@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth, isAuthorizedAdminEmail } from '../context/AuthContext';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { ShieldCheck, Settings, ArrowLeft, Lock, Eye, EyeOff, X, KeyRound, LogOut, Search } from 'lucide-react';
-import { isNativeAndroid } from '../utils/platform';
+import { ShieldCheck, Settings, ArrowLeft, Lock, Eye, EyeOff, X, KeyRound, LogOut, Search, Download, Smartphone } from 'lucide-react';
+import { isNativeAndroid, isInstalledPhoneApp, downloadOfficialApk } from '../utils/platform';
 
 export function MoviePortal3DLogo() {
   return (
@@ -99,18 +99,56 @@ export default function Header() {
     navigate('/');
   };
 
+  const [isInstalled, setIsInstalled] = useState(false);
+
+  useEffect(() => {
+    setIsInstalled(isInstalledPhoneApp());
+  }, []);
+
   // -------------------------------------------------------------
   // NATIVE ANDROID APP HEADER
   // -------------------------------------------------------------
   if (isAndroid) {
     return (
       <>
+        {/* Prominent Top Bar in Chrome/Browser: Only visible when opened in browser, hidden inside installed app */}
+        {!isInstalled && (
+          <div className="w-full bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 text-black px-3 py-2 flex items-center justify-between shadow-lg sticky top-0 z-50">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-7 h-7 rounded-lg bg-black text-yellow-400 flex items-center justify-center flex-shrink-0 shadow">
+                <Smartphone size={15} />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-black uppercase tracking-tight text-black truncate">
+                    Movie Portal Official App
+                  </span>
+                  <span className="bg-black/20 text-black text-[9px] font-extrabold px-1.5 py-0.2 rounded uppercase">
+                    Android APK
+                  </span>
+                </div>
+                <p className="text-[10px] font-semibold text-neutral-900 truncate">
+                  High-speed streaming & direct phone downloads!
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={downloadOfficialApk}
+              className="ml-2 flex-shrink-0 bg-black hover:bg-neutral-900 active:scale-95 text-yellow-400 font-black text-xs px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 shadow transition-all cursor-pointer uppercase tracking-wider"
+            >
+              <Download size={13} className="stroke-[2.5]" />
+              <span>Download App</span>
+            </button>
+          </div>
+        )}
+
         <header
           className={`w-full z-40 transition-colors ${
             isOnHome
               ? 'absolute top-0 left-0 bg-gradient-to-b from-black/85 via-black/45 to-transparent pt-3 pb-4 px-4'
               : 'sticky top-0 left-0 bg-black/95 backdrop-blur-md border-b border-neutral-900 py-3.5 px-4'
-          }`}
+          } ${!isInstalled ? 'mt-0' : ''}`}
         >
           <div className="max-w-7xl mx-auto flex items-center justify-between relative">
             {/* Left Action / Back button */}
@@ -144,8 +182,19 @@ export default function Header() {
               <MoviePortal3DLogo />
             </div>
 
-            {/* Right Action: Settings ⚙️ Icon for Android App */}
-            <div className="w-10 flex items-center justify-end z-10">
+            {/* Right Action: Direct Download App Button (Browser Only) + Settings ⚙️ */}
+            <div className="flex items-center gap-2 z-10">
+              {!isInstalled && (
+                <button
+                  type="button"
+                  onClick={downloadOfficialApk}
+                  className="p-2 rounded-full bg-yellow-400 hover:bg-yellow-300 text-black font-black border border-yellow-500 backdrop-blur-md cursor-pointer active:scale-90 transition-transform shadow-md flex items-center gap-1 text-[10px]"
+                  title="Direct Download Movie Portal APK"
+                >
+                  <Download size={15} className="stroke-[2.5]" />
+                  <span className="hidden xs:inline uppercase font-extrabold">App</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={handleSettingsClick}
@@ -279,10 +328,42 @@ export default function Header() {
   }
 
   // -------------------------------------------------------------
-  // CHROME / BROWSER WEB VERSION (STRICTLY UNCHANGED)
+  // CHROME / BROWSER WEB VERSION
   // -------------------------------------------------------------
   return (
     <>
+      {/* Prominent Top Bar in Chrome/Browser: Only visible when opened in browser, hidden inside installed app */}
+      {!isInstalled && (
+        <div className="w-full bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 text-black px-4 py-2 flex items-center justify-between shadow-lg sticky top-0 z-50">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-7 h-7 rounded-lg bg-black text-yellow-400 flex items-center justify-center flex-shrink-0 shadow">
+              <Smartphone size={16} />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-xs sm:text-sm font-black uppercase tracking-tight text-black truncate">
+                  Movie Portal Official Android App
+                </span>
+                <span className="bg-black/20 text-black text-[10px] font-extrabold px-1.5 py-0.2 rounded uppercase">
+                  v2.5.0 APK
+                </span>
+              </div>
+              <p className="text-[11px] font-semibold text-neutral-900 truncate">
+                Download app for high-speed streaming & direct phone downloads!
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={downloadOfficialApk}
+            className="ml-3 flex-shrink-0 bg-black hover:bg-neutral-900 active:scale-95 text-yellow-400 font-black text-xs px-4 py-1.5 rounded-xl flex items-center gap-1.5 shadow-md transition-all cursor-pointer uppercase tracking-wider"
+          >
+            <Download size={14} className="stroke-[2.5]" />
+            <span>Download App</span>
+          </button>
+        </div>
+      )}
+
       <header className="sticky top-0 left-0 w-full p-4 flex justify-between items-center z-40 bg-black/90 backdrop-blur-md border-b border-neutral-900">
         <div 
           onClick={handleHomeClick}
@@ -296,6 +377,18 @@ export default function Header() {
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3">
+          {!isInstalled && (
+            <button
+              type="button"
+              onClick={downloadOfficialApk}
+              className="flex items-center gap-1.5 bg-yellow-400 hover:bg-yellow-300 text-black text-xs font-black px-3.5 py-2 rounded-xl shadow-lg shadow-yellow-400/20 active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
+              title="Direct Download Movie Portal Android App"
+            >
+              <Smartphone size={14} />
+              <Download size={14} className="stroke-[2.5]" />
+              <span>Download App</span>
+            </button>
+          )}
           {loading ? (
             <span className="text-xs text-gray-500 animate-pulse">Loading...</span>
           ) : user ? (

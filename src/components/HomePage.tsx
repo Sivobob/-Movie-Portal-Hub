@@ -11,7 +11,7 @@ import { useAuth, isAuthorizedAdminEmail } from '../context/AuthContext';
 import { loginWithGoogle } from '../services/authService';
 
 import { getLocalMovies, saveLocalMovies } from '../services/movieStorage';
-import { isNativeAndroid } from '../utils/platform';
+import { isNativeAndroid, isInstalledPhoneApp, downloadOfficialApk } from '../utils/platform';
 import { useDownloads } from '../hooks/useDownloads';
 import DownloadOptionsModal from './DownloadOptionsModal';
 import DownloadsView from './DownloadsView';
@@ -118,8 +118,47 @@ export default function HomePage() {
     };
   }, []);
 
-  // Listen for public content announcements (New Movie Releases)
+  // Listen for public content announcements (New Movie / Series Releases)
   useEffect(() => {
+    // 1. Check local storage for recent broadcasts
+    try {
+      const stored = localStorage.getItem('app_latest_announcement');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        const lastSeen = sessionStorage.getItem('last_seen_announcement');
+        if (parsed?.id && parsed.id !== lastSeen) {
+          setAnnouncement(parsed);
+          sessionStorage.setItem('last_seen_announcement', parsed.id);
+          setTimeout(() => setAnnouncement(null), 12000);
+        }
+      }
+    } catch (e) {}
+
+    // 2. Custom window event listener (immediate within same or cross tab)
+    const handleReleaseEvent = (event: any) => {
+      if (event.detail) {
+        setAnnouncement(event.detail);
+        sessionStorage.setItem('last_seen_announcement', event.detail.id || `ann-${Date.now()}`);
+        setTimeout(() => setAnnouncement(null), 12000);
+      }
+    };
+    window.addEventListener('new_movie_release', handleReleaseEvent);
+
+    // 3. BroadcastChannel for multi-tab sync
+    let bc: BroadcastChannel | null = null;
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        bc = new BroadcastChannel('movie_portal_updates');
+        bc.onmessage = (msg) => {
+          if (msg.data?.type === 'NEW_RELEASE' && msg.data.data) {
+            setAnnouncement(msg.data.data);
+            setTimeout(() => setAnnouncement(null), 12000);
+          }
+        };
+      } catch (e) {}
+    }
+
+    // 4. Firestore real-time collection listener
     const q = query(
       collection(db, 'announcements'),
       where('expiresAt', '>', new Date())
@@ -128,24 +167,24 @@ export default function HomePage() {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       if (docs.length > 0) {
-        // Sort by newest
         docs.sort((a: any, b: any) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
         const latest = docs[0] as any;
-        
-        // Only show if it's "fresh" (last 10 minutes) or hasn't been seen in this session
-        const lastSeenId = sessionStorage.getItem('last_announcement_id');
+        const lastSeenId = sessionStorage.getItem('last_seen_announcement');
         if (latest.id !== lastSeenId) {
           setAnnouncement(latest);
-          sessionStorage.setItem('last_announcement_id', latest.id);
-          // Auto-hide after 10 seconds
-          setTimeout(() => setAnnouncement(null), 10000);
+          sessionStorage.setItem('last_seen_announcement', latest.id);
+          setTimeout(() => setAnnouncement(null), 12000);
         }
       }
     }, (err) => {
-      handleFirestoreError(err, OperationType.LIST, 'announcements');
+      console.warn('Firestore announcements listener inactive:', err?.message || err);
     });
     
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      window.removeEventListener('new_movie_release', handleReleaseEvent);
+      if (bc) bc.close();
+    };
   }, []);
 
   // Slider Touch & Interaction State
@@ -294,19 +333,6 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen bg-black text-white flex flex-col relative pb-20 select-none overflow-x-hidden">
-      {/* Top-Center DOWNLOAD APP Button (Browser Only) */}
-      {!isAndroid && (
-        <div className="absolute top-3.5 left-1/2 -translate-x-1/2 z-40">
-          <button
-            onClick={handleDownloadAPK}
-            className="bg-black/90 hover:bg-black text-yellow-400 border border-yellow-400/80 px-4 py-2 rounded-full font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-2xl backdrop-blur-md transition-all active:scale-95 cursor-pointer hover:border-yellow-400 shadow-yellow-400/20"
-          >
-            <Smartphone size={16} />
-            <span>DOWNLOAD APP</span>
-          </button>
-        </div>
-      )}
-
       {/* New Content Announcement Toast */}
       <AnimatePresence>
         {announcement && (
@@ -314,43 +340,61 @@ export default function HomePage() {
             initial={{ opacity: 0, y: 50, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 50, scale: 0.9 }}
-            className="fixed bottom-24 left-4 right-4 z-[100] flex justify-center pointer-events-none"
+            className="fixed bottom-20 sm:bottom-6 left-4 right-4 z-[100] flex justify-center pointer-events-none"
           >
-            <div className="bg-neutral-900 border-2 border-yellow-400 rounded-2xl shadow-2xl p-3 flex items-center gap-4 max-w-sm w-full pointer-events-auto overflow-hidden relative">
-              <div className="w-12 h-16 rounded-lg overflow-hidden flex-shrink-0 bg-neutral-800 border border-neutral-700">
+            <div 
+              onClick={() => {
+                const target = movies.find(
+                  (m) => m.id === announcement.movieId || (m.title && announcement.title && m.title.toLowerCase() === announcement.title.toLowerCase())
+                );
+                if (target) {
+                  setSelectedMovie(target);
+                }
+              }}
+              className="bg-neutral-900 border-2 border-yellow-400 rounded-2xl shadow-2xl p-3.5 flex items-center gap-3.5 max-w-md w-full pointer-events-auto overflow-hidden relative cursor-pointer active:scale-98 transition-transform group"
+            >
+              <div className="w-14 h-20 rounded-xl overflow-hidden flex-shrink-0 bg-neutral-800 border border-neutral-700 shadow-md">
                 <img 
                   src={announcement.posterUrl} 
                   alt={announcement.title} 
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                 />
               </div>
               
-              <div className="flex-grow">
+              <div className="flex-grow min-w-0">
                 <div className="flex items-center gap-1.5 text-yellow-400 mb-0.5">
-                  <Star size={12} fill="currentColor" />
-                  <span className="text-[10px] font-black uppercase tracking-widest">New Content</span>
+                  <span className="w-2 h-2 rounded-full bg-yellow-400 animate-ping" />
+                  <span className="text-[10px] font-black uppercase tracking-widest">
+                    {announcement.category?.toLowerCase().includes('series') ? 'New Series Release' : 'New Movie Release'}
+                  </span>
                 </div>
-                <h4 className="text-xs font-black text-white uppercase tracking-tight truncate leading-tight">
-                  {announcement.title} ({announcement.releaseYear})
+                <h4 className="text-sm font-black text-white uppercase tracking-tight truncate leading-tight">
+                  {announcement.title} <span className="text-yellow-400 font-bold">({announcement.releaseYear})</span>
                 </h4>
-                <p className="text-[10px] text-gray-400 mt-1 font-medium">
-                  {announcement.message}
-                </p>
+                <div className="mt-1.5 inline-flex items-center gap-1.5 bg-yellow-400/20 text-yellow-400 font-black text-xs px-2.5 py-0.5 rounded border border-yellow-400/40 uppercase tracking-wide">
+                  <Play size={12} fill="currentColor" />
+                  <span>{announcement.message || (announcement.category?.toLowerCase().includes('series') ? 'Check out new series' : 'Check out new movie')}</span>
+                </div>
               </div>
 
               <button 
-                onClick={() => setAnnouncement(null)}
-                className="p-1 hover:bg-white/10 rounded-full transition-colors self-start"
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setAnnouncement(null);
+                }}
+                className="p-1.5 hover:bg-white/10 rounded-full transition-colors self-start cursor-pointer text-gray-400 hover:text-white"
+                aria-label="Close notification"
               >
-                <X size={14} className="text-gray-500" />
+                <X size={16} />
               </button>
               
               {/* Progress Bar (Timer) */}
               <motion.div 
                 initial={{ width: "100%" }}
                 animate={{ width: "0%" }}
-                transition={{ duration: 10, ease: "linear" }}
-                className="absolute bottom-0 left-0 h-0.5 bg-yellow-400"
+                transition={{ duration: 12, ease: "linear" }}
+                className="absolute bottom-0 left-0 h-1 bg-yellow-400"
               />
             </div>
           </motion.div>

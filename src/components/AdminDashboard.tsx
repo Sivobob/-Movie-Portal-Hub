@@ -651,17 +651,59 @@ export default function AdminDashboard() {
         const docRef = await addDoc(collection(db, 'movies'), moviePayload);
         newDocId = docRef.id;
 
-        // Create a public announcement for users to see
+        // Create a public announcement notification for all users to see
         if (!asDraft) {
-          await addDoc(collection(db, 'announcements'), {
+          const announcementMsg = isSeries ? 'Check out new series' : 'Check out new movie';
+          const announcementPayload = {
             title: moviePayload.title,
             releaseYear: moviePayload.releaseYear,
             category: moviePayload.originalCategory,
             posterUrl: moviePayload.posterUrl,
-            message: `Check out new ${moviePayload.originalCategory.toLowerCase().includes('series') ? 'series' : 'movie'}!`,
+            message: announcementMsg,
+            movieId: newDocId,
             createdAt: serverTimestamp(),
-            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) // Visible for 24 hours
-          });
+            expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000) // Visible for 48 hours
+          };
+
+          try {
+            await addDoc(collection(db, 'announcements'), announcementPayload);
+          } catch (annFsErr) {
+            console.warn('Firestore announcement write warning:', annFsErr);
+          }
+
+          // Broadcast announcement to all local tabs/clients
+          const broadcastPayload = {
+            id: `ann-${Date.now()}`,
+            title: moviePayload.title,
+            releaseYear: moviePayload.releaseYear,
+            category: moviePayload.originalCategory,
+            posterUrl: moviePayload.posterUrl,
+            message: announcementMsg,
+            movieId: newDocId,
+            createdAt: { seconds: Math.floor(Date.now() / 1000) }
+          };
+
+          try {
+            localStorage.setItem('app_latest_announcement', JSON.stringify(broadcastPayload));
+            window.dispatchEvent(new CustomEvent('new_movie_release', { detail: broadcastPayload }));
+
+            if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+              const bc = new BroadcastChannel('movie_portal_updates');
+              bc.postMessage({ type: 'NEW_RELEASE', data: broadcastPayload });
+              bc.close();
+            }
+
+            if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+              new Notification(`${moviePayload.title} (${moviePayload.releaseYear})`, {
+                body: announcementMsg,
+                icon: moviePayload.posterUrl || '/assets/logo.png',
+                badge: '/assets/logo.png',
+                tag: `movie-${newDocId}`
+              });
+            }
+          } catch (bcErr) {
+            console.warn('Broadcast notification error:', bcErr);
+          }
         }
       } catch (fsErr: any) {
         console.warn('Firestore write not permitted, saving to local cache:', fsErr?.message || fsErr);

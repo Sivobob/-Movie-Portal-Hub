@@ -1,22 +1,19 @@
 import { Capacitor } from '@capacitor/core';
 
 /**
- * Helper to reliably detect whether the app is running as the installed
- * native Android application (Capacitor native shell, standalone PWA, or Android device)
+ * Detects whether the app is running as the ALREADY INSTALLED phone application
+ * (Capacitor native Android APK or standalone installed PWA from home screen).
+ * Returns FALSE when opened in regular Chrome or mobile browser tabs.
  */
-export const isNativeAndroid = (): boolean => {
+export const isInstalledPhoneApp = (): boolean => {
   if (typeof window === 'undefined') return false;
 
   try {
-    // 1. Capacitor native platform detection
-    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
-      return true;
-    }
+    // 1. Capacitor native shell (real APK running on Android device)
     if (Capacitor.isNativePlatform()) {
       return true;
     }
 
-    // 2. Window Capacitor object injection check (native WebView)
     const winCap = (window as any).Capacitor;
     if (winCap && typeof winCap.isNativePlatform === 'function' && winCap.isNativePlatform()) {
       return true;
@@ -25,7 +22,7 @@ export const isNativeAndroid = (): boolean => {
       return true;
     }
 
-    // 3. Installed PWA Standalone Mode (Launched from home screen without browser UI)
+    // 2. Installed standalone PWA mode (opened from Android home screen icon, not browser)
     if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) {
       return true;
     }
@@ -33,12 +30,30 @@ export const isNativeAndroid = (): boolean => {
       return true;
     }
 
-    // 4. Query flag for testing/forcing Android shell (?platform=android)
+    // 3. Query flag for forcing installed testing
+    if (window.location.search && (window.location.search.includes('installed=true') || window.location.search.includes('app_shell=true'))) {
+      return true;
+    }
+  } catch (e) {
+    return false;
+  }
+
+  return false;
+};
+
+/**
+ * Helper to detect mobile device/Android environment for UI layout styles
+ */
+export const isNativeAndroid = (): boolean => {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    if (isInstalledPhoneApp()) return true;
+
     if (window.location.search && window.location.search.includes('platform=android')) {
       return true;
     }
 
-    // 5. Android user agent on mobile
     const userAgent = navigator.userAgent || navigator.vendor || (window as any).opera || '';
     if (/android/i.test(userAgent) && /mobile/i.test(userAgent)) {
       return true;
@@ -56,4 +71,19 @@ export const isNativeAndroid = (): boolean => {
 export const isMobileDevice = (): boolean => {
   if (typeof window === 'undefined') return false;
   return isNativeAndroid() || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+};
+
+/**
+ * Triggers direct instant download of the official Movie-Portal Android APK
+ * without any intermediary modals or pages.
+ */
+export const downloadOfficialApk = () => {
+  const apkUrl = "https://github.com/Sivobob/-Movie-Portal-Hub/releases/download/latest/Movie-Portal.apk";
+  const link = document.createElement('a');
+  link.href = apkUrl;
+  link.setAttribute('download', 'Movie-Portal.apk');
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 };
