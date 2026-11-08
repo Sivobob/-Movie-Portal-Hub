@@ -37,9 +37,6 @@ jobs:
 
       - name: Sync Capacitor Android
         run: |
-          if [ ! -d "android" ]; then
-            npx cap add android
-          fi
           npx cap sync android
 
       - name: Build Android APK
@@ -66,6 +63,7 @@ jobs:
           name: "Movie Portal Latest Android APK"
           body: "Automated Android APK build from latest source with updated launcher icon and features."
           files: Movie-Portal.apk
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -77,6 +75,6 @@ jobs:
           cp Movie-Portal.apk public/downloads/Movie-Portal.apk
           git add public/downloads/Movie-Portal.apk
           git commit -m "chore: automated APK build update [skip ci]" || true
-          git push origin main || true
+          git push origin main --force || true
 
 
