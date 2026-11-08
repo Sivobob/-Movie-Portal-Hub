@@ -649,6 +649,19 @@ export default function AdminDashboard() {
       try {
         const docRef = await addDoc(collection(db, 'movies'), moviePayload);
         newDocId = docRef.id;
+
+        // Create a public announcement for users to see
+        if (!asDraft) {
+          await addDoc(collection(db, 'announcements'), {
+            title: moviePayload.title,
+            releaseYear: moviePayload.releaseYear,
+            category: moviePayload.originalCategory,
+            posterUrl: moviePayload.posterUrl,
+            message: `Check out new ${moviePayload.originalCategory.toLowerCase().includes('series') ? 'series' : 'movie'}!`,
+            createdAt: serverTimestamp(),
+            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) // Visible for 24 hours
+          });
+        }
       } catch (fsErr: any) {
         console.warn('Firestore write not permitted, saving to local cache:', fsErr?.message || fsErr);
       }

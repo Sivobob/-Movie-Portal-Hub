@@ -32,6 +32,7 @@ export default function HomePage() {
   const [showSignInModal, setShowSignInModal] = useState(false);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [signInError, setSignInError] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState<any | null>(null);
   const navigate = useNavigate();
 
   const isMasterAdmin = Boolean(user && isAuthorizedAdminEmail(user.email) && isAdmin);
@@ -98,6 +99,34 @@ export default function HomePage() {
       isMounted = false;
       unsubscribe();
     };
+  }, []);
+
+  // Listen for public content announcements (New Movie Releases)
+  useEffect(() => {
+    const q = query(
+      collection(db, 'announcements'),
+      where('expiresAt', '>', new Date())
+    );
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (docs.length > 0) {
+        // Sort by newest
+        docs.sort((a: any, b: any) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+        const latest = docs[0] as any;
+        
+        // Only show if it's "fresh" (last 10 minutes) or hasn't been seen in this session
+        const lastSeenId = sessionStorage.getItem('last_announcement_id');
+        if (latest.id !== lastSeenId) {
+          setAnnouncement(latest);
+          sessionStorage.setItem('last_announcement_id', latest.id);
+          // Auto-hide after 10 seconds
+          setTimeout(() => setAnnouncement(null), 10000);
+        }
+      }
+    });
+    
+    return () => unsubscribe();
   }, []);
 
   // Slider Touch & Interaction State
@@ -258,6 +287,56 @@ export default function HomePage() {
           </button>
         </div>
       )}
+
+      {/* New Content Announcement Toast */}
+      <AnimatePresence>
+        {announcement && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 50, scale: 0.9 }}
+            className="fixed bottom-24 left-4 right-4 z-[100] flex justify-center pointer-events-none"
+          >
+            <div className="bg-neutral-900 border-2 border-yellow-400 rounded-2xl shadow-2xl p-3 flex items-center gap-4 max-w-sm w-full pointer-events-auto overflow-hidden relative">
+              <div className="w-12 h-16 rounded-lg overflow-hidden flex-shrink-0 bg-neutral-800 border border-neutral-700">
+                <img 
+                  src={announcement.posterUrl} 
+                  alt={announcement.title} 
+                  className="w-full h-full object-cover"
+                />
+              </div>
+              
+              <div className="flex-grow">
+                <div className="flex items-center gap-1.5 text-yellow-400 mb-0.5">
+                  <Star size={12} fill="currentColor" />
+                  <span className="text-[10px] font-black uppercase tracking-widest">New Content</span>
+                </div>
+                <h4 className="text-xs font-black text-white uppercase tracking-tight truncate leading-tight">
+                  {announcement.title} ({announcement.releaseYear})
+                </h4>
+                <p className="text-[10px] text-gray-400 mt-1 font-medium">
+                  {announcement.message}
+                </p>
+              </div>
+
+              <button 
+                onClick={() => setAnnouncement(null)}
+                className="p-1 hover:bg-white/10 rounded-full transition-colors self-start"
+              >
+                <X size={14} className="text-gray-500" />
+              </button>
+              
+              {/* Progress Bar (Timer) */}
+              <motion.div 
+                initial={{ width: "100%" }}
+                animate={{ width: "0%" }}
+                transition={{ duration: 10, ease: "linear" }}
+                className="absolute bottom-0 left-0 h-0.5 bg-yellow-400"
+              />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Category Grid View OR Cinematic Main Homepage */}
       {category ? (
