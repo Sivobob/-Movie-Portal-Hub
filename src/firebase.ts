@@ -12,13 +12,16 @@ export const db = firebaseConfig.firestoreDatabaseId
 
 export const auth = getAuth(app);
 
-// Enable persistence to handle temporary network issues
-enableIndexedDbPersistence(db).catch((err) => {
-    if (err.code === 'failed-precondition') {
-        console.warn('Multiple tabs open, persistence can only be enabled in one tab at a time.');
-    } else if (err.code === 'unimplemented') {
-        console.warn('The current browser does not support persistence.');
-    } else {
-        console.error('Firestore persistence error:', err);
-    }
-});
+// Enable persistence to handle temporary network issues gracefully
+try {
+  enableIndexedDbPersistence(db).catch((err) => {
+      if (err.code === 'failed-precondition') {
+          console.warn('Multiple tabs open, persistence can only be enabled in one tab at a time.');
+      } else if (err.code === 'unimplemented') {
+          console.warn('The current browser does not support persistence.');
+      }
+  });
+} catch (e) {
+  console.warn('Firestore offline mode active');
+}
+
