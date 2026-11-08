@@ -19,8 +19,11 @@ import {
   RotateCcw,
   RotateCw,
   Check,
-  ExternalLink
+  ExternalLink,
+  Download
 } from 'lucide-react';
+import { useDownloads } from '../hooks/useDownloads';
+
 
 interface VideoPlayerModalProps {
   isOpen: boolean;
@@ -69,6 +72,10 @@ export default function VideoPlayerModal({
   const [error, setError] = useState<string | null>(null);
   const [playableUrl, setPlayableUrl] = useState<string>('');
   const [retryCount, setRetryCount] = useState(0);
+
+  const { addDownload } = useDownloads();
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadSize, setDownloadSize] = useState<string | null>(null);
 
   const [showControls, setShowControls] = useState(true);
   const autoHideTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -561,6 +568,49 @@ export default function VideoPlayerModal({
     setRetryCount(prev => prev + 1);
   };
 
+  const handleDownload = async () => {
+    if (!videoUrl || isDownloading) return;
+    setIsDownloading(true);
+    
+    try {
+      // Try to get file size
+      const res = await fetch(playableUrl || videoUrl, { method: 'HEAD' });
+      const size = res.headers.get('content-length');
+      let formattedSize = 'Unknown Size';
+      if (size) {
+        const mb = parseInt(size) / (1024 * 1024);
+        formattedSize = mb > 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb.toFixed(0)} MB`;
+      }
+      setDownloadSize(formattedSize);
+
+      // Add to local downloads list
+      addDownload({
+        id: title + Date.now(), // Unique enough for local storage
+        title,
+        posterUrl: posterUrl || '',
+        releaseYear: new Date().getFullYear(), // Fallback
+        originalCategory: category || 'Movie',
+        downloadedAt: Date.now(),
+        fileSize: formattedSize,
+        videoUrl: videoUrl,
+        videoQualities: videoQualities
+      });
+
+      // Trigger actual browser download
+      const link = document.createElement('a');
+      link.href = playableUrl || videoUrl;
+      link.setAttribute('download', `${title.replace(/\s+/g, '_')}.mp4`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      setTimeout(() => setIsDownloading(false), 2000);
+    } catch (e) {
+      console.error('Download failed', e);
+      setIsDownloading(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[100] bg-black flex flex-col justify-between select-none overflow-hidden">
       <div
@@ -583,6 +633,21 @@ export default function VideoPlayerModal({
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                resetAutoHideTimer();
+                handleDownload();
+              }}
+              disabled={isDownloading}
+              title="Download Movie"
+              className={`p-2 rounded-full bg-black/40 text-yellow-400 border border-yellow-400/30 transition-all backdrop-blur-sm cursor-pointer flex items-center justify-center ${
+                isDownloading ? 'opacity-50 animate-pulse' : 'hover:bg-yellow-400 hover:text-black'
+              }`}
+            >
+              <Download size={18} />
+            </button>
             <button
               type="button"
               onClick={(e) => {

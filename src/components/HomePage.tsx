@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import MovieCard from './MovieCard';
-import { Search, Play, X, Star, Calendar, Globe, Film, ShieldCheck, LogIn, LogOut, Smartphone } from 'lucide-react';
+import { Search, Play, X, Star, Calendar, Globe, Film, ShieldCheck, LogIn, LogOut, Smartphone, Download } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -12,10 +12,12 @@ import { loginWithGoogle } from '../services/authService';
 
 import { getLocalMovies, saveLocalMovies } from '../services/movieStorage';
 import { isNativeAndroid } from '../utils/platform';
+import { useDownloads } from '../hooks/useDownloads';
 
 export default function HomePage() {
   const isAndroid = isNativeAndroid();
   const { user, isAdmin, handleLogout, signInWithEmail } = useAuth();
+  const { downloads, removeDownload } = useDownloads();
   const initialLocal = getLocalMovies().filter((m: any) => m.published !== false);
   const [movies, setMovies] = useState<any[]>(initialLocal);
   const [featuredMovies, setFeaturedMovies] = useState<any[]>(() => {
@@ -369,6 +371,38 @@ export default function HomePage() {
                 No {category === 'Series' ? 'series' : `${category.toLowerCase()} movies`} have been uploaded yet.
               </p>
             </div>
+          ) : category === 'Downloads' ? (
+            downloads.length === 0 ? (
+              <div className="py-24 px-4 text-center">
+                <Download className="mx-auto mb-3 text-neutral-700" size={44} />
+                <h3 className="text-2xl font-black text-yellow-400 tracking-wider uppercase mb-2">
+                  NO DOWNLOADS
+                </h3>
+                <p className="text-xs text-gray-500 max-w-xs mx-auto">
+                  Movies and series you download will appear here for quick access.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-2 px-2">
+                {downloads.map((item) => (
+                  <div key={item.id} className="relative group">
+                    <MovieCard 
+                      movie={item} 
+                      onClick={() => handleMovieClick({ ...item, streamingUrl: item.videoUrl })} 
+                    />
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeDownload(item.id);
+                      }}
+                      className="absolute top-1 right-1 bg-red-600/90 text-white p-1 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )
           ) : (
             <div className="grid grid-cols-3 gap-2 px-2">
               {categoryMovies.map((movie) => (
@@ -691,11 +725,11 @@ export default function HomePage() {
         />
       )}
 
-      {/* Fixed Bottom Navigation matching design with 3 categories: Bollywood, Hollywood, Series */}
+      {/* Fixed Bottom Navigation matching design with 4 categories: Bollywood, Hollywood, Series, Downloads */}
       <nav className={`bg-black/95 backdrop-blur-md border-t border-neutral-900 flex items-center fixed bottom-0 left-0 w-full z-40 pb-[env(safe-area-inset-bottom)] ${
         isAndroid ? 'p-3 justify-around' : 'p-3.5 justify-around text-yellow-400 text-xs font-bold uppercase'
       }`}>
-        {(['Bollywood', 'Hollywood', 'Series'] as const).map((cat) => (
+        {(['Bollywood', 'Hollywood', 'Series', 'Downloads'] as const).map((cat) => (
           <button
             key={cat}
             onClick={() => setCategory((prev) => (prev === cat ? null : cat))}
