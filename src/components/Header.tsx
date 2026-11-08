@@ -136,10 +136,10 @@ export default function Header() {
               )}
             </div>
 
-            {/* Top-Center 3D MOVIE PORTAL Logo matching reference screenshot */}
+            {/* Top-Center 3D MOVIE PORTAL Logo shifted downward ~18px while keeping centered */}
             <div 
               onClick={handleHomeClick}
-              className="absolute left-1/2 -translate-x-1/2 cursor-pointer flex flex-col items-center z-10"
+              className="absolute left-1/2 -translate-x-1/2 translate-y-[18px] cursor-pointer flex flex-col items-center z-10"
             >
               <MoviePortal3DLogo />
             </div>
