@@ -31,6 +31,21 @@
         "email": { "type": "string" }
       },
       "required": ["email"]
+    },
+    "announcement": {
+      "title": "Announcement",
+      "description": "Public notification for new content",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "releaseYear": { "type": "number" },
+        "category": { "type": "string" },
+        "posterUrl": { "type": "string" },
+        "message": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "expiresAt": { "type": "number" }
+      },
+      "required": ["title", "posterUrl", "message"]
     }
   },
   "firestore": {
@@ -41,6 +56,10 @@
     "/admins/{uid}": {
       "schema": "admin",
       "description": "Collection of authorized admin users"
+    },
+    "/announcements/{announcementId}": {
+      "schema": "announcement",
+      "description": "Collection of public notifications"
     }
   }
 }

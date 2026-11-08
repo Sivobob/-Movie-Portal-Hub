@@ -10,7 +10,7 @@ import {
   setDoc,
   query
 } from 'firebase/firestore';
-import { db, auth } from '../firebase';
+import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth, isAuthorizedAdminEmail, AUTHORIZED_ADMIN_EMAILS } from '../context/AuthContext';
 import { getDisplayCategory } from '../utils/categoryMapping';
 import { Link } from 'react-router-dom';
@@ -335,6 +335,7 @@ export default function AdminDashboard() {
       saveLocalMovies(items);
     } catch (err: any) {
       console.warn('Firestore fetch failed in Admin Dashboard, using local storage cache:', err?.message || err);
+      handleFirestoreError(err, OperationType.LIST, 'movies');
       const local = getLocalMovies();
       setMovies(local);
     } finally {
@@ -664,6 +665,7 @@ export default function AdminDashboard() {
         }
       } catch (fsErr: any) {
         console.warn('Firestore write not permitted, saving to local cache:', fsErr?.message || fsErr);
+        handleFirestoreError(fsErr, OperationType.CREATE, 'movies');
       }
 
       // Always persist to local cache as well

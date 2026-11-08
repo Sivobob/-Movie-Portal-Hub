@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { db } from '../firebase';
+import { db, handleFirestoreError, OperationType } from '../firebase';
 import MovieCard from './MovieCard';
 import { Search, Play, X, Star, Calendar, Globe, Film, ShieldCheck, LogIn, LogOut, Smartphone } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
@@ -87,6 +87,7 @@ export default function HomePage() {
       },
       (err) => {
         console.warn('Firestore real-time listener unavailable, using local movies:', err?.message || err);
+        handleFirestoreError(err, OperationType.LIST, 'movies');
         if (!isMounted) return;
         setIsLoading(false);
         const local = getLocalMovies().filter((m: any) => m.published !== false);
@@ -124,6 +125,8 @@ export default function HomePage() {
           setTimeout(() => setAnnouncement(null), 10000);
         }
       }
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, 'announcements');
     });
     
     return () => unsubscribe();

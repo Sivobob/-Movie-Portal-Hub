@@ -9,13 +9,14 @@ service cloud.firestore {
     function isAuthorizedEmail() {
       return isSignedIn() && 
         request.auth.token.email != null && 
-        request.auth.token.email.lower() == 'movieboxproapk007711@gmail.com';
+        (request.auth.token.email.lower() == 'movieboxproapk007711@gmail.com' ||
+         request.auth.token.email.lower() == 'adityaantil260@gmail.com' ||
+         request.auth.token.email.lower() == 'amandabasladpuriya@gmail.com');
     }
 
     function isAdmin() { 
       return isSignedIn() && 
-        (request.auth.token.admin == true || isAuthorizedEmail()) &&
-        isAuthorizedEmail();
+        (request.auth.token.admin == true || isAuthorizedEmail());
     }
 
     // Default deny
@@ -25,10 +26,13 @@ service cloud.firestore {
 
     // Movies collection
     match /movies/{movieId} {
-      // Full public read so users can view published movies
       allow read: if true; 
-      
-      // Only admins can add, update, delete movies
+      allow write: if isAdmin();
+    }
+
+    // Announcements collection (Real-time notifications)
+    match /announcements/{announcementId} {
+      allow read: if true;
       allow write: if isAdmin();
     }
 
