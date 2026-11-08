@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link } from 'react-router-dom';
+import { StatusBar } from '@capacitor/status-bar';
 import { handleRedirectResult } from './services/authService';
 import { useAuth, isAuthorizedAdminEmail } from './context/AuthContext';
 import SplashScreen from './components/SplashScreen';
@@ -110,6 +111,10 @@ function AppContent() {
 export default function App() {
   useEffect(() => {
     handleRedirectResult();
+    
+    // Initialize immersive full-screen mode for Android
+    StatusBar.setOverlaysWebView({ overlay: true });
+    StatusBar.hide();
   }, []);
 
   return (
