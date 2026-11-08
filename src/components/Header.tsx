@@ -151,28 +151,8 @@ export default function Header() {
           } ${!isInstalled ? 'mt-0' : ''}`}
         >
           <div className="max-w-7xl mx-auto flex items-center justify-between relative">
-            {/* Left Action / Back button */}
-            <div className="w-10 flex items-center justify-start z-10">
-              {!isOnHome ? (
-                <button
-                  type="button"
-                  onClick={handleHomeClick}
-                  className="p-2 rounded-full bg-black/60 hover:bg-black/90 text-yellow-400 border border-yellow-400/30 backdrop-blur-md cursor-pointer active:scale-95 transition-transform"
-                  aria-label="Back to Home"
-                >
-                  <ArrowLeft size={18} />
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => navigate('/search')}
-                  className="p-2 rounded-full bg-black/60 hover:bg-black/90 text-yellow-400 border border-yellow-400/30 backdrop-blur-md cursor-pointer active:scale-95 transition-transform"
-                  aria-label="Search"
-                >
-                  <Search size={18} />
-                </button>
-              )}
-            </div>
+            {/* Left Spacer so 3D Logo stays perfectly centered without UI back or search buttons */}
+            <div className="w-10 flex items-center justify-start z-10 pointer-events-none" />
 
             {/* Top-Center 3D MOVIE PORTAL Logo shifted downward ~18px while keeping centered */}
             <div 

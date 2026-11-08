@@ -53,6 +53,101 @@ export default function HomePage() {
 
   const isMasterAdmin = Boolean(user && isAuthorizedAdminEmail(user.email) && isAdmin);
 
+  // Synchronized refs to allow hardware back button to read real-time state without stale closures
+  const categoryRef = useRef(category);
+  const selectedMovieRef = useRef(selectedMovie);
+  const playingMovieRef = useRef(playingMovie);
+  const downloadModalMovieRef = useRef(downloadModalMovie);
+
+  useEffect(() => {
+    categoryRef.current = category;
+  }, [category]);
+
+  useEffect(() => {
+    selectedMovieRef.current = selectedMovie;
+  }, [selectedMovie]);
+
+  useEffect(() => {
+    playingMovieRef.current = playingMovie;
+  }, [playingMovie]);
+
+  useEffect(() => {
+    downloadModalMovieRef.current = downloadModalMovie;
+  }, [downloadModalMovie]);
+
+  // Method to open category folder and record in history for hardware back navigation
+  const openCategory = (cat: string) => {
+    setCategory(cat);
+    try {
+      window.history.pushState({ appCategory: cat }, '');
+    } catch (e) {}
+  };
+
+  // Hardware and system phone back button handler (Android APK & mobile Chrome)
+  useEffect(() => {
+    const handlePopState = () => {
+      if (playingMovieRef.current) {
+        setPlayingMovie(null);
+        return;
+      }
+      if (selectedMovieRef.current) {
+        setSelectedMovie(null);
+        return;
+      }
+      if (downloadModalMovieRef.current) {
+        setDownloadModalMovie(null);
+        return;
+      }
+      if (categoryRef.current) {
+        setCategory(null);
+        return;
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+
+    let backListener: any = null;
+    if (Capacitor.isNativePlatform()) {
+      import('@capacitor/app').then(({ App: CapApp }) => {
+        backListener = CapApp.addListener('backButton', () => {
+          if (playingMovieRef.current) {
+            setPlayingMovie(null);
+            try { window.history.back(); } catch (e) {}
+            return;
+          }
+          if (selectedMovieRef.current) {
+            setSelectedMovie(null);
+            try { window.history.back(); } catch (e) {}
+            return;
+          }
+          if (downloadModalMovieRef.current) {
+            setDownloadModalMovie(null);
+            try { window.history.back(); } catch (e) {}
+            return;
+          }
+          if (categoryRef.current) {
+            setCategory(null);
+            try { window.history.back(); } catch (e) {}
+            return;
+          }
+
+          try {
+            CapApp.exitApp();
+          } catch (e) {}
+        });
+      }).catch((err) => {
+        console.warn('Capacitor App plugin listener setup:', err);
+      });
+    }
+
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      if (backListener && typeof backListener.remove === 'function') {
+        backListener.remove();
+      }
+    };
+  }, []);
+
   const handleBottomGoogleSignIn = async () => {
     setIsSigningIn(true);
     setSignInError(null);
@@ -286,9 +381,16 @@ export default function HomePage() {
 
   const handleMovieClick = (movie: any) => {
     setSelectedMovie(movie);
+    try {
+      window.history.pushState({ appModal: 'movie_detail' }, '');
+    } catch (e) {}
   };
 
   const handleWatchNow = (movie: any) => {
+    try {
+      window.history.pushState({ appModal: 'player' }, '');
+    } catch (e) {}
+
     if (movie.seasons && movie.seasons.length > 0 && movie.seasons[0].episodes?.length > 0 && movie.seasons[0].episodes[0].streamUrl) {
       const ep = movie.seasons[0].episodes[0];
       setPlayingMovie({
@@ -314,6 +416,13 @@ export default function HomePage() {
     } else {
       setSelectedMovie(movie);
     }
+  };
+
+  const openDownloadModal = (movie: any) => {
+    setDownloadModalMovie(movie);
+    try {
+      window.history.pushState({ appModal: 'download_modal' }, '');
+    } catch (e) {}
   };
 
   const handleDownloadAPK = (e: React.MouseEvent) => {
@@ -453,14 +562,7 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* Floating Search Icon ONLY in Category Screen */}
-          <button
-            onClick={() => navigate('/search')}
-            aria-label="Search"
-            className="fixed bottom-20 right-5 bg-neutral-900 border-2 border-yellow-400 p-3.5 rounded-full text-yellow-400 shadow-2xl hover:scale-105 active:scale-95 transition-transform z-30"
-          >
-            <Search size={22} />
-          </button>
+          {/* Floating Search Icon Removed as requested */}
         </div>
       ) : isLoading ? (
         <div className="relative flex-grow min-h-[calc(100vh-64px)] flex flex-col items-center justify-center p-6 text-center">
@@ -886,7 +988,13 @@ export default function HomePage() {
         {(['Bollywood', 'Hollywood', 'Series', 'Downloads'] as const).map((cat) => (
           <button
             key={cat}
-            onClick={() => setCategory((prev) => (prev === cat ? null : cat))}
+            onClick={() => {
+              if (category === cat) {
+                setCategory(null);
+              } else {
+                openCategory(cat);
+              }
+            }}
             className={`transition-colors rounded cursor-pointer uppercase inline-flex items-center gap-1 ${
               isAndroid
                 ? `py-1.5 px-3 text-[13px] sm:text-sm font-black tracking-wide ${
