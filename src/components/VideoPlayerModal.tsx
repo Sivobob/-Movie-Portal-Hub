@@ -38,6 +38,7 @@ interface VideoPlayerModalProps {
   hasNext?: boolean;
   hasPrev?: boolean;
   initialDuration?: number;
+  onRequestDownload?: (movie: any) => void;
 }
 
 export default function VideoPlayerModal({
@@ -53,6 +54,7 @@ export default function VideoPlayerModal({
   hasNext,
   hasPrev,
   initialDuration = 0,
+  onRequestDownload,
 }: VideoPlayerModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -73,7 +75,7 @@ export default function VideoPlayerModal({
   const [playableUrl, setPlayableUrl] = useState<string>('');
   const [retryCount, setRetryCount] = useState(0);
 
-  const { addDownload } = useDownloads();
+  const { startDownload } = useDownloads();
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadSize, setDownloadSize] = useState<string | null>(null);
 
@@ -569,7 +571,18 @@ export default function VideoPlayerModal({
   };
 
   const handleDownload = async () => {
-    if (!videoUrl || isDownloading) return;
+    if (!videoUrl) return;
+    if (onRequestDownload) {
+      onRequestDownload({
+        title,
+        posterUrl,
+        streamingUrl: playableUrl || videoUrl,
+        displayCategory: category,
+        videoQualities,
+      });
+      return;
+    }
+    if (isDownloading) return;
     setIsDownloading(true);
     
     try {
@@ -583,26 +596,14 @@ export default function VideoPlayerModal({
       }
       setDownloadSize(formattedSize);
 
-      // Add to local downloads list
-      addDownload({
-        id: title + Date.now(), // Unique enough for local storage
+      // Add to downloads and trigger device download
+      startDownload({
         title,
         posterUrl: posterUrl || '',
-        releaseYear: new Date().getFullYear(), // Fallback
+        videoUrl: playableUrl || videoUrl,
+        quality: currentQuality || '720p HD',
         originalCategory: category || 'Movie',
-        downloadedAt: Date.now(),
-        fileSize: formattedSize,
-        videoUrl: videoUrl,
-        videoQualities: videoQualities
       });
-
-      // Trigger actual browser download
-      const link = document.createElement('a');
-      link.href = playableUrl || videoUrl;
-      link.setAttribute('download', `${title.replace(/\s+/g, '_')}.mp4`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
       
       setTimeout(() => setIsDownloading(false), 2000);
     } catch (e) {

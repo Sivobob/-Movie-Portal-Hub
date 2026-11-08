@@ -13,11 +13,25 @@ import { loginWithGoogle } from '../services/authService';
 import { getLocalMovies, saveLocalMovies } from '../services/movieStorage';
 import { isNativeAndroid } from '../utils/platform';
 import { useDownloads } from '../hooks/useDownloads';
+import DownloadOptionsModal from './DownloadOptionsModal';
+import DownloadsView from './DownloadsView';
+import AndroidBottomNav from './AndroidBottomNav';
 
 export default function HomePage() {
   const isAndroid = isNativeAndroid();
   const { user, isAdmin, handleLogout, signInWithEmail } = useAuth();
-  const { downloads, removeDownload } = useDownloads();
+  const { 
+    downloads, 
+    activeDownloads, 
+    startDownload, 
+    removeDownload, 
+    cancelActiveDownload, 
+    pauseActiveDownload, 
+    resumeActiveDownload, 
+    lastNotification, 
+    setLastNotification 
+  } = useDownloads();
+  const [downloadModalMovie, setDownloadModalMovie] = useState<any | null>(null);
   const initialLocal = getLocalMovies().filter((m: any) => m.published !== false);
   const [movies, setMovies] = useState<any[]>(initialLocal);
   const [featuredMovies, setFeaturedMovies] = useState<any[]>(() => {
@@ -372,41 +386,25 @@ export default function HomePage() {
               </p>
             </div>
           ) : category === 'Downloads' ? (
-            downloads.length === 0 ? (
-              <div className="py-24 px-4 text-center">
-                <Download className="mx-auto mb-3 text-neutral-700" size={44} />
-                <h3 className="text-2xl font-black text-yellow-400 tracking-wider uppercase mb-2">
-                  NO DOWNLOADS
-                </h3>
-                <p className="text-xs text-gray-500 max-w-xs mx-auto">
-                  Movies and series you download will appear here for quick access.
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-3 gap-2 px-2">
-                {downloads.map((item) => (
-                  <div key={item.id} className="relative group">
-                    <MovieCard 
-                      movie={item} 
-                      onClick={() => handleMovieClick({ ...item, streamingUrl: item.videoUrl })} 
-                    />
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeDownload(item.id);
-                      }}
-                      className="absolute top-1 right-1 bg-red-600/90 text-white p-1 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <X size={12} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )
+            <DownloadsView
+              activeDownloads={activeDownloads}
+              completedDownloads={downloads}
+              onPlayMovie={(movie) => setPlayingMovie(movie)}
+              onRemoveCompleted={removeDownload}
+              onCancelActive={cancelActiveDownload}
+              onPauseActive={pauseActiveDownload}
+              onResumeActive={resumeActiveDownload}
+              onBrowseMovies={() => setCategory(null)}
+            />
           ) : (
             <div className="grid grid-cols-3 gap-2 px-2">
               {categoryMovies.map((movie) => (
-                <MovieCard key={movie.id} movie={movie} onClick={() => handleMovieClick(movie)} />
+                <MovieCard 
+                  key={movie.id} 
+                  movie={movie} 
+                  onClick={() => handleMovieClick(movie)} 
+                  onDownloadClick={() => setDownloadModalMovie(movie)}
+                />
               ))}
             </div>
           )}
@@ -576,6 +574,32 @@ export default function HomePage() {
                 {selectedMovie.genre || selectedMovie.displayCategory || 'Action, Crime, Drama'}
               </p>
 
+              {/* Action Buttons: Watch Now & Download Options */}
+              <div className="mt-4 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleWatchNow(selectedMovie);
+                    setSelectedMovie(null);
+                  }}
+                  className="flex-1 bg-neutral-950 hover:bg-black text-yellow-400 border border-yellow-400/40 font-black text-xs py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5 shadow-md active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
+                >
+                  <Play size={14} className="fill-yellow-400" />
+                  <span>Watch Now</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDownloadModalMovie(selectedMovie);
+                    setSelectedMovie(null);
+                  }}
+                  className="flex-1 bg-yellow-400 hover:bg-yellow-500 text-black font-black text-xs py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5 shadow-lg shadow-yellow-400/20 active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
+                >
+                  <Download size={14} className="stroke-[2.5]" />
+                  <span>Download</span>
+                </button>
+              </div>
+
               {/* Preserved Series Season & Episode Selection */}
               {selectedMovie.seasons && selectedMovie.seasons.length > 0 && (
                 <div className="mt-4 pt-4 border-t border-gray-200 space-y-3">
@@ -601,31 +625,72 @@ export default function HomePage() {
                     {selectedMovie.seasons[activeSeasonIndex]?.episodes?.map((ep: any, eIdx: number) => (
                       <div
                         key={eIdx}
-                        onClick={() => {
-                          if (!ep.streamUrl) {
-                            alert('Streaming link for this episode is not available yet.');
-                            return;
-                          }
-                          setPlayingMovie({
-                            title: `${selectedMovie.title} - S0${selectedMovie.seasons[activeSeasonIndex].seasonNumber}E0${ep.episodeNumber}: ${ep.title}`,
-                            streamingUrl: ep.streamUrl,
-                            displayCategory: selectedMovie.displayCategory,
-                            posterUrl: selectedMovie.posterUrl,
-                            movie: selectedMovie,
-                            seasonIndex: activeSeasonIndex,
-                            episodeIndex: eIdx,
-                          });
-                          setSelectedMovie(null);
-                        }}
-                        className="flex items-center gap-2.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 p-2 rounded-lg transition-colors cursor-pointer group"
+                        className="flex items-center gap-2 bg-gray-50 hover:bg-gray-100 border border-gray-200 p-2 rounded-lg transition-colors group"
                       >
-                        <div className="w-6 h-6 rounded bg-black text-yellow-400 flex items-center justify-center font-bold text-[11px] flex-shrink-0">
-                          {ep.episodeNumber}
+                        <div 
+                          onClick={() => {
+                            if (!ep.streamUrl) {
+                              alert('Streaming link for this episode is not available yet.');
+                              return;
+                            }
+                            setPlayingMovie({
+                              title: `${selectedMovie.title} - S0${selectedMovie.seasons[activeSeasonIndex].seasonNumber}E0${ep.episodeNumber}: ${ep.title}`,
+                              streamingUrl: ep.streamUrl,
+                              displayCategory: selectedMovie.displayCategory,
+                              posterUrl: selectedMovie.posterUrl,
+                              movie: selectedMovie,
+                              seasonIndex: activeSeasonIndex,
+                              episodeIndex: eIdx,
+                            });
+                            setSelectedMovie(null);
+                          }}
+                          className="flex items-center gap-2 flex-grow min-w-0 cursor-pointer"
+                        >
+                          <div className="w-6 h-6 rounded bg-black text-yellow-400 flex items-center justify-center font-bold text-[11px] flex-shrink-0">
+                            {ep.episodeNumber}
+                          </div>
+                          <div className="flex-grow min-w-0 text-left">
+                            <h4 className="text-xs font-bold text-gray-900 truncate">{ep.title}</h4>
+                          </div>
                         </div>
-                        <div className="flex-grow min-w-0 text-left">
-                          <h4 className="text-xs font-bold text-gray-900 truncate">{ep.title}</h4>
-                        </div>
-                        <div className="w-6 h-6 rounded-full bg-[#facc15] border border-black flex items-center justify-center flex-shrink-0">
+
+                        {/* Direct Episode Download Button */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDownloadModalMovie({
+                              ...selectedMovie,
+                              title: `${selectedMovie.title} - S0${selectedMovie.seasons[activeSeasonIndex].seasonNumber}E0${ep.episodeNumber}: ${ep.title}`,
+                              streamingUrl: ep.streamUrl,
+                            });
+                            setSelectedMovie(null);
+                          }}
+                          className="w-7 h-7 rounded-full bg-yellow-400/20 hover:bg-yellow-400 text-black flex items-center justify-center flex-shrink-0 transition-colors cursor-pointer"
+                          title="Download Episode"
+                        >
+                          <Download size={13} className="text-yellow-600 hover:text-black stroke-[2.5]" />
+                        </button>
+
+                        <div 
+                          onClick={() => {
+                            if (!ep.streamUrl) {
+                              alert('Streaming link for this episode is not available yet.');
+                              return;
+                            }
+                            setPlayingMovie({
+                              title: `${selectedMovie.title} - S0${selectedMovie.seasons[activeSeasonIndex].seasonNumber}E0${ep.episodeNumber}: ${ep.title}`,
+                              streamingUrl: ep.streamUrl,
+                              displayCategory: selectedMovie.displayCategory,
+                              posterUrl: selectedMovie.posterUrl,
+                              movie: selectedMovie,
+                              seasonIndex: activeSeasonIndex,
+                              episodeIndex: eIdx,
+                            });
+                            setSelectedMovie(null);
+                          }}
+                          className="w-6 h-6 rounded-full bg-[#facc15] border border-black flex items-center justify-center flex-shrink-0 cursor-pointer"
+                        >
                           <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 ml-0.5">
                             <path d="M6 4l15 8-15 8V4z" fill="#00e676" stroke="#000000" strokeWidth="2" />
                           </svg>
@@ -722,7 +787,52 @@ export default function HomePage() {
               });
             }
           }}
+          onRequestDownload={(m) => setDownloadModalMovie(m)}
         />
+      )}
+
+      {/* Download Options & Quality Selector Modal */}
+      {downloadModalMovie && (
+        <DownloadOptionsModal
+          isOpen={Boolean(downloadModalMovie)}
+          onClose={() => setDownloadModalMovie(null)}
+          movie={downloadModalMovie}
+          onConfirmDownload={(opts) => {
+            startDownload({
+              title: opts.title,
+              posterUrl: opts.posterUrl,
+              videoUrl: opts.videoUrl,
+              quality: opts.quality,
+              estimatedSizeMb: opts.estimatedSizeMb,
+              originalCategory: downloadModalMovie.displayCategory || 'Movie',
+              releaseYear: downloadModalMovie.releaseYear,
+            });
+          }}
+          onViewDownloads={() => {
+            setDownloadModalMovie(null);
+            setCategory('Downloads');
+          }}
+        />
+      )}
+
+      {/* Floating Download Notification Toast */}
+      {lastNotification && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 bg-neutral-900 border border-yellow-400/80 text-white px-4 py-2.5 rounded-2xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-300 max-w-[90vw]">
+          <div className="w-7 h-7 rounded-full bg-yellow-400 text-black flex items-center justify-center flex-shrink-0 animate-bounce">
+            <Download size={14} className="stroke-[2.5]" />
+          </div>
+          <span className="text-xs font-bold truncate max-w-xs">{lastNotification}</span>
+          <button
+            type="button"
+            onClick={() => {
+              setCategory('Downloads');
+              setLastNotification(null);
+            }}
+            className="text-[11px] bg-yellow-400 hover:bg-yellow-500 text-black font-black px-2.5 py-1 rounded-lg uppercase tracking-wider whitespace-nowrap cursor-pointer active:scale-95"
+          >
+            View
+          </button>
+        </div>
       )}
 
       {/* Fixed Bottom Navigation matching design with 4 categories: Bollywood, Hollywood, Series, Downloads */}
@@ -733,9 +843,9 @@ export default function HomePage() {
           <button
             key={cat}
             onClick={() => setCategory((prev) => (prev === cat ? null : cat))}
-            className={`transition-colors rounded cursor-pointer uppercase ${
+            className={`transition-colors rounded cursor-pointer uppercase inline-flex items-center gap-1 ${
               isAndroid
-                ? `py-1.5 px-4 text-[13.5px] sm:text-sm font-black tracking-wide ${
+                ? `py-1.5 px-3 text-[13px] sm:text-sm font-black tracking-wide ${
                     category === cat ? 'text-white border-b-2 border-yellow-400' : 'text-yellow-400 hover:text-yellow-300'
                   }`
                 : `py-1 px-3 ${
@@ -743,7 +853,12 @@ export default function HomePage() {
                   }`
             }`}
           >
-            {cat}
+            <span>{cat}</span>
+            {cat === 'Downloads' && activeDownloads.length > 0 && (
+              <span className="px-1.5 py-0.2 bg-yellow-400 text-black text-[9px] font-black rounded-full animate-pulse">
+                {activeDownloads.length}
+              </span>
+            )}
           </button>
         ))}
 

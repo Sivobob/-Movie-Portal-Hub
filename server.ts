@@ -1,16 +1,17 @@
 import fs from 'fs';
-import dotenv from 'dotenv';
-dotenv.config({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.env') });
-import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, '.env') });
+
+import express from 'express';
 import metadataRouter from './src/server/metadataRouter.ts';
 import telegramRouter, { handleStream } from './src/server/telegramRouter.ts';
 import videoRouter from './src/server/videoRouter.ts';
 import downloadCastRouter from './src/server/downloadCastRouter.ts';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const app = express();
 let PORT = Number(process.env.PORT) || 3000;

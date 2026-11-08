@@ -1,6 +1,16 @@
+import React from 'react';
 import { motion } from 'framer-motion';
+import { Download } from 'lucide-react';
 
-export default function MovieCard({ movie, onClick }: { movie: any, onClick: () => void }) {
+export default function MovieCard({ 
+  movie, 
+  onClick, 
+  onDownloadClick 
+}: { 
+  movie: any; 
+  onClick: () => void; 
+  onDownloadClick?: (e: React.MouseEvent) => void;
+}) {
   return (
     <motion.div 
       className="relative rounded-xl overflow-hidden aspect-[2/3] cursor-pointer group shadow-lg border border-neutral-800/80 bg-neutral-950"
@@ -19,6 +29,22 @@ export default function MovieCard({ movie, onClick }: { movie: any, onClick: () 
       <div className="absolute top-2 right-2 bg-black/90 border border-yellow-400/40 text-yellow-400 text-[10px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider shadow z-10">
         HD
       </div>
+
+      {/* Top Left Quick Download Button */}
+      {onDownloadClick && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDownloadClick(e);
+          }}
+          className="absolute top-2 left-2 z-20 w-7 h-7 rounded-full bg-black/85 hover:bg-yellow-400 text-yellow-400 hover:text-black border border-yellow-400/40 flex items-center justify-center transition-all cursor-pointer shadow-md active:scale-90"
+          title="Download with Quality Options"
+          aria-label="Download"
+        >
+          <Download size={13} className="stroke-[2.5]" />
+        </button>
+      )}
 
       {/* Bottom Right Yellow Circular Play Button */}
       <div className="absolute bottom-2.5 right-2.5 z-20 group-hover:scale-110 transition-transform duration-200">

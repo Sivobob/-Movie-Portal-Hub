@@ -6,6 +6,8 @@ import { db } from '../firebase';
 import VideoPlayerModal from './VideoPlayerModal';
 import MovieCard from './MovieCard';
 import { getLocalMovies } from '../services/movieStorage';
+import DownloadOptionsModal from './DownloadOptionsModal';
+import { useDownloads } from '../hooks/useDownloads';
 
 const GENRES = [
   "Action", "Adult", "Adventure", "Animation", "Animated Series", "Anime", "Biography", "Ceremony",
@@ -20,6 +22,8 @@ export default function SearchPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [playingMovie, setPlayingMovie] = useState<any | null>(null);
+  const [downloadModalMovie, setDownloadModalMovie] = useState<any | null>(null);
+  const { startDownload } = useDownloads();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -157,6 +161,7 @@ export default function SearchPage() {
                   setPlayingMovie(movie);
                 }
               }} 
+              onDownloadClick={() => setDownloadModalMovie(movie)}
             />
           ))}
         </div>
@@ -194,6 +199,30 @@ export default function SearchPage() {
           videoQualities={playingMovie.videoQualities}
           category={playingMovie.displayCategory}
           posterUrl={playingMovie.posterUrl}
+          onRequestDownload={(m) => setDownloadModalMovie(m)}
+        />
+      )}
+
+      {downloadModalMovie && (
+        <DownloadOptionsModal
+          isOpen={Boolean(downloadModalMovie)}
+          onClose={() => setDownloadModalMovie(null)}
+          movie={downloadModalMovie}
+          onConfirmDownload={(opts) => {
+            startDownload({
+              title: opts.title,
+              posterUrl: opts.posterUrl,
+              videoUrl: opts.videoUrl,
+              quality: opts.quality,
+              estimatedSizeMb: opts.estimatedSizeMb,
+              originalCategory: downloadModalMovie.displayCategory || 'Movie',
+              releaseYear: downloadModalMovie.releaseYear,
+            });
+          }}
+          onViewDownloads={() => {
+            setDownloadModalMovie(null);
+            navigate('/?category=Downloads');
+          }}
         />
       )}
     </div>
