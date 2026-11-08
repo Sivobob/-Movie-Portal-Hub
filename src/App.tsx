@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
 import { StatusBar } from '@capacitor/status-bar';
 import { handleRedirectResult } from './services/authService';
 import { useAuth, isAuthorizedAdminEmail } from './context/AuthContext';
@@ -113,8 +114,10 @@ export default function App() {
     handleRedirectResult();
     
     // Initialize immersive full-screen mode for Android
-    StatusBar.setOverlaysWebView({ overlay: true });
-    StatusBar.hide();
+    if (Capacitor.isNativePlatform()) {
+      StatusBar.setOverlaysWebView({ overlay: true });
+      StatusBar.hide();
+    }
   }, []);
 
   return (
