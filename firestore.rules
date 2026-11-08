@@ -1,0 +1,41 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    function isSignedIn() { 
+      return request.auth != null; 
+    }
+    
+    function isAuthorizedEmail() {
+      return isSignedIn() && 
+        request.auth.token.email != null && 
+        request.auth.token.email.lower() == 'movieboxproapk007711@gmail.com';
+    }
+
+    function isAdmin() { 
+      return isSignedIn() && 
+        (request.auth.token.admin == true || isAuthorizedEmail()) &&
+        isAuthorizedEmail();
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Movies collection
+    match /movies/{movieId} {
+      // Full public read so users can view published movies
+      allow read: if true; 
+      
+      // Only admins can add, update, delete movies
+      allow write: if isAdmin();
+    }
+
+    // Admins collection
+    match /admins/{uid} {
+      allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow write: if isAdmin();
+    }
+  }
+}
