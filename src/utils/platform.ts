@@ -78,7 +78,7 @@ export const isMobileDevice = (): boolean => {
  * without any intermediary modals or pages.
  */
 export const downloadOfficialApk = () => {
-  const apkUrl = "/downloads/MovieBox-v2.5.0.apk";
+  const apkUrl = "https://github.com/Sivobob/-Movie-Portal-Hub/releases/download/latest/Movie-Portal.apk";
   const link = document.createElement('a');
   link.href = apkUrl;
   link.setAttribute('download', 'Movie-Portal.apk');
