@@ -441,7 +441,7 @@ export default function HomePage() {
   };
 
   return (
-    <div className="h-full min-h-full w-full bg-black text-white flex flex-col relative pb-20 select-none overflow-x-hidden">
+    <div className="h-full min-h-full w-full bg-black text-white flex flex-col relative pb-20 pt-16 sm:pt-20 select-none overflow-x-hidden">
       {/* New Content Announcement Toast */}
       <AnimatePresence>
         {announcement && (
