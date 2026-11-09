@@ -5,7 +5,7 @@ import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 import { db } from '../firebase';
 import VideoPlayerModal from './VideoPlayerModal';
 import MovieCard from './MovieCard';
-import { getLocalMovies } from '../services/movieStorage';
+import { fetchMoviesFromFirestore } from '../services/movieStorage';
 import DownloadOptionsModal from './DownloadOptionsModal';
 import { useDownloads } from '../hooks/useDownloads';
 
@@ -48,11 +48,8 @@ export default function SearchPage() {
         const snapshot = await getDocs(q);
         list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter((m: any) => m.published !== false && !m.id?.startsWith('sample-'));
       } catch (e: any) {
-        console.warn('Search falling back to local storage:', e?.message || e);
-      }
-
-      if (list.length === 0) {
-        list = getLocalMovies().filter((m: any) => m.published !== false && !m.id?.startsWith('sample-'));
+        console.warn('Search falling back to storage service:', e?.message || e);
+        list = await fetchMoviesFromFirestore();
       }
 
       // Filter by title
@@ -74,8 +71,7 @@ export default function SearchPage() {
       setResults(list);
     } catch (err: any) {
       console.warn('Search error handled:', err?.message || err);
-      const fallback = getLocalMovies().filter((m: any) => m.published !== false);
-      setResults(fallback);
+      setResults([]);
     } finally {
       setIsLoading(false);
     }

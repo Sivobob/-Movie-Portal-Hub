@@ -29,6 +29,7 @@ export interface MovieData {
       episodeNumber: number;
       title: string;
       streamUrl: string;
+      duration?: string;
     }>;
   }>;
 }

@@ -35,7 +35,7 @@ export default function HomePage() {
   const [movies, setMovies] = useState<any[]>([]);
   const [featuredMovies, setFeaturedMovies] = useState<any[]>([]);
   const [category, setCategory] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(initialLocal.length === 0);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const [selectedMovie, setSelectedMovie] = useState<any | null>(null);
   const [activeSeasonIndex, setActiveSeasonIndex] = useState(0);

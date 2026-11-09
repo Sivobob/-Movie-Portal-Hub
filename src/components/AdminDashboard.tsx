@@ -45,41 +45,13 @@ import {
   fetchMoviesFromFirestore,
   saveMovieToFirestore,
   deleteMovieFromFirestore,
+  saveMovieLocally,
+  deleteMovieLocally,
+  togglePublishLocally,
+  toggleFeaturedLocally,
+  clearAllMoviesLocally,
   MovieData
 } from '../services/movieStorage';
-
-interface MovieData {
-  id: string;
-  title: string;
-  originalTitle?: string;
-  description?: string;
-  posterUrl: string;
-  backdropUrl?: string;
-  releaseYear: number;
-  originalCategory: string;
-  displayCategory: string;
-  language?: string;
-  genre?: string;
-  director?: string;
-  cast?: string;
-  runtime?: string;
-  rating?: number;
-  imdbId?: string;
-  trailerUrl?: string;
-  streamingUrl?: string;
-  featured?: boolean;
-  published: boolean;
-  createdAt?: any;
-  seasons?: Array<{
-    seasonNumber: number;
-    episodes: Array<{
-      episodeNumber: number;
-      title: string;
-      streamUrl: string;
-      duration?: string;
-    }>;
-  }>;
-}
 
 interface MetadataSearchResult {
   imdbId: string;
