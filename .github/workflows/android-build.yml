@@ -58,9 +58,13 @@ jobs:
           path: Movie-Portal.apk
 
       - name: Publish Release to GitHub
-        run: |
-          gh release delete latest --cleanup-tag -y || true
-          gh release create latest Movie-Portal.apk --title "Movie Portal Latest Android APK" --notes "Official Android APK compiled automatically from latest source."
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v2.5.${{ github.run_number }}"
+          name: "Movie Portal Android APK v2.5.${{ github.run_number }}"
+          body: "Official Android APK compiled automatically from latest source code."
+          files: Movie-Portal.apk
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
