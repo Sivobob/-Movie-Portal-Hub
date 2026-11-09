@@ -85,7 +85,7 @@ function AppContent() {
       {showSplash ? (
         <SplashScreen onFinish={() => setShowSplash(false)} />
       ) : (
-        <div className="min-h-screen bg-black flex flex-col select-none overscroll-none">
+        <div className="h-full min-h-full w-full bg-black flex flex-col select-none overscroll-none">
           <Header />
           <UpdateNotification />
           <main className="flex-grow pb-14 sm:pb-0">
