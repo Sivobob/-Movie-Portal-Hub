@@ -42,13 +42,14 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Prepare APK Asset
         run: |
           mkdir -p public/downloads
           cp android/app/build/outputs/apk/debug/app-debug.apk public/downloads/Movie-Portal.apk
           cp android/app/build/outputs/apk/debug/app-debug.apk Movie-Portal.apk
+          ls -lh Movie-Portal.apk
 
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
@@ -57,14 +58,9 @@ jobs:
           path: Movie-Portal.apk
 
       - name: Publish Release to GitHub
-        uses: softprops/action-gh-release@v2
-        continue-on-error: true
-        with:
-          tag_name: latest
-          name: "Movie Portal Latest Android APK"
-          body: "Official Android APK compiled automatically from latest source."
-          files: Movie-Portal.apk
-          make_latest: true
+        run: |
+          gh release delete latest --cleanup-tag -y || true
+          gh release create latest Movie-Portal.apk --title "Movie Portal Latest Android APK" --notes "Official Android APK compiled automatically from latest source."
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
