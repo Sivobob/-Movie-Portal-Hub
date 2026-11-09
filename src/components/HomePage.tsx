@@ -32,12 +32,8 @@ export default function HomePage() {
     setLastNotification 
   } = useDownloads();
   const [downloadModalMovie, setDownloadModalMovie] = useState<any | null>(null);
-  const initialLocal = getLocalMovies().filter((m: any) => m.published !== false);
-  const [movies, setMovies] = useState<any[]>(initialLocal);
-  const [featuredMovies, setFeaturedMovies] = useState<any[]>(() => {
-    const feat = initialLocal.filter((m: any) => m.featured);
-    return feat.length > 0 ? feat : initialLocal;
-  });
+  const [movies, setMovies] = useState<any[]>([]);
+  const [featuredMovies, setFeaturedMovies] = useState<any[]>([]);
   const [category, setCategory] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(initialLocal.length === 0);
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
