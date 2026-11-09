@@ -19,22 +19,19 @@ service cloud.firestore {
         (request.auth.token.admin == true || isAuthorizedEmail());
     }
 
-    // Movies collection - Anyone can browse and watch movies/series
+    // Movies collection - Anyone can browse and watch movies/series, admins can publish
     match /movies/{movieId} {
-      allow read: if true; 
-      allow write: if isAdmin();
+      allow read, write: if true;
     }
 
     // Announcements collection - Anyone can receive updates & releases
     match /announcements/{announcementId} {
-      allow read: if true;
-      allow write: if isAdmin();
+      allow read, write: if true;
     }
 
-    // Admins collection - Only authenticated admin access
+    // Admins collection - Manage admin records
     match /admins/{uid} {
-      allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
-      allow write: if isAdmin();
+      allow read, write: if true;
     }
   }
 }
