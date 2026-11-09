@@ -1,3 +1,6 @@
+import { db } from '../firebase';
+import { collection, getDocs, doc, setDoc, deleteDoc, query, orderBy } from 'firebase/firestore';
+
 export interface MovieData {
   id: string;
   title: string;
@@ -30,7 +33,37 @@ export interface MovieData {
   }>;
 }
 
-export const INITIAL_SAMPLE_MOVIES: MovieData[] = [];
+const COLLECTION_NAME = 'movies';
+
+export async function fetchMoviesFromFirestore(): Promise<MovieData[]> {
+  try {
+    const q = query(collection(db, COLLECTION_NAME), orderBy('releaseYear', 'desc'));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MovieData));
+  } catch (e) {
+    console.error('Error fetching movies from Firestore', e);
+    return [];
+  }
+}
+
+export async function saveMovieToFirestore(movie: MovieData): Promise<void> {
+  try {
+    await setDoc(doc(db, COLLECTION_NAME, movie.id), movie);
+  } catch (e) {
+    console.error('Error saving movie to Firestore', e);
+    throw e;
+  }
+}
+
+export async function deleteMovieFromFirestore(id: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, COLLECTION_NAME, id));
+  } catch (e) {
+    console.error('Error deleting movie from Firestore', e);
+    throw e;
+  }
+}
+
 
 const STORAGE_KEY = 'movie_portal_movies_v2';
 
@@ -38,8 +71,7 @@ export function getLocalMovies(): MovieData[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw === null) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(INITIAL_SAMPLE_MOVIES));
-      return INITIAL_SAMPLE_MOVIES;
+      return [];
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
@@ -104,3 +136,4 @@ export function clearAllMoviesLocally(): void {
     console.warn('Failed to clear movies from localStorage', e);
   }
 }
+

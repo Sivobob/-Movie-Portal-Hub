@@ -10,7 +10,7 @@ import VideoPlayerModal from './VideoPlayerModal';
 import { useAuth, isAuthorizedAdminEmail } from '../context/AuthContext';
 import { loginWithGoogle } from '../services/authService';
 
-import { getLocalMovies, saveLocalMovies } from '../services/movieStorage';
+import { fetchMoviesFromFirestore } from '../services/movieStorage';
 import { isNativeAndroid, isInstalledPhoneApp, downloadOfficialApk } from '../utils/platform';
 import { useDownloads } from '../hooks/useDownloads';
 import DownloadOptionsModal from './DownloadOptionsModal';
@@ -184,27 +184,17 @@ export default function HomePage() {
           const publishedList = list.filter((m: any) => m.published !== false);
           if (publishedList.length > 0) {
             setMovies(publishedList);
-            saveLocalMovies(publishedList as any);
             const feat = publishedList.filter((m: any) => m.featured);
             setFeaturedMovies(feat.length > 0 ? feat : publishedList);
             return;
           }
         }
-        // Fall back to local movies
-        const local = getLocalMovies().filter((m: any) => m.published !== false);
-        setMovies(local);
-        const feat = local.filter((m: any) => m.featured);
-        setFeaturedMovies(feat.length > 0 ? feat : local);
       },
       (err) => {
-        console.warn('Firestore real-time listener unavailable, using local movies:', err?.message || err);
+        console.error('Firestore real-time listener error:', err);
         handleFirestoreError(err, OperationType.LIST, 'movies');
         if (!isMounted) return;
         setIsLoading(false);
-        const local = getLocalMovies().filter((m: any) => m.published !== false);
-        setMovies(local);
-        const feat = local.filter((m: any) => m.featured);
-        setFeaturedMovies(feat.length > 0 ? feat : local);
       }
     );
     return () => {

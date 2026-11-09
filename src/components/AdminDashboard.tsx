@@ -39,14 +39,13 @@ import {
   Square
 } from 'lucide-react';
 import VideoPlayerModal from './VideoPlayerModal';
-import {
+import { 
   getLocalMovies,
   saveLocalMovies,
-  saveMovieLocally,
-  deleteMovieLocally,
-  togglePublishLocally,
-  toggleFeaturedLocally,
-  clearAllMoviesLocally
+  fetchMoviesFromFirestore,
+  saveMovieToFirestore,
+  deleteMovieFromFirestore,
+  MovieData
 } from '../services/movieStorage';
 
 interface MovieData {
@@ -437,24 +436,25 @@ export default function AdminDashboard() {
   const fetchMovies = async () => {
     setLoadingMovies(true);
     try {
-      const q = query(collection(db, 'movies'));
-      const querySnapshot = await getDocs(q);
-      const items: MovieData[] = [];
-      querySnapshot.forEach((d) => {
-        if (!d.id.startsWith('sample-')) {
-          items.push({ id: d.id, ...d.data() } as MovieData);
-        }
-      });
-      items.sort((a, b) => (b.releaseYear || 0) - (a.releaseYear || 0));
+      const items = await fetchMoviesFromFirestore();
       setMovies(items);
-      saveLocalMovies(items);
     } catch (err: any) {
-      console.warn('Firestore fetch failed in Admin Dashboard, using local storage cache:', err?.message || err);
+      console.error('Firestore fetch failed in Admin Dashboard', err);
       handleFirestoreError(err, OperationType.LIST, 'movies');
-      const local = getLocalMovies();
-      setMovies(local);
     } finally {
       setLoadingMovies(false);
+    }
+  };
+
+
+
+  const handleDeleteMovie = async (id: string) => {
+    try {
+      await deleteMovieFromFirestore(id);
+      showNotification('success', 'Movie deleted successfully!');
+      fetchMovies();
+    } catch (err: any) {
+      showNotification('error', 'Failed to delete movie.');
     }
   };
 
