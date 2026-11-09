@@ -427,7 +427,7 @@ export default function HomePage() {
   };
 
   return (
-    <div className="h-full min-h-full w-full bg-black text-white flex flex-col relative pb-20 pt-16 sm:pt-20 select-none overflow-x-hidden">
+    <div className="h-full min-h-full w-full bg-black text-white flex flex-col relative pb-20 pt-64 select-none overflow-x-hidden">
       {/* New Content Announcement Toast */}
       <AnimatePresence>
         {announcement && (
@@ -595,12 +595,12 @@ export default function HomePage() {
               <div 
                 className={`absolute inset-0 bg-cover ${isAndroid ? 'bg-top sm:bg-center' : 'bg-center'}`}
                 style={{
-                  backgroundImage: `url(${currentFeatured.backdropUrl || currentFeatured.posterUrl || '/assets/aistudio/file_00000000358c821196dc204611457f40_2f7c42b6.png'})`,
+                  backgroundImage: `url(${currentFeatured.backdropUrl || currentFeatured.posterUrl || 'https://images.unsplash.com/photo-1626814026160-2237a95fc5a0?q=80&w=1200'})`,
                 }}
               />
-              {/* Cinematic Vignette Overlay */}
-              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-black/70" />
-              <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-transparent" />
+              {/* Cinematic Vignette Overlay - Deeper and darker to match Godzilla reference */}
+              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-black/85" />
+              <div className="absolute inset-0 bg-gradient-to-b from-black/80 via-transparent to-transparent" />
             </motion.div>
           </AnimatePresence>
  
@@ -649,74 +649,62 @@ export default function HomePage() {
               <X size={18} />
             </button>
 
-            {/* Poster Section (Large Prominent Poster with Original Aspect Ratio) */}
-            <div className="relative w-full aspect-[3/4] bg-neutral-950 overflow-hidden">
+            {/* Poster Section (Click to Play) */}
+            <div 
+              onClick={() => {
+                handleWatchNow(selectedMovie);
+                setSelectedMovie(null);
+              }}
+              className="relative w-full aspect-[3/4] bg-neutral-950 overflow-hidden cursor-pointer group"
+            >
               <img
                 src={selectedMovie.posterUrl || selectedMovie.backdropUrl || undefined}
                 alt={selectedMovie.title}
-                className="w-full h-full object-cover"
+                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                 onError={(e: any) => {
                   e.target.src = 'https://images.unsplash.com/photo-1595760205842-8356d2cf98b1?q=80&w=800';
                 }}
               />
 
-              {/* HD Badge (Top-Right Corner of Poster) */}
+              {/* HD Badge */}
               <div className="absolute top-3.5 left-3.5 z-10">
                 <span className="bg-black/90 text-[#facc15] font-black text-xs sm:text-sm px-2.5 py-1 rounded-md border border-amber-400/30 shadow-md tracking-wider">
                   HD
                 </span>
               </div>
 
-              {/* Large Circular YELLOW Play Button with GREEN Play Triangle (Bottom-Right Corner) */}
-              <button
-                onClick={() => {
-                  handleWatchNow(selectedMovie);
-                  setSelectedMovie(null);
-                }}
-                className="absolute bottom-3 right-4 z-20 group cursor-pointer transition-transform duration-200 hover:scale-105 active:scale-95"
-                aria-label="Play Movie"
-              >
-                <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-[#facc15] border-[3px] border-black flex items-center justify-center shadow-xl">
-                  <svg
-                    viewBox="0 0 24 24"
-                    className="w-7 h-7 sm:w-8 sm:h-8 ml-1"
-                    style={{ filter: 'drop-shadow(0px 1px 2px rgba(0,0,0,0.4))' }}
-                  >
-                    <path
-                      d="M6 4l15 8-15 8V4z"
-                      fill="#00e676"
-                      stroke="#000000"
-                      strokeWidth="2"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </div>
-              </button>
+              {/* Center Play Overlay on Hover */}
+              <div className="absolute inset-0 bg-black/40 flex items-center justify-center transition-opacity">
+                 <div className="w-16 h-16 rounded-full bg-yellow-400 flex items-center justify-center shadow-2xl scale-90 group-hover:scale-100 transition-transform">
+                    <Play size={24} fill="black" className="ml-1" />
+                 </div>
+              </div>
             </div>
 
-            {/* Video Player + Download Action */}
-            <div className="relative w-full aspect-video bg-black flex items-center justify-center">
-               {/* Player logic here ... */}
+            {/* Movie Info Section */}
+            <div className="bg-white text-black p-6 pt-5 pb-8 rounded-b-[28px]">
+              <h3 className="text-xl sm:text-2xl font-black text-gray-900 text-center tracking-tight leading-snug mb-2 font-sans uppercase">
+                {selectedMovie.title}
+              </h3>
+
+              <p className="text-xs sm:text-sm font-semibold text-gray-500 text-center leading-normal mb-4">
+                {selectedMovie.genre || selectedMovie.displayCategory || 'Movie'}
+              </p>
+
+              {selectedMovie.description ? (
+                <div className="text-xs text-gray-600 text-center leading-relaxed max-h-32 overflow-y-auto px-2 mb-4 scrollbar-thin">
+                  {selectedMovie.description}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 text-center italic mb-4">No description available for this title.</p>
+              )}
+
+              <div className="flex flex-col items-center gap-1">
+                <div className="h-0.5 w-12 bg-yellow-400 mb-2 rounded-full opacity-50" />
+                <p className="text-[9px] font-black text-yellow-600 uppercase tracking-[0.2em] animate-pulse">Tap Poster to Watch</p>
+              </div>
             </div>
-            
-            {/* Action Buttons inside Player/Detail View */}
-            <div className="p-6 pt-4 flex gap-2">
-              <button
-                type="button"
-                onClick={() => handleWatchNow(selectedMovie)}
-                className="flex-[2] bg-yellow-400 hover:bg-yellow-500 text-black font-black text-sm py-3 px-4 rounded-xl flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
-              >
-                <Play size={16} />
-                <span>Watch Now</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setDownloadModalMovie(selectedMovie)}
-                className="flex-1 bg-neutral-800 hover:bg-neutral-700 text-white font-black text-sm py-3 px-4 rounded-xl flex items-center justify-center gap-2 shadow-md active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
-              >
-                <Download size={16} />
-              </button>
-            </div>
+
 
               {/* Preserved Series Season & Episode Selection */}
               {selectedMovie.seasons && selectedMovie.seasons.length > 0 && (

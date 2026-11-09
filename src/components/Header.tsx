@@ -9,20 +9,17 @@ export function MoviePortal3DLogo() {
     <div className="flex flex-col items-center select-none text-center">
       <span
         style={{
-          fontFamily: "'Impact', 'Arial Black', -apple-system, sans-serif",
-          color: '#FFE200',
-          letterSpacing: '0.04em',
+          fontFamily: "'Bangers', cursive, system-ui",
+          color: '#FFD700', // Gold/Yellow fill
+          letterSpacing: '0.02em',
+          WebkitTextStroke: '2.5px #E60000', // Thick red outline
           textShadow: `
-            -2px -2px 0 #D60000,
-             2px -2px 0 #D60000,
-            -2px  2px 0 #D60000,
-             2px  2px 0 #D60000,
-             0px  3px 0 #9E0000,
-             0px  4.5px 0 #600000,
-             0px  7px 16px rgba(0, 0, 0, 0.95)
+            3px 3px 0 #800000,
+            0px 0px 15px rgba(255, 215, 0, 0.3)
           `,
+          transform: 'scale(1.1) rotate(-1deg)', // Bold presence
         }}
-        className="text-2xl sm:text-3xl font-black uppercase tracking-wider active:scale-95 transition-transform duration-150 drop-shadow-lg"
+        className="text-4xl sm:text-5xl font-normal uppercase tracking-tight active:scale-95 transition-transform duration-150 drop-shadow-2xl"
       >
         MOVIE PORTAL
       </span>
@@ -154,10 +151,10 @@ export default function Header() {
             {/* Left Spacer so 3D Logo stays perfectly centered without UI back or search buttons */}
             <div className="w-10 flex items-center justify-start z-10 pointer-events-none" />
 
-            {/* Top-Center 3D MOVIE PORTAL Logo shifted downward ~18px while keeping centered */}
+            {/* Top-Center 3D MOVIE PORTAL Logo shifted downward ~90px while keeping centered */}
             <div 
               onClick={handleHomeClick}
-              className="absolute left-1/2 -translate-x-1/2 translate-y-[18px] cursor-pointer flex flex-col items-center z-10"
+              className="absolute left-1/2 -translate-x-1/2 translate-y-[90px] cursor-pointer flex flex-col items-center z-10"
             >
               <MoviePortal3DLogo />
             </div>
@@ -168,25 +165,21 @@ export default function Header() {
                 <button
                   type="button"
                   onClick={downloadOfficialApk}
-                  className="p-2 rounded-full bg-yellow-400 hover:bg-yellow-300 text-black font-black border border-yellow-500 backdrop-blur-md cursor-pointer active:scale-90 transition-transform shadow-md flex items-center gap-1 text-[10px]"
+                  className="p-1.5 rounded-full bg-yellow-400 hover:bg-yellow-300 text-black font-black border border-yellow-500 backdrop-blur-md cursor-pointer active:scale-90 transition-transform shadow-md flex items-center gap-1 text-[10px]"
                   title="Direct Download Movie Portal APK"
                 >
-                  <Download size={15} className="stroke-[2.5]" />
+                  <Download size={14} className="stroke-[2.5]" />
                   <span className="hidden xs:inline uppercase font-extrabold">App</span>
                 </button>
               )}
               <button
                 type="button"
                 onClick={handleSettingsClick}
-                className={`p-1.5 rounded-full border backdrop-blur-md cursor-pointer active:scale-90 transition-all ${
-                  isUnlockedSession
-                    ? 'bg-yellow-400/20 text-yellow-400 border-yellow-400/70 shadow-lg shadow-yellow-400/20'
-                    : 'bg-black/60 text-yellow-400 border-yellow-400/30 hover:border-yellow-400/60'
-                }`}
+                className="p-1.5 rounded-full bg-yellow-400 text-black border border-yellow-500 shadow-[0_0_15px_rgba(250,204,21,0.5)] cursor-pointer active:scale-90 transition-all hover:bg-yellow-300"
                 aria-label="Settings"
                 title="Settings"
               >
-                <Settings size={15} className="transition-transform hover:rotate-90 duration-300" />
+                <Settings size={16} className="transition-transform hover:rotate-90 duration-300" />
               </button>
             </div>
           </div>
