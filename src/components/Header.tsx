@@ -178,7 +178,7 @@ export default function Header() {
               <button
                 type="button"
                 onClick={handleSettingsClick}
-                className={`p-2 rounded-full border backdrop-blur-md cursor-pointer active:scale-90 transition-all ${
+                className={`p-1.5 rounded-full border backdrop-blur-md cursor-pointer active:scale-90 transition-all ${
                   isUnlockedSession
                     ? 'bg-yellow-400/20 text-yellow-400 border-yellow-400/70 shadow-lg shadow-yellow-400/20'
                     : 'bg-black/60 text-yellow-400 border-yellow-400/30 hover:border-yellow-400/60'
@@ -186,7 +186,7 @@ export default function Header() {
                 aria-label="Settings"
                 title="Settings"
               >
-                <Settings size={19} className="transition-transform hover:rotate-90 duration-300" />
+                <Settings size={15} className="transition-transform hover:rotate-90 duration-300" />
               </button>
             </div>
           </div>

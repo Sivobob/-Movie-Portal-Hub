@@ -708,43 +708,29 @@ export default function HomePage() {
               </button>
             </div>
 
-            {/* Pure White Bottom Section */}
-            <div className="bg-white text-black p-6 pt-7 pb-6 rounded-b-[28px]">
-              {/* Movie / Series Name (Bold, Black, Centered) */}
-              <h3 className="text-xl sm:text-2xl font-black text-gray-900 text-center tracking-tight leading-snug mb-1 font-sans">
-                {selectedMovie.title}
-              </h3>
-
-              {/* Movie / Series Genres (Gray, Centered below name) */}
-              <p className="text-xs sm:text-sm font-semibold text-gray-500 text-center leading-normal">
-                {selectedMovie.genre || selectedMovie.displayCategory || 'Action, Crime, Drama'}
-              </p>
-
-              {/* Action Buttons: Watch Now & Download Options */}
-              <div className="mt-4 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleWatchNow(selectedMovie);
-                    setSelectedMovie(null);
-                  }}
-                  className="flex-1 bg-neutral-950 hover:bg-black text-yellow-400 border border-yellow-400/40 font-black text-xs py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5 shadow-md active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
-                >
-                  <Play size={14} className="fill-yellow-400" />
-                  <span>Watch Now</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDownloadModalMovie(selectedMovie);
-                    setSelectedMovie(null);
-                  }}
-                  className="flex-1 bg-yellow-400 hover:bg-yellow-500 text-black font-black text-xs py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5 shadow-lg shadow-yellow-400/20 active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
-                >
-                  <Download size={14} className="stroke-[2.5]" />
-                  <span>Download</span>
-                </button>
-              </div>
+            {/* Video Player + Download Action */}
+            <div className="relative w-full aspect-video bg-black flex items-center justify-center">
+               {/* Player logic here ... */}
+            </div>
+            
+            {/* Action Buttons inside Player/Detail View */}
+            <div className="p-6 pt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={() => handleWatchNow(selectedMovie)}
+                className="flex-[2] bg-yellow-400 hover:bg-yellow-500 text-black font-black text-sm py-3 px-4 rounded-xl flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
+              >
+                <Play size={16} />
+                <span>Watch Now</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setDownloadModalMovie(selectedMovie)}
+                className="flex-1 bg-neutral-800 hover:bg-neutral-700 text-white font-black text-sm py-3 px-4 rounded-xl flex items-center justify-center gap-2 shadow-md active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
+              >
+                <Download size={16} />
+              </button>
+            </div>
 
               {/* Preserved Series Season & Episode Selection */}
               {selectedMovie.seasons && selectedMovie.seasons.length > 0 && (
@@ -846,7 +832,6 @@ export default function HomePage() {
                   </div>
                 </div>
               )}
-            </div>
           </div>
         </div>
       )}
