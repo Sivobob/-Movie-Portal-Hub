@@ -79,11 +79,16 @@ export const isMobileDevice = (): boolean => {
  */
 export const downloadOfficialApk = () => {
   const apkUrl = "https://github.com/Sivobob/-Movie-Portal-Hub/releases/download/latest/Movie-Portal.apk";
-  const link = document.createElement('a');
-  link.href = apkUrl;
-  link.setAttribute('download', 'Movie-Portal.apk');
-  link.style.display = 'none';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+  try {
+    const link = document.createElement('a');
+    link.href = apkUrl;
+    link.setAttribute('download', 'Movie-Portal.apk');
+    link.setAttribute('target', '_blank');
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  } catch (e) {
+    window.open(apkUrl, '_blank');
+  }
 };
