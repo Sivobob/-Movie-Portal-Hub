@@ -36,7 +36,10 @@ jobs:
         run: npm run build
 
       - name: Sync Capacitor Android
-        run: npx cap sync android
+        run: |
+          npx cap sync android
+          mkdir -p android/capacitor-cordova-android-plugins
+          echo "// dummy" > android/capacitor-cordova-android-plugins/cordova.variables.gradle
 
       - name: Build Android APK (Gradle)
         working-directory: android
@@ -59,6 +62,7 @@ jobs:
 
       - name: Publish Release to GitHub
         uses: softprops/action-gh-release@v2
+        continue-on-error: true
         with:
           tag_name: "v2.5.${{ github.run_number }}"
           name: "Movie Portal Android APK v2.5.${{ github.run_number }}"
