@@ -273,6 +273,110 @@ export default function AdminDashboard() {
     return fetch(url, { ...options, headers });
   };
 
+  const fetchClientSideImdbSearch = async (queryToSearch: string) => {
+    try {
+      const clean = queryToSearch
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9]/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_+|_+$/g, '');
+
+      if (clean) {
+        const imdbUrl = `https://v3.sg.media-imdb.com/suggestion/x/${encodeURIComponent(clean)}.json`;
+        const imdbRes = await fetch(imdbUrl);
+        if (imdbRes.ok) {
+          const data = await imdbRes.json();
+          if (Array.isArray(data.d)) {
+            const items = data.d
+              .filter((item: any) => item.id && item.id.startsWith('tt'))
+              .map((item: any) => {
+                let poster = item.i?.imageUrl || '';
+                if (poster && poster.includes('._V1_') && poster.endsWith('.jpg')) {
+                  poster = poster.replace(/\._V1_.*\.jpg$/, '._V1_QL75_UX380_CR0,0,380,562_.jpg');
+                }
+                return {
+                  imdbId: item.id,
+                  title: item.l,
+                  year: item.y || 'N/A',
+                  type: (item.q || '').toLowerCase().includes('series') ? 'series' : 'movie',
+                  posterUrl: poster,
+                  cast: item.s || ''
+                };
+              });
+            if (items.length > 0) return items;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Client-side IMDb search fetch error:', e);
+    }
+
+    try {
+      const omdbUrl = `https://www.omdbapi.com/?apikey=trilogy&s=${encodeURIComponent(queryToSearch)}`;
+      const omdbRes = await fetch(omdbUrl);
+      if (omdbRes.ok) {
+        const omdbData = await omdbRes.json();
+        if (omdbData.Response === 'True' && Array.isArray(omdbData.Search)) {
+          return omdbData.Search.map((item: any) => ({
+            imdbId: item.imdbID,
+            title: item.Title,
+            year: item.Year,
+            type: item.Type || 'movie',
+            posterUrl: item.Poster && item.Poster !== 'N/A' ? item.Poster : '',
+          }));
+        }
+      }
+    } catch (e) {
+      console.warn('Client-side OMDb search fetch error:', e);
+    }
+
+    return [];
+  };
+
+  const fetchClientSideImdbDetail = async (imdbIdToFetch: string) => {
+    try {
+      const url = `https://www.omdbapi.com/?apikey=trilogy&i=${encodeURIComponent(imdbIdToFetch)}&plot=full`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.Response === 'True') {
+          const genre = data.Genre && data.Genre !== 'N/A' ? data.Genre : 'Action';
+          const lang = data.Language && data.Language !== 'N/A' ? data.Language : 'Hindi';
+          const country = data.Country && data.Country !== 'N/A' ? data.Country : '';
+          const isAnime = genre.toLowerCase().includes('animation') && (lang.toLowerCase().includes('japanese') || country.toLowerCase().includes('japan'));
+          const isBollywood = country.toLowerCase().includes('india') || lang.toLowerCase().includes('hindi');
+          let cat = 'Hollywood Movie';
+          if (data.Type === 'series') cat = isAnime ? 'Anime Series' : 'Web Series';
+          else if (isAnime) cat = 'Anime Movie';
+          else if (isBollywood) cat = 'Bollywood Movie';
+
+          const posterUrl = data.Poster && data.Poster !== 'N/A' ? data.Poster : '';
+
+          return {
+            imdbId: data.imdbID || imdbIdToFetch,
+            title: data.Title || '',
+            originalTitle: data.Title || '',
+            releaseYear: parseInt(data.Year) || new Date().getFullYear(),
+            posterUrl,
+            backdropUrl: posterUrl,
+            genre,
+            description: data.Plot && data.Plot !== 'N/A' ? data.Plot : '',
+            director: data.Director && data.Director !== 'N/A' ? data.Director : '',
+            cast: data.Actors && data.Actors !== 'N/A' ? data.Actors : '',
+            runtime: data.Runtime && data.Runtime !== 'N/A' ? data.Runtime : '',
+            language: lang,
+            rating: parseFloat(data.imdbRating) || 8.0,
+            suggestedCategory: cat
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('Client-side OMDb detail fetch error:', e);
+    }
+    return null;
+  };
+
   const handleFetchByImdbId = async (customId?: string) => {
     const rawId = (customId || imdbId || '').trim();
     const match = rawId.match(/(tt\d+)/i);
@@ -283,10 +387,21 @@ export default function AdminDashboard() {
     const idToFetch = match[1].toLowerCase();
     setSearchingMetadata(true);
     try {
-      const res = await authFetch(`/api/metadata/detail?id=${encodeURIComponent(idToFetch)}`);
-      const detail = await res.json();
-      if (detail.data) {
-        const d = detail.data;
+      let d: any = null;
+      try {
+        const res = await authFetch(`/api/metadata/detail?id=${encodeURIComponent(idToFetch)}`);
+        const contentType = res.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const detail = await res.json();
+          d = detail.data;
+        }
+      } catch (e) {}
+
+      if (!d) {
+        d = await fetchClientSideImdbDetail(idToFetch);
+      }
+
+      if (d) {
         setTitle(d.title || '');
         setOriginalTitle(d.originalTitle || d.title || '');
         setReleaseYear(d.releaseYear || new Date().getFullYear());
@@ -305,7 +420,7 @@ export default function AdminDashboard() {
         }
         showNotification('success', `✅ Auto-filled all details for "${d.title}" from IMDb!`);
       } else {
-        showNotification('error', detail.error || 'IMDb details not found.');
+        showNotification('error', 'IMDb details not found.');
       }
     } catch (e: any) {
       showNotification('error', `IMDb fetch error: ${e.message}`);
@@ -421,38 +536,50 @@ export default function AdminDashboard() {
     setSetupGuide(null);
 
     try {
-      const res = await authFetch(`/api/metadata/search?q=${encodeURIComponent(query)}`, { signal });
-      
-      const contentType = res.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        const text = await res.text();
-        console.error('Non-JSON response from search API:', text.substring(0, 100));
-        throw new Error(`Server returned non-JSON response (${res.status}). Check server logs.`);
+      let results: any[] = [];
+      try {
+        const res = await authFetch(`/api/metadata/search?q=${encodeURIComponent(query)}`, { signal });
+        const contentType = res.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const data = await res.json();
+          setApiConfigured(data.configured ?? true);
+          if (data.status) setApiStatus(data.status);
+          if (data.provider) setProviderName(data.provider);
+          if (Array.isArray(data.results)) {
+            results = data.results;
+          }
+        }
+      } catch (e) {}
+
+      // Fallback to client-side direct IMDb suggestion / OMDb fetch
+      if (results.length === 0) {
+        results = await fetchClientSideImdbSearch(query);
+        setApiConfigured(true);
+        setApiStatus('connected');
+        setProviderName('IMDb Live Engine');
       }
 
-      const data = await res.json();
-
-      setApiConfigured(data.configured ?? false);
-      if (data.status) setApiStatus(data.status);
-      if (data.provider) setProviderName(data.provider);
-
-      if (data.results && data.results.length > 0) {
-        setSearchResults(data.results);
-        if ((autoSelectIfSingle && data.results.length === 1) || /(tt\d+)/i.test(query)) {
-          handleSelectResult(data.results[0]);
+      if (results.length > 0) {
+        setSearchResults(results);
+        if ((autoSelectIfSingle && results.length === 1) || /(tt\d+)/i.test(query)) {
+          handleSelectResult(results[0]);
         }
       } else {
-        const msg = data.message || 'No matching movies, series or anime found on IMDb.';
         setSearchResults([]);
         if (!signal?.aborted) {
-          setApiMessage(msg);
+          setApiMessage(`No matching movies, series or anime found on IMDb for "${query}".`);
         }
       }
     } catch (err: any) {
       if (err.name === 'AbortError') return;
-      console.error('IMDb Metadata search failed:', err);
-      setApiStatus('error');
-      setApiMessage(err.message || 'Could not reach IMDb metadata service.');
+      console.error('IMDb Metadata search error:', err);
+      const fallbackResults = await fetchClientSideImdbSearch(query);
+      if (fallbackResults.length > 0) {
+        setSearchResults(fallbackResults);
+      } else {
+        setApiStatus('error');
+        setApiMessage(err.message || 'Could not reach IMDb metadata service.');
+      }
     } finally {
       if (!signal?.aborted) {
         setSearchingMetadata(false);
@@ -475,17 +602,23 @@ export default function AdminDashboard() {
     if (item.cast) setCast(item.cast);
 
     try {
-      const res = await authFetch(`/api/metadata/detail?id=${encodeURIComponent(item.imdbId)}`);
-      const contentType = res.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        // Fallback to basic info is already done above
-        return;
-      }
-      const detail = await res.json();
+      let d: any = null;
+      if (item.imdbId) {
+        try {
+          const res = await authFetch(`/api/metadata/detail?id=${encodeURIComponent(item.imdbId)}`);
+          const contentType = res.headers.get('content-type');
+          if (contentType && contentType.includes('application/json')) {
+            const detail = await res.json();
+            d = detail.data;
+          }
+        } catch (e) {}
 
-      if (detail.data) {
-        const d = detail.data;
-        // Enrich with more details from full metadata
+        if (!d) {
+          d = await fetchClientSideImdbDetail(item.imdbId);
+        }
+      }
+
+      if (d) {
         setTitle(d.title || item.title || '');
         setOriginalTitle(d.originalTitle || item.title || '');
         setReleaseYear(d.releaseYear || parseInt(String(item.year)) || new Date().getFullYear());
@@ -505,13 +638,11 @@ export default function AdminDashboard() {
 
         showNotification('success', `Auto-filled details for "${d.title}"! Review and edit fields below.`);
       } else {
-        // We already have basic info from the item, so just show a warning notice if details failed
-        console.warn('Metadata details fetch failed, kept basic search info:', detail.error);
-        showNotification('success', `Auto-filled basic info for "${item.title}". Detailed metadata (plot, cast, rating) could not be fetched.`);
+        showNotification('success', `Auto-filled basic info for "${item.title}".`);
       }
-    } catch (err: any) {
-      console.error('Auto-fill detail error:', err);
-      showNotification('error', `Could not auto-fill metadata: ${err?.message}`);
+    } catch (e) {
+      console.warn('Metadata detail fetch failed, kept basic search info:', e);
+      showNotification('success', `Auto-filled basic info for "${item.title}".`);
     } finally {
       setSearchingMetadata(false);
     }
