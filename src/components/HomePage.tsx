@@ -10,7 +10,7 @@ import VideoPlayerModal from './VideoPlayerModal';
 import { useAuth, isAuthorizedAdminEmail } from '../context/AuthContext';
 import { loginWithGoogle } from '../services/authService';
 
-import { fetchMoviesFromFirestore } from '../services/movieStorage';
+import { fetchMoviesFromFirestore, getLocalMovies, saveLocalMovies } from '../services/movieStorage';
 import { isNativeAndroid, isInstalledPhoneApp, downloadOfficialApk } from '../utils/platform';
 import { useDownloads } from '../hooks/useDownloads';
 import DownloadOptionsModal from './DownloadOptionsModal';
@@ -32,10 +32,10 @@ export default function HomePage() {
     setLastNotification 
   } = useDownloads();
   const [downloadModalMovie, setDownloadModalMovie] = useState<any | null>(null);
-  const [movies, setMovies] = useState<any[]>([]);
-  const [featuredMovies, setFeaturedMovies] = useState<any[]>([]);
+  const [movies, setMovies] = useState<any[]>(getLocalMovies());
+  const [featuredMovies, setFeaturedMovies] = useState<any[]>(getLocalMovies().filter((m: any) => m.featured));
   const [category, setCategory] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const [selectedMovie, setSelectedMovie] = useState<any | null>(null);
   const [activeSeasonIndex, setActiveSeasonIndex] = useState(0);
@@ -176,10 +176,11 @@ export default function HomePage() {
         if (!isMounted) return;
         setIsLoading(false);
         if (!snapshot.empty) {
-          const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+          const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
           const publishedList = list.filter((m: any) => m.published !== false);
           if (publishedList.length > 0) {
             setMovies(publishedList);
+            saveLocalMovies(publishedList); // Update local cache
             const feat = publishedList.filter((m: any) => m.featured);
             setFeaturedMovies(feat.length > 0 ? feat : publishedList);
             return;
@@ -254,6 +255,16 @@ export default function HomePage() {
         if (latest.id !== lastSeenId) {
           setAnnouncement(latest);
           sessionStorage.setItem('last_seen_announcement', latest.id);
+          
+          // Trigger system notification if permitted
+          if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+            new Notification(`${latest.title} (${latest.releaseYear})`, {
+              body: latest.message || 'New content available!',
+              icon: latest.posterUrl || '/assets/logo.png',
+              tag: `movie-${latest.id}`
+            });
+          }
+          
           setTimeout(() => setAnnouncement(null), 12000);
         }
       }
@@ -541,24 +552,17 @@ export default function HomePage() {
               ))}
             </div>
           )}
-
-          {/* Floating Search Icon Removed as requested */}
-        </div>
-      ) : isLoading ? (
-        <div className="relative flex-grow min-h-[calc(100vh-64px)] flex flex-col items-center justify-center p-6 text-center">
-          <div className="w-10 h-10 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin mb-4" />
-          <p className="text-xs text-gray-400 uppercase tracking-widest font-bold">Loading Movies...</p>
-        </div>
+          </div>
       ) : !currentFeatured ? (
         <div className="relative flex-grow min-h-[calc(100vh-64px)] flex flex-col items-center justify-center p-6 text-center">
           <div className="w-16 h-16 rounded-2xl bg-neutral-900 border border-neutral-800 flex items-center justify-center text-yellow-400 mb-4 shadow-2xl">
             <Film size={32} />
           </div>
           <h2 className="text-2xl sm:text-3xl font-black text-yellow-400 tracking-wider uppercase mb-2">
-            NO CONTENT FOUND
+            NO MOVEI FOUND
           </h2>
           <p className="text-xs text-gray-500 max-w-sm leading-relaxed mb-6">
-            No movies or series are available in this section right now. Please check back later.
+            No movies or series have been uploaded yet. Please check back later.
           </p>
         </div>
       ) : (

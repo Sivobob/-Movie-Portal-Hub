@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { motion } from 'framer-motion';
 import { Download } from 'lucide-react';
 
-export default function MovieCard({ 
+const MovieCard = memo(({ 
   movie, 
   onClick, 
   onDownloadClick 
@@ -10,7 +10,7 @@ export default function MovieCard({
   movie: any; 
   onClick: () => void; 
   onDownloadClick?: (e: React.MouseEvent) => void;
-}) {
+}) => {
   return (
     <motion.div 
       className="relative rounded-xl overflow-hidden aspect-[2/3] cursor-pointer group shadow-lg border border-neutral-800/80 bg-neutral-950"
@@ -62,4 +62,6 @@ export default function MovieCard({
       </div>
     </motion.div>
   );
-}
+});
+
+export default MovieCard;

@@ -4,7 +4,7 @@ import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { ShieldCheck, Settings, ArrowLeft, Lock, Eye, EyeOff, X, KeyRound, LogOut, Search, Download, Smartphone } from 'lucide-react';
 import { isNativeAndroid, isInstalledPhoneApp, downloadOfficialApk } from '../utils/platform';
 
-export function MoviePortal3DLogo() {
+export const MoviePortal3DLogo = React.memo(function MoviePortal3DLogo() {
   return (
     <div className="flex flex-col items-center select-none text-center">
       <span
@@ -25,7 +25,7 @@ export function MoviePortal3DLogo() {
       </span>
     </div>
   );
-}
+});
 
 export default function Header() {
   const { 
