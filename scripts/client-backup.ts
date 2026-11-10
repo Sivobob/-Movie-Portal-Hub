@@ -5,8 +5,9 @@ import fs from 'fs';
 import path from 'path';
 
 const app = initializeApp(firebaseConfig);
-const db = firebaseConfig.firestoreDatabaseId 
-  ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
+const config = firebaseConfig as any;
+const db = config.firestoreDatabaseId 
+  ? getFirestore(app, config.firestoreDatabaseId)
   : getFirestore(app);
 
 async function checkAndBackup() {
