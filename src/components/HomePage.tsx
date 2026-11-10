@@ -427,7 +427,7 @@ export default function HomePage() {
   };
 
   return (
-    <div className="h-full min-h-full w-full bg-black text-white flex flex-col relative pb-20 pt-64 select-none overflow-x-hidden">
+    <div className="h-full min-h-full w-full bg-black text-white flex flex-col relative pb-20 pt-0 select-none overflow-x-hidden">
       {/* New Content Announcement Toast */}
       <AnimatePresence>
         {announcement && (
@@ -570,7 +570,7 @@ export default function HomePage() {
       ) : (
         /* Cinematic Main Homepage Slider */
         <div 
-          className="relative flex-grow min-h-[calc(100vh-64px)] flex flex-col justify-end overflow-hidden pb-12 touch-pan-y cursor-pointer"
+          className="relative flex-grow min-h-screen flex flex-col justify-end overflow-hidden pb-12 touch-pan-y cursor-pointer"
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
@@ -598,9 +598,9 @@ export default function HomePage() {
                   backgroundImage: `url(${currentFeatured.backdropUrl || currentFeatured.posterUrl || 'https://images.unsplash.com/photo-1626814026160-2237a95fc5a0?q=80&w=1200'})`,
                 }}
               />
-              {/* Cinematic Vignette Overlay - Deeper and darker to match Godzilla reference */}
-              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-black/85" />
-              <div className="absolute inset-0 bg-gradient-to-b from-black/80 via-transparent to-transparent" />
+              {/* Cinematic Vignette Overlay - Lighter at the top to show poster behind logo */}
+              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
+              <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-transparent" />
             </motion.div>
           </AnimatePresence>
  

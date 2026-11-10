@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth, isAuthorizedAdminEmail } from '../context/AuthContext';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { ShieldCheck, Settings, ArrowLeft, Lock, Eye, EyeOff, X, KeyRound, LogOut, Search, Download, Smartphone } from 'lucide-react';
 import { isNativeAndroid, isInstalledPhoneApp, downloadOfficialApk } from '../utils/platform';
 
@@ -38,6 +38,7 @@ export default function Header() {
   
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const isAndroid = isNativeAndroid();
 
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -46,12 +47,13 @@ export default function Header() {
   const [passwordError, setPasswordError] = useState('');
   const [isSuccessUnlocked, setIsSuccessUnlocked] = useState(false);
 
+  const activeCategory = searchParams.get('category');
   const isUnlockedSession = typeof window !== 'undefined' && localStorage.getItem('admin_unlocked_session') === '20180020511';
   const isAuthorizedAdmin = isAuthorizedAdminEmail(user?.email) || isUnlockedSession;
   const canAccessAdmin = (isAuthorizedAdmin && isAdmin) || isUnlockedSession;
   const isOnAdmin = location.pathname.startsWith('/admin');
   const isOnSearch = location.pathname.startsWith('/search');
-  const isOnHome = location.pathname === '/';
+  const isOnHome = location.pathname === '/' && !activeCategory;
 
   const handleAdminClick = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -151,13 +153,15 @@ export default function Header() {
             {/* Left Spacer so 3D Logo stays perfectly centered without UI back or search buttons */}
             <div className="w-10 flex items-center justify-start z-10 pointer-events-none" />
 
-            {/* Top-Center 3D MOVIE PORTAL Logo shifted downward ~90px while keeping centered */}
-            <div 
-              onClick={handleHomeClick}
-              className="absolute left-1/2 -translate-x-1/2 translate-y-[90px] cursor-pointer flex flex-col items-center z-10"
-            >
-              <MoviePortal3DLogo />
-            </div>
+            {/* Top-Center 3D MOVIE PORTAL Logo shifted downward ~110px while keeping centered - ONLY ON HOME */}
+            {isOnHome && (
+              <div 
+                onClick={handleHomeClick}
+                className="absolute left-1/2 -translate-x-1/2 translate-y-[110px] cursor-pointer flex flex-col items-center z-10"
+              >
+                <MoviePortal3DLogo />
+              </div>
+            )}
 
             {/* Right Action: Direct Download App Button (Browser Only) + Settings ⚙️ */}
             <div className="flex items-center gap-2 z-10">
@@ -337,19 +341,35 @@ export default function Header() {
         </div>
       )}
 
-      <header className="sticky top-0 left-0 w-full p-4 flex justify-between items-center z-40 bg-black/90 backdrop-blur-md border-b border-neutral-900">
-        <div 
-          onClick={handleHomeClick}
-          className="cursor-pointer flex flex-col items-start select-none"
-        >
-          <h1 className="text-yellow-400 font-extrabold text-sm sm:text-base tracking-widest uppercase flex items-center gap-1.5">
-            <span>MOVIE PORTAL</span>
-            <span className="text-[9px] bg-yellow-400/20 text-yellow-400 font-mono font-bold px-1.5 py-0.2 rounded border border-yellow-400/30">PRO</span>
-          </h1>
-          <span className="text-[9px] text-gray-500 tracking-wider">THE ULTIMATE MOVIE HUB</span>
-        </div>
+      <header className={`w-full z-40 transition-colors ${
+        isOnHome
+          ? 'absolute top-0 left-0 bg-gradient-to-b from-black/85 via-black/45 to-transparent pt-3 pb-4 px-4'
+          : 'sticky top-0 left-0 bg-black/95 backdrop-blur-md border-b border-neutral-900 py-3.5 px-4'
+      }`}>
+        <div className="max-w-7xl mx-auto flex items-center justify-between relative w-full p-4">
+          {/* Left spacer - Web header now matches Android layout for consistency */}
+          <div className="w-10 flex items-center justify-start z-10 pointer-events-none" />
 
-        <div className="flex items-center gap-2 sm:gap-3">
+          {/* Top-Center 3D MOVIE PORTAL Logo shifted downward ~110px while keeping centered - ONLY ON HOME */}
+          {isOnHome ? (
+            <div 
+              onClick={handleHomeClick}
+              className="absolute left-1/2 -translate-x-1/2 translate-y-[110px] cursor-pointer flex flex-col items-center z-10"
+            >
+              <MoviePortal3DLogo />
+            </div>
+          ) : (
+            <div 
+              onClick={handleHomeClick}
+              className="cursor-pointer flex flex-col items-start select-none"
+            >
+              <h1 className="text-yellow-400 font-extrabold text-sm sm:text-base tracking-widest uppercase flex items-center gap-1.5">
+                <span>{activeCategory || 'BROWSE'}</span>
+              </h1>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 sm:gap-3 z-10">
           {!isInstalled && (
             <button
               type="button"
@@ -403,6 +423,7 @@ export default function Header() {
               </button>
             </div>
           ) : null}
+          </div>
         </div>
       </header>
     </>
