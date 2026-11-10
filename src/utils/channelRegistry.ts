@@ -22,12 +22,24 @@ function loadCacheFromDisk(): Record<string, CachedChannelInfo> {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object') {
         inMemoryCache = parsed;
-        return inMemoryCache;
       }
     }
   } catch (err: any) {
     console.warn('[ChannelRegistry] Error loading cache from disk:', err?.message || err);
   }
+
+  // Auto-seed user's private channel
+  const defaultChannelKey = 'QSL_3k54YfBjMjE1';
+  if (!inMemoryCache[defaultChannelKey] && !inMemoryCache['priv-QSL_3k54YfBjMjE1']) {
+    inMemoryCache[defaultChannelKey] = {
+      channelId: defaultChannelKey,
+      accessHash: '0',
+      title: 'Movie Portal Private Channel (+QSL_3k54YfBjMjE1)',
+      username: '',
+      updatedAt: Date.now()
+    };
+  }
+
   return inMemoryCache;
 }
 
@@ -194,6 +206,26 @@ export async function resolveTelegramMedia(
     candidatePeers.push(`-100${cleanId}`);
     candidatePeers.push(cleanId);
   }
+
+  // Dynamic dialog refresh to discover channel access hash on the fly
+  try {
+    const dialogs = await client.getDialogs({ limit: 50 });
+    for (const dialog of dialogs) {
+      const entity = dialog.entity;
+      if (entity && (entity instanceof Api.Channel || (entity as any).className === 'Channel')) {
+        const ch = entity as Api.Channel;
+        if (ch.id.toString() === cleanId || ch.id.toString() === parsed.rawChannelId) {
+          if (ch.accessHash) {
+            saveChannelEntity(ch.id.toString(), ch.accessHash.toString(), ch.title, ch.username);
+            candidatePeers.unshift(new Api.InputPeerChannel({
+              channelId: bigInt(ch.id.toString()),
+              accessHash: bigInt(ch.accessHash.toString()),
+            }));
+          }
+        }
+      }
+    }
+  } catch (dErr) {}
 
   let foundMsg: any = null;
   let lastError = '';
