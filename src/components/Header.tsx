@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth, isAuthorizedAdminEmail } from '../context/AuthContext';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { ShieldCheck, Settings, ArrowLeft, Lock, Eye, EyeOff, X, KeyRound, LogOut, Search, Download, Smartphone } from 'lucide-react';
@@ -107,12 +107,33 @@ export default function Header() {
   // -------------------------------------------------------------
   // NATIVE ANDROID APP HEADER
   // -------------------------------------------------------------
+  const [showTopHeader, setShowTopHeader] = useState(true);
+  const hideTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setShowTopHeader(true);
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = setTimeout(() => {
+        if (window.scrollY > 50) {
+          setShowTopHeader(false);
+        }
+      }, 3500);
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    };
+  }, []);
+
   if (isAndroid) {
     return (
       <>
-        {/* Prominent Top Bar in Chrome/Browser: Only visible when opened in browser, hidden inside installed app */}
-        {!isInstalled && isOnHome && (
-          <div className="w-full bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 text-black px-3 py-2 flex items-center justify-between shadow-lg sticky top-0 z-50">
+        {/* Prominent Top Bar in Chrome/Browser */}
+        {!isInstalled && isOnHome && showTopHeader && (
+          <div className="w-full bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 text-black px-3 py-2 flex items-center justify-between shadow-lg sticky top-0 z-50 transition-all duration-300">
             <div className="flex items-center gap-2 min-w-0">
               <div className="w-7 h-7 rounded-lg bg-black text-yellow-400 flex items-center justify-center flex-shrink-0 shadow">
                 <Smartphone size={15} />
@@ -143,11 +164,13 @@ export default function Header() {
         )}
 
         <header
-          className={`w-full z-40 transition-colors ${
+          className={`w-full z-40 transition-all duration-300 ${
+            showTopHeader ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0 pointer-events-none'
+          } ${
             isOnHome
-              ? 'absolute top-0 left-0 bg-gradient-to-b from-black/85 via-black/45 to-transparent pt-3 pb-4 px-4'
+              ? 'absolute top-0 left-0 bg-gradient-to-b from-black/90 via-black/50 to-transparent pt-4 pb-4 px-4'
               : 'sticky top-0 left-0 bg-black/95 backdrop-blur-md border-b border-neutral-900 py-3.5 px-4'
-          } ${!isInstalled ? 'mt-0' : ''}`}
+          }`}
         >
           <div className="max-w-7xl mx-auto flex items-center justify-between relative">
             {/* Left Spacer so 3D Logo stays perfectly centered without UI back or search buttons */}
