@@ -12,7 +12,7 @@ interface UpdateInfo {
 }
 
 // Baseline version for the current APK
-const CURRENT_VERSION_CODE = 31;
+const CURRENT_VERSION_CODE = 32;
 
 export function useAppUpdate() {
   const [updateAvailable, setUpdateAvailable] = useState<UpdateInfo | null>(null);
