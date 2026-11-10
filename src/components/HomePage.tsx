@@ -409,16 +409,9 @@ export default function HomePage() {
   const handleDownloadAPK = (e: React.MouseEvent) => {
     e.preventDefault();
     const apkUrl = "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk";
-    // Release v1.0.2 - Immersive Mode & Circular Icon Update
-    
-    // Create an invisible anchor tag that triggers direct download
-    const link = document.createElement('a');
-    link.href = apkUrl;
-    link.setAttribute('download', 'Movie-Portal.apk');
-    link.style.display = 'none';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    if (typeof window !== 'undefined') {
+      window.location.href = apkUrl;
+    }
   };
 
   return (

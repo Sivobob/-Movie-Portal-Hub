@@ -9,13 +9,9 @@ export default function UpdateNotification() {
   if (!updateAvailable || dismissed) return null;
 
   const handleUpdate = () => {
-    const link = document.createElement('a');
-    link.href = updateAvailable.apkUrl;
-    link.setAttribute('download', 'Movie-Portal.apk');
-    link.style.display = 'none';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    if (typeof window !== 'undefined' && updateAvailable?.apkUrl) {
+      window.location.href = updateAvailable.apkUrl;
+    }
   };
 
   return (
