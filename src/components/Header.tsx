@@ -153,13 +153,22 @@ export default function Header() {
             {/* Left Spacer so 3D Logo stays perfectly centered without UI back or search buttons */}
             <div className="w-10 flex items-center justify-start z-10 pointer-events-none" />
 
-            {/* Top-Center 3D MOVIE PORTAL Logo at the top - ONLY ON HOME */}
-            {isOnHome && (
+            {/* Top-Center Display: Logo on Home, Category Name in Folders */}
+            {isOnHome ? (
               <div 
                 onClick={handleHomeClick}
                 className="absolute left-1/2 -translate-x-1/2 cursor-pointer flex flex-col items-center z-10"
               >
                 <MoviePortal3DLogo />
+              </div>
+            ) : (
+              <div 
+                onClick={handleHomeClick}
+                className="absolute left-1/2 -translate-x-1/2 cursor-pointer flex flex-col items-center z-10"
+              >
+                <h1 className="text-yellow-400 font-extrabold text-sm tracking-widest uppercase flex items-center gap-1.5 whitespace-nowrap">
+                  <span>{activeCategory || 'BROWSE'}</span>
+                </h1>
               </div>
             )}
 

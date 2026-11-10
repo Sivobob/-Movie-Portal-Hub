@@ -427,7 +427,7 @@ export default function HomePage() {
   };
 
   return (
-    <div className={`h-full min-h-full w-full bg-black text-white flex flex-col relative pt-0 select-none overflow-x-hidden ${category ? 'pb-20' : 'pb-0'}`}>
+    <div className={`h-full min-h-full w-full bg-black text-white flex flex-col relative pt-0 select-none overflow-x-hidden ${category ? 'pb-20' : 'pb-0 overflow-y-hidden'}`}>
       {/* New Content Announcement Toast */}
       <AnimatePresence>
         {announcement && (
