@@ -168,46 +168,13 @@ export default function Header() {
             showTopHeader ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0 pointer-events-none'
           } ${
             isOnHome
-              ? 'absolute top-0 left-0 bg-gradient-to-b from-black/95 via-black/60 to-transparent pt-6 sm:pt-4 pb-4 px-4'
-              : 'sticky top-0 left-0 bg-black/95 backdrop-blur-md border-b border-neutral-900 pt-6 pb-3.5 px-4'
+              ? 'absolute top-0 left-0 bg-transparent pt-6 sm:pt-4 pb-2 px-4'
+              : 'sticky top-0 left-0 bg-black/95 backdrop-blur-md border-b border-neutral-900 pt-6 pb-3 px-4'
           }`}
         >
-          <div className="max-w-7xl mx-auto flex items-center justify-between relative">
-            {/* Left Spacer so 3D Logo stays perfectly centered without UI back or search buttons */}
-            <div className="w-10 flex items-center justify-start z-10 pointer-events-none" />
-
-            {/* Top-Center Display: Logo on Home, Category Name in Folders */}
-            {isOnHome ? (
-              <div 
-                onClick={handleHomeClick}
-                className="absolute left-1/2 -translate-x-1/2 cursor-pointer flex flex-col items-center z-10"
-              >
-                <MoviePortal3DLogo />
-              </div>
-            ) : (
-              <div 
-                onClick={handleHomeClick}
-                className="absolute left-1/2 -translate-x-1/2 cursor-pointer flex flex-col items-center z-10"
-              >
-                <h1 className="text-yellow-400 font-extrabold text-sm tracking-widest uppercase flex items-center gap-1.5 whitespace-nowrap">
-                  <span>{activeCategory || 'BROWSE'}</span>
-                </h1>
-              </div>
-            )}
-
-            {/* Right Action: Direct Download App Button (Browser Only) + Settings ⚙️ */}
-            <div className="flex items-center gap-2 z-10">
-              {!isInstalled && (
-                <button
-                  type="button"
-                  onClick={downloadOfficialApk}
-                  className="p-1.5 rounded-full bg-yellow-400 hover:bg-yellow-300 text-black font-black border border-yellow-500 backdrop-blur-md cursor-pointer active:scale-90 transition-transform shadow-md flex items-center gap-1 text-[10px]"
-                  title="Direct Download Movie Portal APK"
-                >
-                  <Download size={14} className="stroke-[2.5]" />
-                  <span className="hidden xs:inline uppercase font-extrabold">App</span>
-                </button>
-              )}
+          <div className="max-w-7xl mx-auto flex items-center justify-end relative">
+            {/* ONLY Settings Button on Top Right */}
+            <div className="flex items-center z-10">
               <button
                 type="button"
                 onClick={handleSettingsClick}
@@ -375,86 +342,20 @@ export default function Header() {
 
       <header className={`w-full z-40 transition-colors ${
         isOnHome
-          ? 'absolute top-0 left-0 bg-gradient-to-b from-black/85 via-black/45 to-transparent pt-3 pb-4 px-4'
-          : 'sticky top-0 left-0 bg-black/95 backdrop-blur-md border-b border-neutral-900 py-3.5 px-4'
+          ? 'absolute top-0 left-0 bg-transparent pt-4 pb-2 px-4'
+          : 'sticky top-0 left-0 bg-black/95 backdrop-blur-md border-b border-neutral-900 py-3 px-4'
       }`}>
-        <div className="max-w-7xl mx-auto flex items-center justify-between relative w-full p-4">
-          {/* Left spacer - Web header now matches Android layout for consistency */}
-          <div className="w-10 flex items-center justify-start z-10 pointer-events-none" />
-
-          {/* Top-Center 3D MOVIE PORTAL Logo at the top - ONLY ON HOME */}
-          {isOnHome ? (
-            <div 
-              onClick={handleHomeClick}
-              className="absolute left-1/2 -translate-x-1/2 cursor-pointer flex flex-col items-center z-10"
-            >
-              <MoviePortal3DLogo />
-            </div>
-          ) : (
-            <div 
-              onClick={handleHomeClick}
-              className="cursor-pointer flex flex-col items-start select-none"
-            >
-              <h1 className="text-yellow-400 font-extrabold text-sm sm:text-base tracking-widest uppercase flex items-center gap-1.5">
-                <span>{activeCategory || 'BROWSE'}</span>
-              </h1>
-            </div>
-          )}
-
-          <div className="flex items-center gap-2 sm:gap-3 z-10">
-          {!isInstalled && (
+        <div className="max-w-7xl mx-auto flex items-center justify-end relative w-full p-2">
+          <div className="flex items-center gap-2 z-10">
             <button
               type="button"
-              onClick={downloadOfficialApk}
-              className="flex items-center gap-1.5 bg-yellow-400 hover:bg-yellow-300 text-black text-xs font-black px-3.5 py-2 rounded-xl shadow-lg shadow-yellow-400/20 active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
-              title="Direct Download Movie Portal Android App"
+              onClick={handleSettingsClick}
+              className="p-2.5 rounded-full bg-yellow-400 text-black border border-yellow-500 shadow-[0_0_15px_rgba(250,204,21,0.5)] cursor-pointer active:scale-90 transition-all hover:bg-yellow-300"
+              aria-label="Settings"
+              title="Settings"
             >
-              <Smartphone size={14} />
-              <Download size={14} className="stroke-[2.5]" />
-              <span>Download App</span>
+              <Settings size={18} className="transition-transform hover:rotate-90 duration-300" />
             </button>
-          )}
-          {loading ? (
-            <span className="text-xs text-gray-500 animate-pulse">Loading...</span>
-          ) : user ? (
-            <div className="flex gap-2 items-center">
-              {/* User Identity Pill */}
-              <div className="hidden sm:flex items-center gap-1.5 bg-neutral-900/90 border border-neutral-800 rounded-full py-1 px-2.5 text-[11px] text-gray-300">
-                <span className="w-2 h-2 rounded-full bg-green-500"></span>
-                <span className="max-w-[160px] truncate font-medium text-gray-200">
-                  {user.email || user.displayName || 'User'}
-                </span>
-                {canAccessAdmin && (
-                  <span className="bg-yellow-400/20 text-yellow-400 text-[9px] font-black px-1.5 py-0.2 rounded border border-yellow-400/30 uppercase">
-                    Admin
-                  </span>
-                )}
-              </div>
-
-              {canAccessAdmin && (
-                <button
-                  type="button"
-                  onClick={handleAdminClick}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all border flex items-center gap-1.5 cursor-pointer ${
-                    isOnAdmin
-                      ? 'bg-yellow-400 text-black border-yellow-400 shadow-md shadow-yellow-500/20'
-                      : 'text-yellow-400 border-yellow-500/50 hover:bg-yellow-400/10'
-                  }`}
-                >
-                  <ShieldCheck size={14} />
-                  <span>Admin Panel</span>
-                </button>
-              )}
-
-              <button
-                type="button"
-                onClick={() => handleLogout()}
-                className="px-2.5 py-1.5 rounded-lg text-xs text-gray-300 hover:text-white bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 transition-colors cursor-pointer"
-              >
-                Logout
-              </button>
-            </div>
-          ) : null}
           </div>
         </div>
       </header>
