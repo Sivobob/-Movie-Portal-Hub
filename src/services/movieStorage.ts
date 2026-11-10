@@ -80,7 +80,7 @@ export const DEFAULT_INITIAL_MOVIES: MovieData[] = [
     language: 'Hindi / Telugu',
     genre: 'Action, Crime, Drama',
     rating: 8.8,
-    streamingUrl: 'https://t.me/+QSL_3k54YfBjMjE1',
+    streamingUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
     featured: true,
     published: true,
   },
@@ -95,7 +95,7 @@ export const DEFAULT_INITIAL_MOVIES: MovieData[] = [
     language: 'Hindi / Kannada',
     genre: 'Action, Thriller',
     rating: 8.4,
-    streamingUrl: 'https://t.me/+QSL_3k54YfBjMjE1',
+    streamingUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
     featured: true,
     published: true,
   },
@@ -110,7 +110,7 @@ export const DEFAULT_INITIAL_MOVIES: MovieData[] = [
     language: 'Hindi',
     genre: 'Comedy, Horror',
     rating: 7.9,
-    streamingUrl: 'https://t.me/+QSL_3k54YfBjMjE1',
+    streamingUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
     featured: true,
     published: true,
   },
@@ -125,15 +125,15 @@ export const DEFAULT_INITIAL_MOVIES: MovieData[] = [
     language: 'Hindi',
     genre: 'Crime, Drama, Action',
     rating: 8.5,
-    streamingUrl: 'https://t.me/+QSL_3k54YfBjMjE1',
+    streamingUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
     featured: true,
     published: true,
     seasons: [
       {
         seasonNumber: 1,
         episodes: [
-          { episodeNumber: 1, title: 'Episode 1: Bhaukaal', streamUrl: 'https://t.me/+QSL_3k54YfBjMjE1' },
-          { episodeNumber: 2, title: 'Episode 2: Gaddi', streamUrl: 'https://t.me/+QSL_3k54YfBjMjE1' }
+          { episodeNumber: 1, title: 'Episode 1: Bhaukaal', streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4' },
+          { episodeNumber: 2, title: 'Episode 2: Gaddi', streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4' }
         ]
       }
     ]

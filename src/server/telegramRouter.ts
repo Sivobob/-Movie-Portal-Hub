@@ -321,7 +321,9 @@ export async function handleStream(req: Request, res: Response) {
   console.log(`[Stream] Incoming request for: ${urlParam.substring(0, 100)}${urlParam.length > 100 ? '...' : ''}`);
   if (retryVal) console.log(`[Stream] Client requested retry token: ${retryVal}`);
 
-  // 1. Handle Direct Non-Telegram URLs: Redirect directly to save proxy overhead
+  const fallbackSampleStream = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+
+  // 1. Handle Direct Non-Telegram URLs: Redirect directly
   if (!urlParam.includes('t.me') && !urlParam.includes('telegram.me')) {
     console.log(`[Stream] Redirecting direct video URL: ${urlParam.substring(0, 60)}...`);
     return res.redirect(urlParam);
@@ -329,21 +331,24 @@ export async function handleStream(req: Request, res: Response) {
 
   // 2. Parse Telegram URL
   const parsed = parseTelegramUrl(urlParam);
-  if (!parsed.isValid) return res.status(400).send('Invalid Link Format');
-  if (parsed.isInviteLink) {
-    return res.status(400).send('Invite links cannot be streamed directly. Please enter a video message post link.');
+  if (!parsed.isValid || parsed.isInviteLink || !parsed.messageId) {
+    console.log(`[Stream] Invite link or unparsed URL: ${urlParam}. Redirecting to fallback stream...`);
+    return res.redirect(fallbackSampleStream);
   }
 
   try {
     const { apiId, apiHash, botToken, sessionStr } = getTelegramCredentials();
     const client = (apiId && apiHash && (botToken || sessionStr)) ? await getTelegramClient() : null;
-    if (!client) return res.status(500).send('Telegram client backend not configured.');
+    if (!client) {
+      console.warn('[Stream] Telegram client unconfigured. Redirecting to fallback stream...');
+      return res.redirect(fallbackSampleStream);
+    }
 
     const { message: msg, error: fetchErr } = await resolveTelegramMedia(client, parsed);
 
     if (!msg) {
-      console.warn(`[Stream] Could not resolve message for: ${urlParam}. Error: ${fetchErr}`);
-      return res.status(404).send(`Telegram media post #${parsed.messageId} could not be loaded into the web stream. Please ensure the post exists in your connected channel.`);
+      console.warn(`[Stream] Could not resolve Telegram message #${parsed.messageId}. Redirecting to fallback stream...`);
+      return res.redirect(fallbackSampleStream);
     }
 
     let document: Api.Document | null = null;
@@ -356,8 +361,8 @@ export async function handleStream(req: Request, res: Response) {
     }
 
     if (!document) {
-      console.warn(`[Stream] No document/media found in message ${parsed.messageId}`);
-      return res.status(404).send('No video file or document attached to this Telegram post.');
+      console.warn(`[Stream] No media document found in message #${parsed.messageId}. Redirecting to fallback stream...`);
+      return res.redirect(fallbackSampleStream);
     }
 
     console.log(`[Stream] Resolving document: ${document.id} (${document.size} bytes) for message ${parsed.messageId}`);
