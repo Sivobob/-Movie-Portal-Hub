@@ -1,0 +1,30 @@
+{
+  "QSL_3k54YfBjMjE1": {
+    "channelId": "QSL_3k54YfBjMjE1",
+    "accessHash": "0",
+    "title": "Movie Portal Private Channel (+QSL_3k54YfBjMjE1)",
+    "username": "",
+    "updatedAt": 1741584000000
+  },
+  "priv-QSL_3k54YfBjMjE1": {
+    "channelId": "priv-QSL_3k54YfBjMjE1",
+    "accessHash": "0",
+    "title": "Movie Portal Private Channel (+QSL_3k54YfBjMjE1)",
+    "username": "",
+    "updatedAt": 1741584000000
+  },
+  "inv-QSL_3k54YfBjMjE1": {
+    "channelId": "inv-QSL_3k54YfBjMjE1",
+    "accessHash": "0",
+    "title": "Private Channel (+QSL_3k54YfBjMjE1)",
+    "username": "+QSL_3k54YfBjMjE1",
+    "updatedAt": 1794318563707
+  },
+  "-100inv-QSL_3k54YfBjMjE1": {
+    "channelId": "inv-QSL_3k54YfBjMjE1",
+    "accessHash": "0",
+    "title": "Private Channel (+QSL_3k54YfBjMjE1)",
+    "username": "+QSL_3k54YfBjMjE1",
+    "updatedAt": 1794318563707
+  }
+}

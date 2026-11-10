@@ -78,7 +78,6 @@ export default function Header() {
 
     if (adminPassword.trim() === '20180020511') {
       localStorage.setItem('admin_unlocked_session', '20180020511');
-      signInWithEmail('adityaantil260@gmail.com');
       setIsSuccessUnlocked(true);
       setTimeout(() => {
         setShowSettingsModal(false);

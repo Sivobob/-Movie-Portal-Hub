@@ -51,9 +51,6 @@ export default function HomePage() {
   const [activeSeasonIndex, setActiveSeasonIndex] = useState(0);
   const [playingMovie, setPlayingMovie] = useState<any | null>(null);
   const [showAdminMenu, setShowAdminMenu] = useState(false);
-  const [showSignInModal, setShowSignInModal] = useState(false);
-  const [isSigningIn, setIsSigningIn] = useState(false);
-  const [signInError, setSignInError] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState<any | null>(null);
   const navigate = useNavigate();
 
@@ -150,28 +147,6 @@ export default function HomePage() {
       }
     };
   }, []);
-
-  const handleBottomGoogleSignIn = async () => {
-    setIsSigningIn(true);
-    setSignInError(null);
-    try {
-      const res = await loginWithGoogle();
-      if (res?.user?.email) {
-        signInWithEmail(res.user.email);
-        setShowSignInModal(false);
-      } else if (res?.cancelled) {
-        setSignInError('Sign-in cancelled.');
-      } else {
-        signInWithEmail('movieboxproapk007711@gmail.com');
-        setShowSignInModal(false);
-      }
-    } catch (e: any) {
-      signInWithEmail('movieboxproapk007711@gmail.com');
-      setShowSignInModal(false);
-    } finally {
-      setIsSigningIn(false);
-    }
-  };
 
   // Load published movies real-time
   useEffect(() => {
@@ -977,88 +952,7 @@ export default function HomePage() {
           </button>
         ))}
 
-        {!isAndroid && (
-          !user ? (
-            <button
-              type="button"
-              onClick={() => {
-                setSignInError(null);
-                setShowSignInModal(true);
-              }}
-              className="transition-colors py-1 px-2 rounded text-yellow-400 hover:text-yellow-300 font-bold uppercase cursor-pointer"
-            >
-              Sign In
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => handleLogout()}
-              className="transition-colors py-1 px-2 rounded text-yellow-400 hover:text-yellow-300 font-bold uppercase cursor-pointer"
-            >
-              Logout
-            </button>
-          )
-        )}
       </nav>
-
-      {/* Sign-In Modal when clicking Sign In from Bottom Navigation */}
-      {showSignInModal && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
-            <button
-              onClick={() => setShowSignInModal(false)}
-              className="absolute top-4 right-4 text-gray-400 hover:text-white p-1 rounded-full bg-neutral-800 transition-colors cursor-pointer"
-            >
-              <X size={18} />
-            </button>
-
-            <div className="flex items-center gap-3 mb-5">
-              <div className="p-3 bg-yellow-400/10 border border-yellow-500/30 rounded-xl text-yellow-400">
-                <LogIn size={26} />
-              </div>
-              <div>
-                <h3 className="text-lg font-black text-white uppercase tracking-tight">Sign In to MOVIE PORTAL</h3>
-                <p className="text-xs text-gray-400">Sign in with your Google account</p>
-              </div>
-            </div>
-
-            {signInError && (
-              <div className="mb-4 p-3 bg-red-950/70 border border-red-800/80 rounded-xl text-xs text-red-300">
-                {signInError}
-              </div>
-            )}
-
-            <div className="space-y-3">
-              <button
-                type="button"
-                onClick={handleBottomGoogleSignIn}
-                disabled={isSigningIn}
-                className="w-full bg-white hover:bg-gray-100 text-black font-bold text-xs py-3 px-4 rounded-xl shadow transition-all flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-50"
-              >
-                <svg className="w-4 h-4" viewBox="0 0 24 24">
-                  <path
-                    fill="#EA4335"
-                    d="M12 5c1.7 0 3 .6 4 1.5l3-3C17.2 1.8 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.4 9 5 12 5z"
-                  />
-                  <path
-                    fill="#4285F4"
-                    d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5 3.7-8.8z"
-                  />
-                  <path
-                    fill="#FBBC05"
-                    d="M5.6 14.8c-.2-.7-.4-1.5-.4-2.8s.2-2.1.4-2.8L1.9 6.3C.7 8.7 0 10.3 0 12s.7 3.3 1.9 5.7l3.7-2.9z"
-                  />
-                  <path
-                    fill="#34A853"
-                    d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2.4-6.4-5.2L1.9 16c1.8 3.7 5.6 7 10.1 7z"
-                  />
-                </svg>
-                <span>{isSigningIn ? 'Connecting to Google...' : 'Sign In with Google Account'}</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

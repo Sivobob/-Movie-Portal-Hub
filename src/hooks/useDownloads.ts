@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { buildApiUrl } from '../utils/apiConfig';
 
 export interface ActiveDownload {
   id: string;
@@ -103,7 +104,7 @@ export function useDownloads() {
   }) => {
     const downloadId = `${title}-${quality}-${Date.now()}`;
     const cleanFilename = `${title.replace(/[^a-zA-Z0-9]/g, '_')}_${quality}.mp4`;
-    const targetDownloadUrl = `/api/download/file?url=${encodeURIComponent(videoUrl)}&filename=${encodeURIComponent(cleanFilename)}`;
+    const targetDownloadUrl = buildApiUrl(`/api/download/file?url=${encodeURIComponent(videoUrl)}&filename=${encodeURIComponent(cleanFilename)}`);
 
     // Quality size approximation in bytes if header missing
     const totalBytes = estimatedSizeMb * 1024 * 1024;

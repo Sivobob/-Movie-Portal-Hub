@@ -30,9 +30,23 @@ app.use((req, _res, next) => {
   next();
 });
 
-// Ensure all /api routes return JSON
+// Universal CORS middleware for Android APK and web
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, HEAD');
+  res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Range');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length, X-Video-Duration, Content-Type');
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+  next();
+});
+
+// Ensure API routes (except /api/stream) default to JSON
 app.use('/api', (req, res, next) => {
-  res.setHeader('Content-Type', 'application/json');
+  if (!req.path.startsWith('/stream')) {
+    res.setHeader('Content-Type', 'application/json');
+  }
   next();
 });
 

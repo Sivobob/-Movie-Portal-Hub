@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
 
+import { buildApiUrl } from '../utils/apiConfig';
+
 interface UpdateInfo {
   latestVersion: string;
   latestVersionCode: number;
@@ -22,7 +24,7 @@ export function useAppUpdate() {
     const checkUpdate = async () => {
       try {
         // Fetch version info from the live production URL
-        const response = await fetch('https://ais-pre-abcn6s4zzgkysogvx2vu5v-828533060153.asia-northeast1.run.app/version.json');
+        const response = await fetch(buildApiUrl('/version.json'));
         if (!response.ok) return;
 
         const data: UpdateInfo = await response.json();

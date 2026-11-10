@@ -23,6 +23,7 @@ import {
   Download
 } from 'lucide-react';
 import { useDownloads } from '../hooks/useDownloads';
+import { buildApiUrl } from '../utils/apiConfig';
 
 
 interface VideoPlayerModalProps {
@@ -231,7 +232,7 @@ export default function VideoPlayerModal({
 
     if (isTelegram) {
       const retryParam = retryCount > 0 ? `&retry=${Date.now()}` : '';
-      setPlayableUrl(`/api/stream?url=${encodeURIComponent(trimmed)}${retryParam}`);
+      setPlayableUrl(buildApiUrl(`/api/stream?url=${encodeURIComponent(trimmed)}${retryParam}`));
     } else {
       setPlayableUrl(trimmed);
     }
