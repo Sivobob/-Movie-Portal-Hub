@@ -78,7 +78,9 @@ export function getLocalMovies(): MovieData[] {
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      return parsed;
+      // Filter out any legacy dummy/sample movies if present in local storage
+      const clean = parsed.filter((m: any) => m && m.id && !['m1', 'm2', 'm3', 'm4', 'default-1', 'default-2'].includes(m.id));
+      return clean;
     }
     return [];
   } catch (e) {

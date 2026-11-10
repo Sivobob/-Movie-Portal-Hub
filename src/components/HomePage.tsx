@@ -160,12 +160,13 @@ export default function HomePage() {
         if (!snapshot.empty) {
           const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
           const publishedList = list.filter((m: any) => m.published !== false);
-          if (publishedList.length > 0) {
-            setMovies(publishedList);
-            saveLocalMovies(publishedList); // Update local cache
-            setFeaturedMovies(publishedList);
-            return;
-          }
+          setMovies(publishedList);
+          saveLocalMovies(publishedList);
+          setFeaturedMovies(publishedList);
+        } else {
+          setMovies([]);
+          saveLocalMovies([]);
+          setFeaturedMovies([]);
         }
       },
       (err) => {
