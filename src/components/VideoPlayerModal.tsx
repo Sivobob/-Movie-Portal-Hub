@@ -721,8 +721,11 @@ export default function VideoPlayerModal({
 
               {/* Minimal Clean Error & Retry Screen */}
               {error && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black z-30 px-6 text-center">
-                  <p className="text-xs text-gray-400 mb-4">Unable to load stream. Please try again.</p>
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/95 z-30 px-6 text-center">
+                  <div className="max-w-md bg-neutral-900 border border-red-800/60 p-5 rounded-2xl shadow-2xl mb-4">
+                    <p className="text-xs text-red-400 font-bold mb-1 uppercase tracking-wider">Stream Playback Notice</p>
+                    <p className="text-xs text-gray-300 leading-relaxed">{error}</p>
+                  </div>
                   <button
                     onClick={() => {
                       setError(null);

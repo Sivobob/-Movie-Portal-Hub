@@ -30,6 +30,12 @@ app.use((req, _res, next) => {
   next();
 });
 
+// Ensure all /api routes return JSON
+app.use('/api', (req, res, next) => {
+  res.setHeader('Content-Type', 'application/json');
+  next();
+});
+
 // API Routes
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
@@ -49,21 +55,16 @@ app.get('/api/stream', handleStream);
 app.use('/api/video', videoRouter);
 app.use('/api', downloadCastRouter);
 
-// API 404 Handler
+// API 404 Handler (Guaranteed JSON)
 app.use('/api', (req, res) => {
   console.warn(`[API 404] ${req.method} ${req.url}`);
   res.status(404).json({ error: `API route not found: /api${req.url}` });
 });
 
-// Add a catch-all for /api that ensures JSON even for 403s if they fall through
-app.use('/api', (req, res, next) => {
-  res.setHeader('Content-Type', 'application/json');
-  next();
-});
-
-// Global Error Handler for API
+// Global Error Handler for API (Guaranteed JSON)
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('[Global Error Handler]', err);
+  res.setHeader('Content-Type', 'application/json');
   res.status(err.status || 500).json({
     error: err.message || 'Internal Server Error',
     stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
