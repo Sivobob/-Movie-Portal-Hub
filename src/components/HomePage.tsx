@@ -33,7 +33,7 @@ export default function HomePage() {
   } = useDownloads();
   const [downloadModalMovie, setDownloadModalMovie] = useState<any | null>(null);
   const [movies, setMovies] = useState<any[]>(getLocalMovies());
-  const [featuredMovies, setFeaturedMovies] = useState<any[]>(getLocalMovies().filter((m: any) => m.featured));
+  const [featuredMovies, setFeaturedMovies] = useState<any[]>(getLocalMovies());
   const [searchParams, setSearchParams] = useSearchParams();
   const category = searchParams.get('category');
   
@@ -188,8 +188,7 @@ export default function HomePage() {
           if (publishedList.length > 0) {
             setMovies(publishedList);
             saveLocalMovies(publishedList); // Update local cache
-            const feat = publishedList.filter((m: any) => m.featured);
-            setFeaturedMovies(feat.length > 0 ? feat : publishedList);
+            setFeaturedMovies(publishedList);
             return;
           }
         }
