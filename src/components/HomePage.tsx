@@ -238,13 +238,15 @@ export default function HomePage() {
           sessionStorage.setItem('last_seen_announcement', latest.id);
           
           // Trigger system notification if permitted
-          if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-            new Notification(`${latest.title} (${latest.releaseYear})`, {
-              body: latest.message || 'New content available!',
-              icon: latest.posterUrl || '/assets/logo.png',
-              tag: `movie-${latest.id}`
-            });
-          }
+          try {
+            if (typeof window !== 'undefined' && 'Notification' in window && (window as any).Notification?.permission === 'granted') {
+              new Notification(`${latest.title} (${latest.releaseYear})`, {
+                body: latest.message || 'New content available!',
+                icon: latest.posterUrl || '/assets/logo.png',
+                tag: `movie-${latest.id}`
+              });
+            }
+          } catch (notifErr) {}
           
           setTimeout(() => setAnnouncement(null), 12000);
         }

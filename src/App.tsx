@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
-import { StatusBar } from '@capacitor/status-bar';
 import { handleRedirectResult } from './services/authService';
 import { useAuth, isAuthorizedAdminEmail } from './context/AuthContext';
 import SplashScreen from './components/SplashScreen';
@@ -111,14 +110,20 @@ function AppContent() {
   );
 }
 
+import { StatusBar, Style } from '@capacitor/status-bar';
+
 export default function App() {
   useEffect(() => {
-    handleRedirectResult();
+    handleRedirectResult().catch(() => {});
     
-    // Initialize immersive full-screen mode for Android
+    // Initialize safe status bar theme for Android WebView
     if (Capacitor.isNativePlatform()) {
-      StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {});
-      StatusBar.hide().catch(() => {});
+      try {
+        StatusBar.setBackgroundColor({ color: '#000000' }).catch(() => {});
+        StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
+      } catch (e) {
+        console.warn('StatusBar configuration notice:', e);
+      }
     }
   }, []);
 

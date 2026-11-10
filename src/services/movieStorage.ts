@@ -68,19 +68,91 @@ export async function deleteMovieFromFirestore(id: string): Promise<void> {
 
 const STORAGE_KEY = 'movie_portal_movies_v2';
 
+export const DEFAULT_INITIAL_MOVIES: MovieData[] = [
+  {
+    id: 'pushpa-2-rule-2024',
+    title: 'Pushpa 2: The Rule',
+    description: 'The clash continues as Pushpa Raj expands his sandalwood smuggling empire against SP Bhanwar Singh Shekhawat.',
+    posterUrl: 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?auto=format&fit=crop&w=600&q=80',
+    releaseYear: 2024,
+    originalCategory: 'Bollywood',
+    displayCategory: 'Bollywood',
+    language: 'Hindi / Telugu',
+    genre: 'Action, Crime, Drama',
+    rating: 8.8,
+    streamingUrl: 'https://t.me/+QSL_3k54YfBjMjE1',
+    featured: true,
+    published: true,
+  },
+  {
+    id: 'kgf-chapter-2-2022',
+    title: 'K.G.F: Chapter 2',
+    description: 'In the blood-soaked Kolar Gold Fields, Rocky\'s name strikes fear into his foes while his allies look up to him.',
+    posterUrl: 'https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?auto=format&fit=crop&w=600&q=80',
+    releaseYear: 2022,
+    originalCategory: 'Bollywood',
+    displayCategory: 'Bollywood',
+    language: 'Hindi / Kannada',
+    genre: 'Action, Thriller',
+    rating: 8.4,
+    streamingUrl: 'https://t.me/+QSL_3k54YfBjMjE1',
+    featured: true,
+    published: true,
+  },
+  {
+    id: 'stree-2-2024',
+    title: 'Stree 2',
+    description: 'The town of Chanderi is haunted once again, this time by a headless entity named Sarkata.',
+    posterUrl: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?auto=format&fit=crop&w=600&q=80',
+    releaseYear: 2024,
+    originalCategory: 'Bollywood',
+    displayCategory: 'Bollywood',
+    language: 'Hindi',
+    genre: 'Comedy, Horror',
+    rating: 7.9,
+    streamingUrl: 'https://t.me/+QSL_3k54YfBjMjE1',
+    featured: true,
+    published: true,
+  },
+  {
+    id: 'mirzapur-s3-2024',
+    title: 'Mirzapur (Season 3)',
+    description: 'The battle for the throne of Mirzapur reaches a fever pitch as new contenders challenge Guddu Pandit.',
+    posterUrl: 'https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?auto=format&fit=crop&w=600&q=80',
+    releaseYear: 2024,
+    originalCategory: 'Web Series',
+    displayCategory: 'Series',
+    language: 'Hindi',
+    genre: 'Crime, Drama, Action',
+    rating: 8.5,
+    streamingUrl: 'https://t.me/+QSL_3k54YfBjMjE1',
+    featured: true,
+    published: true,
+    seasons: [
+      {
+        seasonNumber: 1,
+        episodes: [
+          { episodeNumber: 1, title: 'Episode 1: Bhaukaal', streamUrl: 'https://t.me/+QSL_3k54YfBjMjE1' },
+          { episodeNumber: 2, title: 'Episode 2: Gaddi', streamUrl: 'https://t.me/+QSL_3k54YfBjMjE1' }
+        ]
+      }
+    ]
+  }
+];
+
 export function getLocalMovies(): MovieData[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw === null) {
-      return [];
+      return DEFAULT_INITIAL_MOVIES;
     }
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
+    if (Array.isArray(parsed) && parsed.length > 0) {
       return parsed;
     }
-    return [];
+    return DEFAULT_INITIAL_MOVIES;
   } catch (e) {
-    return [];
+    return DEFAULT_INITIAL_MOVIES;
   }
 }
 
