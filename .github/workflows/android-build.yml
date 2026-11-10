@@ -36,10 +36,7 @@ jobs:
         run: npm run build
 
       - name: Sync Capacitor Android
-        run: |
-          npx cap sync android
-          mkdir -p android/capacitor-cordova-android-plugins/src/main/libs
-          echo "// dummy" > android/capacitor-cordova-android-plugins/cordova.variables.gradle
+        run: npx cap sync android
 
       - name: Build Android APK (Gradle)
         working-directory: android
