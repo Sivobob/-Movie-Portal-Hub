@@ -1,6 +1,6 @@
 {
-  "latestVersion": "2.1.0",
-  "latestVersionCode": 21,
+  "latestVersion": "2.2.0",
+  "latestVersionCode": 22,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
   "releaseNotes": "Removed Gmail sign-in, fixed video playback and downloads for phone app, and pre-authorized private Telegram channel."
