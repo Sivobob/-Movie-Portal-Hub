@@ -427,7 +427,7 @@ export default function HomePage() {
   };
 
   return (
-    <div className="h-full min-h-full w-full bg-black text-white flex flex-col relative pb-20 pt-0 select-none overflow-x-hidden">
+    <div className={`h-full min-h-full w-full bg-black text-white flex flex-col relative pt-0 select-none overflow-x-hidden ${category ? 'pb-20' : 'pb-0'}`}>
       {/* New Content Announcement Toast */}
       <AnimatePresence>
         {announcement && (
@@ -562,9 +562,9 @@ export default function HomePage() {
           </p>
         </div>
       ) : (
-        /* Cinematic Main Homepage Slider */
+        /* Cinematic Main Homepage Slider - Fixed Full Screen height */
         <div 
-          className="relative flex-grow min-h-screen flex flex-col justify-end overflow-hidden pb-12 touch-pan-y cursor-pointer"
+          className="relative flex-grow h-screen flex flex-col justify-end overflow-hidden pb-12 touch-pan-y cursor-pointer"
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}

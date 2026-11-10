@@ -153,11 +153,11 @@ export default function Header() {
             {/* Left Spacer so 3D Logo stays perfectly centered without UI back or search buttons */}
             <div className="w-10 flex items-center justify-start z-10 pointer-events-none" />
 
-            {/* Top-Center 3D MOVIE PORTAL Logo shifted downward ~110px while keeping centered - ONLY ON HOME */}
+            {/* Top-Center 3D MOVIE PORTAL Logo at the top - ONLY ON HOME */}
             {isOnHome && (
               <div 
                 onClick={handleHomeClick}
-                className="absolute left-1/2 -translate-x-1/2 translate-y-[110px] cursor-pointer flex flex-col items-center z-10"
+                className="absolute left-1/2 -translate-x-1/2 cursor-pointer flex flex-col items-center z-10"
               >
                 <MoviePortal3DLogo />
               </div>
@@ -350,11 +350,11 @@ export default function Header() {
           {/* Left spacer - Web header now matches Android layout for consistency */}
           <div className="w-10 flex items-center justify-start z-10 pointer-events-none" />
 
-          {/* Top-Center 3D MOVIE PORTAL Logo shifted downward ~110px while keeping centered - ONLY ON HOME */}
+          {/* Top-Center 3D MOVIE PORTAL Logo at the top - ONLY ON HOME */}
           {isOnHome ? (
             <div 
               onClick={handleHomeClick}
-              className="absolute left-1/2 -translate-x-1/2 translate-y-[110px] cursor-pointer flex flex-col items-center z-10"
+              className="absolute left-1/2 -translate-x-1/2 cursor-pointer flex flex-col items-center z-10"
             >
               <MoviePortal3DLogo />
             </div>
