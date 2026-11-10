@@ -320,6 +320,7 @@ export async function handleStream(req: Request, res: Response) {
   const urlParam = req.query.url as string;
   const retryVal = req.query.retry as string;
   if (!urlParam) return res.status(400).send('URL required');
+  console.log(`[Stream] Incoming request for: ${urlParam.substring(0, 100)}${urlParam.length > 100 ? '...' : ''}`);
   if (retryVal) console.log(`[Stream] Client requested retry token: ${retryVal}`);
 
   // 1. Handle Direct Non-Telegram URLs: Redirect directly to save proxy overhead
@@ -357,8 +358,11 @@ export async function handleStream(req: Request, res: Response) {
     }
 
     if (!document) {
+      console.warn(`[Stream] No document/media found in message ${parsed.messageId}`);
       return res.status(404).send('No video file or document attached to this Telegram post.');
     }
+
+    console.log(`[Stream] Resolving document: ${document.id} (${document.size} bytes) for message ${parsed.messageId}`);
 
     const fileSize = Number(document.size);
     const rangeHeader = req.headers.range;

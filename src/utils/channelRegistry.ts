@@ -198,21 +198,28 @@ export async function resolveTelegramMedia(
   let foundMsg: any = null;
   let lastError = '';
 
+  console.log(`[ChannelRegistry] Searching for message ${messageId} in ${candidatePeers.length} candidate peers...`);
+
   for (const peer of candidatePeers) {
     if (foundMsg) break;
     try {
+      const peerStr = typeof peer === 'string' ? peer : JSON.stringify(peer);
+      console.log(`[ChannelRegistry] Checking peer: ${peerStr.substring(0, 50)}...`);
       const messages = await client.getMessages(peer, { ids: [messageId] });
       if (messages && messages.length > 0 && messages[0]) {
         foundMsg = messages[0];
+        console.log(`[ChannelRegistry] ✅ Found message ${messageId} in peer ${peerStr.substring(0, 30)}`);
         break;
       }
     } catch (err: any) {
       lastError = err?.message || '';
+      console.warn(`[ChannelRegistry] Peer check failed: ${lastError.substring(0, 100)}`);
     }
   }
 
   // Fallback: Scan channel's recent messages if ID wasn't directly found
   if (!foundMsg) {
+    console.log(`[ChannelRegistry] Message ${messageId} not found directly. Attempting recent scan fallback...`);
     for (const peer of candidatePeers) {
       if (foundMsg) break;
       try {
@@ -221,11 +228,7 @@ export async function resolveTelegramMedia(
           const exact = messages.find((m: any) => m.id === messageId);
           if (exact) {
             foundMsg = exact;
-            break;
-          }
-          const mediaMsg = messages.find((m: any) => m.media);
-          if (mediaMsg) {
-            foundMsg = mediaMsg;
+            console.log(`[ChannelRegistry] ✅ Found message ${messageId} in recent scan of peer`);
             break;
           }
         }
@@ -233,6 +236,10 @@ export async function resolveTelegramMedia(
         if (!lastError) lastError = err?.message || '';
       }
     }
+  }
+
+  if (!foundMsg) {
+    console.error(`[ChannelRegistry] ❌ Could not resolve message ${messageId} for streaming.`);
   }
 
   return { message: foundMsg, error: lastError };

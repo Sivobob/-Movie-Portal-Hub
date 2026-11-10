@@ -78,7 +78,7 @@ function AdminRoute({ children }: { children: React.ReactElement }) {
 }
 
 function AppContent() {
-  const [showSplash, setShowSplash] = useState(true);
+  const [showSplash, setShowSplash] = useState(false);
 
   return (
     <>
@@ -88,7 +88,7 @@ function AppContent() {
         <div className="h-full min-h-full w-full bg-black flex flex-col select-none overscroll-none">
           <Header />
           <UpdateNotification />
-          <main className={`flex-grow ${window.location.pathname === '/' ? 'pb-0' : 'pb-14 sm:pb-0'}`}>
+          <main className={`flex-grow ${window.location.pathname === '/' && !new URLSearchParams(window.location.search).get('category') ? 'pb-0' : 'pb-14 sm:pb-0'}`}>
             <Routes>
               <Route path="/" element={<HomePage />} />
               <Route

@@ -4,7 +4,7 @@ import { db, handleFirestoreError, OperationType } from '../firebase';
 import MovieCard from './MovieCard';
 import { Search, Play, X, Star, Calendar, Globe, Film, ShieldCheck, LogIn, LogOut, Smartphone, Download } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
-import { useNavigate } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import VideoPlayerModal from './VideoPlayerModal';
 import { useAuth, isAuthorizedAdminEmail } from '../context/AuthContext';
@@ -34,7 +34,17 @@ export default function HomePage() {
   const [downloadModalMovie, setDownloadModalMovie] = useState<any | null>(null);
   const [movies, setMovies] = useState<any[]>(getLocalMovies());
   const [featuredMovies, setFeaturedMovies] = useState<any[]>(getLocalMovies().filter((m: any) => m.featured));
-  const [category, setCategory] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const category = searchParams.get('category');
+  
+  const setCategory = (cat: string | null) => {
+    if (cat) {
+      setSearchParams({ category: cat });
+    } else {
+      setSearchParams({});
+    }
+  };
+
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const [selectedMovie, setSelectedMovie] = useState<any | null>(null);
@@ -74,9 +84,6 @@ export default function HomePage() {
   // Method to open category folder and record in history for hardware back navigation
   const openCategory = (cat: string) => {
     setCategory(cat);
-    try {
-      window.history.pushState({ appCategory: cat }, '');
-    } catch (e) {}
   };
 
   // Hardware and system phone back button handler (Android APK & mobile Chrome)
@@ -568,7 +575,7 @@ export default function HomePage() {
       ) : (
         /* Cinematic Main Homepage Slider - Fixed Full Screen height */
         <div 
-          className="relative flex-grow h-screen flex flex-col justify-end overflow-hidden pb-12 touch-pan-y cursor-pointer"
+          className="relative flex-grow h-screen flex flex-col justify-end overflow-hidden pb-12 touch-pan-y cursor-pointer will-change-transform transform-gpu"
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}

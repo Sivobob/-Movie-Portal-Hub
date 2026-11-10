@@ -13,7 +13,7 @@ const MovieCard = memo(({
 }) => {
   return (
     <motion.div 
-      className="relative rounded-xl overflow-hidden aspect-[2/3] cursor-pointer group shadow-lg border border-neutral-800/80 bg-neutral-950"
+      className="relative rounded-xl overflow-hidden aspect-[2/3] cursor-pointer group shadow-lg border border-neutral-800/80 bg-neutral-950 will-change-transform transform-gpu"
       whileHover={{ scale: 1.04 }}
       onClick={onClick}
     >
