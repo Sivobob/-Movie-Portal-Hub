@@ -1,0 +1,40 @@
+{
+  "name": "Movie Portal",
+  "short_name": "Movie Portal",
+  "description": "Stream unlimited movies and series in HD quality with offline downloads.",
+  "start_url": "/?platform=android",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "portrait",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "categories": ["entertainment", "movies", "video"],
+  "icons": [
+    {
+      "src": "/assets/icons/master_icon.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/icons/master_icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Search Movies",
+      "short_name": "Search",
+      "url": "/search",
+      "icons": [{ "src": "/assets/icons/master_icon.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "My Downloads",
+      "short_name": "Downloads",
+      "url": "/?category=Downloads",
+      "icons": [{ "src": "/assets/icons/master_icon.png", "sizes": "192x192" }]
+    }
+  ]
+}
