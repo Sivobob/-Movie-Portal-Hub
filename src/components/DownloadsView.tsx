@@ -63,14 +63,6 @@ export default function DownloadsView({
         <p className="text-xs text-gray-400 leading-relaxed mb-6">
           Download movies & web series in 1080p or 720p HD to watch anytime offline without internet.
         </p>
-        <button
-          type="button"
-          onClick={onBrowseMovies}
-          className="bg-yellow-400 hover:bg-yellow-500 active:scale-95 text-black font-black text-xs py-3 px-6 rounded-xl shadow-lg shadow-yellow-400/20 transition-all uppercase tracking-wider inline-flex items-center gap-2 cursor-pointer"
-        >
-          <Sparkles size={16} />
-          <span>Browse Movies & Series</span>
-        </button>
       </div>
     );
   }

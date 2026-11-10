@@ -501,12 +501,6 @@ export default function HomePage() {
         <div className="flex-grow pt-4">
           <div className="flex items-center justify-between px-4 mb-3">
             <h2 className="text-yellow-400 font-bold text-lg tracking-wide uppercase">{category}</h2>
-            <button
-              onClick={() => setCategory(null)}
-              className="text-xs text-gray-400 hover:text-white underline cursor-pointer"
-            >
-              Back to Featured
-            </button>
           </div>
 
           {isLoading ? (

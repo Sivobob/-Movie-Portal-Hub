@@ -111,7 +111,7 @@ export default function Header() {
     return (
       <>
         {/* Prominent Top Bar in Chrome/Browser: Only visible when opened in browser, hidden inside installed app */}
-        {!isInstalled && (
+        {!isInstalled && isOnHome && (
           <div className="w-full bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 text-black px-3 py-2 flex items-center justify-between shadow-lg sticky top-0 z-50">
             <div className="flex items-center gap-2 min-w-0">
               <div className="w-7 h-7 rounded-lg bg-black text-yellow-400 flex items-center justify-center flex-shrink-0 shadow">
@@ -310,7 +310,7 @@ export default function Header() {
   return (
     <>
       {/* Prominent Top Bar in Chrome/Browser: Only visible when opened in browser, hidden inside installed app */}
-      {!isInstalled && (
+      {!isInstalled && isOnHome && (
         <div className="w-full bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 text-black px-4 py-2 flex items-center justify-between shadow-lg sticky top-0 z-50">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-7 h-7 rounded-lg bg-black text-yellow-400 flex items-center justify-center flex-shrink-0 shadow">
