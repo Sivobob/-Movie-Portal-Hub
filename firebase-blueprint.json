@@ -1,0 +1,65 @@
+{
+  "entities": {
+    "movie": {
+      "title": "Movie",
+      "description": "A movie entry",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "posterUrl": { "type": "string" },
+        "backdropUrl": { "type": "string" },
+        "releaseYear": { "type": "number" },
+        "originalCategory": { "type": "string" },
+        "displayCategory": { "type": "string" },
+        "language": { "type": "string" },
+        "genre": { "type": "string" },
+        "rating": { "type": "number" },
+        "featured": { "type": "boolean" },
+        "published": { "type": "boolean" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" },
+        "duration": { "type": "number" }
+      },
+      "required": ["title", "posterUrl", "originalCategory", "displayCategory", "published"]
+    },
+    "admin": {
+      "title": "Admin",
+      "description": "Authorized administrator record",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" }
+      },
+      "required": ["email"]
+    },
+    "announcement": {
+      "title": "Announcement",
+      "description": "Public notification for new content",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "releaseYear": { "type": "number" },
+        "category": { "type": "string" },
+        "posterUrl": { "type": "string" },
+        "message": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "expiresAt": { "type": "number" }
+      },
+      "required": ["title", "posterUrl", "message"]
+    }
+  },
+  "firestore": {
+    "/movies/{movieId}": {
+      "schema": "movie",
+      "description": "Collection of all movies"
+    },
+    "/admins/{uid}": {
+      "schema": "admin",
+      "description": "Collection of authorized admin users"
+    },
+    "/announcements/{announcementId}": {
+      "schema": "announcement",
+      "description": "Collection of public notifications"
+    }
+  }
+}
