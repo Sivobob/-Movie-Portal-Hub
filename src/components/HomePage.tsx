@@ -542,7 +542,7 @@ export default function HomePage() {
             <Film size={32} />
           </div>
           <h2 className="text-2xl sm:text-3xl font-black text-yellow-400 tracking-wider uppercase mb-2">
-            NO MOVEI FOUND
+            NO MOVIE FOUND
           </h2>
           <p className="text-xs text-gray-500 max-w-sm leading-relaxed mb-6">
             No movies or series have been uploaded yet. Please check back later.
