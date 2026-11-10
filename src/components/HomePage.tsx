@@ -598,9 +598,9 @@ export default function HomePage() {
               className="absolute inset-0"
             >
               <div 
-                className={`absolute inset-0 bg-cover ${isAndroid ? 'bg-top sm:bg-center' : 'bg-center'}`}
+                className="absolute inset-0 bg-cover bg-center w-full h-full"
                 style={{
-                  backgroundImage: `url(${currentFeatured.backdropUrl || currentFeatured.posterUrl || 'https://images.unsplash.com/photo-1626814026160-2237a95fc5a0?q=80&w=1200'})`,
+                  backgroundImage: `url(${currentFeatured.posterUrl || currentFeatured.backdropUrl || 'https://images.unsplash.com/photo-1626814026160-2237a95fc5a0?q=80&w=1200'})`,
                 }}
               />
               {/* Cinematic Vignette Overlay - Lighter at the top to show poster behind logo */}
