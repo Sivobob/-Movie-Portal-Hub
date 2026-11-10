@@ -45,12 +45,10 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          ./gradlew clean assembleDebug --no-daemon --stacktrace
 
       - name: Prepare APK Asset
         run: |
-          mkdir -p public/downloads
-          cp android/app/build/outputs/apk/debug/app-debug.apk public/downloads/Movie-Portal.apk
           cp android/app/build/outputs/apk/debug/app-debug.apk Movie-Portal.apk
           ls -lh Movie-Portal.apk
 
@@ -66,16 +64,8 @@ jobs:
         with:
           tag_name: "v2.5.${{ github.run_number }}"
           name: "Movie Portal Android APK v2.5.${{ github.run_number }}"
-          body: "Official Android APK compiled automatically from latest source code."
+          body: "Official Android APK compiled automatically from latest source code. If you have an older version installed, please uninstall it first."
           files: Movie-Portal.apk
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Commit APK to repository for direct download
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add public/downloads/Movie-Portal.apk
-          git commit -m "chore: automated real APK build update [skip ci]" || true
-          git push origin main --force || true
