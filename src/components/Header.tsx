@@ -168,8 +168,8 @@ export default function Header() {
             showTopHeader ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0 pointer-events-none'
           } ${
             isOnHome
-              ? 'absolute top-0 left-0 bg-gradient-to-b from-black/90 via-black/50 to-transparent pt-4 pb-4 px-4'
-              : 'sticky top-0 left-0 bg-black/95 backdrop-blur-md border-b border-neutral-900 py-3.5 px-4'
+              ? 'absolute top-0 left-0 bg-gradient-to-b from-black/95 via-black/60 to-transparent pt-6 sm:pt-4 pb-4 px-4'
+              : 'sticky top-0 left-0 bg-black/95 backdrop-blur-md border-b border-neutral-900 pt-6 pb-3.5 px-4'
           }`}
         >
           <div className="max-w-7xl mx-auto flex items-center justify-between relative">
@@ -211,11 +211,11 @@ export default function Header() {
               <button
                 type="button"
                 onClick={handleSettingsClick}
-                className="p-1.5 rounded-full bg-yellow-400 text-black border border-yellow-500 shadow-[0_0_15px_rgba(250,204,21,0.5)] cursor-pointer active:scale-90 transition-all hover:bg-yellow-300"
+                className="p-2.5 rounded-full bg-yellow-400 text-black border border-yellow-500 shadow-[0_0_15px_rgba(250,204,21,0.5)] cursor-pointer active:scale-90 transition-all hover:bg-yellow-300"
                 aria-label="Settings"
                 title="Settings"
               >
-                <Settings size={16} className="transition-transform hover:rotate-90 duration-300" />
+                <Settings size={18} className="transition-transform hover:rotate-90 duration-300" />
               </button>
             </div>
           </div>

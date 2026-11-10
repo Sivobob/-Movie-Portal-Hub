@@ -115,7 +115,7 @@ export default function App() {
     
     // Initialize immersive full-screen mode for Android
     if (Capacitor.isNativePlatform()) {
-      StatusBar.setOverlaysWebView({ overlay: true }).catch(() => {});
+      StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {});
       StatusBar.hide().catch(() => {});
     }
   }, []);
