@@ -30,7 +30,9 @@ jobs:
           java-version: '17'
 
       - name: Install dependencies
-        run: npm install --legacy-peer-deps
+        run: |
+          rm -f package-lock.json
+          npm install --legacy-peer-deps
 
       - name: Build web app
         run: npm run build
@@ -42,26 +44,26 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew clean assembleDebug --no-daemon --stacktrace
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Prepare APK Asset
         run: |
-          cp android/app/build/outputs/apk/debug/app-debug.apk Movie-Portal.apk
-          ls -lh Movie-Portal.apk
-
-      - name: Upload Build Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Movie-Portal-APK
-          path: Movie-Portal.apk
+          if [ -f "android/app/build/outputs/apk/debug/app-debug.apk" ]; then
+            cp android/app/build/outputs/apk/debug/app-debug.apk Movie-Portal.apk
+            echo "APK ready."
+          else
+            echo "APK NOT FOUND!"
+            find android -name "*.apk"
+            exit 1
+          fi
 
       - name: Publish Release to GitHub
         uses: softprops/action-gh-release@v2
         continue-on-error: true
         with:
           tag_name: "latest"
-          name: "Movie Portal Android APK (Latest)"
-          body: "Official Android APK compiled automatically from latest source code. If you have an older version installed, please uninstall it first."
+          name: "Movie Portal Android APK (Final Fix)"
+          body: "Official Android APK. If you have an older version installed, please uninstall it first."
           files: Movie-Portal.apk
           make_latest: true
         env:
