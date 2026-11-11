@@ -73,7 +73,7 @@ export const isMobileDevice = (): boolean => {
   return isNativeAndroid() || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 };
 
-export const OFFICIAL_APK_DOWNLOAD_URL = "https://github.com/Sivobob/-Movie-Portal-Hub/releases/download/v3.5.114/Movie-Portal.apk";
+export const OFFICIAL_APK_DOWNLOAD_URL = "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk";
 
 export const downloadOfficialApk = (e?: any) => {
   if (e && typeof e.preventDefault === 'function') {
