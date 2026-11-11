@@ -258,8 +258,17 @@ export default function VideoPlayerModal({
     const isTelegram = /t\.me|telegram\.me/i.test(trimmed);
 
     if (isTelegram) {
-      const retryParam = retryCount > 0 ? `&retry=${Date.now()}` : '';
-      setPlayableUrl(buildApiUrl(`/api/stream?url=${encodeURIComponent(trimmed)}${retryParam}`));
+      // Build dynamic params for retries
+      let params = `?url=${encodeURIComponent(trimmed)}`;
+      if (retryCount > 0) {
+        params += `&rb=${Date.now()}`; // Cache bust
+        // Force transcode if retry > 1
+        if (retryCount >= 2) params += '&transcode=1';
+        // Try different formats on higher retries
+        if (retryCount === 3) params += '&format=webm';
+        if (retryCount === 4) params += '&format=mkv';
+      }
+      setPlayableUrl(buildApiUrl(`/api/stream${params}`));
     } else {
       setPlayableUrl(trimmed);
     }
@@ -418,22 +427,9 @@ export default function VideoPlayerModal({
     };
     const onError = async () => {
       console.warn('[Player] Video element stream notice:', video.error);
-      if (retryCount < 3) {
-        const nextRetry = retryCount + 1;
-        setRetryCount(nextRetry);
+      if (retryCount < 4) {
+        setRetryCount(prev => prev + 1);
         setIsLoading(true);
-        const currentPos = video.currentTime || 0;
-        const formatParam = nextRetry === 1 ? 'format=mkv' : nextRetry === 2 ? 'format=webm' : 'format=mp4';
-        setTimeout(() => {
-          if (videoRef.current) {
-            const separator = playableUrl.includes('?') ? '&' : '?';
-            videoRef.current.src = `${playableUrl}${separator}${formatParam}&_retry=${Date.now()}`;
-            if (currentPos > 0) {
-              try { videoRef.current.currentTime = currentPos; } catch (e) {}
-            }
-            videoRef.current.play().catch(() => {});
-          }
-        }, 800);
         return;
       }
       setIsLoading(false);

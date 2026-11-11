@@ -1032,7 +1032,7 @@ async function handleStream(req, res) {
     const rangeHeader = req.headers.range;
     let start = 0;
     let endPos = fileSize - 1;
-    const MAX_RANGE_CHUNK = 20 * 1024 * 1024;
+    const MAX_RANGE_CHUNK = 50 * 1024 * 1024;
     if (rangeHeader) {
       const match = rangeHeader.match(/bytes=(\d+)-(\d+)?/);
       if (match) {
@@ -1147,7 +1147,7 @@ async function handleStream(req, res) {
         const stream = client2.iterDownload({
           file: fileLocation,
           offset: bigInt2(0),
-          requestSize: 1024 * 1024
+          requestSize: 2 * 1024 * 1024
         });
         for await (let chunk of stream) {
           if (isClosed || res.writableEnded) break;
@@ -1187,7 +1187,7 @@ async function handleStream(req, res) {
       const stream = client2.iterDownload({
         file: fileLocation,
         offset: bigInt2(alignedStart),
-        requestSize: 1024 * 1024
+        requestSize: 4 * 1024 * 1024
       });
       for await (let chunk of stream) {
         if (isClosed || res.writableEnded || delivered >= chunkSize) break;

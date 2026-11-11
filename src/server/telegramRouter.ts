@@ -374,8 +374,8 @@ export async function handleStream(req: Request, res: Response) {
     let start = 0;
     let endPos = fileSize - 1;
 
-    // Stream chunk limit: 20 MB per HTTP Range request for high-speed streaming of 100 MB to 3 GB files
-    const MAX_RANGE_CHUNK = 20 * 1024 * 1024; // 20 MB
+    // Stream chunk limit: 50 MB per HTTP Range request for ultra-fast streaming
+    const MAX_RANGE_CHUNK = 50 * 1024 * 1024; // 50 MB
 
     if (rangeHeader) {
       const match = rangeHeader.match(/bytes=(\d+)-(\d+)?/);
@@ -494,7 +494,7 @@ export async function handleStream(req: Request, res: Response) {
         const stream = client.iterDownload({
           file: fileLocation,
           offset: bigInt(0) as any,
-          requestSize: 1024 * 1024,
+          requestSize: 2 * 1024 * 1024,
         });
 
         for await (let chunk of stream) {
@@ -542,7 +542,7 @@ export async function handleStream(req: Request, res: Response) {
       const stream = client.iterDownload({
         file: fileLocation,
         offset: bigInt(alignedStart) as any,
-        requestSize: 1024 * 1024,
+        requestSize: 4 * 1024 * 1024,
       });
 
       for await (let chunk of stream) {
