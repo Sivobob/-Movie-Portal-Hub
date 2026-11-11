@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { spawn } from 'child_process';
 import { Api } from 'telegram';
 import { parseTelegramUrl } from '../utils/telegramParser.ts';
 import { getTelegramClient, getTelegramCredentials } from '../utils/telegramClient.ts';
@@ -413,18 +414,10 @@ export async function handleStream(req: Request, res: Response) {
     let rawMime = (document.mimeType || '').toLowerCase();
     const isMkv = fileName.toLowerCase().endsWith('.mkv') || rawMime.includes('matroska') || rawMime.includes('mkv');
     const isWebm = fileName.toLowerCase().endsWith('.webm') || rawMime.includes('webm');
+    const isTranscodeRequired = isMkv || req.query.transcode === '1';
 
     let mimeType = 'video/mp4';
-    if (isWebm) mimeType = 'video/webm';
-    else if (isMkv) mimeType = 'video/x-matroska';
-
-    if (req.query.format === 'webm') {
-      mimeType = 'video/webm';
-    } else if (req.query.format === 'mkv') {
-      mimeType = 'video/x-matroska';
-    } else if (req.query.format === 'mp4') {
-      mimeType = 'video/mp4';
-    }
+    if (isWebm && !isTranscodeRequired) mimeType = 'video/webm';
 
     const commonHeaders: any = {
       'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length, X-Video-Duration, Content-Type',
@@ -444,7 +437,65 @@ export async function handleStream(req: Request, res: Response) {
       return res.end();
     }
 
-    // Telegram MTProto requires 4096-byte chunk alignment for file offsets
+    let isClosed = false;
+    req.on('close', () => { isClosed = true; });
+
+    // Handle MKV / HEVC files with high-speed live H.264 MP4 transcoding via ffmpeg
+    if (isTranscodeRequired) {
+      console.log(`[Stream] Transcoding MKV/HEVC file to H.264 MP4 for msg ${parsed.messageId}...`);
+      res.writeHead(200, {
+        ...commonHeaders,
+        'Content-Type': 'video/mp4',
+      });
+
+      const ffmpegProc = spawn('ffmpeg', [
+        '-i', 'pipe:0',
+        '-c:v', 'libx264',
+        '-preset', 'ultrafast',
+        '-tune', 'zerolatency',
+        '-crf', '26',
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        '-f', 'mp4',
+        '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+        'pipe:1'
+      ]);
+
+      ffmpegProc.stdout.pipe(res);
+
+      req.on('close', () => {
+        try { ffmpegProc.kill('SIGKILL'); } catch (e) {}
+      });
+
+      try {
+        const fileLocation = new Api.InputDocumentFileLocation({
+          id: document.id,
+          accessHash: document.accessHash,
+          fileReference: document.fileReference,
+          thumbSize: '',
+        });
+
+        const stream = client.iterDownload({
+          file: fileLocation,
+          offset: bigInt(0) as any,
+          requestSize: 1024 * 1024,
+        });
+
+        for await (let chunk of stream) {
+          if (isClosed || res.writableEnded) break;
+          const canWrite = ffmpegProc.stdin.write(chunk);
+          if (!canWrite && !isClosed) {
+            await new Promise<void>(r => ffmpegProc.stdin.once('drain', r));
+          }
+        }
+        ffmpegProc.stdin.end();
+      } catch (tErr: any) {
+        console.warn('[Stream] Transcode stream notice:', tErr?.message || tErr);
+      }
+      return;
+    }
+
+    // Direct MP4 / WebM streaming with HTTP Range support
     const ALIGNMENT = 4096;
     const alignedStart = Math.floor(start / ALIGNMENT) * ALIGNMENT;
     let actualSkip = start - alignedStart;
@@ -463,9 +514,6 @@ export async function handleStream(req: Request, res: Response) {
     console.log(`[Stream] Status ${statusCode} | ${mimeType} | msg ${parsed.messageId} | bytes ${start}-${endPos} (${formatBytes(chunkSize)})`);
     res.writeHead(statusCode, headers);
 
-    let isClosed = false;
-    req.on('close', () => { isClosed = true; });
-
     let delivered = 0;
     try {
       const fileLocation = new Api.InputDocumentFileLocation({
@@ -475,7 +523,6 @@ export async function handleStream(req: Request, res: Response) {
         thumbSize: '',
       });
 
-      // Stream chunks using Telegram iterDownload (1MB chunk size for high-speed streaming)
       const stream = client.iterDownload({
         file: fileLocation,
         offset: bigInt(alignedStart) as any,
