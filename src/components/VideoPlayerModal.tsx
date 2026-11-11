@@ -25,6 +25,8 @@ import {
   Captions,
   Radio
 } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
+import { Browser } from '@capacitor/browser';
 import { useDownloads } from '../hooks/useDownloads';
 import { buildApiUrl, APP_VERSION } from '../utils/apiConfig';
 
@@ -749,8 +751,14 @@ export default function VideoPlayerModal({
                     </button>
 
                     <button
-                      onClick={() => {
-                        if (playableUrl) window.open(playableUrl, '_blank');
+                      onClick={async () => {
+                        if (playableUrl) {
+                          if (Capacitor.isNativePlatform()) {
+                            await Browser.open({ url: playableUrl });
+                          } else {
+                            window.open(playableUrl, '_blank');
+                          }
+                        }
                       }}
                       className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all cursor-pointer shadow-lg"
                     >

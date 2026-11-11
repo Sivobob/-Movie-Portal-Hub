@@ -22,8 +22,9 @@ export function getApiBaseUrl(): string {
     return '';
   }
 
-  // 3. For Native APK / Localhost, use the Pre-Shared URL as it's the most stable
-  return 'https://ais-pre-wfl4fkek6sbm6lchwjz2bi-832989141722.asia-southeast1.run.app';
+  // 3. For Native APK / Localhost, we must use an absolute URL.
+  // We prioritize the Dev URL because that's where the user is seeing it work in Chrome.
+  return LIVE_BACKEND_URL;
 }
 
 /**
