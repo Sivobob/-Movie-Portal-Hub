@@ -442,14 +442,23 @@ export async function handleStream(req: Request, res: Response) {
 
     // Handle MKV / HEVC files with high-speed live H.264 MP4 transcoding via ffmpeg
     if (isTranscodeRequired) {
-      console.log(`[Stream] Transcoding MKV/HEVC file to H.264 MP4 for msg ${parsed.messageId}...`);
+      console.log(`[Stream] Transcoding MKV/HEVC for msg ${parsed.messageId}. File: ${fileName}`);
+      
+      // Remove Accept-Ranges for live transcode to prevent player seeking confusion
+      const transcodeHeaders = { ...commonHeaders };
+      delete transcodeHeaders['Accept-Ranges'];
+      
       res.writeHead(200, {
-        ...commonHeaders,
+        ...transcodeHeaders,
         'Content-Type': 'video/mp4',
+        'Content-Disposition': `inline; filename="stream.mp4"`,
+        'Cache-Control': 'no-cache',
       });
 
       const ffmpegProc = spawn('ffmpeg', [
         '-i', 'pipe:0',
+        '-map', '0:v:0',      // Map first video track
+        '-map', '0:a?',      // Map all available audio tracks
         '-c:v', 'libx264',
         '-preset', 'ultrafast',
         '-tune', 'zerolatency',
@@ -462,11 +471,15 @@ export async function handleStream(req: Request, res: Response) {
       ]);
 
       ffmpegProc.stdout.pipe(res);
-      ffmpegProc.stderr.on('data', (d) => console.log('[FFMPEG Err]', d.toString()));
-      ffmpegProc.on('error', (e) => console.error('[FFMPEG Proc Err]', e));
-      ffmpegProc.on('close', (code) => console.log('[FFMPEG Closed]', code));
+      
+      // Log errors only if not closed by user
+      ffmpegProc.stderr.on('data', (d) => {
+        const msg = d.toString();
+        if (msg.includes('Error') && !isClosed) console.log('[FFMPEG Err]', msg.trim());
+      });
 
       req.on('close', () => {
+        isClosed = true;
         try { ffmpegProc.kill('SIGKILL'); } catch (e) {}
       });
 
@@ -491,9 +504,9 @@ export async function handleStream(req: Request, res: Response) {
             await new Promise<void>(r => ffmpegProc.stdin.once('drain', r));
           }
         }
-        ffmpegProc.stdin.end();
+        if (!isClosed) ffmpegProc.stdin.end();
       } catch (tErr: any) {
-        console.warn('[Stream] Transcode stream notice:', tErr?.message || tErr);
+        if (!isClosed) console.warn('[Stream] Transcode loop notice:', tErr.message);
       }
       return;
     }

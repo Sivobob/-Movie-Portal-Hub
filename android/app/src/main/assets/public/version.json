@@ -1,7 +1,7 @@
 {
-  "latestVersion": "3.3.0",
-  "latestVersionCode": 81,
+  "latestVersion": "3.4.0",
+  "latestVersionCode": 90,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
-  "isMandatory": false,
-  "releaseNotes": "Enhanced stream playback reliability, direct Telegram player integration, and 100+ MB full bundle package."
+  "isMandatory": true,
+  "releaseNotes": "MAJOR FIX: Optimized H.264 live transcoding pipeline for Pushpa 2 and all HEVC/MKV Telegram streams. Force absolute backend URL for native app stability."
 }

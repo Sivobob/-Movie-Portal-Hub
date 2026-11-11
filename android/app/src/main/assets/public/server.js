@@ -1089,14 +1089,24 @@ async function handleStream(req, res) {
       isClosed = true;
     });
     if (isTranscodeRequired) {
-      console.log(`[Stream] Transcoding MKV/HEVC file to H.264 MP4 for msg ${parsed.messageId}...`);
+      console.log(`[Stream] Transcoding MKV/HEVC for msg ${parsed.messageId}. File: ${fileName}`);
+      const transcodeHeaders = { ...commonHeaders };
+      delete transcodeHeaders["Accept-Ranges"];
       res.writeHead(200, {
-        ...commonHeaders,
-        "Content-Type": "video/mp4"
+        ...transcodeHeaders,
+        "Content-Type": "video/mp4",
+        "Content-Disposition": `inline; filename="stream.mp4"`,
+        "Cache-Control": "no-cache"
       });
       const ffmpegProc = spawn("ffmpeg", [
         "-i",
         "pipe:0",
+        "-map",
+        "0:v:0",
+        // Map first video track
+        "-map",
+        "0:a?",
+        // Map all available audio tracks
         "-c:v",
         "libx264",
         "-preset",
@@ -1116,10 +1126,12 @@ async function handleStream(req, res) {
         "pipe:1"
       ]);
       ffmpegProc.stdout.pipe(res);
-      ffmpegProc.stderr.on("data", (d) => console.log("[FFMPEG Err]", d.toString()));
-      ffmpegProc.on("error", (e) => console.error("[FFMPEG Proc Err]", e));
-      ffmpegProc.on("close", (code) => console.log("[FFMPEG Closed]", code));
+      ffmpegProc.stderr.on("data", (d) => {
+        const msg2 = d.toString();
+        if (msg2.includes("Error") && !isClosed) console.log("[FFMPEG Err]", msg2.trim());
+      });
       req.on("close", () => {
+        isClosed = true;
         try {
           ffmpegProc.kill("SIGKILL");
         } catch (e) {
@@ -1144,9 +1156,9 @@ async function handleStream(req, res) {
             await new Promise((r) => ffmpegProc.stdin.once("drain", r));
           }
         }
-        ffmpegProc.stdin.end();
+        if (!isClosed) ffmpegProc.stdin.end();
       } catch (tErr) {
-        console.warn("[Stream] Transcode stream notice:", tErr?.message || tErr);
+        if (!isClosed) console.warn("[Stream] Transcode loop notice:", tErr.message);
       }
       return;
     }
