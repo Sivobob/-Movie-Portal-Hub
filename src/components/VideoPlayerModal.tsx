@@ -737,8 +737,6 @@ export default function VideoPlayerModal({
                       <RotateCcw size={15} /> Retry Playback
                     </button>
 
-
-
                     <button
                       onClick={() => {
                         setError(null);
@@ -752,9 +750,24 @@ export default function VideoPlayerModal({
 
                     <button
                       onClick={async () => {
+                        const url = buildApiUrl('/api/health');
+                        if (Capacitor.isNativePlatform()) {
+                          await Browser.open({ url });
+                        } else {
+                          window.open(url, '_blank');
+                        }
+                      }}
+                      className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all cursor-pointer shadow-lg"
+                      title="Fix authentication if stream is blocked"
+                    >
+                      <Settings size={14} /> Login to Server
+                    </button>
+
+                    <button
+                      onClick={() => {
                         if (playableUrl) {
                           if (Capacitor.isNativePlatform()) {
-                            await Browser.open({ url: playableUrl });
+                            Browser.open({ url: playableUrl });
                           } else {
                             window.open(playableUrl, '_blank');
                           }
