@@ -1,5 +1,5 @@
-export const LIVE_BACKEND_URL = 'https://ais-dev-wfl4fkek6sbm6lchwjz2bi-832989141722.asia-southeast1.run.app';
-export const APP_VERSION = 'v3.5.2-FINAL-FIX';
+export const LIVE_BACKEND_URL = 'https://ais-dev-d4oy4g4wkdxchvgc5wbbty-835315626292.asia-northeast1.run.app';
+export const APP_VERSION = 'v3.5.3-PARITY';
 
 
 /**

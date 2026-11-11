@@ -260,16 +260,16 @@ export default function VideoPlayerModal({
     const isTelegram = /t\.me|telegram\.me/i.test(trimmed);
 
     if (isTelegram) {
-      // Build dynamic params
+      // Build dynamic params - EXACT same clean streaming engine as Chrome
       let params = `?url=${encodeURIComponent(trimmed)}`;
-      // Always transcode for native Android app to guarantee H.264 Baseline MP4 compatibility
-      if (Capacitor.isNativePlatform() || retryCount >= 1) {
+      // Only transcode as last-resort fallback on repeated user retries
+      if (retryCount >= 3) {
         params += '&transcode=1';
       }
       if (retryCount > 0) {
         params += `&rb=${Date.now()}`; // Cache bust
-        if (retryCount === 3) params += '&format=webm';
-        if (retryCount === 4) params += '&format=mkv';
+        if (retryCount === 4) params += '&format=webm';
+        if (retryCount === 5) params += '&format=mkv';
       }
       setPlayableUrl(buildApiUrl(`/api/stream${params}`));
     } else {
