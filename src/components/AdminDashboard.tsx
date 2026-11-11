@@ -813,12 +813,13 @@ export default function AdminDashboard() {
 
         // Create a public announcement notification for all users to see
         if (!asDraft) {
-          const announcementMsg = isSeries ? 'Check out new series' : 'Check out new movie';
+          const announcementMsg = 'GO STREAM or DOWNLOAD NOW';
           const announcementPayload = {
             title: moviePayload.title,
             releaseYear: moviePayload.releaseYear,
             category: moviePayload.originalCategory,
             posterUrl: moviePayload.posterUrl,
+            backdropUrl: moviePayload.backdropUrl || moviePayload.posterUrl,
             message: announcementMsg,
             movieId: newDocId,
             createdAt: serverTimestamp(),
@@ -838,6 +839,7 @@ export default function AdminDashboard() {
             releaseYear: moviePayload.releaseYear,
             category: moviePayload.originalCategory,
             posterUrl: moviePayload.posterUrl,
+            backdropUrl: moviePayload.backdropUrl || moviePayload.posterUrl,
             message: announcementMsg,
             movieId: newDocId,
             createdAt: { seconds: Math.floor(Date.now() / 1000) }
@@ -854,12 +856,13 @@ export default function AdminDashboard() {
             }
 
             if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-              new Notification(`${moviePayload.title} (${moviePayload.releaseYear})`, {
-                body: announcementMsg,
-                icon: moviePayload.posterUrl || '/assets/logo.png',
-                badge: '/assets/logo.png',
+              new Notification('MOVIE PORTAL', {
+                body: `Watch Now : ${moviePayload.title} (${moviePayload.releaseYear}) Full ${isSeries ? 'Series' : 'Movie'} available now\nGO STREAM or DOWNLOAD NOW`,
+                icon: '/assets/icons/master_icon.jpg',
+                image: moviePayload.posterUrl || '/assets/icons/master_icon.jpg',
+                badge: '/assets/icons/master_icon.jpg',
                 tag: `movie-${newDocId}`
-              });
+              } as any);
             }
           } catch (bcErr) {
             console.warn('Broadcast notification error:', bcErr);

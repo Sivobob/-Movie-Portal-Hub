@@ -148,6 +148,15 @@ export default function HomePage() {
     };
   }, []);
 
+  // Request system notification permission on app launch
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      if (Notification.permission === 'default') {
+        Notification.requestPermission().catch(() => {});
+      }
+    }
+  }, []);
+
   // Load published movies real-time
   useEffect(() => {
     let isMounted = true;
@@ -241,14 +250,17 @@ export default function HomePage() {
           setAnnouncement(latest);
           sessionStorage.setItem('last_seen_announcement', latest.id);
           
-          // Trigger system notification if permitted
+          // Trigger system notification matching rich Android style
           try {
             if (typeof window !== 'undefined' && 'Notification' in window && (window as any).Notification?.permission === 'granted') {
-              new Notification(`${latest.title} (${latest.releaseYear})`, {
-                body: latest.message || 'New content available!',
-                icon: latest.posterUrl || '/assets/logo.png',
+              const isSeries = (latest.category || '').toLowerCase().includes('series');
+              new Notification('MOVIE PORTAL', {
+                body: `Watch Now : ${latest.title} (${latest.releaseYear || new Date().getFullYear()}) Full ${isSeries ? 'Series' : 'Movie'} available now\nGO STREAM or DOWNLOAD NOW`,
+                icon: '/assets/icons/master_icon.jpg',
+                image: latest.posterUrl || latest.backdropUrl || '/assets/icons/master_icon.jpg',
+                badge: '/assets/icons/master_icon.jpg',
                 tag: `movie-${latest.id}`
-              });
+              } as any);
             }
           } catch (notifErr) {}
           
@@ -437,44 +449,55 @@ export default function HomePage() {
                   setSelectedMovie(target);
                 }
               }}
-              className="bg-neutral-900 border-2 border-yellow-400 rounded-2xl shadow-2xl p-3.5 flex items-center gap-3.5 max-w-md w-full pointer-events-auto overflow-hidden relative cursor-pointer active:scale-98 transition-transform group"
+              className="bg-neutral-900/95 backdrop-blur-md border border-neutral-700/80 rounded-3xl shadow-2xl p-4 max-w-md w-full pointer-events-auto overflow-hidden relative cursor-pointer active:scale-98 transition-all group text-white"
             >
-              <div className="w-14 h-20 rounded-xl overflow-hidden flex-shrink-0 bg-neutral-800 border border-neutral-700 shadow-md">
-                <img 
-                  src={announcement.posterUrl} 
-                  alt={announcement.title} 
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                />
-              </div>
-              
-              <div className="flex-grow min-w-0">
-                <div className="flex items-center gap-1.5 text-yellow-400 mb-0.5">
-                  <span className="w-2 h-2 rounded-full bg-yellow-400 animate-ping" />
-                  <span className="text-[10px] font-black uppercase tracking-widest">
-                    {announcement.category?.toLowerCase().includes('series') ? 'New Series Release' : 'New Movie Release'}
+              {/* Header bar: Icon, App Name, Time, Close */}
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-full overflow-hidden border border-yellow-400/50 bg-black flex-shrink-0">
+                    <img src="/assets/icons/master_icon.jpg" alt="Movie Portal" className="w-full h-full object-cover" />
+                  </div>
+                  <span className="text-xs font-bold text-gray-300 tracking-wide">
+                    MOVIE PORTAL <span className="text-gray-500 font-normal ml-1">• Just now</span>
                   </span>
                 </div>
-                <h4 className="text-sm font-black text-white uppercase tracking-tight truncate leading-tight">
-                  {announcement.title} <span className="text-yellow-400 font-bold">({announcement.releaseYear})</span>
+                
+                <button 
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setAnnouncement(null);
+                  }}
+                  className="p-1 hover:bg-white/10 rounded-full transition-colors cursor-pointer text-gray-400 hover:text-white"
+                  aria-label="Close notification"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Title & Body */}
+              <div className="space-y-0.5 px-0.5">
+                <h4 className="text-xs sm:text-sm font-bold text-gray-100 leading-snug">
+                  Watch Now : {announcement.title} ({announcement.releaseYear || new Date().getFullYear()}) Full {announcement.category?.toLowerCase().includes('series') ? 'Series' : 'Movie'} available now
                 </h4>
-                <div className="mt-1.5 inline-flex items-center gap-1.5 bg-yellow-400/20 text-yellow-400 font-black text-xs px-2.5 py-0.5 rounded border border-yellow-400/40 uppercase tracking-wide">
-                  <Play size={12} fill="currentColor" />
-                  <span>{announcement.message || (announcement.category?.toLowerCase().includes('series') ? 'Check out new series' : 'Check out new movie')}</span>
+                <p className="text-[11px] font-semibold text-gray-400 tracking-wide uppercase">
+                  GO STREAM or DOWNLOAD NOW
+                </p>
+              </div>
+
+              {/* Large Poster / Banner (Big Picture) */}
+              <div className="mt-3 rounded-2xl overflow-hidden bg-black/60 border border-neutral-800 shadow-xl max-h-56 relative group">
+                <img 
+                  src={announcement.posterUrl || announcement.backdropUrl} 
+                  alt={announcement.title} 
+                  className="w-full h-44 sm:h-52 object-cover group-hover:scale-105 transition-transform duration-300"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-80" />
+                <div className="absolute bottom-2.5 right-3 bg-yellow-400 text-black font-black text-[10px] px-3 py-1 rounded-full uppercase tracking-wider flex items-center gap-1 shadow-lg">
+                  <Play size={10} fill="black" /> WATCH NOW
                 </div>
               </div>
 
-              <button 
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setAnnouncement(null);
-                }}
-                className="p-1.5 hover:bg-white/10 rounded-full transition-colors self-start cursor-pointer text-gray-400 hover:text-white"
-                aria-label="Close notification"
-              >
-                <X size={16} />
-              </button>
-              
               {/* Progress Bar (Timer) */}
               <motion.div 
                 initial={{ width: "100%" }}
