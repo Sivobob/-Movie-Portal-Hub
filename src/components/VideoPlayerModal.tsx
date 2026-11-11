@@ -744,18 +744,7 @@ export default function VideoPlayerModal({
                       <RotateCcw size={15} /> Retry Playback
                     </button>
 
-                    {/t\.me|telegram\.me/i.test((videoQualities && videoQualities[currentQuality]) || videoUrl || '') && (
-                      <a
-                        href={((videoQualities && videoQualities[currentQuality]) || videoUrl || '').startsWith('http')
-                          ? ((videoQualities && videoQualities[currentQuality]) || videoUrl || '')
-                          : `https://${(videoQualities && videoQualities[currentQuality]) || videoUrl || ''}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition-all active:scale-95 cursor-pointer shadow-lg shadow-sky-600/20"
-                      >
-                        <ExternalLink size={15} /> Watch in Telegram
-                      </a>
-                    )}
+
 
                     <button
                       onClick={() => {
