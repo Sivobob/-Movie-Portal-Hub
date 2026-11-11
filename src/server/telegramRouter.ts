@@ -449,7 +449,15 @@ export async function handleStream(req: Request, res: Response) {
     if (isTranscodeRequired) {
       console.log(`[Stream] Transcoding MKV/HEVC for msg ${parsed.messageId}. File: ${fileName}`);
       
-      // Remove Accept-Ranges for live transcode to prevent player seeking confusion
+      let startSeconds = 0;
+      if (rangeHeader && fileSize > 0 && durationSec > 0) {
+        const matchRange = rangeHeader.match(/bytes=(\d+)-/);
+        if (matchRange) {
+          const startByte = parseInt(matchRange[1], 10) || 0;
+          startSeconds = Math.floor((startByte / fileSize) * durationSec);
+        }
+      }
+
       const transcodeHeaders = { ...commonHeaders };
       delete transcodeHeaders['Accept-Ranges'];
       
@@ -460,7 +468,8 @@ export async function handleStream(req: Request, res: Response) {
         'Cache-Control': 'no-cache',
       });
 
-      const ffmpegProc = spawn('ffmpeg', [
+      const ffmpegArgs = [
+        ...(startSeconds > 3 ? ['-ss', startSeconds.toString()] : []),
         '-i', 'pipe:0',
         '-map', '0:v:0',
         '-map', '0:a?',
@@ -476,7 +485,9 @@ export async function handleStream(req: Request, res: Response) {
         '-f', 'mp4',
         '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
         'pipe:1'
-      ]);
+      ];
+
+      const ffmpegProc = spawn('ffmpeg', ffmpegArgs);
 
       ffmpegProc.stdout.pipe(res);
       
