@@ -430,13 +430,15 @@ export default function VideoPlayerModal({
     };
     const onError = async () => {
       console.warn('[Player] Video element stream notice:', video.error);
-      if (retryCount < 4) {
-        setRetryCount(prev => prev + 1);
-        setIsLoading(true);
-        return;
-      }
-      setIsLoading(false);
-      setError('Unable to load stream. Please tap Retry Playback or verify media URL.');
+      // Silently auto-retry without showing error overlay
+      setRetryCount(prev => (prev + 1) % 5);
+      setIsLoading(true);
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.load();
+          videoRef.current.play().catch(() => {});
+        }
+      }, 1500);
     };
 
     video.addEventListener('play', onPlay);
@@ -700,7 +702,7 @@ export default function VideoPlayerModal({
               )}
 
               {/* Small Loading Spinner at Bottom Center */}
-              {isLoading && !error && (
+              {isLoading && (
                 <div className="absolute bottom-16 left-1/2 -translate-x-1/2 flex items-center gap-2.5 bg-black/80 backdrop-blur-md px-4 py-2 rounded-full border border-neutral-800 z-25 pointer-events-none shadow-xl select-none">
                   <RefreshCw className="animate-spin text-yellow-400" size={16} />
                   <span className="text-xs text-gray-200 font-bold tracking-wide">Loading...</span>
@@ -708,128 +710,10 @@ export default function VideoPlayerModal({
               )}
 
               {/* Minimal Clean Error & Options Screen */}
-              {error && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/95 z-30 px-6 text-center">
-                  <div className="max-w-md bg-neutral-900 border border-red-800/60 p-5 rounded-2xl shadow-2xl mb-4">
-                    <p className="text-xs text-red-400 font-bold mb-1 uppercase tracking-wider">Stream Playback Notice</p>
-                    <p className="text-xs text-gray-300 leading-relaxed mb-3">{error}</p>
-                    <div className="bg-yellow-400/10 border border-yellow-500/20 p-2.5 rounded-lg text-left">
-                       <p className="text-[10px] text-yellow-400 font-bold uppercase mb-1">Why is this happening in App?</p>
-                       <p className="text-[10px] text-gray-400 leading-tight">Chrome has your Google login saved, but the App doesn't. Please use the <b>Login to Server</b> button below to authorize your phone.</p>
-                    </div>
-                    <div className="mt-3 pt-3 border-t border-red-800/40 space-y-1.5 text-left">
-                       <p className="text-[9px] text-gray-500 font-mono break-all opacity-70">
-                         <span className="text-yellow-500/50 font-bold mr-1">URL:</span>
-                         {playableUrl ? playableUrl.split('?')[0] : 'N/A'}
-                       </p>
-                       <p className="text-[9px] text-gray-500 font-mono opacity-70">
-                         <span className="text-yellow-500/50 font-bold mr-1">DEV:</span>
-                         {videoRef.current?.error ? `Code ${videoRef.current.error.code}: ${videoRef.current.error.message || 'Media Error'}` : 'No Native Error'}
-                       </p>
-                       <p className="text-[9px] text-yellow-600/40 font-bold uppercase tracking-widest">
-                         Build: {APP_VERSION}
-                       </p>
-                    </div>
-                  </div>
 
-                  <div className="flex flex-wrap items-center justify-center gap-2 max-w-md">
-                    <button
-                      onClick={async () => {
-                        const url = buildApiUrl('/api/health');
-                        if (Capacitor.isNativePlatform()) {
-                          await Browser.open({ url });
-                        } else {
-                          window.open(url, '_blank');
-                        }
-                      }}
-                      className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-white font-black text-xs px-6 py-3 rounded-xl transition-all active:scale-95 cursor-pointer shadow-lg animate-bounce-short"
-                      title="Fix authentication if stream is blocked"
-                    >
-                      <Settings size={15} /> Login to Server (Click This First)
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setError(null);
-                        setIsLoading(true);
-                        handleRetry();
-                      }}
-                      className="flex items-center gap-2 bg-yellow-400 hover:bg-yellow-500 text-black font-black text-xs px-5 py-2.5 rounded-xl transition-all active:scale-95 cursor-pointer shadow-lg shadow-yellow-400/20"
-                    >
-                      <RotateCcw size={15} /> Retry Playback
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setError(null);
-                        setIsLoading(true);
-                        setPlayableUrl('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4');
-                      }}
-                      className="flex items-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-gray-300 font-semibold text-xs px-4 py-2.5 rounded-xl border border-neutral-700 transition-all cursor-pointer"
-                    >
-                      <Play size={14} /> Test Sample
-                    </button>
-
-                    <button
-                      onClick={async () => {
-                        if (playableUrl) {
-                          if (Capacitor.isNativePlatform()) {
-                            await Browser.open({ url: playableUrl });
-                          } else {
-                            window.open(playableUrl, '_blank');
-                          }
-                        }
-                      }}
-                      className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all cursor-pointer shadow-lg"
-                    >
-                      <ExternalLink size={14} /> Open in Chrome
-                    </button>
-
-                    <button
-                      onClick={() => setShowServerConfig(prev => !prev)}
-                      className="flex items-center gap-1.5 bg-neutral-800/80 hover:bg-neutral-700 text-gray-400 hover:text-white text-xs px-3 py-2.5 rounded-xl border border-neutral-800 transition-all cursor-pointer"
-                      title="Configure Backend Server"
-                    >
-                      <Settings size={14} /> Server
-                    </button>
-                  </div>
-
-                  {showServerConfig && (
-                    <div className="mt-4 p-3 bg-neutral-900 border border-neutral-700 rounded-xl max-w-md w-full text-left space-y-2 animate-in fade-in duration-150">
-                      <label className="text-[11px] font-bold text-gray-300 block">Stream Server URL:</label>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={customServerInput}
-                          onChange={(e) => setCustomServerInput(e.target.value)}
-                          placeholder="https://your-backend.run.app"
-                          className="flex-1 bg-black text-white text-xs px-3 py-1.5 rounded-lg border border-neutral-700 focus:outline-none focus:border-yellow-400"
-                        />
-                        <button
-                          onClick={() => {
-                            if (customServerInput.trim()) {
-                              localStorage.setItem('movie_portal_backend_url', customServerInput.trim());
-                            } else {
-                              localStorage.removeItem('movie_portal_backend_url');
-                            }
-                            setShowServerConfig(false);
-                            setError(null);
-                            setIsLoading(true);
-                            handleRetry();
-                          }}
-                          className="bg-yellow-400 text-black font-bold text-xs px-3 py-1.5 rounded-lg hover:bg-yellow-300 transition-all cursor-pointer"
-                        >
-                          Save
-                        </button>
-                      </div>
-                      <p className="text-[10px] text-gray-500">Enter your live cloud server or Cloud Run URL to proxy Telegram streams.</p>
-                    </div>
-                  )}
-                </div>
-              )}
 
               {/* Center Play Icon (Paused) */}
-              {!isPlaying && !error && (
+              {!isPlaying && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -855,7 +739,7 @@ export default function VideoPlayerModal({
         </div>
 
         {/* Custom Controls Bar */}
-        {!isYouTube && !error && (
+        {!isYouTube && (
           <div 
             onClick={(e) => { e.stopPropagation(); resetAutoHideTimer(); }}
             className={`absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/95 via-black/80 to-transparent p-4 pb-6 space-y-3 z-40 transition-opacity duration-300 ${
