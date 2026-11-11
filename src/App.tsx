@@ -116,11 +116,11 @@ export default function App() {
   useEffect(() => {
     handleRedirectResult().catch(() => {});
     
-    // Initialize safe status bar theme for Android WebView
+    // Hide top status bar by default for immersive app experience
     if (Capacitor.isNativePlatform()) {
       try {
-        StatusBar.setBackgroundColor({ color: '#000000' }).catch(() => {});
-        StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
+        StatusBar.hide().catch(() => {});
+        StatusBar.setOverlaysWebView({ overlay: true }).catch(() => {});
       } catch (e) {
         console.warn('StatusBar configuration notice:', e);
       }

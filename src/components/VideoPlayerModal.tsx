@@ -417,32 +417,25 @@ export default function VideoPlayerModal({
       }
     };
     const onError = async () => {
-      if (retryCount < 2) {
-        console.warn('[Player] Transient stream error detected, auto-retrying...', video.error);
+      console.warn('[Player] Video element stream notice:', video.error);
+      if (retryCount < 3) {
         setRetryCount(prev => prev + 1);
+        setIsLoading(true);
+        const currentPos = video.currentTime || 0;
+        setTimeout(() => {
+          if (videoRef.current) {
+            const separator = playableUrl.includes('?') ? '&' : '?';
+            videoRef.current.src = `${playableUrl}${separator}_retry=${Date.now()}`;
+            if (currentPos > 0) {
+              videoRef.current.currentTime = currentPos;
+            }
+            videoRef.current.play().catch(() => {});
+          }
+        }, 1000);
         return;
       }
       setIsLoading(false);
-      const videoError = video.error;
-      let msg = 'Unable to load stream. Please try again.';
-      if (videoError?.code === 4) msg = 'Unable to load stream. Please try again.';
-      if (videoError?.code === 3) msg = 'Network error while downloading video.';
-
-      if (playableUrl && playableUrl.includes('/api/stream')) {
-        try {
-          const res = await fetch(playableUrl, { headers: { Range: 'bytes=0-10' } });
-          if (!res.ok) {
-            const serverMsg = await res.text();
-            if (serverMsg && serverMsg.trim()) {
-              msg = serverMsg.trim();
-            }
-          }
-        } catch (e) {
-          // keep fallback msg
-        }
-      }
-
-      setError(msg);
+      setError('Unable to load stream. Please tap Retry Playback or verify media URL.');
     };
 
     video.addEventListener('play', onPlay);

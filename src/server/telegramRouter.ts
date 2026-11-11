@@ -373,8 +373,8 @@ export async function handleStream(req: Request, res: Response) {
     let start = 0;
     let endPos = fileSize - 1;
 
-    // Stream chunk limit: 5 MB per HTTP Range request when end is not explicitly requested
-    const MAX_RANGE_CHUNK = 5 * 1024 * 1024; // 5 MB
+    // Stream chunk limit: 20 MB per HTTP Range request for high-speed streaming of 100 MB to 3 GB files
+    const MAX_RANGE_CHUNK = 20 * 1024 * 1024; // 20 MB
 
     if (rangeHeader) {
       const match = rangeHeader.match(/bytes=(\d+)-(\d+)?/);

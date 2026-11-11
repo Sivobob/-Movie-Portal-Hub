@@ -1031,7 +1031,7 @@ async function handleStream(req, res) {
     const rangeHeader = req.headers.range;
     let start = 0;
     let endPos = fileSize - 1;
-    const MAX_RANGE_CHUNK = 5 * 1024 * 1024;
+    const MAX_RANGE_CHUNK = 20 * 1024 * 1024;
     if (rangeHeader) {
       const match = rangeHeader.match(/bytes=(\d+)-(\d+)?/);
       if (match) {
