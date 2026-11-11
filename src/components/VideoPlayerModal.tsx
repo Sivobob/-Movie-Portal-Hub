@@ -260,13 +260,14 @@ export default function VideoPlayerModal({
     const isTelegram = /t\.me|telegram\.me/i.test(trimmed);
 
     if (isTelegram) {
-      // Build dynamic params for retries
+      // Build dynamic params
       let params = `?url=${encodeURIComponent(trimmed)}`;
+      // Always transcode for native Android app to guarantee H.264 Baseline MP4 compatibility
+      if (Capacitor.isNativePlatform() || retryCount >= 1) {
+        params += '&transcode=1';
+      }
       if (retryCount > 0) {
         params += `&rb=${Date.now()}`; // Cache bust
-        // Force transcode if retry > 1
-        if (retryCount >= 2) params += '&transcode=1';
-        // Try different formats on higher retries
         if (retryCount === 3) params += '&format=webm';
         if (retryCount === 4) params += '&format=mkv';
       }
@@ -671,10 +672,12 @@ export default function VideoPlayerModal({
           {!isYouTube ? (
             <>
               <video
+                key={playableUrl}
                 ref={videoRef}
                 src={playableUrl || undefined}
                 playsInline
                 preload="auto"
+                crossOrigin="anonymous"
                 className="w-full h-full object-contain pointer-events-none"
               />
 
@@ -709,7 +712,11 @@ export default function VideoPlayerModal({
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/95 z-30 px-6 text-center">
                   <div className="max-w-md bg-neutral-900 border border-red-800/60 p-5 rounded-2xl shadow-2xl mb-4">
                     <p className="text-xs text-red-400 font-bold mb-1 uppercase tracking-wider">Stream Playback Notice</p>
-                    <p className="text-xs text-gray-300 leading-relaxed">{error}</p>
+                    <p className="text-xs text-gray-300 leading-relaxed mb-3">{error}</p>
+                    <div className="bg-yellow-400/10 border border-yellow-500/20 p-2.5 rounded-lg text-left">
+                       <p className="text-[10px] text-yellow-400 font-bold uppercase mb-1">Why is this happening in App?</p>
+                       <p className="text-[10px] text-gray-400 leading-tight">Chrome has your Google login saved, but the App doesn't. Please use the <b>Login to Server</b> button below to authorize your phone.</p>
+                    </div>
                     <div className="mt-3 pt-3 border-t border-red-800/40 space-y-1.5 text-left">
                        <p className="text-[9px] text-gray-500 font-mono break-all opacity-70">
                          <span className="text-yellow-500/50 font-bold mr-1">URL:</span>
@@ -726,6 +733,21 @@ export default function VideoPlayerModal({
                   </div>
 
                   <div className="flex flex-wrap items-center justify-center gap-2 max-w-md">
+                    <button
+                      onClick={async () => {
+                        const url = buildApiUrl('/api/health');
+                        if (Capacitor.isNativePlatform()) {
+                          await Browser.open({ url });
+                        } else {
+                          window.open(url, '_blank');
+                        }
+                      }}
+                      className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-white font-black text-xs px-6 py-3 rounded-xl transition-all active:scale-95 cursor-pointer shadow-lg animate-bounce-short"
+                      title="Fix authentication if stream is blocked"
+                    >
+                      <Settings size={15} /> Login to Server (Click This First)
+                    </button>
+
                     <button
                       onClick={() => {
                         setError(null);
@@ -750,24 +772,9 @@ export default function VideoPlayerModal({
 
                     <button
                       onClick={async () => {
-                        const url = buildApiUrl('/api/health');
-                        if (Capacitor.isNativePlatform()) {
-                          await Browser.open({ url });
-                        } else {
-                          window.open(url, '_blank');
-                        }
-                      }}
-                      className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all cursor-pointer shadow-lg"
-                      title="Fix authentication if stream is blocked"
-                    >
-                      <Settings size={14} /> Login to Server
-                    </button>
-
-                    <button
-                      onClick={() => {
                         if (playableUrl) {
                           if (Capacitor.isNativePlatform()) {
-                            Browser.open({ url: playableUrl });
+                            await Browser.open({ url: playableUrl });
                           } else {
                             window.open(playableUrl, '_blank');
                           }

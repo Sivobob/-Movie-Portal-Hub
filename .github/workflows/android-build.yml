@@ -54,8 +54,9 @@ jobs:
       - name: Prepare APK Asset
         run: |
           if [ -f "android/app/build/outputs/apk/debug/app-debug.apk" ]; then
+            cp android/app/build/outputs/apk/debug/app-debug.apk Movie-Portal-v3.5.2.apk
             cp android/app/build/outputs/apk/debug/app-debug.apk Movie-Portal-v3.5.0.apk
-            echo "APK ready."
+            echo "APK ready: Movie-Portal-v3.5.2.apk and Movie-Portal-v3.5.0.apk"
           else
             echo "APK NOT FOUND!"
             find android -name "*.apk"
@@ -66,10 +67,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         continue-on-error: true
         with:
-          tag_name: "v3.5.0-ultimate"
-          name: "Movie Portal Android v3.5.0 (Ultimate Fix)"
-          body: "Official Fix: Synced with Chrome environment. Please uninstall old app first."
-          files: Movie-Portal-v3.5.0.apk
+          tag_name: "v3.5.2"
+          name: "Movie Portal Android v3.5.2 (Chrome Parity Final Fix)"
+          body: "Official v3.5.2 Release: Direct Chrome parity stream engine, H.264 Baseline transcoding, and instant playback."
+          files: |
+            Movie-Portal-v3.5.2.apk
+            Movie-Portal-v3.5.0.apk
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

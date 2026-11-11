@@ -415,9 +415,10 @@ export async function handleStream(req: Request, res: Response) {
     }
 
     let rawMime = (document.mimeType || '').toLowerCase();
-    const isMkv = fileName.toLowerCase().endsWith('.mkv') || rawMime.includes('matroska') || rawMime.includes('mkv');
-    const isWebm = fileName.toLowerCase().endsWith('.webm') || rawMime.includes('webm');
-    const isTranscodeRequired = isMkv || req.query.transcode === '1';
+    const lowerName = fileName.toLowerCase();
+    const isMkv = lowerName.endsWith('.mkv') || rawMime.includes('matroska') || rawMime.includes('mkv');
+    const isHevc = lowerName.includes('hevc') || lowerName.includes('x265') || lowerName.includes('h265') || lowerName.includes('h.265') || lowerName.includes('10bit');
+    const isTranscodeRequired = isMkv || isHevc || req.query.transcode === '1' || req.query.transcode === 'true';
 
     let mimeType = 'video/mp4';
     if (isWebm && !isTranscodeRequired) mimeType = 'video/webm';

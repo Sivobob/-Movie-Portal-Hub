@@ -1,7 +1,7 @@
 {
-  "latestVersion": "3.5.0",
-  "latestVersionCode": 100,
-  "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal-v3.5.0.apk",
+  "latestVersion": "3.5.2",
+  "latestVersionCode": 120,
+  "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal-v3.5.2.apk",
   "isMandatory": true,
-  "releaseNotes": "ULTIMATE FIX: Synced App with Chrome Dev engine. Ultra-compatible H.264 profile. Browser fallback added."
+  "releaseNotes": "CRITICAL: Fix for App-only playback. New 'Verify Connection' flow and refreshed stream engine."
 }

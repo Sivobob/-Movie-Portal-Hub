@@ -11,6 +11,24 @@ public class MainActivity extends BridgeActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         enableImmersiveStickyMode();
+        configureWebView();
+    }
+
+    private void configureWebView() {
+        try {
+            android.webkit.CookieManager cookieManager = android.webkit.CookieManager.getInstance();
+            cookieManager.setAcceptCookie(true);
+            if (getBridge() != null && getBridge().getWebView() != null) {
+                cookieManager.setAcceptThirdPartyCookies(getBridge().getWebView(), true);
+                android.webkit.WebSettings settings = getBridge().getWebView().getSettings();
+                settings.setDomStorageEnabled(true);
+                settings.setDatabaseEnabled(true);
+                settings.setMediaPlaybackRequiresUserGesture(false);
+                settings.setMixedContentMode(android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
     @Override
