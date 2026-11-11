@@ -1,6 +1,5 @@
-import { Capacitor } from '@capacitor/core';
+export const LIVE_BACKEND_URL = 'https://ais-pre-wfl4fkek6sbm6lchwjz2bi-832989141722.asia-southeast1.run.app';
 
-export const LIVE_BACKEND_URL = 'https://ais-pre-jca6l6vqg5h4vdtbp6abaw-755452514312.asia-northeast1.run.app';
 
 /**
  * Returns the base URL for API requests.

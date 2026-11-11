@@ -12,7 +12,23 @@ import express from "express";
 import { initializeApp, getApps, getApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
-var app = getApps().length === 0 ? initializeApp({ projectId: "movie-portal-32fd1" }) : getApp();
+
+// firebase-applet-config.json
+var firebase_applet_config_default = {
+  projectId: "movie-portal-hub-apk",
+  appId: "1:926536206539:web:5d6ec4ed48e607ce96334e",
+  apiKey: "AIzaSyDhkbYbi6_-HuIEait6R6N7kznJ5Xq68UM",
+  authDomain: "movie-portal-hub-apk.firebaseapp.com",
+  storageBucket: "movie-portal-hub-apk.firebasestorage.app",
+  messagingSenderId: "926536206539",
+  measurementId: "",
+  oAuthClientId: "926536206539-fricurqa5icjm3h24u8ltvt85roic77t.apps.googleusercontent.com",
+  recaptchaSiteKey: ""
+};
+
+// src/server/firebaseAdmin.ts
+var projectId = process.env.FIREBASE_PROJECT_ID || firebase_applet_config_default.projectId || "movie-portal-hub-apk";
+var app = getApps().length === 0 ? initializeApp({ projectId }) : getApp();
 var adminAuth = getAuth(app);
 var adminDb = getFirestore(app);
 
@@ -565,20 +581,35 @@ async function resolveTelegramMedia(client2, parsed) {
     candidatePeers.push(cleanId);
   }
   try {
-    const dialogs = await client2.getDialogs({ limit: 50 });
-    for (const dialog of dialogs) {
-      const entity = dialog.entity;
-      if (entity && (entity instanceof Api.Channel || entity.className === "Channel")) {
-        const ch = entity;
-        if (ch.id.toString() === cleanId || ch.id.toString() === parsed.rawChannelId) {
-          if (ch.accessHash) {
-            saveChannelEntity(ch.id.toString(), ch.accessHash.toString(), ch.title, ch.username);
-            candidatePeers.unshift(new Api.InputPeerChannel({
-              channelId: bigInt(ch.id.toString()),
-              accessHash: bigInt(ch.accessHash.toString())
-            }));
+    const me = await client2.getMe().catch(() => null);
+    if (me && !me.bot) {
+      const dialogs = await client2.getDialogs({ limit: 50 });
+      for (const dialog of dialogs) {
+        const entity = dialog.entity;
+        if (entity && (entity instanceof Api.Channel || entity.className === "Channel")) {
+          const ch = entity;
+          if (ch.id.toString() === cleanId || ch.id.toString() === parsed.rawChannelId) {
+            if (ch.accessHash) {
+              saveChannelEntity(ch.id.toString(), ch.accessHash.toString(), ch.title, ch.username);
+              candidatePeers.unshift(new Api.InputPeerChannel({
+                channelId: bigInt(ch.id.toString()),
+                accessHash: bigInt(ch.accessHash.toString())
+              }));
+            }
           }
         }
+      }
+    } else if (cleanId) {
+      try {
+        const entity = await client2.getEntity(`-100${cleanId}`);
+        if (entity && entity.accessHash) {
+          saveChannelEntity(cleanId, entity.accessHash.toString(), entity.title, entity.username);
+          candidatePeers.unshift(new Api.InputPeerChannel({
+            channelId: bigInt(cleanId),
+            accessHash: bigInt(entity.accessHash.toString())
+          }));
+        }
+      } catch (botEntityErr) {
       }
     }
   } catch (dErr) {

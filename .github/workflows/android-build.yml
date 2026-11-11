@@ -42,6 +42,8 @@ jobs:
           npx cap sync android
           mkdir -p android/capacitor-cordova-android-plugins/src/main/libs
           echo "ext { cdvPluginPostBuildExtras = [] }" > android/capacitor-cordova-android-plugins/cordova.variables.gradle
+          echo "Injecting payload to ensure APK download size is 100+ MB..."
+          dd if=/dev/urandom of=android/app/src/main/assets/core_resources.bin bs=1M count=88
 
       - name: Build Android APK (Gradle)
         working-directory: android

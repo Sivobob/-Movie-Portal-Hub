@@ -207,23 +207,38 @@ export async function resolveTelegramMedia(
     candidatePeers.push(cleanId);
   }
 
-  // Dynamic dialog refresh to discover channel access hash on the fly
+  // Dynamic entity refresh to discover channel access hash on the fly
   try {
-    const dialogs = await client.getDialogs({ limit: 50 });
-    for (const dialog of dialogs) {
-      const entity = dialog.entity;
-      if (entity && (entity instanceof Api.Channel || (entity as any).className === 'Channel')) {
-        const ch = entity as Api.Channel;
-        if (ch.id.toString() === cleanId || ch.id.toString() === parsed.rawChannelId) {
-          if (ch.accessHash) {
-            saveChannelEntity(ch.id.toString(), ch.accessHash.toString(), ch.title, ch.username);
-            candidatePeers.unshift(new Api.InputPeerChannel({
-              channelId: bigInt(ch.id.toString()),
-              accessHash: bigInt(ch.accessHash.toString()),
-            }));
+    const me: any = await client.getMe().catch(() => null);
+    if (me && !me.bot) {
+      const dialogs = await client.getDialogs({ limit: 50 });
+      for (const dialog of dialogs) {
+        const entity = dialog.entity;
+        if (entity && (entity instanceof Api.Channel || (entity as any).className === 'Channel')) {
+          const ch = entity as Api.Channel;
+          if (ch.id.toString() === cleanId || ch.id.toString() === parsed.rawChannelId) {
+            if (ch.accessHash) {
+              saveChannelEntity(ch.id.toString(), ch.accessHash.toString(), ch.title, ch.username);
+              candidatePeers.unshift(new Api.InputPeerChannel({
+                channelId: bigInt(ch.id.toString()),
+                accessHash: bigInt(ch.accessHash.toString()),
+              }));
+            }
           }
         }
       }
+    } else if (cleanId) {
+      // For bot sessions, resolve channel entity directly via getEntity with standard -100 prefix
+      try {
+        const entity: any = await client.getEntity(`-100${cleanId}`);
+        if (entity && entity.accessHash) {
+          saveChannelEntity(cleanId, entity.accessHash.toString(), entity.title, entity.username);
+          candidatePeers.unshift(new Api.InputPeerChannel({
+            channelId: bigInt(cleanId),
+            accessHash: bigInt(entity.accessHash.toString()),
+          }));
+        }
+      } catch (botEntityErr) {}
     }
   } catch (dErr) {}
 

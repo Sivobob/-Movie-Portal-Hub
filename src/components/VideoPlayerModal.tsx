@@ -75,6 +75,10 @@ export default function VideoPlayerModal({
   const [error, setError] = useState<string | null>(null);
   const [playableUrl, setPlayableUrl] = useState<string>('');
   const [retryCount, setRetryCount] = useState(0);
+  const [showServerConfig, setShowServerConfig] = useState(false);
+  const [customServerInput, setCustomServerInput] = useState(() => {
+    return (typeof window !== 'undefined' && localStorage.getItem('movie_portal_backend_url')) || '';
+  });
 
   const { startDownload } = useDownloads();
   const [isDownloading, setIsDownloading] = useState(false);
@@ -720,23 +724,90 @@ export default function VideoPlayerModal({
                 </div>
               )}
 
-              {/* Minimal Clean Error & Retry Screen */}
+              {/* Minimal Clean Error & Options Screen */}
               {error && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/95 z-30 px-6 text-center">
                   <div className="max-w-md bg-neutral-900 border border-red-800/60 p-5 rounded-2xl shadow-2xl mb-4">
                     <p className="text-xs text-red-400 font-bold mb-1 uppercase tracking-wider">Stream Playback Notice</p>
                     <p className="text-xs text-gray-300 leading-relaxed">{error}</p>
                   </div>
-                  <button
-                    onClick={() => {
-                      setError(null);
-                      setIsLoading(true);
-                      handleRetry();
-                    }}
-                    className="flex items-center gap-2 bg-yellow-400 hover:bg-yellow-500 text-black font-black text-xs px-6 py-2.5 rounded-xl transition-all active:scale-95 cursor-pointer shadow-lg shadow-yellow-400/20"
-                  >
-                    <RotateCcw size={15} /> Retry Playback
-                  </button>
+
+                  <div className="flex flex-wrap items-center justify-center gap-2 max-w-md">
+                    <button
+                      onClick={() => {
+                        setError(null);
+                        setIsLoading(true);
+                        handleRetry();
+                      }}
+                      className="flex items-center gap-2 bg-yellow-400 hover:bg-yellow-500 text-black font-black text-xs px-5 py-2.5 rounded-xl transition-all active:scale-95 cursor-pointer shadow-lg shadow-yellow-400/20"
+                    >
+                      <RotateCcw size={15} /> Retry Playback
+                    </button>
+
+                    {/t\.me|telegram\.me/i.test((videoQualities && videoQualities[currentQuality]) || videoUrl || '') && (
+                      <a
+                        href={((videoQualities && videoQualities[currentQuality]) || videoUrl || '').startsWith('http')
+                          ? ((videoQualities && videoQualities[currentQuality]) || videoUrl || '')
+                          : `https://${(videoQualities && videoQualities[currentQuality]) || videoUrl || ''}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition-all active:scale-95 cursor-pointer shadow-lg shadow-sky-600/20"
+                      >
+                        <ExternalLink size={15} /> Watch in Telegram
+                      </a>
+                    )}
+
+                    <button
+                      onClick={() => {
+                        setError(null);
+                        setIsLoading(true);
+                        setPlayableUrl('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4');
+                      }}
+                      className="flex items-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-gray-300 font-semibold text-xs px-4 py-2.5 rounded-xl border border-neutral-700 transition-all cursor-pointer"
+                    >
+                      <Play size={14} /> Test Sample
+                    </button>
+
+                    <button
+                      onClick={() => setShowServerConfig(prev => !prev)}
+                      className="flex items-center gap-1.5 bg-neutral-800/80 hover:bg-neutral-700 text-gray-400 hover:text-white text-xs px-3 py-2.5 rounded-xl border border-neutral-800 transition-all cursor-pointer"
+                      title="Configure Backend Server"
+                    >
+                      <Settings size={14} /> Server
+                    </button>
+                  </div>
+
+                  {showServerConfig && (
+                    <div className="mt-4 p-3 bg-neutral-900 border border-neutral-700 rounded-xl max-w-md w-full text-left space-y-2 animate-in fade-in duration-150">
+                      <label className="text-[11px] font-bold text-gray-300 block">Stream Server URL:</label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={customServerInput}
+                          onChange={(e) => setCustomServerInput(e.target.value)}
+                          placeholder="https://your-backend.run.app"
+                          className="flex-1 bg-black text-white text-xs px-3 py-1.5 rounded-lg border border-neutral-700 focus:outline-none focus:border-yellow-400"
+                        />
+                        <button
+                          onClick={() => {
+                            if (customServerInput.trim()) {
+                              localStorage.setItem('movie_portal_backend_url', customServerInput.trim());
+                            } else {
+                              localStorage.removeItem('movie_portal_backend_url');
+                            }
+                            setShowServerConfig(false);
+                            setError(null);
+                            setIsLoading(true);
+                            handleRetry();
+                          }}
+                          className="bg-yellow-400 text-black font-bold text-xs px-3 py-1.5 rounded-lg hover:bg-yellow-300 transition-all cursor-pointer"
+                        >
+                          Save
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-gray-500">Enter your live cloud server or Cloud Run URL to proxy Telegram streams.</p>
+                    </div>
+                  )}
                 </div>
               )}
 
