@@ -1116,6 +1116,9 @@ async function handleStream(req, res) {
         "pipe:1"
       ]);
       ffmpegProc.stdout.pipe(res);
+      ffmpegProc.stderr.on("data", (d) => console.log("[FFMPEG Err]", d.toString()));
+      ffmpegProc.on("error", (e) => console.error("[FFMPEG Proc Err]", e));
+      ffmpegProc.on("close", (code) => console.log("[FFMPEG Closed]", code));
       req.on("close", () => {
         try {
           ffmpegProc.kill("SIGKILL");
