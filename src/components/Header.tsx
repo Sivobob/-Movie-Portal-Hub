@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useAuth, isAuthorizedAdminEmail } from '../context/AuthContext';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { ShieldCheck, Settings, ArrowLeft, Lock, Eye, EyeOff, X, KeyRound, LogOut, Search, Download, Smartphone } from 'lucide-react';
-import { isNativeAndroid, isInstalledPhoneApp, downloadOfficialApk } from '../utils/platform';
+import { isNativeAndroid, isInstalledPhoneApp, downloadOfficialApk, OFFICIAL_APK_DOWNLOAD_URL } from '../utils/platform';
 
 export const MoviePortal3DLogo = React.memo(function MoviePortal3DLogo() {
   return (
@@ -151,14 +151,16 @@ export default function Header() {
                 </p>
               </div>
             </div>
-            <button
-              type="button"
+            <a
+              href={OFFICIAL_APK_DOWNLOAD_URL}
+              target="_blank"
+              rel="noopener noreferrer"
               onClick={downloadOfficialApk}
-              className="ml-2 flex-shrink-0 bg-black hover:bg-neutral-900 active:scale-95 text-yellow-400 font-black text-xs px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 shadow transition-all cursor-pointer uppercase tracking-wider"
+              className="ml-2 flex-shrink-0 bg-black hover:bg-neutral-900 active:scale-95 text-yellow-400 font-black text-xs px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 shadow transition-all cursor-pointer uppercase tracking-wider no-underline"
             >
               <Download size={13} className="stroke-[2.5]" />
               <span>Download App</span>
-            </button>
+            </a>
           </div>
         )}
 
@@ -320,7 +322,7 @@ export default function Header() {
                   Movie Portal Official Android App
                 </span>
                 <span className="bg-black/20 text-black text-[10px] font-extrabold px-1.5 py-0.2 rounded uppercase">
-                  v3.2 APK
+                  v3.5 APK (179MB)
                 </span>
               </div>
               <p className="text-[11px] font-semibold text-neutral-900 truncate">
@@ -328,14 +330,16 @@ export default function Header() {
               </p>
             </div>
           </div>
-          <button
-            type="button"
+          <a
+            href={OFFICIAL_APK_DOWNLOAD_URL}
+            target="_blank"
+            rel="noopener noreferrer"
             onClick={downloadOfficialApk}
-            className="ml-3 flex-shrink-0 bg-black hover:bg-neutral-900 active:scale-95 text-yellow-400 font-black text-xs px-4 py-1.5 rounded-xl flex items-center gap-1.5 shadow-md transition-all cursor-pointer uppercase tracking-wider"
+            className="ml-3 flex-shrink-0 bg-black hover:bg-neutral-900 active:scale-95 text-yellow-400 font-black text-xs px-4 py-1.5 rounded-xl flex items-center gap-1.5 shadow-md transition-all cursor-pointer uppercase tracking-wider no-underline"
           >
             <Download size={14} className="stroke-[2.5]" />
             <span>Download App</span>
-          </button>
+          </a>
         </div>
       )}
 

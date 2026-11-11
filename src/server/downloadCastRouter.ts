@@ -80,78 +80,12 @@ async function fetchLatestGitHubApk(): Promise<{ url: string; version: string; f
 }
 
 // Route 1: Official Android APK Dynamic Download Endpoint
-// Chrome will automatically download the latest APK directly as a full binary file stream
-downloadCastRouter.get('/download/apk', async (req: Request, res: Response) => {
+// Redirects Chrome & mobile browsers directly to high-speed GitHub release CDN
+downloadCastRouter.get('/download/apk', async (_req: Request, res: Response) => {
   const latest = await fetchLatestGitHubApk();
-  console.log(`[Download Router] Processing APK request: ${latest.fileName} from ${latest.url}`);
-
-  if (req.query.redirect === '1' || req.query.direct === '1') {
-    return res.redirect(302, latest.url);
-  }
-
-  // Stream directly to client so Chrome downloads full APK with correct name & size without cross-origin redirect traps
-  const pipeRemoteApk = (targetUrl: string, depth = 0) => {
-    if (depth > 5) {
-      if (!res.headersSent) res.redirect(302, latest.url);
-      return;
-    }
-
-    try {
-      const parsed = new URL(targetUrl);
-      const client = parsed.protocol === 'https:' ? https : http;
-      const remoteReq = client.get(
-        targetUrl,
-        {
-          headers: {
-            'User-Agent': 'MoviePortal-Downloader/3.5 (Linux; Android; Mobile)',
-            'Accept': '*/*',
-          },
-        },
-        (remoteRes) => {
-          if (
-            (remoteRes.statusCode === 301 || remoteRes.statusCode === 302 || remoteRes.statusCode === 307) &&
-            remoteRes.headers.location
-          ) {
-            return pipeRemoteApk(remoteRes.headers.location, depth + 1);
-          }
-
-          if (remoteRes.statusCode && remoteRes.statusCode >= 400) {
-            console.warn(`[Download Router] Remote responded with ${remoteRes.statusCode}`);
-            if (!res.headersSent) res.redirect(302, latest.url);
-            return;
-          }
-
-          const fileName = latest.fileName || 'Movie-Portal.apk';
-          res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-          res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-          res.setHeader('Access-Control-Allow-Origin', '*');
-          res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Disposition');
-          if (remoteRes.headers['content-length']) {
-            res.setHeader('Content-Length', remoteRes.headers['content-length']);
-          }
-
-          remoteRes.pipe(res);
-        }
-      );
-
-      remoteReq.on('error', (err) => {
-        console.error('[Download Router] Streaming error:', err?.message || err);
-        if (!res.headersSent) {
-          res.redirect(302, latest.url);
-        }
-      });
-
-      req.on('close', () => {
-        remoteReq.destroy();
-      });
-    } catch (e) {
-      if (!res.headersSent) {
-        res.redirect(302, latest.url);
-      }
-    }
-  };
-
-  pipeRemoteApk(latest.url);
+  console.log(`[Download Router] Redirecting to latest APK: ${latest.url}`);
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.redirect(302, latest.url);
 });
 
 // Route 1b: Release info for frontend / version checker
