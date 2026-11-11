@@ -157,11 +157,21 @@ export default function VideoPlayerModal({
   useEffect(() => {
     if (isOpen) {
       showControlsWithTimer();
+      window.history.pushState({ playerModalOpen: true }, '');
     }
+
+    const handlePopState = (e: PopStateEvent) => {
+      e.preventDefault();
+      onClose();
+    };
+
+    window.addEventListener('popstate', handlePopState);
+
     return () => {
       clearAutoHideTimer();
+      window.removeEventListener('popstate', handlePopState);
     };
-  }, [isOpen, isPlaying]);
+  }, [isOpen, onClose]);
 
   const [doubleTapFeedback, setDoubleTapFeedback] = useState<{ side: 'left' | 'right'; text: string } | null>(null);
   const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -928,7 +938,7 @@ export default function VideoPlayerModal({
                   {showAudioMenu && (
                     <div className="absolute bottom-full right-0 mb-2 bg-neutral-900 border border-neutral-800 rounded-lg shadow-xl overflow-hidden min-w-[130px] z-50">
                       <div className="px-3 py-2 text-[9px] font-black text-gray-400 bg-black/40 border-b border-neutral-800 uppercase">Audio Track</div>
-                      {['Default (Stereo)', 'Hindi HD', 'English HD'].map((track) => (
+                      {['Default (Stereo)', 'Hindi', 'English', 'Tamil', 'Telugu', 'Malayalam', 'Kannada', 'Bengali', 'Punjabi', 'Marathi', 'Gujarati', 'Urdu'].map((track) => (
                         <button
                           key={track}
                           onClick={() => {
@@ -964,7 +974,7 @@ export default function VideoPlayerModal({
                   {showSubtitlesMenu && (
                     <div className="absolute bottom-full right-0 mb-2 bg-neutral-900 border border-neutral-800 rounded-lg shadow-xl overflow-hidden min-w-[120px] z-50">
                       <div className="px-3 py-2 text-[9px] font-black text-gray-400 bg-black/40 border-b border-neutral-800 uppercase">Subtitles (CC)</div>
-                      {['Off', 'English', 'Hindi'].map((sub) => (
+                      {['Off', 'Hindi', 'English', 'Tamil', 'Telugu', 'Malayalam', 'Kannada', 'Bengali', 'Punjabi', 'Marathi', 'Gujarati', 'Urdu'].map((sub) => (
                         <button
                           key={sub}
                           onClick={() => {
