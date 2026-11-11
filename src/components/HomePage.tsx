@@ -170,10 +170,13 @@ export default function HomePage() {
         }
       },
       (err) => {
-        console.warn('Firestore listener permission notice (ignoring):', err?.message || err);
-        // Silently fail to local storage
         if (!isMounted) return;
         setIsLoading(false);
+        const local = getLocalMovies();
+        if (local.length > 0) {
+          setMovies(local);
+          setFeaturedMovies(local);
+        }
       }
     );
     return () => {
