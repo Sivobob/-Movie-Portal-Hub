@@ -419,19 +419,21 @@ export default function VideoPlayerModal({
     const onError = async () => {
       console.warn('[Player] Video element stream notice:', video.error);
       if (retryCount < 3) {
-        setRetryCount(prev => prev + 1);
+        const nextRetry = retryCount + 1;
+        setRetryCount(nextRetry);
         setIsLoading(true);
         const currentPos = video.currentTime || 0;
+        const formatParam = nextRetry === 1 ? 'format=mkv' : nextRetry === 2 ? 'format=webm' : 'format=mp4';
         setTimeout(() => {
           if (videoRef.current) {
             const separator = playableUrl.includes('?') ? '&' : '?';
-            videoRef.current.src = `${playableUrl}${separator}_retry=${Date.now()}`;
+            videoRef.current.src = `${playableUrl}${separator}${formatParam}&_retry=${Date.now()}`;
             if (currentPos > 0) {
-              videoRef.current.currentTime = currentPos;
+              try { videoRef.current.currentTime = currentPos; } catch (e) {}
             }
             videoRef.current.play().catch(() => {});
           }
-        }, 1000);
+        }, 800);
         return;
       }
       setIsLoading(false);

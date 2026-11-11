@@ -1066,9 +1066,13 @@ async function handleStream(req, res) {
     const isWebm = fileName.toLowerCase().endsWith(".webm") || rawMime.includes("webm");
     let mimeType = "video/mp4";
     if (isWebm) mimeType = "video/webm";
-    else if (isMkv) mimeType = "video/mp4";
-    if (req.query.format === "webm" || req.query.retry) {
+    else if (isMkv) mimeType = "video/x-matroska";
+    if (req.query.format === "webm") {
       mimeType = "video/webm";
+    } else if (req.query.format === "mkv") {
+      mimeType = "video/x-matroska";
+    } else if (req.query.format === "mp4") {
+      mimeType = "video/mp4";
     }
     const commonHeaders = {
       "Access-Control-Expose-Headers": "Content-Range, Accept-Ranges, Content-Length, X-Video-Duration, Content-Type",

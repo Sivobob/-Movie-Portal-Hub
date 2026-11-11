@@ -416,10 +416,14 @@ export async function handleStream(req: Request, res: Response) {
 
     let mimeType = 'video/mp4';
     if (isWebm) mimeType = 'video/webm';
-    else if (isMkv) mimeType = 'video/mp4';
+    else if (isMkv) mimeType = 'video/x-matroska';
 
-    if (req.query.format === 'webm' || req.query.retry) {
+    if (req.query.format === 'webm') {
       mimeType = 'video/webm';
+    } else if (req.query.format === 'mkv') {
+      mimeType = 'video/x-matroska';
+    } else if (req.query.format === 'mp4') {
+      mimeType = 'video/mp4';
     }
 
     const commonHeaders: any = {

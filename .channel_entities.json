@@ -1,4 +1,11 @@
 {
+  "3850537977": {
+    "channelId": "3850537977",
+    "accessHash": "5272514172729841892",
+    "title": "app Databas",
+    "username": "",
+    "updatedAt": 1794394258048
+  },
   "QSL_3k54YfBjMjE1": {
     "channelId": "QSL_3k54YfBjMjE1",
     "accessHash": "0",
@@ -26,5 +33,12 @@
     "title": "Private Channel (+QSL_3k54YfBjMjE1)",
     "username": "+QSL_3k54YfBjMjE1",
     "updatedAt": 1794318563707
+  },
+  "-1003850537977": {
+    "channelId": "3850537977",
+    "accessHash": "5272514172729841892",
+    "title": "app Databas",
+    "username": "",
+    "updatedAt": 1794394258048
   }
 }
