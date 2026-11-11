@@ -317,10 +317,13 @@ router.post('/verify', async (req: Request, res: Response) => {
  */
 export async function handleStream(req: Request, res: Response) {
   const urlParam = req.query.url as string;
-  const retryVal = req.query.retry as string;
+  const isTranscodeParam = req.query.transcode === '1';
+  
+  console.log(`[Stream Req] Transcode: ${isTranscodeParam}. Client: ${req.headers['user-agent']?.substring(0, 50)}`);
+  console.log(`[Stream Range] ${req.headers.range || 'No Range'}`);
+
   if (!urlParam) return res.status(400).send('URL required');
   console.log(`[Stream] Incoming request for: ${urlParam.substring(0, 100)}${urlParam.length > 100 ? '...' : ''}`);
-  if (retryVal) console.log(`[Stream] Client requested retry token: ${retryVal}`);
 
   const fallbackSampleStream = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
 

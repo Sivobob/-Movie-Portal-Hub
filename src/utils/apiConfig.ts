@@ -1,4 +1,5 @@
-export const LIVE_BACKEND_URL = 'https://ais-pre-wfl4fkek6sbm6lchwjz2bi-832989141722.asia-southeast1.run.app';
+export const LIVE_BACKEND_URL = 'https://ais-dev-wfl4fkek6sbm6lchwjz2bi-832989141722.asia-southeast1.run.app';
+export const PRE_BACKEND_URL = 'https://ais-pre-wfl4fkek6sbm6lchwjz2bi-832989141722.asia-southeast1.run.app';
 
 
 /**
@@ -10,22 +11,19 @@ export const LIVE_BACKEND_URL = 'https://ais-pre-wfl4fkek6sbm6lchwjz2bi-83298914
 export function getApiBaseUrl(): string {
   if (typeof window === 'undefined') return '';
 
+  // 1. User manual override
   const customServer = localStorage.getItem('movie_portal_backend_url');
   if (customServer && customServer.trim()) {
     return customServer.trim().replace(/\/+$/, '');
   }
 
-  // Force live backend URL for native environments to avoid path issues
-  if ((window as any).Capacitor?.isNativePlatform()) {
-    return LIVE_BACKEND_URL;
-  }
-
-  // If directly running on the Cloud Run backend server, relative paths work
+  // 2. If running on a known cloud domain (Chrome/Web), use relative paths
   if (window.location.hostname && window.location.hostname.includes('run.app')) {
     return '';
   }
 
-  // Default
+  // 3. For Native APK / Localhost, we must use an absolute URL.
+  // We prioritize the Dev URL because that's where the user is seeing it work in Chrome.
   return LIVE_BACKEND_URL;
 }
 
@@ -35,5 +33,11 @@ export function getApiBaseUrl(): string {
 export function buildApiUrl(path: string): string {
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   const base = getApiBaseUrl();
+  
+  // Debug log for app development
+  if ((window as any).Capacitor?.isNativePlatform()) {
+     console.log('[API] Final URL:', base ? `${base}${cleanPath}` : cleanPath);
+  }
+
   return base ? `${base}${cleanPath}` : cleanPath;
 }

@@ -708,6 +708,11 @@ export default function VideoPlayerModal({
                   <div className="max-w-md bg-neutral-900 border border-red-800/60 p-5 rounded-2xl shadow-2xl mb-4">
                     <p className="text-xs text-red-400 font-bold mb-1 uppercase tracking-wider">Stream Playback Notice</p>
                     <p className="text-xs text-gray-300 leading-relaxed">{error}</p>
+                    <div className="mt-3 pt-3 border-t border-red-800/40">
+                       <p className="text-[9px] text-gray-500 font-mono break-all opacity-60">
+                         Endpoint: {playableUrl ? playableUrl.split('?')[0] : 'N/A'}
+                       </p>
+                    </div>
                   </div>
 
                   <div className="flex flex-wrap items-center justify-center gap-2 max-w-md">
