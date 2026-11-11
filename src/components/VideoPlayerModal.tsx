@@ -644,47 +644,11 @@ export default function VideoPlayerModal({
             showControls ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
           }`}
         >
-          <div className="flex items-center gap-2.5 truncate max-w-[80%]">
+          <div className="flex items-center gap-2.5 truncate max-w-[95%]">
             <span className="bg-yellow-400 text-black text-[10px] font-black px-1.5 py-0.5 rounded uppercase">
               {currentQuality !== 'Default' ? `${currentQuality} STREAM` : 'HD STREAM'}
             </span>
             <h3 className="text-sm sm:text-base font-bold text-white truncate shadow-black drop-shadow-md">{title}</h3>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                resetAutoHideTimer();
-                handleDownload();
-              }}
-              disabled={isDownloading}
-              title="Download Movie"
-              className={`p-2 rounded-full bg-black/40 text-yellow-400 border border-yellow-400/30 transition-all backdrop-blur-sm cursor-pointer flex items-center justify-center ${
-                isDownloading ? 'opacity-50 animate-pulse' : 'hover:bg-yellow-400 hover:text-black'
-              }`}
-            >
-              <Download size={18} />
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                resetAutoHideTimer();
-                setShowTVCastModal(true);
-              }}
-              title="Cast to Smart TV"
-              className="p-2 rounded-full bg-black/40 hover:bg-yellow-400 text-yellow-400 hover:text-black transition-colors backdrop-blur-sm cursor-pointer flex items-center justify-center border border-yellow-400/30"
-            >
-              <Tv size={18} />
-            </button>
-            <button
-              onClick={onClose}
-              className="p-2 rounded-full bg-black/40 hover:bg-red-600 text-white transition-colors backdrop-blur-sm cursor-pointer"
-            >
-              <X size={20} />
-            </button>
           </div>
         </div>
 
@@ -880,13 +844,13 @@ export default function VideoPlayerModal({
             </div>
 
             {/* Actions */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2.5 sm:gap-4">
                 {onPrevEpisode && (
                   <button
                     onClick={onPrevEpisode}
                     disabled={!hasPrev}
-                    className="text-gray-400 hover:text-white disabled:opacity-30 transition-colors"
+                    className="text-white hover:text-yellow-400 disabled:opacity-30 transition-colors cursor-pointer"
                   >
                     <SkipBack size={20} fill="currentColor" />
                   </button>
@@ -896,9 +860,9 @@ export default function VideoPlayerModal({
                   type="button"
                   onClick={() => handleSkip(-10)}
                   title="Rewind 10s"
-                  className="text-gray-300 hover:text-yellow-400 transition-colors cursor-pointer flex items-center gap-0.5 text-xs font-bold"
+                  className="text-white hover:text-yellow-400 transition-colors cursor-pointer flex items-center gap-1 text-xs font-bold bg-white/10 px-2 py-1.5 rounded-lg"
                 >
-                  <RotateCcw size={18} />
+                  <RotateCcw size={16} />
                   <span className="text-[10px]">10s</span>
                 </button>
 
@@ -914,25 +878,25 @@ export default function VideoPlayerModal({
                   type="button"
                   onClick={() => handleSkip(10)}
                   title="Forward 10s"
-                  className="text-gray-300 hover:text-yellow-400 transition-colors cursor-pointer flex items-center gap-0.5 text-xs font-bold"
+                  className="text-white hover:text-yellow-400 transition-colors cursor-pointer flex items-center gap-1 text-xs font-bold bg-white/10 px-2 py-1.5 rounded-lg"
                 >
                   <span className="text-[10px]">10s</span>
-                  <RotateCw size={18} />
+                  <RotateCw size={16} />
                 </button>
 
                 {onNextEpisode && (
                   <button
                     onClick={onNextEpisode}
                     disabled={!hasNext}
-                    className="text-gray-400 hover:text-white disabled:opacity-30 transition-colors"
+                    className="text-white hover:text-yellow-400 disabled:opacity-30 transition-colors cursor-pointer"
                   >
                     <SkipForward size={20} fill="currentColor" />
                   </button>
                 )}
 
-                <div className="flex items-center gap-2 group ml-2">
-                  <button onClick={toggleMute} className="text-gray-400 hover:text-white transition-colors">
-                    {isMuted || volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
+                <div className="flex items-center gap-2 group">
+                  <button onClick={toggleMute} className="text-white hover:text-yellow-400 transition-colors cursor-pointer">
+                    {isMuted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
                   </button>
                   <input
                     type="range"
@@ -941,12 +905,12 @@ export default function VideoPlayerModal({
                     step="0.05"
                     value={isMuted ? 0 : volume}
                     onChange={handleVolumeChange}
-                    className="w-20 accent-white h-1 bg-neutral-800 rounded cursor-pointer"
+                    className="w-16 sm:w-20 accent-yellow-400 h-1 bg-neutral-800 rounded cursor-pointer"
                   />
                 </div>
               </div>
 
-              <div className="flex items-center gap-2.5">
+              <div className="flex flex-wrap items-center gap-2">
                 {/* Audio Menu */}
                 <div className="relative">
                   <button
@@ -956,14 +920,14 @@ export default function VideoPlayerModal({
                       setShowSpeedMenu(false);
                       setShowSubtitlesMenu(false);
                     }}
-                    className="flex items-center gap-1.5 text-gray-400 hover:text-white text-[10px] font-black border border-neutral-800 px-2.5 py-1 rounded-md transition-colors cursor-pointer"
+                    className="flex items-center gap-1.5 text-white hover:text-yellow-400 text-[10px] font-black border border-white/20 px-2.5 py-1.5 rounded-md transition-colors cursor-pointer bg-black/40"
                   >
                     <Music size={14} className={showAudioMenu ? 'text-yellow-400' : ''} />
                     <span>Audio</span>
                   </button>
                   {showAudioMenu && (
                     <div className="absolute bottom-full right-0 mb-2 bg-neutral-900 border border-neutral-800 rounded-lg shadow-xl overflow-hidden min-w-[130px] z-50">
-                      <div className="px-3 py-2 text-[9px] font-black text-gray-500 bg-black/40 border-b border-neutral-800 uppercase">Audio Track</div>
+                      <div className="px-3 py-2 text-[9px] font-black text-gray-400 bg-black/40 border-b border-neutral-800 uppercase">Audio Track</div>
                       {['Default (Stereo)', 'Hindi HD', 'English HD'].map((track) => (
                         <button
                           key={track}
@@ -972,7 +936,7 @@ export default function VideoPlayerModal({
                             setShowAudioMenu(false);
                           }}
                           className={`w-full text-left px-3 py-2.5 text-[11px] hover:bg-yellow-400 hover:text-black transition-colors flex items-center justify-between ${
-                            selectedAudio === track ? 'text-yellow-400 font-bold bg-white/5' : 'text-gray-300'
+                            selectedAudio === track ? 'text-yellow-400 font-bold bg-white/5' : 'text-white'
                           }`}
                         >
                           <span>{track}</span>
@@ -992,14 +956,14 @@ export default function VideoPlayerModal({
                       setShowSpeedMenu(false);
                       setShowAudioMenu(false);
                     }}
-                    className="flex items-center gap-1.5 text-gray-400 hover:text-white text-[10px] font-black border border-neutral-800 px-2.5 py-1 rounded-md transition-colors cursor-pointer"
+                    className="flex items-center gap-1.5 text-white hover:text-yellow-400 text-[10px] font-black border border-white/20 px-2.5 py-1.5 rounded-md transition-colors cursor-pointer bg-black/40"
                   >
                     <Captions size={14} className={showSubtitlesMenu ? 'text-yellow-400' : ''} />
                     <span>Subtitles</span>
                   </button>
                   {showSubtitlesMenu && (
                     <div className="absolute bottom-full right-0 mb-2 bg-neutral-900 border border-neutral-800 rounded-lg shadow-xl overflow-hidden min-w-[120px] z-50">
-                      <div className="px-3 py-2 text-[9px] font-black text-gray-500 bg-black/40 border-b border-neutral-800 uppercase">Subtitles (CC)</div>
+                      <div className="px-3 py-2 text-[9px] font-black text-gray-400 bg-black/40 border-b border-neutral-800 uppercase">Subtitles (CC)</div>
                       {['Off', 'English', 'Hindi'].map((sub) => (
                         <button
                           key={sub}
@@ -1008,7 +972,7 @@ export default function VideoPlayerModal({
                             setShowSubtitlesMenu(false);
                           }}
                           className={`w-full text-left px-3 py-2.5 text-[11px] hover:bg-yellow-400 hover:text-black transition-colors flex items-center justify-between ${
-                            selectedSubtitle === sub ? 'text-yellow-400 font-bold bg-white/5' : 'text-gray-300'
+                            selectedSubtitle === sub ? 'text-yellow-400 font-bold bg-white/5' : 'text-white'
                           }`}
                         >
                           <span>{sub}</span>
@@ -1026,21 +990,23 @@ export default function VideoPlayerModal({
                       onClick={() => {
                         setShowQualityMenu(!showQualityMenu);
                         setShowSpeedMenu(false);
+                        setShowAudioMenu(false);
+                        setShowSubtitlesMenu(false);
                       }}
-                      className="flex items-center gap-1.5 text-gray-400 hover:text-white text-[10px] font-black border border-neutral-800 px-2.5 py-1 rounded-md transition-colors"
+                      className="flex items-center gap-1.5 text-white hover:text-yellow-400 text-[10px] font-black border border-white/20 px-2.5 py-1.5 rounded-md transition-colors cursor-pointer bg-black/40"
                     >
                       <Settings size={14} className={showQualityMenu ? 'text-yellow-400' : ''} />
                       {currentQuality}
                     </button>
                     {showQualityMenu && (
                       <div className="absolute bottom-full right-0 mb-2 bg-neutral-900 border border-neutral-800 rounded-lg shadow-xl overflow-hidden min-w-[110px] z-50">
-                        <div className="px-3 py-2 text-[9px] font-black text-gray-500 bg-black/40 border-b border-neutral-800 uppercase">Select Quality</div>
+                        <div className="px-3 py-2 text-[9px] font-black text-gray-400 bg-black/40 border-b border-neutral-800 uppercase">Select Quality</div>
                         {availableQualities.map((q) => (
                           <button
                             key={q}
                             onClick={() => handleQualityChange(q)}
                             className={`w-full text-left px-3 py-2.5 text-[11px] hover:bg-yellow-400 hover:text-black transition-colors flex items-center justify-between ${
-                              currentQuality === q ? 'text-yellow-400 font-bold bg-white/5' : 'text-gray-300'
+                              currentQuality === q ? 'text-yellow-400 font-bold bg-white/5' : 'text-white'
                             }`}
                           >
                             <span>{q}</span>
@@ -1058,14 +1024,16 @@ export default function VideoPlayerModal({
                     onClick={() => {
                       setShowSpeedMenu(!showSpeedMenu);
                       setShowQualityMenu(false);
+                      setShowAudioMenu(false);
+                      setShowSubtitlesMenu(false);
                     }}
-                    className="text-gray-400 hover:text-white text-[10px] font-black border border-neutral-800 px-2.5 py-1 rounded-md transition-colors"
+                    className="text-white hover:text-yellow-400 text-[10px] font-black border border-white/20 px-2.5 py-1.5 rounded-md transition-colors cursor-pointer bg-black/40"
                   >
                     {playbackSpeed}x
                   </button>
                   {showSpeedMenu && (
                     <div className="absolute bottom-full right-0 mb-2 bg-neutral-900 border border-neutral-800 rounded-lg shadow-xl overflow-hidden min-w-[90px] z-50">
-                      <div className="px-3 py-2 text-[9px] font-black text-gray-500 bg-black/40 border-b border-neutral-800 uppercase">Playback Speed</div>
+                      <div className="px-3 py-2 text-[9px] font-black text-gray-400 bg-black/40 border-b border-neutral-800 uppercase">Playback Speed</div>
                       {[0.5, 0.75, 1, 1.25, 1.5, 2].map((spd) => (
                         <button
                           key={spd}
@@ -1075,7 +1043,7 @@ export default function VideoPlayerModal({
                             setShowSpeedMenu(false);
                           }}
                           className={`w-full text-left px-3 py-2.5 text-[11px] hover:bg-yellow-400 hover:text-black transition-colors flex items-center justify-between ${
-                            playbackSpeed === spd ? 'text-yellow-400 font-bold bg-white/5' : 'text-gray-300'
+                            playbackSpeed === spd ? 'text-yellow-400 font-bold bg-white/5' : 'text-white'
                           }`}
                         >
                           <span>{spd}x</span>
@@ -1086,11 +1054,53 @@ export default function VideoPlayerModal({
                   )}
                 </div>
 
+                {/* Download Button */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    resetAutoHideTimer();
+                    handleDownload();
+                  }}
+                  disabled={isDownloading}
+                  title="Download Movie"
+                  className={`p-1.5 rounded-md bg-black/40 text-yellow-400 border border-white/20 transition-all cursor-pointer flex items-center justify-center ${
+                    isDownloading ? 'opacity-50 animate-pulse' : 'hover:bg-yellow-400 hover:text-black'
+                  }`}
+                >
+                  <Download size={16} />
+                </button>
+
+                {/* Cast Button */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    resetAutoHideTimer();
+                    setShowTVCastModal(true);
+                  }}
+                  title="Cast to Smart TV"
+                  className="p-1.5 rounded-md bg-black/40 text-yellow-400 border border-white/20 hover:bg-yellow-400 hover:text-black transition-colors cursor-pointer flex items-center justify-center"
+                >
+                  <Tv size={16} />
+                </button>
+
+                {/* Fullscreen Button */}
                 <button
                   onClick={toggleFullscreen}
-                  className="text-gray-400 hover:text-white transition-colors"
+                  className="text-white hover:text-yellow-400 transition-colors p-1.5 rounded-md border border-white/20 bg-black/40 cursor-pointer"
+                  title="Fullscreen"
                 >
-                  {isFullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
+                  {isFullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
+                </button>
+
+                {/* Close Button */}
+                <button
+                  onClick={onClose}
+                  className="text-white hover:text-red-500 transition-colors p-1.5 rounded-md border border-white/20 bg-black/40 cursor-pointer"
+                  title="Close Player"
+                >
+                  <X size={16} />
                 </button>
               </div>
             </div>
