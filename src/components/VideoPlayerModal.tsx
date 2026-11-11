@@ -20,7 +20,10 @@ import {
   RotateCw,
   Check,
   ExternalLink,
-  Download
+  Download,
+  Music,
+  Captions,
+  Radio
 } from 'lucide-react';
 import { useDownloads } from '../hooks/useDownloads';
 import { buildApiUrl } from '../utils/apiConfig';
@@ -72,6 +75,10 @@ export default function VideoPlayerModal({
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
   const [showQualityMenu, setShowQualityMenu] = useState(false);
   const [showTVCastModal, setShowTVCastModal] = useState(false);
+  const [showAudioMenu, setShowAudioMenu] = useState(false);
+  const [showSubtitlesMenu, setShowSubtitlesMenu] = useState(false);
+  const [selectedAudio, setSelectedAudio] = useState('Default (Stereo)');
+  const [selectedSubtitle, setSelectedSubtitle] = useState('Off');
   const [error, setError] = useState<string | null>(null);
   const [playableUrl, setPlayableUrl] = useState<string>('');
   const [retryCount, setRetryCount] = useState(0);
@@ -101,7 +108,9 @@ export default function VideoPlayerModal({
         setShowControls(false);
         setShowQualityMenu(false);
         setShowSpeedMenu(false);
-      }, 3000);
+        setShowAudioMenu(false);
+        setShowSubtitlesMenu(false);
+      }, 5000); // 5 seconds
     }
   };
 
@@ -115,6 +124,8 @@ export default function VideoPlayerModal({
     setShowControls(false);
     setShowQualityMenu(false);
     setShowSpeedMenu(false);
+    setShowAudioMenu(false);
+    setShowSubtitlesMenu(false);
   };
 
   const toggleControlsVisibility = () => {
@@ -123,6 +134,8 @@ export default function VideoPlayerModal({
         clearAutoHideTimer();
         setShowQualityMenu(false);
         setShowSpeedMenu(false);
+        setShowAudioMenu(false);
+        setShowSubtitlesMenu(false);
         return false;
       } else {
         scheduleAutoHideTimer();
@@ -933,7 +946,79 @@ export default function VideoPlayerModal({
                 </div>
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2.5">
+                {/* Audio Menu */}
+                <div className="relative">
+                  <button
+                    onClick={() => {
+                      setShowAudioMenu(!showAudioMenu);
+                      setShowQualityMenu(false);
+                      setShowSpeedMenu(false);
+                      setShowSubtitlesMenu(false);
+                    }}
+                    className="flex items-center gap-1.5 text-gray-400 hover:text-white text-[10px] font-black border border-neutral-800 px-2.5 py-1 rounded-md transition-colors cursor-pointer"
+                  >
+                    <Music size={14} className={showAudioMenu ? 'text-yellow-400' : ''} />
+                    <span>Audio</span>
+                  </button>
+                  {showAudioMenu && (
+                    <div className="absolute bottom-full right-0 mb-2 bg-neutral-900 border border-neutral-800 rounded-lg shadow-xl overflow-hidden min-w-[130px] z-50">
+                      <div className="px-3 py-2 text-[9px] font-black text-gray-500 bg-black/40 border-b border-neutral-800 uppercase">Audio Track</div>
+                      {['Default (Stereo)', 'Hindi HD', 'English HD'].map((track) => (
+                        <button
+                          key={track}
+                          onClick={() => {
+                            setSelectedAudio(track);
+                            setShowAudioMenu(false);
+                          }}
+                          className={`w-full text-left px-3 py-2.5 text-[11px] hover:bg-yellow-400 hover:text-black transition-colors flex items-center justify-between ${
+                            selectedAudio === track ? 'text-yellow-400 font-bold bg-white/5' : 'text-gray-300'
+                          }`}
+                        >
+                          <span>{track}</span>
+                          {selectedAudio === track && <Check size={12} className="stroke-[3]" />}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Subtitles Menu */}
+                <div className="relative">
+                  <button
+                    onClick={() => {
+                      setShowSubtitlesMenu(!showSubtitlesMenu);
+                      setShowQualityMenu(false);
+                      setShowSpeedMenu(false);
+                      setShowAudioMenu(false);
+                    }}
+                    className="flex items-center gap-1.5 text-gray-400 hover:text-white text-[10px] font-black border border-neutral-800 px-2.5 py-1 rounded-md transition-colors cursor-pointer"
+                  >
+                    <Captions size={14} className={showSubtitlesMenu ? 'text-yellow-400' : ''} />
+                    <span>Subtitles</span>
+                  </button>
+                  {showSubtitlesMenu && (
+                    <div className="absolute bottom-full right-0 mb-2 bg-neutral-900 border border-neutral-800 rounded-lg shadow-xl overflow-hidden min-w-[120px] z-50">
+                      <div className="px-3 py-2 text-[9px] font-black text-gray-500 bg-black/40 border-b border-neutral-800 uppercase">Subtitles (CC)</div>
+                      {['Off', 'English', 'Hindi'].map((sub) => (
+                        <button
+                          key={sub}
+                          onClick={() => {
+                            setSelectedSubtitle(sub);
+                            setShowSubtitlesMenu(false);
+                          }}
+                          className={`w-full text-left px-3 py-2.5 text-[11px] hover:bg-yellow-400 hover:text-black transition-colors flex items-center justify-between ${
+                            selectedSubtitle === sub ? 'text-yellow-400 font-bold bg-white/5' : 'text-gray-300'
+                          }`}
+                        >
+                          <span>{sub}</span>
+                          {selectedSubtitle === sub && <Check size={12} className="stroke-[3]" />}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 {/* Quality Menu */}
                 {availableQualities.length > 0 && (
                   <div className="relative">
