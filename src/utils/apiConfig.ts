@@ -15,12 +15,17 @@ export function getApiBaseUrl(): string {
     return customServer.trim().replace(/\/+$/, '');
   }
 
+  // Force live backend URL for native environments to avoid path issues
+  if ((window as any).Capacitor?.isNativePlatform()) {
+    return LIVE_BACKEND_URL;
+  }
+
   // If directly running on the Cloud Run backend server, relative paths work
   if (window.location.hostname && window.location.hostname.includes('run.app')) {
     return '';
   }
 
-  // In all other environments (Android APK, Capacitor webview, localhost, GitHub Pages, external preview):
+  // Default
   return LIVE_BACKEND_URL;
 }
 
