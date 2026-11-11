@@ -423,10 +423,7 @@ export default function HomePage() {
 
   const handleDownloadAPK = (e: React.MouseEvent) => {
     e.preventDefault();
-    const apkUrl = "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk";
-    if (typeof window !== 'undefined') {
-      window.location.href = apkUrl;
-    }
+    downloadOfficialApk();
   };
 
   return (

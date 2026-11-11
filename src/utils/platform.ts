@@ -74,24 +74,8 @@ export const isMobileDevice = (): boolean => {
 };
 
 export const downloadOfficialApk = () => {
-  const apkUrl = "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk";
   if (typeof window !== 'undefined') {
-    try {
-      const link = document.createElement('a');
-      link.href = apkUrl;
-      link.setAttribute('download', 'Movie-Portal.apk');
-      link.setAttribute('target', '_blank');
-      link.setAttribute('rel', 'noopener noreferrer');
-      document.body.appendChild(link);
-      link.click();
-      setTimeout(() => {
-        if (document.body.contains(link)) {
-          document.body.removeChild(link);
-        }
-      }, 500);
-    } catch (e) {
-      window.location.href = apkUrl;
-    }
+    window.location.href = '/api/download/apk';
   }
 };
 

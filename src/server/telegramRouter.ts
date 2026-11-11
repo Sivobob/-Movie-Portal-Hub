@@ -417,6 +417,7 @@ export async function handleStream(req: Request, res: Response) {
     let rawMime = (document.mimeType || '').toLowerCase();
     const lowerName = fileName.toLowerCase();
     const isMkv = lowerName.endsWith('.mkv') || rawMime.includes('matroska') || rawMime.includes('mkv');
+    const isWebm = lowerName.endsWith('.webm') || rawMime.includes('webm');
     const isHevc = lowerName.includes('hevc') || lowerName.includes('x265') || lowerName.includes('h265') || lowerName.includes('h.265') || lowerName.includes('10bit');
     const isTranscodeRequired = isMkv || isHevc || req.query.transcode === '1' || req.query.transcode === 'true';
 

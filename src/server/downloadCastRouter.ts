@@ -10,6 +10,160 @@ const __dirname = path.dirname(__filename);
 
 const downloadCastRouter = Router();
 
+// In-memory cache for latest GitHub release APK
+let cachedApkInfo = {
+  url: 'https://github.com/Sivobob/-Movie-Portal-Hub/releases/download/v3.5.2/Movie-Portal-v3.5.2.apk',
+  version: '3.5.2',
+  fileName: 'Movie-Portal-v3.5.2.apk',
+  lastChecked: 0,
+};
+
+async function fetchLatestGitHubApk(): Promise<{ url: string; version: string; fileName: string }> {
+  const now = Date.now();
+  // Cache for 60 seconds to avoid hitting rate limits while keeping new pushes fresh
+  if (now - cachedApkInfo.lastChecked < 60000 && cachedApkInfo.url) {
+    return cachedApkInfo;
+  }
+
+  try {
+    const headers: Record<string, string> = {
+      'User-Agent': 'MoviePortal-App/3.5',
+      'Accept': 'application/vnd.github.v3+json',
+    };
+    const token = (process.env.GITHUB_TOKEN || '').trim();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch('https://api.github.com/repos/Sivobob/-Movie-Portal-Hub/releases/latest', {
+      headers,
+    });
+
+    if (response.ok) {
+      const data: any = await response.json();
+      if (data && Array.isArray(data.assets)) {
+        // Look for universal 'Movie-Portal.apk', or highest versioned APK asset
+        let preferred = data.assets.find((a: any) => 
+          a.name === 'Movie-Portal.apk' || a.name === 'Movie-Portal-latest.apk'
+        );
+
+        if (!preferred) {
+          const apkAssets = data.assets.filter((a: any) => typeof a.name === 'string' && a.name.endsWith('.apk'));
+          // Sort numerically descending so v3.5.2 is chosen before v3.5.0
+          apkAssets.sort((a: any, b: any) => b.name.localeCompare(a.name, undefined, { numeric: true }));
+          if (apkAssets.length > 0) {
+            preferred = apkAssets[0];
+          }
+        }
+
+        if (preferred && preferred.browser_download_url) {
+          const rawTag = (data.tag_name || '3.5.2').replace(/^v/, '');
+          cachedApkInfo = {
+            url: preferred.browser_download_url,
+            version: rawTag,
+            fileName: preferred.name || `Movie-Portal-v${rawTag}.apk`,
+            lastChecked: now,
+          };
+          console.log(`[GitHub Releases] Discovered latest APK: ${cachedApkInfo.fileName} (${cachedApkInfo.url})`);
+          return cachedApkInfo;
+        }
+      }
+    } else {
+      console.warn(`[GitHub Releases] Release API status: ${response.status}`);
+    }
+  } catch (err: any) {
+    console.warn('[GitHub Releases] Could not fetch latest release:', err?.message || err);
+  }
+
+  cachedApkInfo.lastChecked = now;
+  return cachedApkInfo;
+}
+
+// Route 1: Official Android APK Dynamic Download Endpoint
+// Chrome will automatically download the latest APK directly as a full binary file stream
+downloadCastRouter.get('/download/apk', async (req: Request, res: Response) => {
+  const latest = await fetchLatestGitHubApk();
+  console.log(`[Download Router] Processing APK request: ${latest.fileName} from ${latest.url}`);
+
+  if (req.query.redirect === '1' || req.query.direct === '1') {
+    return res.redirect(302, latest.url);
+  }
+
+  // Stream directly to client so Chrome downloads full APK with correct name & size without cross-origin redirect traps
+  const pipeRemoteApk = (targetUrl: string, depth = 0) => {
+    if (depth > 5) {
+      if (!res.headersSent) res.redirect(302, latest.url);
+      return;
+    }
+
+    try {
+      const parsed = new URL(targetUrl);
+      const client = parsed.protocol === 'https:' ? https : http;
+      const remoteReq = client.get(
+        targetUrl,
+        {
+          headers: {
+            'User-Agent': 'MoviePortal-Downloader/3.5 (Linux; Android; Mobile)',
+            'Accept': '*/*',
+          },
+        },
+        (remoteRes) => {
+          if (
+            (remoteRes.statusCode === 301 || remoteRes.statusCode === 302 || remoteRes.statusCode === 307) &&
+            remoteRes.headers.location
+          ) {
+            return pipeRemoteApk(remoteRes.headers.location, depth + 1);
+          }
+
+          if (remoteRes.statusCode && remoteRes.statusCode >= 400) {
+            console.warn(`[Download Router] Remote responded with ${remoteRes.statusCode}`);
+            if (!res.headersSent) res.redirect(302, latest.url);
+            return;
+          }
+
+          const fileName = latest.fileName || 'Movie-Portal.apk';
+          res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+          res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Disposition');
+          if (remoteRes.headers['content-length']) {
+            res.setHeader('Content-Length', remoteRes.headers['content-length']);
+          }
+
+          remoteRes.pipe(res);
+        }
+      );
+
+      remoteReq.on('error', (err) => {
+        console.error('[Download Router] Streaming error:', err?.message || err);
+        if (!res.headersSent) {
+          res.redirect(302, latest.url);
+        }
+      });
+
+      req.on('close', () => {
+        remoteReq.destroy();
+      });
+    } catch (e) {
+      if (!res.headersSent) {
+        res.redirect(302, latest.url);
+      }
+    }
+  };
+
+  pipeRemoteApk(latest.url);
+});
+
+// Route 1b: Release info for frontend / version checker
+downloadCastRouter.get('/download/latest-info', async (_req: Request, res: Response) => {
+  const latest = await fetchLatestGitHubApk();
+  res.json({
+    latestVersion: latest.version,
+    apkUrl: latest.url,
+    fileName: latest.fileName,
+  });
+});
+
 // Route 2: TV Casting Media Proxy Endpoint
 // Proxies media streams to TV receivers (Chromecast, DLNA, Smart TVs) with HTTP Range support & CORS
 downloadCastRouter.get('/cast/proxy', (req: Request, res: Response) => {
