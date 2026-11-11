@@ -460,13 +460,16 @@ export async function handleStream(req: Request, res: Response) {
 
       const ffmpegProc = spawn('ffmpeg', [
         '-i', 'pipe:0',
-        '-map', '0:v:0',      // Map first video track
-        '-map', '0:a?',      // Map all available audio tracks
+        '-map', '0:v:0',
+        '-map', '0:a?',
         '-c:v', 'libx264',
+        '-profile:v', 'baseline', // Max compatibility for old Android WebViews
+        '-level', '3.0',
         '-preset', 'ultrafast',
         '-tune', 'zerolatency',
-        '-crf', '26',
+        '-crf', '28',
         '-c:a', 'aac',
+        '-ac', '2',
         '-b:a', '128k',
         '-f', 'mp4',
         '-movflags', 'frag_keyframe+empty_moov+default_base_moof',

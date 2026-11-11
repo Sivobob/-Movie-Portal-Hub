@@ -749,6 +749,15 @@ export default function VideoPlayerModal({
                     </button>
 
                     <button
+                      onClick={() => {
+                        if (playableUrl) window.open(playableUrl, '_blank');
+                      }}
+                      className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all cursor-pointer shadow-lg"
+                    >
+                      <ExternalLink size={14} /> Open in Chrome
+                    </button>
+
+                    <button
                       onClick={() => setShowServerConfig(prev => !prev)}
                       className="flex items-center gap-1.5 bg-neutral-800/80 hover:bg-neutral-700 text-gray-400 hover:text-white text-xs px-3 py-2.5 rounded-xl border border-neutral-800 transition-all cursor-pointer"
                       title="Configure Backend Server"

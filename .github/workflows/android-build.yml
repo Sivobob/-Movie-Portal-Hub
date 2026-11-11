@@ -54,7 +54,7 @@ jobs:
       - name: Prepare APK Asset
         run: |
           if [ -f "android/app/build/outputs/apk/debug/app-debug.apk" ]; then
-            cp android/app/build/outputs/apk/debug/app-debug.apk Movie-Portal-v3.4.5.apk
+            cp android/app/build/outputs/apk/debug/app-debug.apk Movie-Portal-v3.5.0.apk
             echo "APK ready."
           else
             echo "APK NOT FOUND!"
@@ -66,10 +66,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         continue-on-error: true
         with:
-          tag_name: "v3.4.5-final"
-          name: "Movie Portal Android v3.4.5 (Fixed Streaming)"
-          body: "This is a critical update for Pushpa 2 and MKV streaming. Please uninstall OLD app first."
-          files: Movie-Portal-v3.4.5.apk
+          tag_name: "v3.5.0-ultimate"
+          name: "Movie Portal Android v3.5.0 (Ultimate Fix)"
+          body: "Official Fix: Synced with Chrome environment. Please uninstall old app first."
+          files: Movie-Portal-v3.5.0.apk
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
