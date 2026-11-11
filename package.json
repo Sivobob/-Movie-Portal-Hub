@@ -20,7 +20,7 @@
     "@capacitor/splash-screen": "^6.0.2",
     "@capacitor/status-bar": "^6.0.2",
     "@google/genai": "^2.4.0",
-    "@tailwindcss/vite": "4.0.0",
+    "@tailwindcss/vite": "^4.3.5",
     "@types/fluent-ffmpeg": "^2.1.28",
     "@vitejs/plugin-react": "^4.3.4",
     "dotenv": "^17.2.3",
@@ -44,7 +44,7 @@
     "@types/react-dom": "^19.0.0",
     "autoprefixer": "^10.4.20",
     "esbuild": "^0.24.2",
-    "tailwindcss": "4.0.0",
+    "tailwindcss": "^4.3.5",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }
