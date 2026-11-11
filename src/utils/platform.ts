@@ -73,13 +73,25 @@ export const isMobileDevice = (): boolean => {
   return isNativeAndroid() || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 };
 
-/**
- * Triggers direct instant download of the official Movie-Portal Android APK
- * without any intermediary modals or pages.
- */
 export const downloadOfficialApk = () => {
   const apkUrl = "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk";
   if (typeof window !== 'undefined') {
-    window.location.href = apkUrl;
+    try {
+      const link = document.createElement('a');
+      link.href = apkUrl;
+      link.setAttribute('download', 'Movie-Portal.apk');
+      link.setAttribute('target', '_blank');
+      link.setAttribute('rel', 'noopener noreferrer');
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        if (document.body.contains(link)) {
+          document.body.removeChild(link);
+        }
+      }, 500);
+    } catch (e) {
+      window.location.href = apkUrl;
+    }
   }
 };
+

@@ -320,7 +320,7 @@ export default function Header() {
                   Movie Portal Official Android App
                 </span>
                 <span className="bg-black/20 text-black text-[10px] font-extrabold px-1.5 py-0.2 rounded uppercase">
-                  v2.5.0 APK
+                  v3.2 APK
                 </span>
               </div>
               <p className="text-[11px] font-semibold text-neutral-900 truncate">
