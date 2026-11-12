@@ -156,43 +156,21 @@ export default function HomePage() {
     }
   }, []);
 
-  // Load published movies real-time - Primary Cloud Sync
+  // Load and sync published movies in real-time
   useEffect(() => {
     let isMounted = true;
-    
-    // 1. Force check on mount
-    const fetchInitial = async () => {
-      try {
-        const q = query(collection(db, 'movies'), where('published', '==', true));
-        const snapshot = await getDocs(q);
-        if (!isMounted) return;
-        
-        const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
-        setMovies(list);
-        saveLocalMovies(list);
-        setFeaturedMovies(list.filter(m => m.featured));
-        setIsLoading(false);
-      } catch (e) {
-        console.error('Cloud fetch notice:', e);
-      }
-    };
-    fetchInitial();
+    const q = query(collection(db, 'movies'), where('published', '==', true));
 
-    // 2. Real-time Cloud Synchronization (Works instantly on every device)
-    const q = query(collection(db, 'movies'));
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
         if (!isMounted) return;
-        setIsLoading(false);
         const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
-        console.log(`[Sync] Received ${list.length} movies from cloud`);
+        console.log(`[Sync] Real-time update: Received ${list.length} published movies`);
         
-        // Update UI state immediately
+        setIsLoading(false);
         setMovies(list);
         setFeaturedMovies(list.filter(m => m.featured));
-        
-        // Sync to local cache for offline/instant start
         saveLocalMovies(list);
       },
       (err) => {
