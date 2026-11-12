@@ -49,6 +49,10 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
+          echo "Cleaning gradle caches and transforms..."
+          rm -rf ~/.gradle/caches/transforms-*
+          rm -rf ~/.gradle/caches/journal-*
+          rm -rf ~/.gradle/caches/8.2.1/transforms/
           ./gradlew clean assembleDebug --no-daemon --stacktrace
 
       - name: Prepare APK Asset
