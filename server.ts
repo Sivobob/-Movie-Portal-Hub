@@ -14,7 +14,14 @@ import videoRouter from './src/server/videoRouter.ts';
 import downloadCastRouter from './src/server/downloadCastRouter.ts';
 
 const app = express();
-let PORT = Number(process.env.PORT) || 3000;
+// In AI Studio container environment, port 3000 is required for the application.
+// process.env.PORT is often set to 8080 by Cloud Run (which is already bound by Nginx).
+let PORT = 3000;
+if (process.env.APP_PORT) {
+  PORT = Number(process.env.APP_PORT) || 3000;
+} else if (process.env.PORT && process.env.PORT !== '8080') {
+  PORT = Number(process.env.PORT) || 3000;
+}
 const args = process.argv.slice(2);
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--port' && args[i + 1]) {

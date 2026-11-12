@@ -15,6 +15,7 @@ export default function TVCastModal({ isOpen, onClose, title, videoUrl }: TVCast
   const [connectedDevice, setConnectedDevice] = useState<string | null>(null);
   const [copiedProxyUrl, setCopiedProxyUrl] = useState(false);
   const [dlnaProxyUrl, setDlnaProxyUrl] = useState('');
+  const [discoveredDevices, setDiscoveredDevices] = useState<string[]>([]);
 
   // Generate TV Cast Proxy URL
   useEffect(() => {
@@ -26,8 +27,6 @@ export default function TVCastModal({ isOpen, onClose, title, videoUrl }: TVCast
   }, [videoUrl]);
 
   if (!isOpen) return null;
-
-  const [discoveredDevices, setDiscoveredDevices] = useState<string[]>([]);
 
   // Wi-Fi Local Network TV Discovery Handler
   const handleConnectChromecast = async () => {

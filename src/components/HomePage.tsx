@@ -379,7 +379,7 @@ export default function HomePage() {
                   key={movie.id} 
                   movie={movie} 
                   onClick={() => handleMovieClick(movie)} 
-                  onDownloadClick={() => setDownloadModalMovie(movie)}
+                  onDownloadClick={!(movie.seasons && movie.seasons.length > 0) ? () => setDownloadModalMovie(movie) : undefined}
                 />
               ))}
             </div>
@@ -590,23 +590,7 @@ export default function HomePage() {
                           </div>
                         </div>
 
-                        {/* Direct Episode Download Button */}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDownloadModalMovie({
-                              ...selectedMovie,
-                              title: `${selectedMovie.title} - S0${selectedMovie.seasons[activeSeasonIndex].seasonNumber}E0${ep.episodeNumber}: ${ep.title}`,
-                              streamingUrl: ep.streamUrl,
-                            });
-                            setSelectedMovie(null);
-                          }}
-                          className="w-7 h-7 rounded-full bg-yellow-400/20 hover:bg-yellow-400 text-black flex items-center justify-center flex-shrink-0 transition-colors cursor-pointer"
-                          title="Download Episode"
-                        >
-                          <Download size={13} className="text-yellow-600 hover:text-black stroke-[2.5]" />
-                        </button>
+
 
                         <div 
                           onClick={() => {
@@ -650,6 +634,25 @@ export default function HomePage() {
           videoQualities={playingMovie.videoQualities}
           category={playingMovie.displayCategory}
           posterUrl={playingMovie.posterUrl}
+          movie={playingMovie.movie || (playingMovie.seasons ? playingMovie : undefined)}
+          seasonIndex={playingMovie.seasonIndex ?? 0}
+          episodeIndex={playingMovie.episodeIndex ?? 0}
+          language={playingMovie.language || playingMovie.movie?.language}
+          onEpisodeChange={(sIdx, eIdx) => {
+            const m = playingMovie.movie || playingMovie;
+            if (m?.seasons && m.seasons[sIdx]?.episodes?.[eIdx]) {
+              const ep = m.seasons[sIdx].episodes[eIdx];
+              setPlayingMovie({
+                title: `${m.title} - S0${m.seasons[sIdx].seasonNumber}E0${ep.episodeNumber}: ${ep.title}`,
+                streamingUrl: ep.streamUrl,
+                displayCategory: m.displayCategory,
+                posterUrl: m.posterUrl,
+                movie: m,
+                seasonIndex: sIdx,
+                episodeIndex: eIdx,
+              });
+            }
+          }}
           hasNext={
             Boolean(playingMovie.movie?.seasons) &&
             (playingMovie.seasonIndex < playingMovie.movie.seasons.length - 1 ||

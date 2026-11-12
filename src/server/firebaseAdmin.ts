@@ -10,7 +10,9 @@ const app = getApps().length === 0
   ? initializeApp({ projectId }) 
   : getApp();
 
+const databaseId = (firebaseConfig as any).firestoreDatabaseId;
+
 export const adminAuth = getAuth(app);
-export const adminDb = getFirestore(app);
+export const adminDb = databaseId ? getFirestore(app, databaseId) : getFirestore(app);
 export default app;
 

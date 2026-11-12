@@ -90,7 +90,7 @@ export default function DownloadOptionsModal({
   const [isStarting, setIsStarting] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
 
-  if (!isOpen || !movie) return null;
+  if (!isOpen || !movie || (movie.seasons && movie.seasons.length > 0)) return null;
 
   const isSeries = Boolean(movie.seasons && movie.seasons.length > 0);
   const currentSeason = isSeries ? movie.seasons[selectedSeasonIdx] : null;

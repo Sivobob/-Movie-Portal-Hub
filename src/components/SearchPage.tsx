@@ -157,7 +157,7 @@ export default function SearchPage() {
                   setPlayingMovie(movie);
                 }
               }} 
-              onDownloadClick={() => setDownloadModalMovie(movie)}
+              onDownloadClick={!(movie.seasons && movie.seasons.length > 0) ? () => setDownloadModalMovie(movie) : undefined}
             />
           ))}
         </div>
@@ -195,6 +195,8 @@ export default function SearchPage() {
           videoQualities={playingMovie.videoQualities}
           category={playingMovie.displayCategory}
           posterUrl={playingMovie.posterUrl}
+          movie={playingMovie}
+          language={playingMovie.language}
           onRequestDownload={(m) => setDownloadModalMovie(m)}
         />
       )}

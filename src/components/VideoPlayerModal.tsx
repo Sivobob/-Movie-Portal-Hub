@@ -4,47 +4,66 @@ import TVCastModal from './TVCastModal';
 import {
   Play,
   Pause,
-  Volume2,
-  VolumeX,
+  ArrowLeft,
   Maximize,
   Minimize,
-  X,
-  RefreshCw,
-  AlertCircle,
-  Film,
-  Tv,
   Settings,
-  SkipBack,
-  SkipForward,
-  RotateCcw,
-  RotateCw,
-  Check,
-  ExternalLink,
-  Download,
-  Music,
+  Volume2,
   Captions,
-  Radio
+  Gauge,
+  Languages,
+  Check,
+  ChevronDown,
+  Tv,
+  Download,
+  RefreshCw,
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
-import { Browser } from '@capacitor/browser';
+import { StatusBar } from '@capacitor/status-bar';
 import { useDownloads } from '../hooks/useDownloads';
-import { buildApiUrl, APP_VERSION } from '../utils/apiConfig';
+import { buildApiUrl } from '../utils/apiConfig';
 
-
-interface VideoPlayerModalProps {
+export interface VideoPlayerModalProps {
   isOpen: boolean;
   onClose: () => void;
   title: string;
   videoUrl: string;
-  videoQualities?: Record<string, string>; // { '480p': '...', '720p': '...', '1080p': '...', '4K': '...' }
+  videoQualities?: Record<string, string>;
   category?: string;
   posterUrl?: string;
-  onNextEpisode?: () => void;
-  onPrevEpisode?: () => void;
+  movie?: any;
+  seasonIndex?: number;
+  episodeIndex?: number;
+  language?: string;
   hasNext?: boolean;
   hasPrev?: boolean;
   initialDuration?: number;
+  onNextEpisode?: () => void;
+  onPrevEpisode?: () => void;
+  onEpisodeChange?: (seasonIndex: number, episodeIndex: number) => void;
   onRequestDownload?: (movie: any) => void;
+}
+
+// Custom 10-Second Rewind Icon matching reference design
+function Rewind10Icon({ className = "w-7 h-7 sm:w-9 sm:h-9" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 36 36" className={className} fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 5 C10.8 5 5 10.8 5 18 C5 25.2 10.8 31 18 31 C25.2 31 31 25.2 31 18 C31 12.8 28 8.3 23.5 6.2" />
+      <polygon points="21,2 24.5,6.5 19.5,8.5" fill="currentColor" stroke="none" />
+      <text x="18" y="21.5" textAnchor="middle" fontSize="9" fontWeight="bold" fill="currentColor" stroke="none" fontFamily="system-ui, -apple-system, sans-serif">10</text>
+    </svg>
+  );
+}
+
+// Custom 10-Second Forward Icon matching reference design
+function Forward10Icon({ className = "w-7 h-7 sm:w-9 sm:h-9" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 36 36" className={className} fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 5 C25.2 5 31 10.8 31 18 C31 25.2 25.2 31 18 31 C10.8 31 5 25.2 5 18 C5 12.8 8 8.3 12.5 6.2" />
+      <polygon points="15,2 11.5,6.5 16.5,8.5" fill="currentColor" stroke="none" />
+      <text x="18" y="21.5" textAnchor="middle" fontSize="9" fontWeight="bold" fill="currentColor" stroke="none" fontFamily="system-ui, -apple-system, sans-serif">10</text>
+    </svg>
+  );
 }
 
 export default function VideoPlayerModal({
@@ -55,8 +74,13 @@ export default function VideoPlayerModal({
   videoQualities = {},
   category,
   posterUrl,
+  movie,
+  seasonIndex = 0,
+  episodeIndex = 0,
+  language,
   onNextEpisode,
   onPrevEpisode,
+  onEpisodeChange,
   hasNext,
   hasPrev,
   initialDuration = 0,
@@ -64,102 +88,160 @@ export default function VideoPlayerModal({
 }: VideoPlayerModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
 
+  // Playback state
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(initialDuration);
   const [bufferedTime, setBufferedTime] = useState(0);
-  const [volume, setVolume] = useState(1);
-  const [isMuted, setIsMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [error, setError] = useState<string | null>(null);
+
+  // Active series season and episode indices
+  const [activeSeasonIdx, setActiveSeasonIdx] = useState(seasonIndex);
+  const [activeEpisodeIdx, setActiveEpisodeIdx] = useState(episodeIndex);
+  const [activeStreamUrl, setActiveStreamUrl] = useState(videoUrl);
+  const [currentEpisodeTitle, setCurrentEpisodeTitle] = useState(title);
+
+  // Track menus visibility
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
-  const [showQualityMenu, setShowQualityMenu] = useState(false);
-  const [showTVCastModal, setShowTVCastModal] = useState(false);
   const [showAudioMenu, setShowAudioMenu] = useState(false);
   const [showSubtitlesMenu, setShowSubtitlesMenu] = useState(false);
-  const [selectedAudio, setSelectedAudio] = useState('Default (Stereo)');
-  const [selectedSubtitle, setSelectedSubtitle] = useState('Off');
-  const [error, setError] = useState<string | null>(null);
-  const [playableUrl, setPlayableUrl] = useState<string>('');
-  const [retryCount, setRetryCount] = useState(0);
-  const [showServerConfig, setShowServerConfig] = useState(false);
-  const [customServerInput, setCustomServerInput] = useState(() => {
-    return (typeof window !== 'undefined' && localStorage.getItem('movie_portal_backend_url')) || '';
+  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
+  const [showSeasonDropdown, setShowSeasonDropdown] = useState(false);
+  const [showEpisodeDropdown, setShowEpisodeDropdown] = useState(false);
+  const [showTVCastModal, setShowTVCastModal] = useState(false);
+
+  // Real detected audio and subtitle tracks
+  const [realAudioTracks, setRealAudioTracks] = useState<Array<{ id: number | string; label: string; lang?: string }>>([]);
+  const [selectedAudio, setSelectedAudio] = useState<string>('Hindi');
+  const [realSubtitleTracks, setRealSubtitleTracks] = useState<Array<{ id: number | string; label: string; lang?: string }>>([]);
+  const [selectedSubtitle, setSelectedSubtitle] = useState<string>('Off');
+
+  // Quality State
+  const availableQualities = Object.keys(videoQualities)
+    .filter((k) => typeof videoQualities[k] === 'string' && videoQualities[k].trim().length > 0)
+    .sort((a, b) => (parseInt(b) || 0) - (parseInt(a) || 0));
+
+  const [currentQuality, setCurrentQuality] = useState<string>(() => {
+    return availableQualities.length > 0 ? availableQualities[0] : 'Default';
   });
 
+  // Download integration
   const { startDownload } = useDownloads();
   const [isDownloading, setIsDownloading] = useState(false);
-  const [downloadSize, setDownloadSize] = useState<string | null>(null);
 
+  // Autohide controls state & timer
   const [showControls, setShowControls] = useState(true);
   const autoHideTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const clearAutoHideTimer = () => {
+  // Determine series information
+  const targetMovie = movie || {};
+  const seasonsList = Array.isArray(targetMovie.seasons) && targetMovie.seasons.length > 0 ? targetMovie.seasons : [];
+  const isSeries = seasonsList.length > 0;
+  const currentSeason = isSeries ? seasonsList[activeSeasonIdx] || seasonsList[0] : null;
+  const episodesList = currentSeason && Array.isArray(currentSeason.episodes) ? currentSeason.episodes : [];
+  const currentEpisode = isSeries && episodesList.length > 0 ? episodesList[activeEpisodeIdx] || episodesList[0] : null;
+
+  // Sync props when opening or changing parent movie
+  useEffect(() => {
+    setActiveSeasonIdx(seasonIndex);
+  }, [seasonIndex]);
+
+  useEffect(() => {
+    setActiveEpisodeIdx(episodeIndex);
+  }, [episodeIndex]);
+
+  useEffect(() => {
+    setActiveStreamUrl(videoUrl);
+    setCurrentEpisodeTitle(title);
+  }, [videoUrl, title]);
+
+  // Derived Title and Subtitle display
+  const seriesOrMovieTitle = isSeries ? (targetMovie.title || title.split(' - ')[0]) : title.replace(/\s*\(Official Trailer\)/i, '');
+  const verifiedLanguage = language || targetMovie.language || 'Hindi';
+  const displayCat = category || targetMovie.displayCategory || (isSeries ? 'Web Series' : 'Movie');
+  const subtitleLine = `${displayCat} • ${verifiedLanguage}`;
+
+  // Automatically start / reset 5-second autohide timer
+  // CRITICAL REQUIREMENT: Controls disappear after exactly 5 seconds even if paused
+  const resetAutoHideTimer = () => {
     if (autoHideTimerRef.current) {
       clearTimeout(autoHideTimerRef.current);
       autoHideTimerRef.current = null;
     }
-  };
-
-  const scheduleAutoHideTimer = () => {
-    clearAutoHideTimer();
-    if (isPlaying) {
-      autoHideTimerRef.current = setTimeout(() => {
-        setShowControls(false);
-        setShowQualityMenu(false);
-        setShowSpeedMenu(false);
-        setShowAudioMenu(false);
-        setShowSubtitlesMenu(false);
-      }, 5000); // 5 seconds
-    }
+    autoHideTimerRef.current = setTimeout(() => {
+      setShowControls(false);
+      setShowSpeedMenu(false);
+      setShowAudioMenu(false);
+      setShowSubtitlesMenu(false);
+      setShowSettingsMenu(false);
+      setShowSeasonDropdown(false);
+      setShowEpisodeDropdown(false);
+    }, 5000);
   };
 
   const showControlsWithTimer = () => {
     setShowControls(true);
-    scheduleAutoHideTimer();
+    resetAutoHideTimer();
   };
 
-  const hideControlsImmediately = () => {
-    clearAutoHideTimer();
-    setShowControls(false);
-    setShowQualityMenu(false);
-    setShowSpeedMenu(false);
-    setShowAudioMenu(false);
-    setShowSubtitlesMenu(false);
-  };
-
-  const toggleControlsVisibility = () => {
-    setShowControls((prev) => {
-      if (prev) {
-        clearAutoHideTimer();
-        setShowQualityMenu(false);
-        setShowSpeedMenu(false);
-        setShowAudioMenu(false);
-        setShowSubtitlesMenu(false);
-        return false;
-      } else {
-        scheduleAutoHideTimer();
-        return true;
-      }
-    });
-  };
-
-  const handleUserActivity = () => {
-    if (showControls && isPlaying) {
-      scheduleAutoHideTimer();
+  // Screen Tap Handler:
+  // When hidden: tap anywhere reveals controls immediately and starts 5s timer
+  // When visible: tap on the video backdrop toggles controls off immediately
+  const handleViewportTap = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    if (!showControls) {
+      showControlsWithTimer();
+    } else {
+      if (autoHideTimerRef.current) clearTimeout(autoHideTimerRef.current);
+      setShowControls(false);
+      setShowSpeedMenu(false);
+      setShowAudioMenu(false);
+      setShowSubtitlesMenu(false);
+      setShowSettingsMenu(false);
+      setShowSeasonDropdown(false);
+      setShowEpisodeDropdown(false);
     }
   };
 
-  const resetAutoHideTimer = () => {
-    showControlsWithTimer();
-  };
+  // Resolve playable stream URL
+  const [playableUrl, setPlayableUrl] = useState<string>('');
 
+  useEffect(() => {
+    if (!isOpen) return;
+
+    setError(null);
+    setIsLoading(true);
+
+    const activeSource = (videoQualities && videoQualities[currentQuality]) || activeStreamUrl;
+    if (!activeSource || !activeSource.trim()) {
+      setIsLoading(false);
+      return;
+    }
+
+    const trimmed = activeSource.trim();
+    const isTelegram = /t\.me|telegram\.me/i.test(trimmed);
+
+    if (isTelegram) {
+      const params = `?url=${encodeURIComponent(trimmed)}&ext=.mp4`;
+      setPlayableUrl(buildApiUrl(`/api/stream${params}`));
+    } else {
+      setPlayableUrl(trimmed);
+    }
+  }, [isOpen, activeStreamUrl, currentQuality]);
+
+  // Initial Autohide timer on open & cleanup
   useEffect(() => {
     if (isOpen) {
       showControlsWithTimer();
-      window.history.pushState({ playerModalOpen: true }, '');
+      setSelectedAudio(verifiedLanguage);
+      try {
+        window.history.pushState({ playerModalOpen: true }, '');
+      } catch (e) {}
     }
 
     const handlePopState = (e: PopStateEvent) => {
@@ -170,132 +252,37 @@ export default function VideoPlayerModal({
     window.addEventListener('popstate', handlePopState);
 
     return () => {
-      clearAutoHideTimer();
+      if (autoHideTimerRef.current) clearTimeout(autoHideTimerRef.current);
       window.removeEventListener('popstate', handlePopState);
     };
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, verifiedLanguage]);
 
-  const [doubleTapFeedback, setDoubleTapFeedback] = useState<{ side: 'left' | 'right'; text: string } | null>(null);
-  const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const lastTapTimeRef = useRef<number>(0);
-
-  const handleViewportClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    e.stopPropagation();
-    const now = Date.now();
-    const timeDiff = now - lastTapTimeRef.current;
-    lastTapTimeRef.current = now;
-
-    if (timeDiff < 280) {
-      // Double Tap detected (Netflix style seek)
-      if (clickTimeoutRef.current) {
-        clearTimeout(clickTimeoutRef.current);
-        clickTimeoutRef.current = null;
-      }
-      
-      const rect = e.currentTarget.getBoundingClientRect();
-      const clickX = e.clientX - rect.left;
-      const isRight = clickX > rect.width / 2;
-
-      if (isRight) {
-        handleSkip(10);
-        setDoubleTapFeedback({ side: 'right', text: '+10s' });
-      } else {
-        handleSkip(-10);
-        setDoubleTapFeedback({ side: 'left', text: '-10s' });
-      }
-
-      setTimeout(() => {
-        setDoubleTapFeedback(null);
-      }, 700);
-    } else {
-      // Single Tap (Toggle controls visibility: show on 1st tap, hide on 2nd tap)
-      clickTimeoutRef.current = setTimeout(() => {
-        toggleControlsVisibility();
-      }, 280);
-    }
-  };
-
-  // Quality State
-  const availableQualities = Object.keys(videoQualities)
-    .filter((k) => typeof videoQualities[k] === 'string' && videoQualities[k].trim().length > 0)
-    .sort((a, b) => {
-      const qA = parseInt(a) || 0;
-      const qB = parseInt(b) || 0;
-      return qB - qA; // Higher first
-    });
-
-  const [currentQuality, setCurrentQuality] = useState<string>(() => {
-    if (availableQualities.length > 0) return availableQualities[0];
-    return 'Default';
-  });
-
-  // Sync quality whenever movie or qualities change
+  // Fullscreen listeners
   useEffect(() => {
-    if (availableQualities.length > 0) {
-      if (!availableQualities.includes(currentQuality)) {
-        setCurrentQuality(availableQualities[0]);
+    const handleFullscreenChange = () => {
+      const isFull = Boolean(document.fullscreenElement || (document as any).webkitFullscreenElement);
+      setIsFullscreen(isFull);
+      if (Capacitor.isNativePlatform()) {
+        try {
+          if (isFull) {
+            StatusBar.hide().catch(() => {});
+          }
+        } catch (e) {}
       }
-    } else {
-      setCurrentQuality('Default');
-    }
-  }, [videoUrl, availableQualities.join(',')]);
-
-  // Identify stream type
-  const isYouTube = /youtube\.com|youtu\.be/i.test(videoUrl);
-
-  // Resolve Playable URL (Direct or via Proxy)
-  useEffect(() => {
-    if (!isOpen || (!videoUrl && availableQualities.length === 0)) return;
-
-    setError(null);
-    setIsLoading(true);
-
-    const activeUrl = (videoQualities && videoQualities[currentQuality]) || videoUrl;
-    if (!activeUrl || !activeUrl.trim()) {
-      setIsLoading(false);
-      return;
-    }
-
-    const trimmed = activeUrl.trim();
-    const isTelegram = /t\.me|telegram\.me/i.test(trimmed);
-
-    if (isTelegram) {
-      // Build dynamic params - EXACT same clean streaming engine as Chrome
-      const params = `?url=${encodeURIComponent(trimmed)}&ext=.mp4`;
-      setPlayableUrl(buildApiUrl(`/api/stream${params}`));
-    } else {
-      setPlayableUrl(trimmed);
-    }
-  }, [isOpen, videoUrl, currentQuality]);
-
-  // Handle Quality Switch
-  const handleQualityChange = (quality: string) => {
-    if (quality === currentQuality) return;
-    
-    // Save current playback state
-    const time = videoRef.current?.currentTime || 0;
-    const wasPlaying = isPlaying;
-
-    setCurrentQuality(quality);
-    setShowQualityMenu(false);
-    setIsLoading(true);
-
-    // After state updates, the useEffect will trigger playableUrl change
-    // We need to seek back once metadata is loaded
-    const onLoaded = () => {
-      if (videoRef.current) {
-        videoRef.current.currentTime = time;
-        if (wasPlaying) videoRef.current.play().catch(() => {});
-      }
-      videoRef.current?.removeEventListener('loadedmetadata', onLoaded);
     };
 
-    videoRef.current?.addEventListener('loadedmetadata', onLoaded);
-  };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
 
-  const hlsRef = useRef<Hls | null>(null);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+    };
+  }, []);
 
-  // Video event listeners and Autoplay (with HLS support)
+  // Video Element & HLS Setup
+  const isYouTube = /youtube\.com|youtu\.be/i.test(activeStreamUrl);
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video || isYouTube || !playableUrl) return;
@@ -314,13 +301,35 @@ export default function VideoPlayerModal({
 
       hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
         setIsLoading(false);
-        video.play().catch(err => console.warn('HLS Autoplay:', err));
+        // Detect HLS Audio tracks
+        if (hlsInstance && hlsInstance.audioTracks && hlsInstance.audioTracks.length > 0) {
+          const tracks = hlsInstance.audioTracks.map((t, idx) => ({
+            id: idx,
+            label: t.name || t.lang || `Track ${idx + 1}`,
+            lang: t.lang
+          }));
+          setRealAudioTracks(tracks);
+          if (tracks.length > 0) {
+            setSelectedAudio(tracks[hlsInstance.audioTrack]?.label || tracks[0].label);
+          }
+        }
+        // Detect HLS Subtitles
+        if (hlsInstance && hlsInstance.subtitleTracks && hlsInstance.subtitleTracks.length > 0) {
+          const subTracks = hlsInstance.subtitleTracks.map((s, idx) => ({
+            id: idx,
+            label: s.name || s.lang || `Sub ${idx + 1}`,
+            lang: s.lang
+          }));
+          setRealSubtitleTracks(subTracks);
+        }
+
+        video.play().catch(() => {});
       });
 
       hlsInstance.on(Hls.Events.ERROR, (_event, data) => {
         if (data.fatal) {
           setIsLoading(false);
-          setError('HLS Stream Error: Unable to parse or load HLS playlist manifest.');
+          setError('HLS Stream Error: Unable to play playlist stream.');
         }
       });
     } else if (isHlsUrl && video.canPlayType('application/vnd.apple.mpegurl')) {
@@ -331,96 +340,123 @@ export default function VideoPlayerModal({
       setIsPlaying(true);
       resetAutoHideTimer();
     };
+
     const onPause = () => {
       setIsPlaying(false);
-      setShowControls(true);
-      if (autoHideTimerRef.current) clearTimeout(autoHideTimerRef.current);
+      resetAutoHideTimer();
     };
+
     const onTimeUpdate = () => {
       const cur = video.currentTime;
       setCurrentTime(cur);
 
-      // Persist resume position every few seconds
-      if (cur > 10 && title) {
+      if (cur > 10 && seriesOrMovieTitle) {
         try {
-          localStorage.setItem(`resume_pos_${title}`, cur.toString());
+          localStorage.setItem(`resume_pos_${seriesOrMovieTitle}`, cur.toString());
         } catch (e) {}
       }
 
       if (video.buffered.length > 0) {
-        // Find which buffered range we are currently in
         for (let i = 0; i < video.buffered.length; i++) {
-          if (video.buffered.start(i) <= video.currentTime && video.buffered.end(i) >= video.currentTime) {
+          if (video.buffered.start(i) <= cur && video.buffered.end(i) >= cur) {
             setBufferedTime(video.buffered.end(i));
             break;
           }
         }
       }
     };
+
     const onLoadedMetadata = () => {
       const vidDuration = video.duration;
-      // Only trust browser duration if it is not Infinity AND (we don't have a manual duration OR browser reported a significantly larger value)
-      setDuration(prev => {
-        if (vidDuration && vidDuration !== Infinity && (prev <= 0 || vidDuration > prev)) {
-          return vidDuration;
-        }
-        return prev;
-      });
+      if (vidDuration && vidDuration !== Infinity && (duration <= 0 || vidDuration > duration)) {
+        setDuration(vidDuration);
+      }
       setIsLoading(false);
 
-      // Restore saved playback position if available
-      if (title) {
+      // Detect HTML5 Audio Tracks if browser exposes them
+      const audioTracksApi = (video as any).audioTracks;
+      if (audioTracksApi && audioTracksApi.length > 0) {
+        const detected: Array<{ id: number; label: string; lang?: string }> = [];
+        for (let i = 0; i < audioTracksApi.length; i++) {
+          detected.push({
+            id: i,
+            label: audioTracksApi[i].label || audioTracksApi[i].language || `Audio ${i + 1}`,
+            lang: audioTracksApi[i].language
+          });
+        }
+        setRealAudioTracks(detected);
+        setSelectedAudio(detected[0]?.label || verifiedLanguage);
+      } else {
+        // Fallback to verified movie metadata audio language
+        setRealAudioTracks([{ id: 0, label: verifiedLanguage, lang: verifiedLanguage.toLowerCase() }]);
+        setSelectedAudio(verifiedLanguage);
+      }
+
+      // Detect HTML5 Text / Subtitle Tracks
+      if (video.textTracks && video.textTracks.length > 0) {
+        const subs: Array<{ id: number; label: string; lang?: string }> = [];
+        for (let i = 0; i < video.textTracks.length; i++) {
+          const t = video.textTracks[i];
+          if (t.kind === 'subtitles' || t.kind === 'captions') {
+            subs.push({
+              id: i,
+              label: t.label || t.language || `Subtitle ${i + 1}`,
+              lang: t.language
+            });
+          }
+        }
+        setRealSubtitleTracks(subs);
+      }
+
+      // Resume position
+      if (seriesOrMovieTitle) {
         try {
-          const savedPos = parseFloat(localStorage.getItem(`resume_pos_${title}`) || '0');
+          const savedPos = parseFloat(localStorage.getItem(`resume_pos_${seriesOrMovieTitle}`) || '0');
           if (savedPos > 15 && (!vidDuration || savedPos < vidDuration - 45)) {
             video.currentTime = savedPos;
             setCurrentTime(savedPos);
-            console.log(`[Player] Resumed playback at: ${savedPos}s`);
           }
         } catch (e) {}
       }
     };
 
-    // Attempt to fetch duration from custom headers for fragmented streams (MKV remux)
+    // Check custom header duration for remux streams
     if (playableUrl && playableUrl.includes('/api/stream')) {
       fetch(playableUrl, { method: 'HEAD' })
         .then(res => {
           const customDuration = res.headers.get('X-Video-Duration');
           if (customDuration) {
-            const parsedDuration = parseFloat(customDuration);
-            if (!isNaN(parsedDuration) && parsedDuration > 0) {
-              setDuration(parsedDuration);
-              console.log('[Player] Set manual duration from header:', parsedDuration);
-            }
+            const parsed = parseFloat(customDuration);
+            if (!isNaN(parsed) && parsed > 0) setDuration(parsed);
           }
         })
-        .catch(err => console.warn('[Player] Duration header fetch failed:', err));
+        .catch(() => {});
     }
+
     const onWaiting = () => {
-      // Only set loading if video has already started playing and is buffering
-      if (video.currentTime > 0.5) {
-        setIsLoading(true);
-      }
+      if (video.currentTime > 0.5) setIsLoading(true);
     };
+
     const onPlaying = () => {
       setIsLoading(false);
       setIsPlaying(true);
       resetAutoHideTimer();
     };
+
     const onCanPlay = () => setIsLoading(false);
     const onLoadedData = () => setIsLoading(false);
     const onEnded = () => {
-      if (title) {
+      if (seriesOrMovieTitle) {
         try {
-          localStorage.removeItem(`resume_pos_${title}`);
+          localStorage.removeItem(`resume_pos_${seriesOrMovieTitle}`);
         } catch (e) {}
       }
       if (onNextEpisode && hasNext) {
         onNextEpisode();
       }
     };
+
     const onError = () => {
-      console.warn('[Player] Video element stream notice:', video.error);
       setIsLoading(false);
     };
 
@@ -435,41 +471,30 @@ export default function VideoPlayerModal({
     video.addEventListener('ended', onEnded);
     video.addEventListener('error', onError);
 
-    // Standard non-HLS video playback with safe fallback
     if (!isHlsUrl && playableUrl) {
-      video.src = playableUrl;
-      video.load();
+      if (video.src !== playableUrl) {
+        video.src = playableUrl;
+      }
       const playPromise = video.play();
       if (playPromise !== undefined) {
-        playPromise
-          .then(() => {
+        playPromise.then(() => {
+          setIsLoading(false);
+          setIsPlaying(true);
+        }).catch(() => {
+          // Fallback muted autoplay for mobile browser policies
+          video.muted = true;
+          video.play().then(() => {
             setIsLoading(false);
             setIsPlaying(true);
-          })
-          .catch((err) => {
-            console.warn('[Player] Direct unmuted autoplay prevented by browser:', err);
-            // Browser blocked unmuted autoplay - attempt muted autoplay
-            video.muted = true;
-            setIsMuted(true);
-            video.play()
-              .then(() => {
-                setIsLoading(false);
-                setIsPlaying(true);
-              })
-              .catch((mutedErr) => {
-                console.warn('[Player] Muted autoplay also prevented:', mutedErr);
-                // Crucial: Clear loading state so user can tap the large play button
-                setIsLoading(false);
-                setIsPlaying(false);
-              });
+          }).catch(() => {
+            setIsLoading(false);
+            setIsPlaying(false);
           });
+        });
       }
     }
 
-    // Safety watchdog: ensure loading spinner never blocks the user longer than 2.5s
-    const safetyTimer = setTimeout(() => {
-      setIsLoading(false);
-    }, 2500);
+    const safetyTimer = setTimeout(() => setIsLoading(false), 2500);
 
     return () => {
       clearTimeout(safetyTimer);
@@ -488,9 +513,9 @@ export default function VideoPlayerModal({
       video.removeEventListener('ended', onEnded);
       video.removeEventListener('error', onError);
     };
-  }, [playableUrl, isYouTube]);
+  }, [playableUrl, isYouTube, seriesOrMovieTitle, verifiedLanguage]);
 
-  // Keyboard shortcut listener
+  // Keyboard shortcut listener (Space = play/pause, Left/Right = skip, Escape = close)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!isOpen) return;
@@ -499,6 +524,10 @@ export default function VideoPlayerModal({
       else if (e.key === ' ' && !isYouTube) {
         e.preventDefault();
         togglePlay();
+      } else if (e.key === 'ArrowLeft') {
+        handleSkip(-10);
+      } else if (e.key === 'ArrowRight') {
+        handleSkip(10);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -507,31 +536,21 @@ export default function VideoPlayerModal({
 
   if (!isOpen) return null;
 
+  // Real Play / Pause Control
   const togglePlay = () => {
     if (!videoRef.current) return;
-    if (isPlaying) {
+    resetAutoHideTimer();
+    if (!videoRef.current.paused) {
       videoRef.current.pause();
     } else {
       if (!videoRef.current.src && playableUrl) {
         videoRef.current.src = playableUrl;
-        videoRef.current.load();
       }
-      videoRef.current.play().catch(e => {
-        if (e.name !== 'AbortError' && !e.message?.includes('interrupted')) {
-          console.warn('Play error:', e);
-        }
-      });
+      videoRef.current.play().catch(() => {});
     }
   };
 
-  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!videoRef.current) return;
-    resetAutoHideTimer();
-    const time = Number(e.target.value);
-    videoRef.current.currentTime = time;
-    setCurrentTime(time);
-  };
-
+  // Real 10-Second Skip Control
   const handleSkip = (seconds: number) => {
     if (!videoRef.current) return;
     resetAutoHideTimer();
@@ -540,35 +559,161 @@ export default function VideoPlayerModal({
     setCurrentTime(newTime);
   };
 
-  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    resetAutoHideTimer();
-    const val = Number(e.target.value);
-    setVolume(val);
-    if (videoRef.current) {
-      videoRef.current.volume = val;
-      videoRef.current.muted = val === 0;
-    }
-    setIsMuted(val === 0);
-  };
-
-  const toggleMute = () => {
-    resetAutoHideTimer();
+  // Real Seek via Progress Bar
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!videoRef.current) return;
-    const nextMuted = !isMuted;
-    setIsMuted(nextMuted);
-    videoRef.current.muted = nextMuted;
+    resetAutoHideTimer();
+    const time = Number(e.target.value);
+    videoRef.current.currentTime = time;
+    setCurrentTime(time);
   };
 
+  // Real Fullscreen Toggle
   const toggleFullscreen = () => {
     resetAutoHideTimer();
     if (!containerRef.current) return;
-    if (!document.fullscreenElement) {
-      containerRef.current.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
+    if (!document.fullscreenElement && !(document as any).webkitFullscreenElement) {
+      if (containerRef.current.requestFullscreen) {
+        containerRef.current.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
+      } else if ((containerRef.current as any).webkitRequestFullscreen) {
+        (containerRef.current as any).webkitRequestFullscreen();
+        setIsFullscreen(true);
+      }
     } else {
-      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
+      if (document.exitFullscreen) {
+        document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
+      } else if ((document as any).webkitExitFullscreen) {
+        (document as any).webkitExitFullscreen();
+        setIsFullscreen(false);
+      }
     }
   };
 
+  // Real Audio Selection
+  const handleSelectAudio = (track: { id: number | string; label: string }) => {
+    setSelectedAudio(track.label);
+    setShowAudioMenu(false);
+    resetAutoHideTimer();
+
+    // HLS multi-audio switch
+    if (hlsRef.current && typeof track.id === 'number') {
+      hlsRef.current.audioTrack = track.id;
+    } else if (videoRef.current && (videoRef.current as any).audioTracks) {
+      const audioTracksApi = (videoRef.current as any).audioTracks;
+      for (let i = 0; i < audioTracksApi.length; i++) {
+        audioTracksApi[i].enabled = (i === track.id);
+      }
+    }
+  };
+
+  // Real Subtitle Selection
+  const handleSelectSubtitle = (label: string) => {
+    setSelectedSubtitle(label);
+    setShowSubtitlesMenu(false);
+    resetAutoHideTimer();
+
+    if (label === 'Off') {
+      if (hlsRef.current) hlsRef.current.subtitleTrack = -1;
+      if (videoRef.current && videoRef.current.textTracks) {
+        for (let i = 0; i < videoRef.current.textTracks.length; i++) {
+          videoRef.current.textTracks[i].mode = 'disabled';
+        }
+      }
+      return;
+    }
+
+    const matched = realSubtitleTracks.find(s => s.label === label);
+    if (matched) {
+      if (hlsRef.current && typeof matched.id === 'number') {
+        hlsRef.current.subtitleTrack = matched.id;
+      } else if (videoRef.current && videoRef.current.textTracks) {
+        for (let i = 0; i < videoRef.current.textTracks.length; i++) {
+          videoRef.current.textTracks[i].mode = (i === matched.id ? 'showing' : 'disabled');
+        }
+      }
+    }
+  };
+
+  // Real Quality Change
+  const handleQualityChange = (quality: string) => {
+    if (quality === currentQuality) return;
+    const time = videoRef.current?.currentTime || 0;
+    const wasPlaying = isPlaying;
+
+    setCurrentQuality(quality);
+    setShowSettingsMenu(false);
+    setIsLoading(true);
+    resetAutoHideTimer();
+
+    const onLoaded = () => {
+      if (videoRef.current) {
+        videoRef.current.currentTime = time;
+        if (wasPlaying) videoRef.current.play().catch(() => {});
+      }
+      videoRef.current?.removeEventListener('loadedmetadata', onLoaded);
+    };
+    videoRef.current?.addEventListener('loadedmetadata', onLoaded);
+  };
+
+  // Real Season Selection (Shows only actually uploaded seasons)
+  const handleSelectSeason = (sIdx: number) => {
+    resetAutoHideTimer();
+    setShowSeasonDropdown(false);
+    setActiveSeasonIdx(sIdx);
+
+    const targetSeason = seasonsList[sIdx];
+    const targetEpisodes = targetSeason?.episodes || [];
+    if (targetEpisodes.length > 0) {
+      const firstEp = targetEpisodes[0];
+      setActiveEpisodeIdx(0);
+      if (firstEp.streamUrl) {
+        setActiveStreamUrl(firstEp.streamUrl);
+        setCurrentEpisodeTitle(`${seriesOrMovieTitle} - S0${targetSeason.seasonNumber}E0${firstEp.episodeNumber}: ${firstEp.title}`);
+        if (onEpisodeChange) onEpisodeChange(sIdx, 0);
+      }
+    }
+  };
+
+  // Real Episode Selection (Plays that exact episode immediately)
+  const handleSelectEpisode = (eIdx: number) => {
+    resetAutoHideTimer();
+    setShowEpisodeDropdown(false);
+    setActiveEpisodeIdx(eIdx);
+
+    const ep = episodesList[eIdx];
+    if (ep && ep.streamUrl) {
+      setActiveStreamUrl(ep.streamUrl);
+      setCurrentEpisodeTitle(`${seriesOrMovieTitle} - S0${currentSeason?.seasonNumber}E0${ep.episodeNumber}: ${ep.title}`);
+      if (onEpisodeChange) onEpisodeChange(activeSeasonIdx, eIdx);
+    }
+  };
+
+  // Real Download Handling
+  const handleDownload = () => {
+    if (!activeStreamUrl) return;
+    if (onRequestDownload) {
+      onRequestDownload({
+        title: currentEpisodeTitle,
+        posterUrl,
+        streamingUrl: playableUrl || activeStreamUrl,
+        displayCategory: displayCat,
+        videoQualities,
+      });
+      return;
+    }
+    if (isDownloading) return;
+    setIsDownloading(true);
+    startDownload({
+      title: currentEpisodeTitle,
+      posterUrl: posterUrl || '',
+      videoUrl: playableUrl || activeStreamUrl,
+      quality: currentQuality || '720p HD',
+      originalCategory: displayCat,
+    });
+    setTimeout(() => setIsDownloading(false), 2000);
+  };
+
+  // Format Time into hh:mm:ss or mm:ss
   const formatTime = (secs: number) => {
     if (isNaN(secs) || !isFinite(secs) || secs < 0) return '00:00';
     const hrs = Math.floor(secs / 3600);
@@ -578,87 +723,24 @@ export default function VideoPlayerModal({
     return `${mins.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  const handleRetry = () => {
-    resetAutoHideTimer();
-    setRetryCount(prev => prev + 1);
-  };
-
-  const handleDownload = async () => {
-    if (!videoUrl) return;
-    if (onRequestDownload) {
-      onRequestDownload({
-        title,
-        posterUrl,
-        streamingUrl: playableUrl || videoUrl,
-        displayCategory: category,
-        videoQualities,
-      });
-      return;
-    }
-    if (isDownloading) return;
-    setIsDownloading(true);
-    
-    try {
-      // Try to get file size
-      const res = await fetch(playableUrl || videoUrl, { method: 'HEAD' });
-      const size = res.headers.get('content-length');
-      let formattedSize = 'Unknown Size';
-      if (size) {
-        const mb = parseInt(size) / (1024 * 1024);
-        formattedSize = mb > 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb.toFixed(0)} MB`;
-      }
-      setDownloadSize(formattedSize);
-
-      // Add to downloads and trigger device download
-      startDownload({
-        title,
-        posterUrl: posterUrl || '',
-        videoUrl: playableUrl || videoUrl,
-        quality: currentQuality || '720p HD',
-        originalCategory: category || 'Movie',
-      });
-      
-      setTimeout(() => setIsDownloading(false), 2000);
-    } catch (e) {
-      console.error('Download failed', e);
-      setIsDownloading(false);
-    }
-  };
-
   return (
     <div className="fixed inset-0 z-[100] bg-black flex flex-col justify-between select-none overflow-hidden">
       <div
         ref={containerRef}
-        onMouseMove={handleUserActivity}
         className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden"
       >
-        {/* Top Header */}
-        <div 
-          onClick={(e) => { e.stopPropagation(); resetAutoHideTimer(); }}
-          className={`absolute top-0 left-0 w-full bg-gradient-to-b from-black/90 via-black/60 to-transparent p-4 flex items-center justify-between z-40 transition-opacity duration-300 ${
-            showControls ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
-          }`}
-        >
-          <div className="flex items-center gap-2.5 truncate max-w-[95%]">
-            <span className="bg-yellow-400 text-black text-[10px] font-black px-1.5 py-0.5 rounded uppercase">
-              {currentQuality !== 'Default' ? `${currentQuality} STREAM` : 'HD STREAM'}
-            </span>
-            <h3 className="text-sm sm:text-base font-bold text-white truncate shadow-black drop-shadow-md">{title}</h3>
-          </div>
-        </div>
-
-        {/* TV Cast Discovery & Connection Modal */}
+        {/* TV Cast Modal */}
         <TVCastModal
           isOpen={showTVCastModal}
           onClose={() => setShowTVCastModal(false)}
-          title={title}
-          videoUrl={playableUrl || videoUrl}
+          title={currentEpisodeTitle}
+          videoUrl={playableUrl || activeStreamUrl}
         />
 
-        {/* Player Viewport */}
-        <div 
+        {/* Video Screen Viewport */}
+        <div
           className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden cursor-pointer"
-          onClick={handleViewportClick}
+          onClick={handleViewportTap}
         >
           {!isYouTube ? (
             <>
@@ -668,58 +750,21 @@ export default function VideoPlayerModal({
                 src={playableUrl || undefined}
                 playsInline
                 preload="auto"
-                crossOrigin="anonymous"
                 className="w-full h-full object-contain pointer-events-none"
               />
 
-              {/* Double-Tap Netflix Ripple Overlay */}
-              {doubleTapFeedback && (
-                <div 
-                  className={`absolute top-0 bottom-0 w-1/2 flex flex-col items-center justify-center bg-white/10 backdrop-blur-xs z-30 animate-in fade-in zoom-in-90 duration-200 pointer-events-none ${
-                    doubleTapFeedback.side === 'right' ? 'right-0 rounded-l-full' : 'left-0 rounded-r-full'
-                  }`}
-                >
-                  <div className="flex flex-col items-center gap-1 text-yellow-400 font-black">
-                    {doubleTapFeedback.side === 'right' ? (
-                      <RotateCw size={40} className="animate-spin-slow" />
-                    ) : (
-                      <RotateCcw size={40} className="animate-spin-slow" />
-                    )}
-                    <span className="text-sm font-mono tracking-widest">{doubleTapFeedback.text}</span>
-                  </div>
-                </div>
-              )}
-
-              {/* Small Loading Spinner at Bottom Center */}
+              {/* Loading Indicator */}
               {isLoading && (
-                <div className="absolute bottom-16 left-1/2 -translate-x-1/2 flex items-center gap-2.5 bg-black/80 backdrop-blur-md px-4 py-2 rounded-full border border-neutral-800 z-25 pointer-events-none shadow-xl select-none">
-                  <RefreshCw className="animate-spin text-yellow-400" size={16} />
-                  <span className="text-xs text-gray-200 font-bold tracking-wide">Loading...</span>
+                <div className="absolute inset-0 m-auto w-24 h-24 flex flex-col items-center justify-center gap-2 bg-black/60 backdrop-blur-md rounded-2xl z-25 pointer-events-none shadow-2xl">
+                  <RefreshCw className="animate-spin text-yellow-400" size={28} />
+                  <span className="text-[11px] text-gray-200 font-bold tracking-wide">Buffering</span>
                 </div>
-              )}
-
-              {/* Minimal Clean Error & Options Screen */}
-
-
-              {/* Center Play Icon (Paused) */}
-              {!isPlaying && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setIsLoading(false);
-                    togglePlay();
-                    resetAutoHideTimer();
-                  }}
-                  className="absolute inset-0 m-auto w-20 h-20 rounded-full bg-yellow-400/90 text-black flex items-center justify-center shadow-2xl transition-transform hover:scale-110 active:scale-90 z-30 cursor-pointer"
-                >
-                  <Play size={32} fill="black" className="ml-1" />
-                </button>
               )}
             </>
           ) : (
             <iframe
-              src={`https://www.youtube.com/embed/${videoUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|v\/|embed\/|user\/(?:\w+\/)?))([^?&]+)/)?.[1]}?autoplay=1&rel=0`}
-              title={title}
+              src={`https://www.youtube.com/embed/${activeStreamUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|v\/|embed\/|user\/(?:\w+\/)?))([^?&]+)/)?.[1]}?autoplay=1&rel=0`}
+              title={currentEpisodeTitle}
               className="w-full h-full border-0"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
               allowFullScreen
@@ -727,309 +772,477 @@ export default function VideoPlayerModal({
           )}
         </div>
 
-        {/* Custom Controls Bar */}
-        {!isYouTube && (
-          <div 
-            onClick={(e) => { e.stopPropagation(); resetAutoHideTimer(); }}
-            className={`absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/95 via-black/80 to-transparent p-4 pb-6 space-y-3 z-40 transition-opacity duration-300 ${
-              showControls ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
-            }`}
-          >
-            {/* Timeline */}
-            <div className="flex items-center gap-3">
-              <span className="text-[11px] font-mono text-gray-400 w-16 text-right tabular-nums">
-                {formatTime(currentTime)}
-              </span>
-              <div className="relative flex-grow h-1.5 bg-neutral-800 rounded-full group">
-                <input
-                  type="range"
-                  min="0"
-                  max={duration || 100}
-                  value={currentTime}
-                  onChange={handleSeek}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
-                />
-                <div 
-                  className="absolute h-full bg-white/20 rounded-full pointer-events-none"
-                  style={{ width: `${(bufferedTime / (duration || 100)) * 100}%` }}
-                />
-                <div 
-                  className="absolute h-full bg-yellow-400 rounded-full pointer-events-none z-10"
-                  style={{ width: `${(currentTime / (duration || 100)) * 100}%` }}
-                />
-                <div 
-                  className="absolute h-3 w-3 bg-white rounded-full -top-[3px] shadow-lg pointer-events-none transition-transform group-hover:scale-125 z-10"
-                  style={{ left: `calc(${(currentTime / (duration || 100)) * 100}% - 6px)` }}
-                />
-              </div>
-              <span className="text-[11px] font-mono text-gray-400 w-16 tabular-nums">
-                {formatTime(duration)}
-              </span>
-            </div>
+        {/* TOP BAR OVERLAY */}
+        <div
+          onClick={(e) => { e.stopPropagation(); resetAutoHideTimer(); }}
+          className={`absolute top-0 left-0 w-full bg-gradient-to-b from-black/90 via-black/50 to-transparent p-4 sm:p-6 flex items-center justify-between z-40 transition-opacity duration-300 ${
+            showControls ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+          }`}
+        >
+          {/* Top-Left: Back Arrow, Title, Subtitle, and Season/Episode Selectors on the SAME horizontal row */}
+          <div className="flex items-center gap-2.5 sm:gap-4 max-w-[70%] sm:max-w-[75%] min-w-0">
+            <button
+              type="button"
+              onClick={onClose}
+              title="Back"
+              className="p-1.5 sm:p-2 text-white hover:text-yellow-400 rounded-full hover:bg-white/10 transition-colors flex-shrink-0 cursor-pointer"
+            >
+              <ArrowLeft size={24} className="sm:w-7 sm:h-7 stroke-[2.5]" />
+            </button>
 
-            {/* Actions */}
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-2.5 sm:gap-4">
-                {onPrevEpisode && (
-                  <button
-                    onClick={onPrevEpisode}
-                    disabled={!hasPrev}
-                    className="text-white hover:text-yellow-400 disabled:opacity-30 transition-colors cursor-pointer"
-                  >
-                    <SkipBack size={20} fill="currentColor" />
-                  </button>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => handleSkip(-10)}
-                  title="Rewind 10s"
-                  className="text-white hover:text-yellow-400 transition-colors cursor-pointer flex items-center gap-1 text-xs font-bold bg-white/10 px-2 py-1.5 rounded-lg"
-                >
-                  <RotateCcw size={16} />
-                  <span className="text-[10px]">10s</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={togglePlay}
-                  className="bg-yellow-400 text-black p-2.5 rounded-full transition-transform active:scale-90 cursor-pointer shadow-lg hover:bg-yellow-300"
-                >
-                  {isPlaying ? <Pause size={20} fill="black" /> : <Play size={20} fill="black" className="ml-0.5" />}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleSkip(10)}
-                  title="Forward 10s"
-                  className="text-white hover:text-yellow-400 transition-colors cursor-pointer flex items-center gap-1 text-xs font-bold bg-white/10 px-2 py-1.5 rounded-lg"
-                >
-                  <span className="text-[10px]">10s</span>
-                  <RotateCw size={16} />
-                </button>
-
-                {onNextEpisode && (
-                  <button
-                    onClick={onNextEpisode}
-                    disabled={!hasNext}
-                    className="text-white hover:text-yellow-400 disabled:opacity-30 transition-colors cursor-pointer"
-                  >
-                    <SkipForward size={20} fill="currentColor" />
-                  </button>
-                )}
-
-                <div className="flex items-center gap-2 group">
-                  <button onClick={toggleMute} className="text-white hover:text-yellow-400 transition-colors cursor-pointer">
-                    {isMuted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
-                  </button>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value={isMuted ? 0 : volume}
-                    onChange={handleVolumeChange}
-                    className="w-16 sm:w-20 accent-yellow-400 h-1 bg-neutral-800 rounded cursor-pointer"
-                  />
-                </div>
+            <div className="flex items-center gap-2 sm:gap-3 flex-wrap min-w-0">
+              <div className="min-w-0">
+                <h3 className="text-base sm:text-xl font-bold text-white tracking-wide truncate max-w-[150px] sm:max-w-xs drop-shadow-md">
+                  {seriesOrMovieTitle}
+                </h3>
+                <p className="text-[11px] sm:text-xs text-neutral-300 font-medium truncate">
+                  {subtitleLine}
+                </p>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                {/* Audio Menu */}
-                <div className="relative">
-                  <button
-                    onClick={() => {
-                      setShowAudioMenu(!showAudioMenu);
-                      setShowQualityMenu(false);
-                      setShowSpeedMenu(false);
-                      setShowSubtitlesMenu(false);
-                    }}
-                    className="flex items-center gap-1.5 text-white hover:text-yellow-400 text-[10px] font-black border border-white/20 px-2.5 py-1.5 rounded-md transition-colors cursor-pointer bg-black/40"
-                  >
-                    <Music size={14} className={showAudioMenu ? 'text-yellow-400' : ''} />
-                    <span>Audio</span>
-                  </button>
-                  {showAudioMenu && (
-                    <div className="absolute bottom-full right-0 mb-2 bg-neutral-900 border border-neutral-800 rounded-lg shadow-xl overflow-hidden min-w-[130px] z-50">
-                      <div className="px-3 py-2 text-[9px] font-black text-gray-400 bg-black/40 border-b border-neutral-800 uppercase">Audio Track</div>
-                      {['Default (Stereo)', 'Hindi', 'English', 'Tamil', 'Telugu', 'Malayalam', 'Kannada', 'Bengali', 'Punjabi', 'Marathi', 'Gujarati', 'Urdu'].map((track) => (
-                        <button
-                          key={track}
-                          onClick={() => {
-                            setSelectedAudio(track);
-                            setShowAudioMenu(false);
-                          }}
-                          className={`w-full text-left px-3 py-2.5 text-[11px] hover:bg-yellow-400 hover:text-black transition-colors flex items-center justify-between ${
-                            selectedAudio === track ? 'text-yellow-400 font-bold bg-white/5' : 'text-white'
-                          }`}
-                        >
-                          <span>{track}</span>
-                          {selectedAudio === track && <Check size={12} className="stroke-[3]" />}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Subtitles Menu */}
-                <div className="relative">
-                  <button
-                    onClick={() => {
-                      setShowSubtitlesMenu(!showSubtitlesMenu);
-                      setShowQualityMenu(false);
-                      setShowSpeedMenu(false);
-                      setShowAudioMenu(false);
-                    }}
-                    className="flex items-center gap-1.5 text-white hover:text-yellow-400 text-[10px] font-black border border-white/20 px-2.5 py-1.5 rounded-md transition-colors cursor-pointer bg-black/40"
-                  >
-                    <Captions size={14} className={showSubtitlesMenu ? 'text-yellow-400' : ''} />
-                    <span>Subtitles</span>
-                  </button>
-                  {showSubtitlesMenu && (
-                    <div className="absolute bottom-full right-0 mb-2 bg-neutral-900 border border-neutral-800 rounded-lg shadow-xl overflow-hidden min-w-[120px] z-50">
-                      <div className="px-3 py-2 text-[9px] font-black text-gray-400 bg-black/40 border-b border-neutral-800 uppercase">Subtitles (CC)</div>
-                      {['Off', 'Hindi', 'English', 'Tamil', 'Telugu', 'Malayalam', 'Kannada', 'Bengali', 'Punjabi', 'Marathi', 'Gujarati', 'Urdu'].map((sub) => (
-                        <button
-                          key={sub}
-                          onClick={() => {
-                            setSelectedSubtitle(sub);
-                            setShowSubtitlesMenu(false);
-                          }}
-                          className={`w-full text-left px-3 py-2.5 text-[11px] hover:bg-yellow-400 hover:text-black transition-colors flex items-center justify-between ${
-                            selectedSubtitle === sub ? 'text-yellow-400 font-bold bg-white/5' : 'text-white'
-                          }`}
-                        >
-                          <span>{sub}</span>
-                          {selectedSubtitle === sub && <Check size={12} className="stroke-[3]" />}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Quality Menu */}
-                {availableQualities.length > 0 && (
+              {/* SERIES SELECTORS: Shown only for series, positioned directly beside the Series Name */}
+              {isSeries && seasonsList.length > 0 && (
+                <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+                  {/* Season Dropdown */}
                   <div className="relative">
                     <button
+                      type="button"
                       onClick={() => {
-                        setShowQualityMenu(!showQualityMenu);
+                        setShowSeasonDropdown(!showSeasonDropdown);
+                        setShowEpisodeDropdown(false);
                         setShowSpeedMenu(false);
                         setShowAudioMenu(false);
                         setShowSubtitlesMenu(false);
+                        setShowSettingsMenu(false);
+                        resetAutoHideTimer();
                       }}
-                      className="flex items-center gap-1.5 text-white hover:text-yellow-400 text-[10px] font-black border border-white/20 px-2.5 py-1.5 rounded-md transition-colors cursor-pointer bg-black/40"
+                      className="bg-neutral-900/85 hover:bg-neutral-800 border border-neutral-700/80 rounded-lg px-2.5 py-1 sm:px-3 sm:py-1.5 text-xs text-white font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-md transition-colors cursor-pointer"
                     >
-                      <Settings size={14} className={showQualityMenu ? 'text-yellow-400' : ''} />
-                      {currentQuality}
+                      <span>Season {currentSeason?.seasonNumber || (activeSeasonIdx + 1)}</span>
+                      <ChevronDown size={14} className={`transition-transform duration-200 ${showSeasonDropdown ? 'rotate-180 text-yellow-400' : 'text-neutral-400'}`} />
                     </button>
-                    {showQualityMenu && (
-                      <div className="absolute bottom-full right-0 mb-2 bg-neutral-900 border border-neutral-800 rounded-lg shadow-xl overflow-hidden min-w-[110px] z-50">
-                        <div className="px-3 py-2 text-[9px] font-black text-gray-400 bg-black/40 border-b border-neutral-800 uppercase">Select Quality</div>
-                        {availableQualities.map((q) => (
+
+                    {showSeasonDropdown && (
+                      <div className="absolute top-full left-0 mt-2 bg-neutral-900/95 border border-neutral-700 rounded-xl shadow-2xl py-1 min-w-[130px] max-h-60 overflow-y-auto backdrop-blur-lg z-50">
+                        <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800">
+                          Seasons ({seasonsList.length})
+                        </div>
+                        {seasonsList.map((s: any, idx: number) => (
                           <button
-                            key={q}
-                            onClick={() => handleQualityChange(q)}
-                            className={`w-full text-left px-3 py-2.5 text-[11px] hover:bg-yellow-400 hover:text-black transition-colors flex items-center justify-between ${
-                              currentQuality === q ? 'text-yellow-400 font-bold bg-white/5' : 'text-white'
+                            key={s.seasonNumber || idx}
+                            type="button"
+                            onClick={() => handleSelectSeason(idx)}
+                            className={`w-full text-left px-3 py-2 text-xs hover:bg-yellow-400 hover:text-black transition-colors flex items-center justify-between cursor-pointer ${
+                              activeSeasonIdx === idx ? 'text-yellow-400 font-bold bg-white/5' : 'text-white'
                             }`}
                           >
-                            <span>{q}</span>
-                            {currentQuality === q && <Check size={12} className="stroke-[3]" />}
+                            <span>Season {s.seasonNumber}</span>
+                            {activeSeasonIdx === idx && <Check size={14} className="stroke-[3]" />}
                           </button>
                         ))}
                       </div>
                     )}
                   </div>
-                )}
 
-                {/* Speed Menu */}
-                <div className="relative">
-                  <button
-                    onClick={() => {
-                      setShowSpeedMenu(!showSpeedMenu);
-                      setShowQualityMenu(false);
-                      setShowAudioMenu(false);
-                      setShowSubtitlesMenu(false);
-                    }}
-                    className="text-white hover:text-yellow-400 text-[10px] font-black border border-white/20 px-2.5 py-1.5 rounded-md transition-colors cursor-pointer bg-black/40"
-                  >
-                    {playbackSpeed}x
-                  </button>
-                  {showSpeedMenu && (
-                    <div className="absolute bottom-full right-0 mb-2 bg-neutral-900 border border-neutral-800 rounded-lg shadow-xl overflow-hidden min-w-[90px] z-50">
-                      <div className="px-3 py-2 text-[9px] font-black text-gray-400 bg-black/40 border-b border-neutral-800 uppercase">Playback Speed</div>
-                      {[0.5, 0.75, 1, 1.25, 1.5, 2].map((spd) => (
-                        <button
-                          key={spd}
-                          onClick={() => {
-                            setPlaybackSpeed(spd);
-                            if (videoRef.current) videoRef.current.playbackRate = spd;
-                            setShowSpeedMenu(false);
-                          }}
-                          className={`w-full text-left px-3 py-2.5 text-[11px] hover:bg-yellow-400 hover:text-black transition-colors flex items-center justify-between ${
-                            playbackSpeed === spd ? 'text-yellow-400 font-bold bg-white/5' : 'text-white'
-                          }`}
-                        >
-                          <span>{spd}x</span>
-                          {playbackSpeed === spd && <Check size={12} className="stroke-[3]" />}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                  {/* Episode Dropdown */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowEpisodeDropdown(!showEpisodeDropdown);
+                        setShowSeasonDropdown(false);
+                        setShowSpeedMenu(false);
+                        setShowAudioMenu(false);
+                        setShowSubtitlesMenu(false);
+                        setShowSettingsMenu(false);
+                        resetAutoHideTimer();
+                      }}
+                      className="bg-neutral-900/85 hover:bg-neutral-800 border border-neutral-700/80 rounded-lg px-2.5 py-1 sm:px-3 sm:py-1.5 text-xs text-white font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-md transition-colors cursor-pointer max-w-[160px] sm:max-w-[200px]"
+                    >
+                      <span className="truncate">
+                        {currentEpisode ? `EP ${currentEpisode.episodeNumber}: ${currentEpisode.title}` : `Episode ${activeEpisodeIdx + 1}`}
+                      </span>
+                      <ChevronDown size={14} className={`flex-shrink-0 transition-transform duration-200 ${showEpisodeDropdown ? 'rotate-180 text-yellow-400' : 'text-neutral-400'}`} />
+                    </button>
+
+                    {showEpisodeDropdown && (
+                      <div className="absolute top-full left-0 mt-2 bg-neutral-900/95 border border-neutral-700 rounded-xl shadow-2xl py-1 min-w-[200px] max-w-xs max-h-64 overflow-y-auto backdrop-blur-lg z-50">
+                        <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800">
+                          Season {currentSeason?.seasonNumber} Episodes ({episodesList.length})
+                        </div>
+                        {episodesList.map((ep: any, idx: number) => (
+                          <button
+                            key={ep.episodeNumber || idx}
+                            type="button"
+                            onClick={() => handleSelectEpisode(idx)}
+                            className={`w-full text-left px-3 py-2.5 text-xs hover:bg-yellow-400 hover:text-black transition-colors flex items-center justify-between gap-2 cursor-pointer border-b border-neutral-800/40 last:border-0 ${
+                              activeEpisodeIdx === idx ? 'text-yellow-400 font-bold bg-white/5' : 'text-white'
+                            }`}
+                          >
+                            <div className="truncate min-w-0">
+                              <span className="font-bold mr-1.5 text-neutral-400">EP {ep.episodeNumber}:</span>
+                              <span>{ep.title}</span>
+                            </div>
+                            {activeEpisodeIdx === idx && <Check size={14} className="stroke-[3] flex-shrink-0" />}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
-
-                {/* Download Button */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    resetAutoHideTimer();
-                    handleDownload();
-                  }}
-                  disabled={isDownloading}
-                  title="Download Movie"
-                  className={`p-1.5 rounded-md bg-black/40 text-yellow-400 border border-white/20 transition-all cursor-pointer flex items-center justify-center ${
-                    isDownloading ? 'opacity-50 animate-pulse' : 'hover:bg-yellow-400 hover:text-black'
-                  }`}
-                >
-                  <Download size={16} />
-                </button>
-
-                {/* Cast Button */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    resetAutoHideTimer();
-                    setShowTVCastModal(true);
-                  }}
-                  title="Cast to Smart TV"
-                  className="p-1.5 rounded-md bg-black/40 text-yellow-400 border border-white/20 hover:bg-yellow-400 hover:text-black transition-colors cursor-pointer flex items-center justify-center"
-                >
-                  <Tv size={16} />
-                </button>
-
-                {/* Fullscreen Button */}
-                <button
-                  onClick={toggleFullscreen}
-                  className="text-white hover:text-yellow-400 transition-colors p-1.5 rounded-md border border-white/20 bg-black/40 cursor-pointer"
-                  title="Fullscreen"
-                >
-                  {isFullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
-                </button>
-
-                {/* Close Button */}
-                <button
-                  onClick={onClose}
-                  className="text-white hover:text-red-500 transition-colors p-1.5 rounded-md border border-white/20 bg-black/40 cursor-pointer"
-                  title="Close Player"
-                >
-                  <X size={16} />
-                </button>
-              </div>
+              )}
             </div>
           </div>
-        )}
+
+          {/* Top-Right: Fullscreen Only */}
+          <div className="flex items-center gap-1 sm:gap-2">
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+              className="p-2 rounded-full hover:bg-white/10 text-white hover:text-yellow-400 transition-colors cursor-pointer"
+            >
+              {isFullscreen ? <Minimize size={22} className="stroke-[2.2]" /> : <Maximize size={22} className="stroke-[2.2]" />}
+            </button>
+          </div>
+        </div>
+
+        {/* CENTER CONTROLS: 10s Rewind, Play/Pause, 10s Forward */}
+        <div
+          onClick={(e) => { e.stopPropagation(); resetAutoHideTimer(); }}
+          className={`absolute inset-0 m-auto w-fit h-fit flex items-center justify-center gap-6 sm:gap-12 z-40 transition-opacity duration-300 ${
+            showControls ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+          }`}
+        >
+          {/* 10-Second Rewind Button */}
+          <button
+            type="button"
+            onClick={() => handleSkip(-10)}
+            title="Rewind 10 seconds"
+            className="w-14 h-14 sm:w-18 sm:h-18 rounded-full bg-black/55 hover:bg-black/75 backdrop-blur-md border border-white/15 text-white hover:text-yellow-400 flex items-center justify-center transition-transform hover:scale-110 active:scale-95 shadow-2xl cursor-pointer"
+          >
+            <Rewind10Icon />
+          </button>
+
+          {/* Large Center Play / Pause Button */}
+          <button
+            type="button"
+            onClick={togglePlay}
+            title={isPlaying ? "Pause" : "Play"}
+            className="w-18 h-18 sm:w-22 sm:h-22 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md border border-white/20 text-white flex items-center justify-center transition-transform hover:scale-105 active:scale-95 shadow-2xl cursor-pointer"
+          >
+            {isPlaying ? (
+              <Pause size={32} className="sm:w-10 sm:h-10 fill-white stroke-none" />
+            ) : (
+              <Play size={32} className="sm:w-10 sm:h-10 fill-white stroke-none ml-1" />
+            )}
+          </button>
+
+          {/* 10-Second Forward Button */}
+          <button
+            type="button"
+            onClick={() => handleSkip(10)}
+            title="Forward 10 seconds"
+            className="w-14 h-14 sm:w-18 sm:h-18 rounded-full bg-black/55 hover:bg-black/75 backdrop-blur-md border border-white/15 text-white hover:text-yellow-400 flex items-center justify-center transition-transform hover:scale-110 active:scale-95 shadow-2xl cursor-pointer"
+          >
+            <Forward10Icon />
+          </button>
+        </div>
+
+        {/* BOTTOM CONTROLS OVERLAY: Progress Bar, Speed, Audio, Subtitles, Fullscreen */}
+        <div
+          onClick={(e) => { e.stopPropagation(); resetAutoHideTimer(); }}
+          className={`absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/95 via-black/70 to-transparent p-4 sm:p-6 pb-6 sm:pb-8 space-y-3 sm:space-y-4 z-40 transition-opacity duration-300 ${
+            showControls ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+          }`}
+        >
+          {/* Progress Bar with Current Time and Total Duration */}
+          <div className="flex items-center gap-3 sm:gap-4">
+            <span className="text-xs sm:text-sm font-semibold text-white w-14 sm:w-16 text-right tabular-nums select-none">
+              {formatTime(currentTime)}
+            </span>
+
+            <div className="relative flex-grow h-1.5 sm:h-2 bg-neutral-700/80 rounded-full group cursor-pointer">
+              <input
+                type="range"
+                min="0"
+                max={duration || 100}
+                value={currentTime}
+                onChange={handleSeek}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-30"
+              />
+              {/* Buffered progress */}
+              <div
+                className="absolute h-full bg-white/25 rounded-full pointer-events-none"
+                style={{ width: `${(bufferedTime / (duration || 100)) * 100}%` }}
+              />
+              {/* Played progress (Yellow) */}
+              <div
+                className="absolute h-full bg-yellow-400 rounded-full pointer-events-none z-10"
+                style={{ width: `${(currentTime / (duration || 100)) * 100}%` }}
+              />
+              {/* Yellow Scrubber Handle */}
+              <div
+                className="absolute h-4 w-4 sm:h-4.5 sm:w-4.5 bg-yellow-400 rounded-full -top-[5px] shadow-lg pointer-events-none transition-transform group-hover:scale-125 z-20"
+                style={{ left: `calc(${(currentTime / (duration || 100)) * 100}% - 8px)` }}
+              />
+            </div>
+
+            <span className="text-xs sm:text-sm font-semibold text-white w-14 sm:w-16 tabular-nums select-none">
+              {formatTime(duration)}
+            </span>
+          </div>
+
+          {/* Bottom Action Controls: Speed (left), Audio, Subtitles, Fullscreen (right) */}
+          <div className="flex items-center justify-between gap-3">
+            {/* Playback Speed Pill */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowSpeedMenu(!showSpeedMenu);
+                  setShowAudioMenu(false);
+                  setShowSubtitlesMenu(false);
+                  setShowSettingsMenu(false);
+                  resetAutoHideTimer();
+                }}
+                className="bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-700/70 rounded-full px-3.5 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-white flex items-center gap-1.5 sm:gap-2 shadow-lg backdrop-blur-md cursor-pointer transition-colors"
+              >
+                <Gauge size={16} className="text-neutral-300" />
+                <span>{playbackSpeed}x</span>
+                <ChevronDown size={14} className={`text-neutral-400 transition-transform ${showSpeedMenu ? 'rotate-180 text-yellow-400' : ''}`} />
+              </button>
+
+              {/* Speed Popover Menu */}
+              {showSpeedMenu && (
+                <div className="absolute bottom-full left-0 mb-2 bg-neutral-900/95 border border-neutral-700 rounded-xl shadow-2xl py-1 min-w-[120px] backdrop-blur-lg z-50">
+                  <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800">
+                    Playback Speed
+                  </div>
+                  {[0.5, 0.75, 1, 1.25, 1.5, 2].map((spd) => (
+                    <button
+                      key={spd}
+                      type="button"
+                      onClick={() => {
+                        setPlaybackSpeed(spd);
+                        if (videoRef.current) videoRef.current.playbackRate = spd;
+                        setShowSpeedMenu(false);
+                        resetAutoHideTimer();
+                      }}
+                      className={`w-full text-left px-3 py-2 text-xs hover:bg-yellow-400 hover:text-black transition-colors flex items-center justify-between cursor-pointer ${
+                        playbackSpeed === spd ? 'text-yellow-400 font-bold bg-white/5' : 'text-white'
+                      }`}
+                    >
+                      <span>{spd}x</span>
+                      {playbackSpeed === spd && <Check size={14} className="stroke-[3]" />}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Right Controls: Audio, Subtitles, Fullscreen */}
+            <div className="flex items-center gap-2 sm:gap-3">
+              {/* Audio Language Pill */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAudioMenu(!showAudioMenu);
+                    setShowSubtitlesMenu(false);
+                    setShowSpeedMenu(false);
+                    setShowSettingsMenu(false);
+                    resetAutoHideTimer();
+                  }}
+                  className="bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-700/70 rounded-full px-3.5 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-white flex items-center gap-1.5 sm:gap-2 shadow-lg backdrop-blur-md cursor-pointer transition-colors"
+                >
+                  <Volume2 size={16} className="text-neutral-300" />
+                  <span>Audio: {selectedAudio || 'Hindi'}</span>
+                  <ChevronDown size={14} className={`text-neutral-400 transition-transform ${showAudioMenu ? 'rotate-180 text-yellow-400' : ''}`} />
+                </button>
+
+                {/* Audio Tracks Popover */}
+                {showAudioMenu && (
+                  <div className="absolute bottom-full right-0 mb-2 bg-neutral-900/95 border border-neutral-700 rounded-xl shadow-2xl py-1 min-w-[170px] backdrop-blur-lg z-50">
+                    <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800">
+                      Audio Tracks
+                    </div>
+                    {realAudioTracks.length > 0 ? (
+                      realAudioTracks.map((trk) => (
+                        <button
+                          key={trk.label}
+                          type="button"
+                          onClick={() => handleSelectAudio(trk)}
+                          className={`w-full text-left px-3 py-2 text-xs hover:bg-yellow-400 hover:text-black transition-colors flex items-center justify-between cursor-pointer ${
+                            selectedAudio === trk.label ? 'text-yellow-400 font-bold bg-white/5' : 'text-white'
+                          }`}
+                        >
+                          <span>{trk.label}</span>
+                          {selectedAudio === trk.label && <Check size={14} className="stroke-[3]" />}
+                        </button>
+                      ))
+                    ) : (
+                      <div className="px-3 py-2 text-xs text-neutral-400">
+                        1 Audio Track ({selectedAudio || 'Hindi'})
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Subtitles Language Pill */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowSubtitlesMenu(!showSubtitlesMenu);
+                    setShowAudioMenu(false);
+                    setShowSpeedMenu(false);
+                    setShowSettingsMenu(false);
+                    resetAutoHideTimer();
+                  }}
+                  className="bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-700/70 rounded-full px-3.5 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-white flex items-center gap-1.5 sm:gap-2 shadow-lg backdrop-blur-md cursor-pointer transition-colors"
+                >
+                  <Captions size={16} className="text-neutral-300" />
+                  <span>Subtitles: {selectedSubtitle}</span>
+                  <ChevronDown size={14} className={`text-neutral-400 transition-transform ${showSubtitlesMenu ? 'rotate-180 text-yellow-400' : ''}`} />
+                </button>
+
+                {/* Subtitles Popover */}
+                {showSubtitlesMenu && (
+                  <div className="absolute bottom-full right-0 mb-2 bg-neutral-900/95 border border-neutral-700 rounded-xl shadow-2xl py-1 min-w-[190px] backdrop-blur-lg z-50">
+                    <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800">
+                      Subtitles (CC)
+                    </div>
+                    {/* Subtitle Off Option */}
+                    <button
+                      type="button"
+                      onClick={() => handleSelectSubtitle('Off')}
+                      className={`w-full text-left px-3 py-2 text-xs hover:bg-yellow-400 hover:text-black transition-colors flex items-center justify-between cursor-pointer ${
+                        selectedSubtitle === 'Off' ? 'text-yellow-400 font-bold bg-white/5' : 'text-white'
+                      }`}
+                    >
+                      <span>Off</span>
+                      {selectedSubtitle === 'Off' && <Check size={14} className="stroke-[3]" />}
+                    </button>
+
+                    {realSubtitleTracks.length > 0 ? (
+                      realSubtitleTracks.map((sub) => (
+                        <button
+                          key={sub.label}
+                          type="button"
+                          onClick={() => handleSelectSubtitle(sub.label)}
+                          className={`w-full text-left px-3 py-2 text-xs hover:bg-yellow-400 hover:text-black transition-colors flex items-center justify-between cursor-pointer ${
+                            selectedSubtitle === sub.label ? 'text-yellow-400 font-bold bg-white/5' : 'text-white'
+                          }`}
+                        >
+                          <span>{sub.label}</span>
+                          {selectedSubtitle === sub.label && <Check size={14} className="stroke-[3]" />}
+                        </button>
+                      ))
+                    ) : (
+                      <div className="px-3 py-2 text-xs text-neutral-400 italic">
+                        No subtitles available
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Settings Gear Icon */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowSettingsMenu(!showSettingsMenu);
+                    setShowAudioMenu(false);
+                    setShowSubtitlesMenu(false);
+                    setShowSpeedMenu(false);
+                    setShowSeasonDropdown(false);
+                    setShowEpisodeDropdown(false);
+                    resetAutoHideTimer();
+                  }}
+                  title="Settings"
+                  className={`bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-700/70 text-white hover:text-yellow-400 p-2 sm:px-3 sm:py-2 rounded-xl text-xs sm:text-sm flex items-center justify-center shadow-lg backdrop-blur-md cursor-pointer transition-colors ${
+                    showSettingsMenu ? 'text-yellow-400' : ''
+                  }`}
+                >
+                  <Settings size={18} />
+                </button>
+
+                {/* Settings Popover Menu */}
+                {showSettingsMenu && (
+                  <div className="absolute bottom-full right-0 mb-2 bg-neutral-900/95 border border-neutral-700 rounded-2xl shadow-2xl p-3 min-w-[220px] backdrop-blur-xl z-50 text-white space-y-2.5">
+                    <div className="px-2 py-1 text-[11px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800">
+                      Player Settings
+                    </div>
+
+                    {/* Quality Selector if multiple available */}
+                    {availableQualities.length > 0 && (
+                      <div className="px-1">
+                        <div className="text-xs text-neutral-300 font-semibold mb-1.5">Stream Quality</div>
+                        <div className="grid grid-cols-3 gap-1">
+                          {availableQualities.map((q) => (
+                            <button
+                              key={q}
+                              type="button"
+                              onClick={() => handleQualityChange(q)}
+                              className={`px-2 py-1 text-xs rounded-lg font-bold transition-colors cursor-pointer ${
+                                currentQuality === q ? 'bg-yellow-400 text-black' : 'bg-neutral-800 hover:bg-neutral-700 text-white'
+                              }`}
+                            >
+                              {q}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Cast to Smart TV */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowSettingsMenu(false);
+                        setShowTVCastModal(true);
+                        resetAutoHideTimer();
+                      }}
+                      className="w-full text-left px-2 py-2 rounded-lg text-xs font-semibold hover:bg-white/10 flex items-center gap-2.5 cursor-pointer transition-colors"
+                    >
+                      <Tv size={16} className="text-yellow-400 flex-shrink-0" />
+                      <span>Cast to TV / Chromecast</span>
+                    </button>
+
+                    {/* Download Video (Movies Only) */}
+                    {!isSeries && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowSettingsMenu(false);
+                          handleDownload();
+                          resetAutoHideTimer();
+                        }}
+                        className="w-full text-left px-2 py-2 rounded-lg text-xs font-semibold hover:bg-white/10 flex items-center gap-2.5 cursor-pointer transition-colors"
+                      >
+                        <Download size={16} className="text-yellow-400 flex-shrink-0" />
+                        <span>Download</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Fullscreen Button */}
+              <button
+                type="button"
+                onClick={toggleFullscreen}
+                title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+                className="bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-700/70 text-white hover:text-yellow-400 p-2 sm:px-3 sm:py-2 rounded-xl text-xs sm:text-sm flex items-center justify-center shadow-lg backdrop-blur-md cursor-pointer transition-colors"
+              >
+                {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

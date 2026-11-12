@@ -2,9 +2,11 @@ import { Request, Response, NextFunction } from 'express';
 import { adminAuth } from './firebaseAdmin.ts';
 
 export const AUTHORIZED_ADMIN_EMAILS = [
+  'riteshdahiyajaat00@gmail.com',
   'adityaantil260@gmail.com',
   'amandabasladpuriya@gmail.com',
-  'movieboxproapk007711@gmail.com'
+  'movieboxproapk007711@gmail.com',
+  'movieboxproapp0011@gmail.com'
 ];
 
 export interface AuthRequest extends Request {

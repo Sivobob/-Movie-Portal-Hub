@@ -377,8 +377,8 @@ export async function handleStream(req: Request, res: Response) {
     let start = 0;
     let endPos = fileSize - 1;
 
-    // Stream chunk limit: 50 MB per HTTP Range request for ultra-fast streaming
-    const MAX_RANGE_CHUNK = 50 * 1024 * 1024; // 50 MB
+    // Stream chunk limit: 8 MB per HTTP Range request for instantaneous video start & smooth buffering
+    const MAX_RANGE_CHUNK = 8 * 1024 * 1024; // 8 MB
 
     if (rangeHeader) {
       const match = rangeHeader.match(/bytes=(\d+)-(\d+)?/);
@@ -416,13 +416,8 @@ export async function handleStream(req: Request, res: Response) {
 
     let rawMime = (document.mimeType || '').toLowerCase();
     const lowerName = fileName.toLowerCase();
-    const isMkv = lowerName.endsWith('.mkv') || rawMime.includes('matroska') || rawMime.includes('mkv');
     const isWebm = lowerName.endsWith('.webm') || rawMime.includes('webm');
-    const isHevc = lowerName.includes('hevc') || lowerName.includes('x265') || lowerName.includes('h265') || lowerName.includes('h.265') || lowerName.includes('10bit');
-    const isTranscodeRequired = isMkv || isHevc || req.query.transcode === '1' || req.query.transcode === 'true';
-
-    let mimeType = 'video/mp4';
-    if (isWebm && !isTranscodeRequired) mimeType = 'video/webm';
+    const mimeType = isWebm ? 'video/webm' : 'video/mp4';
 
     const commonHeaders: any = {
       'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length, X-Video-Duration, Content-Type',
@@ -444,112 +439,6 @@ export async function handleStream(req: Request, res: Response) {
 
     let isClosed = false;
     req.on('close', () => { isClosed = true; });
-
-    // Handle MKV / HEVC files with high-speed live H.264 MP4 transcoding via ffmpeg
-    if (isTranscodeRequired) {
-      console.log(`[Stream] Transcoding MKV/HEVC for msg ${parsed.messageId}. File: ${fileName}`);
-      
-      let startByte = 0;
-      let startSeconds = 0;
-      const startParam = req.query.start ? parseFloat(req.query.start as string) : 0;
-
-      if (!isNaN(startParam) && startParam > 0) {
-        startSeconds = startParam;
-        // Estimate startByte for iterDownload based on time ratio
-        if (fileSize > 0 && durationSec > 0) {
-          startByte = Math.floor((startSeconds / durationSec) * fileSize);
-        }
-      } else if (rangeHeader && fileSize > 0 && durationSec > 0) {
-        const matchRange = rangeHeader.match(/bytes=(\d+)-/);
-        if (matchRange) {
-          startByte = parseInt(matchRange[1], 10) || 0;
-          startSeconds = Math.floor((startByte / fileSize) * durationSec);
-        }
-      }
-
-      const transcodeStatusCode = rangeHeader ? 206 : 200;
-      const transcodeHeaders = { ...commonHeaders };
-      delete transcodeHeaders['Accept-Ranges']; // We handle ranges manually here
-      
-      const responseHeaders: any = {
-        ...transcodeHeaders,
-        'Content-Type': 'video/mp4',
-        'Content-Disposition': `inline; filename="stream.mp4"`,
-        'Cache-Control': 'no-cache',
-      };
-
-      if (rangeHeader) {
-        // We use the original fileSize as a hint for the browser's progress bar
-        responseHeaders['Content-Range'] = `bytes ${startByte}-${fileSize - 1}/${fileSize}`;
-        responseHeaders['Content-Length'] = (fileSize - startByte).toString();
-      }
-
-      const ALIGNMENT = 4096;
-      const alignedStartByte = Math.floor(startByte / ALIGNMENT) * ALIGNMENT;
-
-      res.writeHead(transcodeStatusCode, responseHeaders);
-
-      const ffmpegArgs = [
-        ...(startSeconds > 3 ? ['-ss', startSeconds.toString()] : []),
-        '-i', 'pipe:0',
-        '-map', '0:v:0',
-        '-map', '0:a?',
-        '-c:v', 'libx264',
-        '-profile:v', 'baseline',
-        '-level', '3.0',
-        '-preset', 'faster',
-        '-tune', 'zerolatency',
-        '-crf', '28',
-        '-c:a', 'aac',
-        '-ac', '2',
-        '-b:a', '128k',
-        '-f', 'mp4',
-        '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
-        'pipe:1'
-      ];
-
-      const ffmpegProc = spawn('ffmpeg', ffmpegArgs);
-
-      ffmpegProc.stdout.pipe(res);
-      
-      // Log errors only if not closed by user
-      ffmpegProc.stderr.on('data', (d) => {
-        const msg = d.toString();
-        if (msg.includes('Error') && !isClosed) console.log('[FFMPEG Err]', msg.trim());
-      });
-
-      req.on('close', () => {
-        isClosed = true;
-        try { ffmpegProc.kill('SIGKILL'); } catch (e) {}
-      });
-
-      try {
-        const fileLocation = new Api.InputDocumentFileLocation({
-          id: document.id,
-          accessHash: document.accessHash,
-          fileReference: document.fileReference,
-          thumbSize: '',
-        });
-
-        const stream = client.iterDownload({
-          file: fileLocation,
-          offset: bigInt(alignedStartByte) as any,
-          requestSize: 2 * 1024 * 1024,
-        });
-
-        for await (let chunk of stream) {
-          if (isClosed || res.writableEnded) break;
-          const canWrite = ffmpegProc.stdin.write(chunk);
-          if (!canWrite && !isClosed) {
-            await new Promise<void>(r => ffmpegProc.stdin.once('drain', r));
-          }
-        }
-        if (!isClosed) ffmpegProc.stdin.end();
-      } catch (tErr: any) {
-        if (!isClosed) console.warn('[Stream] Transcode loop notice:', tErr.message);
-      }
-      return;
-    }
 
     // Direct MP4 / WebM streaming with HTTP Range support
     const ALIGNMENT = 4096;
@@ -582,7 +471,7 @@ export async function handleStream(req: Request, res: Response) {
       const stream = client.iterDownload({
         file: fileLocation,
         offset: bigInt(alignedStart) as any,
-        requestSize: 4 * 1024 * 1024,
+        requestSize: 1024 * 1024, // 1 MB chunks for immediate first-frame delivery
       });
 
       for await (let chunk of stream) {

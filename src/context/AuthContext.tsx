@@ -5,6 +5,7 @@ import { auth, db } from '../firebase';
 import { getStoredUser, loginWithEmail as serviceLoginWithEmail, clearUserSession } from '../services/authService';
 
 export const AUTHORIZED_ADMIN_EMAILS = [
+  'riteshdahiyajaat00@gmail.com',
   'adityaantil260@gmail.com',
   'amandabasladpuriya@gmail.com',
   'movieboxproapk007711@gmail.com',
