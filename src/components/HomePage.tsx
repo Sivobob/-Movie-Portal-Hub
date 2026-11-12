@@ -51,7 +51,6 @@ export default function HomePage() {
   const [activeSeasonIndex, setActiveSeasonIndex] = useState(0);
   const [playingMovie, setPlayingMovie] = useState<any | null>(null);
   const [showAdminMenu, setShowAdminMenu] = useState(false);
-  const [announcement, setAnnouncement] = useState<any | null>(null);
   const navigate = useNavigate();
 
   const isMasterAdmin = Boolean(user && isAuthorizedAdminEmail(user.email) && isAdmin);
@@ -208,89 +207,7 @@ export default function HomePage() {
     };
   }, []);
 
-  // Listen for public content announcements (New Movie / Series Releases)
-  useEffect(() => {
-    // 1. Check local storage for recent broadcasts
-    try {
-      const stored = localStorage.getItem('app_latest_announcement');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        const lastSeen = sessionStorage.getItem('last_seen_announcement');
-        if (parsed?.id && parsed.id !== lastSeen) {
-          setAnnouncement(parsed);
-          sessionStorage.setItem('last_seen_announcement', parsed.id);
-          setTimeout(() => setAnnouncement(null), 12000);
-        }
-      }
-    } catch (e) {}
 
-    // 2. Custom window event listener (immediate within same or cross tab)
-    const handleReleaseEvent = (event: any) => {
-      if (event.detail) {
-        setAnnouncement(event.detail);
-        sessionStorage.setItem('last_seen_announcement', event.detail.id || `ann-${Date.now()}`);
-        setTimeout(() => setAnnouncement(null), 12000);
-      }
-    };
-    window.addEventListener('new_movie_release', handleReleaseEvent);
-
-    // 3. BroadcastChannel for multi-tab sync
-    let bc: BroadcastChannel | null = null;
-    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-      try {
-        bc = new BroadcastChannel('movie_portal_updates');
-        bc.onmessage = (msg) => {
-          if (msg.data?.type === 'NEW_RELEASE' && msg.data.data) {
-            setAnnouncement(msg.data.data);
-            setTimeout(() => setAnnouncement(null), 12000);
-          }
-        };
-      } catch (e) {}
-    }
-
-    // 4. Firestore real-time collection listener
-    const q = query(
-      collection(db, 'announcements'),
-      where('expiresAt', '>', new Date())
-    );
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      if (docs.length > 0) {
-        docs.sort((a: any, b: any) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-        const latest = docs[0] as any;
-        const lastSeenId = sessionStorage.getItem('last_seen_announcement');
-        if (latest.id !== lastSeenId) {
-          setAnnouncement(latest);
-          sessionStorage.setItem('last_seen_announcement', latest.id);
-          
-          // Trigger system notification matching rich Android style
-          try {
-            if (typeof window !== 'undefined' && 'Notification' in window && (window as any).Notification?.permission === 'granted') {
-              const isSeries = (latest.category || '').toLowerCase().includes('series');
-              new Notification('MOVIE PORTAL', {
-                body: `Watch Now : ${latest.title} (${latest.releaseYear || new Date().getFullYear()}) Full ${isSeries ? 'Series' : 'Movie'} available now\nGO STREAM or DOWNLOAD NOW`,
-                icon: '/assets/icons/master_icon.jpg',
-                image: latest.posterUrl || latest.backdropUrl || '/assets/icons/master_icon.jpg',
-                badge: '/assets/icons/master_icon.jpg',
-                tag: `movie-${latest.id}`
-              } as any);
-            }
-          } catch (notifErr) {}
-          
-          setTimeout(() => setAnnouncement(null), 12000);
-        }
-      }
-    }, (err) => {
-      console.warn('Firestore announcements listener inactive:', err?.message || err);
-    });
-    
-    return () => {
-      unsubscribe();
-      window.removeEventListener('new_movie_release', handleReleaseEvent);
-      if (bc) bc.close();
-    };
-  }, []);
 
   // Slider Touch & Interaction State
   const [isUserInteracting, setIsUserInteracting] = useState(false);
@@ -442,84 +359,7 @@ export default function HomePage() {
 
   return (
     <div className={`h-full min-h-full w-full bg-black text-white flex flex-col relative pt-0 select-none overflow-x-hidden ${category ? 'pb-20' : 'pb-0 overflow-y-hidden'}`}>
-      {/* New Content Announcement Toast */}
-      <AnimatePresence>
-        {announcement && (
-          <motion.div
-            initial={{ opacity: 0, y: 50, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 50, scale: 0.9 }}
-            className="fixed bottom-20 sm:bottom-6 left-4 right-4 z-[100] flex justify-center pointer-events-none"
-          >
-            <div 
-              onClick={() => {
-                const target = movies.find(
-                  (m) => m.id === announcement.movieId || (m.title && announcement.title && m.title.toLowerCase() === announcement.title.toLowerCase())
-                );
-                if (target) {
-                  setSelectedMovie(target);
-                }
-              }}
-              className="bg-neutral-900/95 backdrop-blur-md border border-neutral-700/80 rounded-3xl shadow-2xl p-4 max-w-md w-full pointer-events-auto overflow-hidden relative cursor-pointer active:scale-98 transition-all group text-white"
-            >
-              {/* Header bar: Icon, App Name, Time, Close */}
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-full overflow-hidden border border-yellow-400/50 bg-black flex-shrink-0">
-                    <img src="/assets/icons/master_icon.jpg" alt="Movie Portal" className="w-full h-full object-cover" />
-                  </div>
-                  <span className="text-xs font-bold text-gray-300 tracking-wide">
-                    MOVIE PORTAL <span className="text-gray-500 font-normal ml-1">• Just now</span>
-                  </span>
-                </div>
-                
-                <button 
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setAnnouncement(null);
-                  }}
-                  className="p-1 hover:bg-white/10 rounded-full transition-colors cursor-pointer text-gray-400 hover:text-white"
-                  aria-label="Close notification"
-                >
-                  <X size={16} />
-                </button>
-              </div>
 
-              {/* Title & Body */}
-              <div className="space-y-0.5 px-0.5">
-                <h4 className="text-xs sm:text-sm font-bold text-gray-100 leading-snug">
-                  Watch Now : {announcement.title} ({announcement.releaseYear || new Date().getFullYear()}) Full {announcement.category?.toLowerCase().includes('series') ? 'Series' : 'Movie'} available now
-                </h4>
-                <p className="text-[11px] font-semibold text-gray-400 tracking-wide uppercase">
-                  GO STREAM or DOWNLOAD NOW
-                </p>
-              </div>
-
-              {/* Large Poster / Banner (Big Picture) */}
-              <div className="mt-3 rounded-2xl overflow-hidden bg-black/60 border border-neutral-800 shadow-xl max-h-56 relative group">
-                <img 
-                  src={announcement.posterUrl || announcement.backdropUrl} 
-                  alt={announcement.title} 
-                  className="w-full h-44 sm:h-52 object-cover group-hover:scale-105 transition-transform duration-300"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-80" />
-                <div className="absolute bottom-2.5 right-3 bg-yellow-400 text-black font-black text-[10px] px-3 py-1 rounded-full uppercase tracking-wider flex items-center gap-1 shadow-lg">
-                  <Play size={10} fill="black" /> WATCH NOW
-                </div>
-              </div>
-
-              {/* Progress Bar (Timer) */}
-              <motion.div 
-                initial={{ width: "100%" }}
-                animate={{ width: "0%" }}
-                transition={{ duration: 12, ease: "linear" }}
-                className="absolute bottom-0 left-0 h-1 bg-yellow-400"
-              />
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* Category Grid View OR Cinematic Main Homepage */}
       {category ? (
