@@ -176,7 +176,7 @@ export default function Header() {
           <div className="max-w-7xl mx-auto flex items-center justify-end relative">
             {/* ONLY Settings Button on Top Right */}
             {!isInstalledPhoneApp() && (
-              <div className="flex items-center z-10">
+              <div className="flex items-center z-10 mt-2.5">
                 <button
                   type="button"
                   onClick={handleSettingsClick}

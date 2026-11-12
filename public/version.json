@@ -1,7 +1,7 @@
 {
-  "latestVersion": "3.5.170",
-  "latestVersionCode": 3200,
+  "latestVersion": "3.5.172",
+  "latestVersionCode": 3250,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "releaseNotes": "Official Release v3.5.170: Final Permanent Cloud Sync Fix. Verified admin authorization for instant cross-device movie updates."
+  "releaseNotes": "Update v3.5.172: Adjusted Settings icon position for better visual alignment in browser mode."
 }
