@@ -175,17 +175,19 @@ export default function Header() {
         >
           <div className="max-w-7xl mx-auto flex items-center justify-end relative">
             {/* ONLY Settings Button on Top Right */}
-            <div className="flex items-center z-10">
-              <button
-                type="button"
-                onClick={handleSettingsClick}
-                className="p-2.5 rounded-full bg-yellow-400 text-black border border-yellow-500 shadow-[0_0_15px_rgba(250,204,21,0.5)] cursor-pointer active:scale-90 transition-all hover:bg-yellow-300"
-                aria-label="Settings"
-                title="Settings"
-              >
-                <Settings size={18} className="transition-transform hover:rotate-90 duration-300" />
-              </button>
-            </div>
+            {!isInstalledPhoneApp() && (
+              <div className="flex items-center z-10">
+                <button
+                  type="button"
+                  onClick={handleSettingsClick}
+                  className="p-2.5 rounded-full bg-yellow-400 text-black border border-yellow-500 shadow-[0_0_15px_rgba(250,204,21,0.5)] cursor-pointer active:scale-90 transition-all hover:bg-yellow-300"
+                  aria-label="Settings"
+                  title="Settings"
+                >
+                  <Settings size={18} className="transition-transform hover:rotate-90 duration-300" />
+                </button>
+              </div>
+            )}
           </div>
         </header>
 
