@@ -525,8 +525,8 @@ export default function HomePage() {
                 </span>
               </div>
 
-              {/* Center Play Overlay on Hover */}
-              <div className="absolute inset-0 bg-black/40 flex items-center justify-center transition-opacity">
+              {/* Bottom-Right Play Overlay */}
+              <div className="absolute bottom-4 right-4 z-20">
                  <div className="w-16 h-16 rounded-full bg-yellow-400 flex items-center justify-center shadow-2xl scale-90 group-hover:scale-100 transition-transform">
                     <Play size={24} fill="black" className="ml-1" />
                  </div>

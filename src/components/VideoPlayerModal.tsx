@@ -261,7 +261,7 @@ export default function VideoPlayerModal({
 
     if (isTelegram) {
       // Build dynamic params - EXACT same clean streaming engine as Chrome
-      const params = `?url=${encodeURIComponent(trimmed)}`;
+      const params = `?url=${encodeURIComponent(trimmed)}&ext=.mp4`;
       setPlayableUrl(buildApiUrl(`/api/stream${params}`));
     } else {
       setPlayableUrl(trimmed);
