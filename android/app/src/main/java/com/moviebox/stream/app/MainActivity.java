@@ -12,6 +12,29 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
         enableImmersiveStickyMode();
         configureWebView();
+        createNotificationChannel();
+    }
+
+    private void createNotificationChannel() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            try {
+                String channelId = "movie_box_releases";
+                CharSequence name = "Movie Box Releases";
+                String description = "New movies, series episodes and updates";
+                int importance = android.app.NotificationManager.IMPORTANCE_HIGH;
+                android.app.NotificationChannel channel = new android.app.NotificationChannel(channelId, name, importance);
+                channel.setDescription(description);
+                channel.enableLights(true);
+                channel.enableVibration(true);
+                channel.setShowBadge(true);
+                android.app.NotificationManager notificationManager = getSystemService(android.app.NotificationManager.class);
+                if (notificationManager != null) {
+                    notificationManager.createNotificationChannel(channel);
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
     }
 
     private void configureWebView() {
