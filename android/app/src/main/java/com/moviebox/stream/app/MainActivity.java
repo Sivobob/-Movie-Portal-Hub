@@ -19,6 +19,7 @@ public class MainActivity extends BridgeActivity {
             android.webkit.CookieManager cookieManager = android.webkit.CookieManager.getInstance();
             String streamUrl = "https://ais-dev-d4oy4g4wkdxchvgc5wbbty-835315626292.asia-northeast1.run.app";
             cookieManager.setCookie(streamUrl, "__SECURE-aistudio_auth_flow_may_set_cookies=true; Path=/; Secure; SameSite=None");
+            cookieManager.setCookie("https://ais-pre-d4oy4g4wkdxchvgc5wbbty-835315626292.asia-northeast1.run.app", "__SECURE-aistudio_auth_flow_may_set_cookies=true; Path=/; Secure; SameSite=None");
             cookieManager.flush();
             if (getBridge() != null && getBridge().getWebView() != null) {
                 cookieManager.setAcceptThirdPartyCookies(getBridge().getWebView(), true);

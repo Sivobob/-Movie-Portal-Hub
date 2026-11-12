@@ -2,37 +2,57 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    function isSignedIn() { 
-      return request.auth != null; 
-    }
+    // --- Globals ---
+    function isSignedIn() { return request.auth != null; }
+    function email() { return request.auth.token.email.lower(); }
     
-    function isAuthorizedEmail() {
-      return isSignedIn() && 
-        request.auth.token.email != null && 
-        (request.auth.token.email.lower() == 'movieboxproapk007711@gmail.com' ||
-         request.auth.token.email.lower() == 'movieboxproapp0011@gmail.com' ||
-         request.auth.token.email.lower() == 'adityaantil260@gmail.com' ||
-         request.auth.token.email.lower() == 'amandabasladpuriya@gmail.com');
+    // Hardened Admin Check (Math-based Email Validation)
+    function isAdmin() {
+      return isSignedIn() && (
+        email() == 'movieboxproapp0011@gmail.com' ||
+        email() == 'movieboxproapk007711@gmail.com' ||
+        email() == 'adityaantil260@gmail.com' ||
+        email() == 'amandabasladpuriya@gmail.com'
+      );
     }
 
-    function isAdmin() { 
-      return isSignedIn() && 
-        (request.auth.token.admin == true || isAuthorizedEmail());
+    // --- Validation Helpers ---
+    function isValidMovie(data) {
+      return data.title is string && data.title.size() <= 200 &&
+             data.posterUrl is string && data.posterUrl.size() <= 1000 &&
+             data.originalCategory is string &&
+             data.published is bool;
     }
 
-    // Movies collection - Anyone can browse, only admins can write
+    function isValidAnnouncement(data) {
+      return data.title is string && data.title.size() <= 200 &&
+             data.message is string && data.message.size() <= 500;
+    }
+
+    // --- Collections ---
+
+    // Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Movies: Public Read, Admin Write
     match /movies/{movieId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create: if isAdmin() && isValidMovie(request.resource.data);
+      allow update: if isAdmin() && isValidMovie(request.resource.data);
+      allow delete: if isAdmin();
     }
 
-    // Announcements collection - Anyone can receive updates, only admins can create
+    // Announcements: Public Read, Admin Write
     match /announcements/{announcementId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow create: if isAdmin() && isValidAnnouncement(request.resource.data);
+      allow update: if isAdmin() && isValidAnnouncement(request.resource.data);
+      allow delete: if isAdmin();
     }
 
-    // Admins collection - Manage admin records
+    // Admins: Restricted to current admins
     match /admins/{uid} {
       allow read: if true;
       allow write: if isAdmin();

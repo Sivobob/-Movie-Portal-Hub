@@ -425,6 +425,47 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleSyncLocalToCloud = async () => {
+    const local = getLocalMovies();
+    if (local.length === 0) {
+      showNotification('error', 'No local movies found to sync.');
+      return;
+    }
+
+    setFormLoading(true);
+    let synced = 0;
+    let failed = 0;
+
+    for (const movie of local) {
+      // Check if already in Firestore
+      const exists = movies.find(m => m.id === movie.id || (m.imdbId && m.imdbId === movie.imdbId));
+      if (!exists) {
+        try {
+          // Remove local-only id to let Firestore generate one, or keep if preferred
+          const { id, ...payload } = movie as any;
+          await addDoc(collection(db, 'movies'), {
+            ...payload,
+            published: true, // Ensure they are published
+            updatedAt: serverTimestamp()
+          });
+          synced++;
+        } catch (e) {
+          failed++;
+        }
+      }
+    }
+
+    setFormLoading(false);
+    if (synced > 0) {
+      showNotification('success', `Successfully synced ${synced} movies to cloud!`);
+      fetchMovies();
+    } else if (failed > 0) {
+      showNotification('error', `Failed to sync ${failed} movies. Check permissions.`);
+    } else {
+      showNotification('success', 'All local movies are already in the cloud.');
+    }
+  };
+
 
 
   const handleDeleteMovie = async (id: string) => {
@@ -1249,6 +1290,15 @@ export default function AdminDashboard() {
           <div className="flex flex-wrap items-center gap-2">
 
 
+
+            <button
+              onClick={handleSyncLocalToCloud}
+              disabled={formLoading || isDeleting}
+              className="flex items-center gap-1.5 bg-yellow-400 hover:bg-yellow-300 text-black font-black text-xs px-3 py-2 rounded shadow-lg shadow-yellow-400/20 transition-all active:scale-95 cursor-pointer"
+            >
+              <RefreshCw className={formLoading ? "animate-spin" : ""} size={14} />
+              Sync Local to Cloud
+            </button>
 
             <button
               onClick={fetchMovies}

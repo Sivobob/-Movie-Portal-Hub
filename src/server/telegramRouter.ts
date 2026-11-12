@@ -451,7 +451,15 @@ export async function handleStream(req: Request, res: Response) {
       
       let startByte = 0;
       let startSeconds = 0;
-      if (rangeHeader && fileSize > 0 && durationSec > 0) {
+      const startParam = req.query.start ? parseFloat(req.query.start as string) : 0;
+
+      if (!isNaN(startParam) && startParam > 0) {
+        startSeconds = startParam;
+        // Estimate startByte for iterDownload based on time ratio
+        if (fileSize > 0 && durationSec > 0) {
+          startByte = Math.floor((startSeconds / durationSec) * fileSize);
+        }
+      } else if (rangeHeader && fileSize > 0 && durationSec > 0) {
         const matchRange = rangeHeader.match(/bytes=(\d+)-/);
         if (matchRange) {
           startByte = parseInt(matchRange[1], 10) || 0;
@@ -459,18 +467,27 @@ export async function handleStream(req: Request, res: Response) {
         }
       }
 
-      const ALIGNMENT = 4096;
-      const alignedStartByte = Math.floor(startByte / ALIGNMENT) * ALIGNMENT;
-
+      const transcodeStatusCode = rangeHeader ? 206 : 200;
       const transcodeHeaders = { ...commonHeaders };
-      delete transcodeHeaders['Accept-Ranges'];
+      delete transcodeHeaders['Accept-Ranges']; // We handle ranges manually here
       
-      res.writeHead(200, {
+      const responseHeaders: any = {
         ...transcodeHeaders,
         'Content-Type': 'video/mp4',
         'Content-Disposition': `inline; filename="stream.mp4"`,
         'Cache-Control': 'no-cache',
-      });
+      };
+
+      if (rangeHeader) {
+        // We use the original fileSize as a hint for the browser's progress bar
+        responseHeaders['Content-Range'] = `bytes ${startByte}-${fileSize - 1}/${fileSize}`;
+        responseHeaders['Content-Length'] = (fileSize - startByte).toString();
+      }
+
+      const ALIGNMENT = 4096;
+      const alignedStartByte = Math.floor(startByte / ALIGNMENT) * ALIGNMENT;
+
+      res.writeHead(transcodeStatusCode, responseHeaders);
 
       const ffmpegArgs = [
         ...(startSeconds > 3 ? ['-ss', startSeconds.toString()] : []),

@@ -180,13 +180,14 @@ export default function HomePage() {
     fetchInitial();
 
     // 2. Real-time Cloud Synchronization (Works instantly on every device)
-    const q = query(collection(db, 'movies'), where('published', '==', true));
+    const q = query(collection(db, 'movies'));
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
         if (!isMounted) return;
         setIsLoading(false);
         const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+        console.log(`[Sync] Received ${list.length} movies from cloud`);
         
         // Update UI state immediately
         setMovies(list);
@@ -196,7 +197,7 @@ export default function HomePage() {
         saveLocalMovies(list);
       },
       (err) => {
-        console.error('Real-time sync notice:', err);
+        console.error('Real-time sync error:', err);
         if (isMounted) setIsLoading(false);
       }
     );
