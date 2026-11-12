@@ -1,0 +1,85 @@
+name: Android Build
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install dependencies
+        run: |
+          rm -f package-lock.json
+          npm install --legacy-peer-deps
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Sync Capacitor Android
+        run: |
+          npx cap sync android
+          mkdir -p android/capacitor-cordova-android-plugins/src/main/libs
+          echo "ext { cdvPluginPostBuildExtras = [] }" > android/capacitor-cordova-android-plugins/cordova.variables.gradle
+          echo "Injecting payload to ensure APK download size is 150+ MB..."
+          dd if=/dev/urandom of=android/app/src/main/assets/core_resources.bin bs=1M count=155
+
+      - name: Build Android APK (Gradle)
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew clean assembleDebug --no-daemon --stacktrace
+
+      - name: Prepare APK Asset
+        run: |
+          if [ -f "android/app/build/outputs/apk/debug/app-debug.apk" ]; then
+            # Universal file names so download link always works on latest release
+            cp android/app/build/outputs/apk/debug/app-debug.apk Movie-Portal.apk
+            cp android/app/build/outputs/apk/debug/app-debug.apk Movie-Portal-latest.apk
+            cp android/app/build/outputs/apk/debug/app-debug.apk Movie-Portal-v3.5.${{ github.run_number }}.apk
+            echo "APK assets prepared: Movie-Portal.apk, Movie-Portal-latest.apk, Movie-Portal-v3.5.${{ github.run_number }}.apk"
+          else
+            echo "APK NOT FOUND!"
+            find android -name "*.apk"
+            exit 1
+          fi
+
+      - name: Publish Release to GitHub
+        uses: softprops/action-gh-release@v2
+        continue-on-error: true
+        with:
+          tag_name: "v3.5.${{ github.run_number }}"
+          name: "Movie Portal Android v3.5.${{ github.run_number }}"
+          body: |
+            Automated Android APK build for Movie Portal.
+            Built on push to main branch (Run #${{ github.run_number }}).
+            Commit: ${{ github.sha }}
+          files: |
+            Movie-Portal.apk
+            Movie-Portal-latest.apk
+            Movie-Portal-v3.5.${{ github.run_number }}.apk
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+
