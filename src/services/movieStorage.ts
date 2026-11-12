@@ -38,9 +38,9 @@ const COLLECTION_NAME = 'movies';
 
 export async function fetchMoviesFromFirestore(): Promise<MovieData[]> {
   try {
-    const q = query(collection(db, COLLECTION_NAME), orderBy('releaseYear', 'desc'));
-    const snapshot = await getDocs(q);
+    const snapshot = await getDocs(collection(db, COLLECTION_NAME));
     const movies = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MovieData));
+    movies.sort((a, b) => (Number(b.releaseYear) || 0) - (Number(a.releaseYear) || 0));
     if (movies.length > 0) {
       saveLocalMovies(movies);
     }

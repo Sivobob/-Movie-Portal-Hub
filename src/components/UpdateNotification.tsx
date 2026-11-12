@@ -23,12 +23,12 @@ export default function UpdateNotification() {
           </div>
           
           <div className="flex-grow">
-            <h3 className="text-sm font-black uppercase tracking-tight">New Update Available</h3>
-            <p className="text-xs text-gray-400 mt-1">
-              Version {updateAvailable.latestVersion} is now available. Install it for the latest features and fixes.
+            <h3 className="text-sm font-black uppercase tracking-tight text-yellow-400">New Movie Box Update Available</h3>
+            <p className="text-xs text-gray-300 mt-1 leading-relaxed">
+              A new version is available. Update now to enjoy the latest improvements.
             </p>
             {updateAvailable.releaseNotes && (
-              <p className="text-[10px] text-yellow-400/70 mt-1 italic italic">
+              <p className="text-[10px] text-yellow-400/80 mt-1 italic">
                 "{updateAvailable.releaseNotes}"
               </p>
             )}
@@ -36,18 +36,18 @@ export default function UpdateNotification() {
             <div className="flex gap-3 mt-4">
               <button
                 onClick={handleUpdate}
-                className="bg-yellow-400 hover:bg-yellow-500 text-black text-[10px] font-black px-4 py-2 rounded-lg flex items-center gap-2 transition-all active:scale-95"
+                className="bg-yellow-400 hover:bg-yellow-300 text-black text-[11px] font-black px-4 py-2 rounded-xl flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-lg shadow-yellow-400/20"
               >
                 <Download size={14} />
-                UPDATE NOW
+                Update Now
               </button>
               
               {!updateAvailable.isMandatory && (
                 <button
                   onClick={() => setDismissed(true)}
-                  className="text-gray-400 hover:text-white text-[10px] font-bold px-2 py-2 transition-colors"
+                  className="bg-neutral-800 hover:bg-neutral-700 text-gray-300 text-[11px] font-bold px-4 py-2 rounded-xl border border-neutral-700 transition-colors cursor-pointer"
                 >
-                  LATER
+                  Later
                 </button>
               )}
             </div>
