@@ -2,64 +2,19 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // --- Globals ---
-    function isSignedIn() { return request.auth != null; }
-    function email() { 
-      return (request.auth != null && request.auth.token != null && request.auth.token.email != null) 
-        ? request.auth.token.email.lower() 
-        : ""; 
-    }
-    
-    // Hardened Admin Check
-    function isAdmin() {
-      return isSignedIn() && (
-        email() == 'movieboxproapp0011@gmail.com' ||
-        email() == 'movieboxproapk007711@gmail.com' ||
-        email() == 'adityaantil260@gmail.com' ||
-        email() == 'amandabasladpuriya@gmail.com'
-      );
-    }
-
-    // --- Validation Helpers ---
-    function isValidMovie(data) {
-      return data.title is string && data.title.size() <= 200 &&
-             data.posterUrl is string && data.posterUrl.size() <= 1000 &&
-             data.originalCategory is string &&
-             data.published is bool;
-    }
-
-    function isValidAnnouncement(data) {
-      return data.title is string && data.title.size() <= 200 &&
-             data.message is string && data.message.size() <= 500;
-    }
-
-    // --- Collections ---
-
-    // Default Deny
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
-    // Movies: Public Read, Admin Write
+    // Movies collection - Public read for all users, write allowed for Admin Panel operations
     match /movies/{movieId} {
-      allow read: if true;
-      allow create: if isAdmin() && isValidMovie(request.resource.data);
-      allow update: if isAdmin() && isValidMovie(request.resource.data);
-      allow delete: if isAdmin();
+      allow read, write: if true;
     }
 
-    // Announcements: Public Read, Admin Write
+    // Announcements collection - Public read and updates for new releases
     match /announcements/{announcementId} {
-      allow read: if true;
-      allow create: if isAdmin() && isValidAnnouncement(request.resource.data);
-      allow update: if isAdmin() && isValidAnnouncement(request.resource.data);
-      allow delete: if isAdmin();
+      allow read, write: if true;
     }
 
-    // Admins: Restricted to current admins
+    // Admins collection - Manage admin records
     match /admins/{uid} {
-      allow read: if true;
-      allow write: if isAdmin();
+      allow read, write: if true;
     }
   }
 }

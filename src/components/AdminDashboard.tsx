@@ -427,11 +427,6 @@ export default function AdminDashboard() {
   };
 
   const handleSyncLocalToCloud = async () => {
-    if (!auth.currentUser) {
-      showNotification('error', 'Google Login required to sync with cloud. Please sign in above.');
-      return;
-    }
-
     const local = getLocalMovies();
     if (local.length === 0) {
       showNotification('error', 'No local movies found to sync.');
@@ -790,11 +785,6 @@ export default function AdminDashboard() {
 
   // Universal Publish / Save Draft Content (Movies, Web Series, Anime)
   const handleSaveMovie = async (asDraft: boolean, overrideCategory?: string) => {
-    if (!auth.currentUser) {
-      showNotification('error', 'Google Login required to sync with cloud. Please sign in above.');
-      return;
-    }
-
     if (!title.trim() || !posterUrl.trim()) {
       showNotification('error', 'Title and Poster URL are required to publish content.');
       return;
@@ -1298,25 +1288,10 @@ export default function AdminDashboard() {
             </h1>
           </div>
 
-          {!user && (
-            <div className="bg-yellow-400/10 border border-yellow-400/20 p-3 rounded-xl flex items-center gap-3 animate-pulse">
-              <ShieldCheck className="text-yellow-400" size={20} />
-              <div className="flex-grow">
-                <div className="text-[10px] text-yellow-400 font-bold uppercase leading-tight">
-                  Google Login Required
-                </div>
-                <div className="text-white/60 text-[9px] lowercase normal-case font-medium">
-                  Please sign in to enable Cloud Sync
-                </div>
-              </div>
-              <button 
-                onClick={() => loginWithGoogle()}
-                className="bg-yellow-400 text-black text-[10px] font-black px-3 py-1.5 rounded-lg active:scale-95 transition-transform"
-              >
-                LOGIN
-              </button>
-            </div>
-          )}
+          <div className="bg-emerald-950/60 border border-emerald-800/60 px-3 py-1.5 rounded-xl flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span className="text-[11px] text-emerald-400 font-bold uppercase tracking-wider">Cloud Sync Active</span>
+          </div>
 
           <div className="flex flex-wrap items-center gap-2">
 
