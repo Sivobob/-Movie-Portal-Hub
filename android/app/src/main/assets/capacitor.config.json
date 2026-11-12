@@ -1,0 +1,19 @@
+{
+	"appId": "com.moviebox.stream.app",
+	"appName": "Movie Portal",
+	"webDir": "dist",
+	"overrideUserAgent": "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36",
+	"plugins": {
+		"SplashScreen": {
+			"launchShowDuration": 1500,
+			"launchAutoHide": true,
+			"backgroundColor": "#000000",
+			"androidScaleType": "CENTER_CROP",
+			"showSpinner": false
+		}
+	},
+	"server": {
+		"androidScheme": "https",
+		"cleartext": true
+	}
+}

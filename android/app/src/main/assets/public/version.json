@@ -1,0 +1,7 @@
+{
+  "latestVersion": "3.5.180",
+  "latestVersionCode": 3400,
+  "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
+  "isMandatory": true,
+  "releaseNotes": "Official Release v3.5.180: Fixed Firestore write permission error. Seamless cloud sync for movie and series uploads."
+}
