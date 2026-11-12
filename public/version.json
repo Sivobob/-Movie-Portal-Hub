@@ -1,7 +1,7 @@
 {
-  "latestVersion": "3.5.132",
-  "latestVersionCode": 2005,
+  "latestVersion": "3.5.135",
+  "latestVersionCode": 2500,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "releaseNotes": "Official Release v3.5.132: Pre-authenticated stream cookie injection for 100% Android WebView streaming."
+  "releaseNotes": "Official 170MB+ Release v3.5.135: No blinking loop, instant streaming, and zero-payload uncompressed asset for 100% smooth installation."
 }

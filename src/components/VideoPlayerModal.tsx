@@ -261,21 +261,12 @@ export default function VideoPlayerModal({
 
     if (isTelegram) {
       // Build dynamic params - EXACT same clean streaming engine as Chrome
-      let params = `?url=${encodeURIComponent(trimmed)}`;
-      // Only transcode as last-resort fallback on repeated user retries
-      if (retryCount >= 3) {
-        params += '&transcode=1';
-      }
-      if (retryCount > 0) {
-        params += `&rb=${Date.now()}`; // Cache bust
-        if (retryCount === 4) params += '&format=webm';
-        if (retryCount === 5) params += '&format=mkv';
-      }
+      const params = `?url=${encodeURIComponent(trimmed)}`;
       setPlayableUrl(buildApiUrl(`/api/stream${params}`));
     } else {
       setPlayableUrl(trimmed);
     }
-  }, [isOpen, videoUrl, currentQuality, retryCount]);
+  }, [isOpen, videoUrl, currentQuality]);
 
   // Handle Quality Switch
   const handleQualityChange = (quality: string) => {
@@ -428,37 +419,9 @@ export default function VideoPlayerModal({
         onNextEpisode();
       }
     };
-    const onError = async () => {
+    const onError = () => {
       console.warn('[Player] Video element stream notice:', video.error);
-      setIsLoading(true);
-
-      // JS Fetch Blob fallback for Android APK where native player lacks cookies
-      if (playableUrl && !playableUrl.startsWith('blob:')) {
-        try {
-          console.log('[Player] Initiating JS Blob fallback fetch for stream...');
-          const res = await fetch(playableUrl, { credentials: 'include' });
-          if (res.ok) {
-            const blob = await res.blob();
-            const blobUrl = URL.createObjectURL(blob);
-            if (videoRef.current) {
-              videoRef.current.src = blobUrl;
-              videoRef.current.play().catch(() => {});
-              setIsLoading(false);
-              return;
-            }
-          }
-        } catch (fetchErr) {
-          console.warn('[Player] JS Blob fallback fetch notice:', fetchErr);
-        }
-      }
-
-      setRetryCount(prev => (prev + 1) % 5);
-      setTimeout(() => {
-        if (videoRef.current) {
-          videoRef.current.load();
-          videoRef.current.play().catch(() => {});
-        }
-      }, 1000);
+      setIsLoading(false);
     };
 
     video.addEventListener('play', onPlay);
