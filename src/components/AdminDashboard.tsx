@@ -787,7 +787,7 @@ export default function AdminDashboard() {
         releaseYear: Number(releaseYear) || new Date().getFullYear(),
         originalCategory: catToSave,
         displayCategory: autoDisplayCategory,
-        contentType: catToSave.toLowerCase().includes('anime') ? 'anime' : undefined,
+        contentType: catToSave.toLowerCase().includes('anime') ? 'anime' : null,
         language: language.trim() || 'Hindi',
         genre: genre.trim() || 'Action',
         director: director.trim(),
