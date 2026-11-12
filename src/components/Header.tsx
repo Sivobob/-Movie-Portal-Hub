@@ -3,7 +3,6 @@ import { useAuth, isAuthorizedAdminEmail } from '../context/AuthContext';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { ShieldCheck, Settings, ArrowLeft, Lock, Eye, EyeOff, X, KeyRound, LogOut, Search, Download, Smartphone } from 'lucide-react';
 import { isNativeAndroid, isInstalledPhoneApp, downloadOfficialApk, OFFICIAL_APK_DOWNLOAD_URL } from '../utils/platform';
-import { buildApiUrl } from '../utils/apiConfig';
 
 export const MoviePortal3DLogo = React.memo(function MoviePortal3DLogo() {
   return (
@@ -218,25 +217,6 @@ export default function Header() {
                   <h3 className="text-base font-black text-white uppercase tracking-tight">App Settings</h3>
                   <p className="text-[11px] text-gray-400">Admin Panel Access</p>
                 </div>
-              </div>
-
-              <div className="mb-4">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const url = buildApiUrl('/api/health');
-                    try {
-                      const { Browser } = await import('@capacitor/browser');
-                      await Browser.open({ url });
-                    } catch (e) {
-                      window.open(url, '_blank');
-                    }
-                  }}
-                  className="w-full bg-green-600 hover:bg-green-500 text-white font-black text-xs py-3 px-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer uppercase tracking-wider"
-                >
-                  <Settings size={15} /> Login / Authorize App (Tap Once)
-                </button>
-                <p className="text-[10px] text-gray-400 mt-1 text-center">Tap once after installing APK so movies stream instantly like Chrome.</p>
               </div>
 
               {isUnlockedSession ? (
