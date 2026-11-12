@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import MovieCard from './MovieCard';
 import { Search, Play, X, Star, Calendar, Globe, Film, ShieldCheck, LogIn, LogOut, Smartphone, Download } from 'lucide-react';
@@ -160,32 +160,41 @@ export default function HomePage() {
   // Load published movies real-time
   useEffect(() => {
     let isMounted = true;
+    
+    // 1. Initial Fetch
+    const fetchInitial = async () => {
+      try {
+        const q = query(collection(db, 'movies'));
+        const snapshot = await getDocs(q);
+        if (!isMounted) return;
+        setIsLoading(false);
+        const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+        const publishedList = list.filter((m: any) => m.published !== false);
+        setMovies(publishedList);
+        saveLocalMovies(publishedList);
+        setFeaturedMovies(publishedList);
+      } catch (e) {
+        console.error('Initial fetch failed, relying on cache', e);
+      }
+    };
+    fetchInitial();
+
+    // 2. Real-time Listener
     const q = query(collection(db, 'movies'));
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
         if (!isMounted) return;
         setIsLoading(false);
-        if (!snapshot.empty) {
-          const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
-          const publishedList = list.filter((m: any) => m.published !== false);
-          setMovies(publishedList);
-          saveLocalMovies(publishedList);
-          setFeaturedMovies(publishedList);
-        } else {
-          setMovies([]);
-          saveLocalMovies([]);
-          setFeaturedMovies([]);
-        }
+        const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+        const publishedList = list.filter((m: any) => m.published !== false);
+        setMovies(publishedList);
+        saveLocalMovies(publishedList);
+        setFeaturedMovies(publishedList);
       },
       (err) => {
         if (!isMounted) return;
         setIsLoading(false);
-        const local = getLocalMovies();
-        if (local.length > 0) {
-          setMovies(local);
-          setFeaturedMovies(local);
-        }
       }
     );
     return () => {
