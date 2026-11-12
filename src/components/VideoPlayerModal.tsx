@@ -436,7 +436,9 @@ export default function VideoPlayerModal({
     video.addEventListener('error', onError);
 
     // Standard non-HLS video playback with safe fallback
-    if (!isHlsUrl) {
+    if (!isHlsUrl && playableUrl) {
+      video.src = playableUrl;
+      video.load();
       const playPromise = video.play();
       if (playPromise !== undefined) {
         playPromise
@@ -510,6 +512,10 @@ export default function VideoPlayerModal({
     if (isPlaying) {
       videoRef.current.pause();
     } else {
+      if (!videoRef.current.src && playableUrl) {
+        videoRef.current.src = playableUrl;
+        videoRef.current.load();
+      }
       videoRef.current.play().catch(e => {
         if (e.name !== 'AbortError' && !e.message?.includes('interrupted')) {
           console.warn('Play error:', e);
