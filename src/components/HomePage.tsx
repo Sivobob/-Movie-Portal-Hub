@@ -164,14 +164,16 @@ export default function HomePage() {
     // 1. Force check on mount
     const fetchInitial = async () => {
       try {
-        const q = query(collection(db, 'movies'), where('published', '==', true));
-        const snapshot = await getDocs(q);
+        const snapshot = await getDocs(collection(db, 'movies'));
         if (!isMounted) return;
         
         const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
-        setMovies(list);
-        saveLocalMovies(list);
-        setFeaturedMovies(list.filter(m => m.featured));
+        const publishedList = list.filter((m: any) => m.published !== false);
+        const featuredOnly = publishedList.filter((m: any) => m.featured);
+        
+        setMovies(publishedList);
+        setFeaturedMovies(featuredOnly.length > 0 ? featuredOnly : publishedList);
+        saveLocalMovies(publishedList);
         setIsLoading(false);
       } catch (e) {
         console.error('Cloud fetch notice:', e);
@@ -187,14 +189,16 @@ export default function HomePage() {
         if (!isMounted) return;
         setIsLoading(false);
         const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
-        console.log(`[Sync] Received ${list.length} movies from cloud`);
+        const publishedList = list.filter((m: any) => m.published !== false);
+        const featuredOnly = publishedList.filter((m: any) => m.featured);
+        console.log(`[Sync] Received ${publishedList.length} published movies from cloud`);
         
         // Update UI state immediately
-        setMovies(list);
-        setFeaturedMovies(list.filter(m => m.featured));
+        setMovies(publishedList);
+        setFeaturedMovies(featuredOnly.length > 0 ? featuredOnly : publishedList);
         
         // Sync to local cache for offline/instant start
-        saveLocalMovies(list);
+        saveLocalMovies(publishedList);
       },
       (err) => {
         console.error('Real-time sync error:', err);
@@ -369,8 +373,9 @@ export default function HomePage() {
     handleInteractionEnd();
   };
 
-  const currentFeatured = featuredMovies.length > 0
-    ? (featuredMovies[activeSlideIndex] || featuredMovies[0])
+  const activeSliderList = featuredMovies.length > 0 ? featuredMovies : movies;
+  const currentFeatured = activeSliderList.length > 0
+    ? (activeSliderList[activeSlideIndex] || activeSliderList[0])
     : null;
 
   const categoryMovies = category
