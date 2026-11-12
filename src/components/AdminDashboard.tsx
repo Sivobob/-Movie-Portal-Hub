@@ -868,61 +868,62 @@ export default function AdminDashboard() {
             console.warn('Broadcast notification error:', bcErr);
           }
         }
-      } catch (fsErr: any) {
-        console.warn('Firestore write not permitted, saving to local cache:', fsErr?.message || fsErr);
-        handleFirestoreError(fsErr, OperationType.CREATE, 'movies');
-      }
 
-      // Always persist to local cache as well
-      saveMovieLocally({ id: newDocId, ...moviePayload } as any);
+        // Always persist to local cache as well
+        saveMovieLocally({ id: newDocId, ...moviePayload } as any);
 
-      // Reset form
-      setTitle('');
-      setOriginalTitle('');
-      setDescription('');
-      setPosterUrl('');
-      setBackdropUrl('');
-      setDirector('');
-      setCast('');
-      setRuntime('');
-      setImdbId('');
-      setTrailerUrl('');
-      setStreamingUrl('');
-      setUrl480p('');
-      setUrl720p('');
-      setUrl1080p('');
-      setUrl4k('');
-      setFeatured(false);
-      setAutoTranscode(false);
+        // Reset form
+        setTitle('');
+        setOriginalTitle('');
+        setDescription('');
+        setPosterUrl('');
+        setBackdropUrl('');
+        setDirector('');
+        setCast('');
+        setRuntime('');
+        setImdbId('');
+        setTrailerUrl('');
+        setStreamingUrl('');
+        setUrl480p('');
+        setUrl720p('');
+        setUrl1080p('');
+        setUrl4k('');
+        setFeatured(false);
+        setAutoTranscode(false);
 
-      // Trigger transcoding if requested
-      if (autoTranscode && imdbId.trim() && (url1080p.trim() || url720p.trim())) {
-        const sourceUrl = url1080p.trim() || url720p.trim();
-        const targets = [];
-        if (!url480p.trim()) targets.push('480p');
-        if (!url720p.trim() && url1080p.trim()) targets.push('720p');
+        // Trigger transcoding if requested
+        if (autoTranscode && imdbId.trim() && (url1080p.trim() || url720p.trim())) {
+          const sourceUrl = url1080p.trim() || url720p.trim();
+          const targets = [];
+          if (!url480p.trim()) targets.push('480p');
+          if (!url720p.trim() && url1080p.trim()) targets.push('720p');
 
-        if (targets.length > 0) {
-          authFetch('/api/video/transcode', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              url: sourceUrl,
-              imdbId: imdbId.trim(),
-              targetQualities: targets
-            })
-          }).catch(err => console.error('Failed to trigger transcode:', err));
+          if (targets.length > 0) {
+            authFetch('/api/video/transcode', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                url: sourceUrl,
+                imdbId: imdbId.trim(),
+                targetQualities: targets
+              })
+            }).catch(err => console.error('Failed to trigger transcode:', err));
+          }
         }
-      }
 
-      showNotification(
-        'success', 
-        asDraft 
-          ? `Saved "${moviePayload.title}" as Draft (Unpublished).` 
-          : `🎉 Successfully PUBLISHED "${moviePayload.title}" into ${autoDisplayCategory} Section! ${autoTranscode ? '(Transcoding started in background)' : ''}`
-      );
-      
-      await fetchMovies();
+        showNotification(
+          'success', 
+          asDraft 
+            ? `Saved "${moviePayload.title}" as Draft (Unpublished).` 
+            : `🎉 Successfully PUBLISHED "${moviePayload.title}" into ${autoDisplayCategory} Section!`
+        );
+        
+        await fetchMovies();
+      } catch (fsErr: any) {
+        console.error('Firestore write failed:', fsErr);
+        handleFirestoreError(fsErr, OperationType.CREATE, 'movies');
+        throw new Error(fsErr.message || 'Database write denied. Check connection or permissions.');
+      }
     } catch (err: any) {
       console.error('Error saving content:', err);
       showNotification('error', `Failed to save content: ${err?.message || 'Database write denied'}`);

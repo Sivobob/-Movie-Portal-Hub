@@ -40,16 +40,22 @@ export async function fetchMoviesFromFirestore(): Promise<MovieData[]> {
   try {
     const q = query(collection(db, COLLECTION_NAME), orderBy('releaseYear', 'desc'));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MovieData));
+    const movies = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MovieData));
+    if (movies.length > 0) {
+      saveLocalMovies(movies);
+    }
+    return movies;
   } catch (e) {
     console.error('Error fetching movies from Firestore', e);
-    return [];
+    // On error, return local cache instead of empty array
+    return getLocalMovies();
   }
 }
 
 export async function saveMovieToFirestore(movie: MovieData): Promise<void> {
   try {
     await setDoc(doc(db, COLLECTION_NAME, movie.id), movie);
+    saveMovieLocally(movie); // Sync local cache immediately
   } catch (e) {
     console.error('Error saving movie to Firestore', e);
     throw e;
@@ -59,6 +65,7 @@ export async function saveMovieToFirestore(movie: MovieData): Promise<void> {
 export async function deleteMovieFromFirestore(id: string): Promise<void> {
   try {
     await deleteDoc(doc(db, COLLECTION_NAME, id));
+    deleteMovieLocally(id); // Sync local cache immediately
   } catch (e) {
     console.error('Error deleting movie from Firestore', e);
     throw e;
@@ -72,15 +79,14 @@ export const DEFAULT_INITIAL_MOVIES: MovieData[] = [];
 
 export function getLocalMovies(): MovieData[] {
   try {
+    if (typeof window === 'undefined') return [];
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw === null) {
       return [];
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      // Filter out any legacy dummy/sample movies if present in local storage
-      const clean = parsed.filter((m: any) => m && m.id && !['m1', 'm2', 'm3', 'm4', 'default-1', 'default-2'].includes(m.id));
-      return clean;
+      return parsed.filter((m: any) => m && m.id);
     }
     return [];
   } catch (e) {
@@ -90,6 +96,9 @@ export function getLocalMovies(): MovieData[] {
 
 export function saveLocalMovies(movies: MovieData[]): void {
   try {
+    if (typeof window === 'undefined') return;
+    // Safety: Don't overwrite with null/undefined
+    if (!movies) return;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(movies));
   } catch (e) {
     console.warn('Failed to save movies to localStorage', e);
