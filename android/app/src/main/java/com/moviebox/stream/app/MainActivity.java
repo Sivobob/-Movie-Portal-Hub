@@ -21,8 +21,13 @@ public class MainActivity extends BridgeActivity {
             if (getBridge() != null && getBridge().getWebView() != null) {
                 cookieManager.setAcceptThirdPartyCookies(getBridge().getWebView(), true);
                 android.webkit.WebSettings settings = getBridge().getWebView().getSettings();
+                settings.setJavaScriptEnabled(true);
                 settings.setDomStorageEnabled(true);
                 settings.setDatabaseEnabled(true);
+                settings.setAllowFileAccess(true);
+                settings.setAllowContentAccess(true);
+                settings.setAllowFileAccessFromFileURLs(true);
+                settings.setAllowUniversalAccessFromFileURLs(true);
                 settings.setMediaPlaybackRequiresUserGesture(false);
                 settings.setMixedContentMode(android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
             }

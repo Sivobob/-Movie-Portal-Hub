@@ -1,7 +1,7 @@
 {
-  "latestVersion": "3.5.122",
-  "latestVersionCode": 127,
+  "latestVersion": "3.5.125",
+  "latestVersionCode": 130,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "releaseNotes": "Full Chrome stream parity inside native Android APK shell with instant seeking."
+  "releaseNotes": "Full JS Blob fallback & WebSettings cookie parity for instant mobile APK streaming."
 }
