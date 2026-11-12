@@ -13,6 +13,7 @@
     }
   },
   "server": {
+    "url": "https://ais-dev-d4oy4g4wkdxchvgc5wbbty-835315626292.asia-northeast1.run.app",
     "androidScheme": "https",
     "cleartext": true
   }

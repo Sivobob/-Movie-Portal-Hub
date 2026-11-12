@@ -449,14 +449,18 @@ export async function handleStream(req: Request, res: Response) {
     if (isTranscodeRequired) {
       console.log(`[Stream] Transcoding MKV/HEVC for msg ${parsed.messageId}. File: ${fileName}`);
       
+      let startByte = 0;
       let startSeconds = 0;
       if (rangeHeader && fileSize > 0 && durationSec > 0) {
         const matchRange = rangeHeader.match(/bytes=(\d+)-/);
         if (matchRange) {
-          const startByte = parseInt(matchRange[1], 10) || 0;
+          startByte = parseInt(matchRange[1], 10) || 0;
           startSeconds = Math.floor((startByte / fileSize) * durationSec);
         }
       }
+
+      const ALIGNMENT = 4096;
+      const alignedStartByte = Math.floor(startByte / ALIGNMENT) * ALIGNMENT;
 
       const transcodeHeaders = { ...commonHeaders };
       delete transcodeHeaders['Accept-Ranges'];
@@ -512,7 +516,7 @@ export async function handleStream(req: Request, res: Response) {
 
         const stream = client.iterDownload({
           file: fileLocation,
-          offset: bigInt(0) as any,
+          offset: bigInt(alignedStartByte) as any,
           requestSize: 2 * 1024 * 1024,
         });
 
