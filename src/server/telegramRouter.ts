@@ -478,7 +478,7 @@ export async function handleStream(req: Request, res: Response) {
         '-map', '0:v:0',
         '-map', '0:a?',
         '-c:v', 'libx264',
-        '-profile:v', 'baseline', // Max compatibility for old Android WebViews
+        '-profile:v', 'baseline',
         '-level', '3.0',
         '-preset', 'ultrafast',
         '-tune', 'zerolatency',
