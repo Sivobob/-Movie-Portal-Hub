@@ -324,7 +324,7 @@ export default function Header() {
                   Movie Portal Official Android App
                 </span>
                 <span className="bg-black/20 text-black text-[10px] font-extrabold px-1.5 py-0.2 rounded uppercase">
-                  v3.5.188 APK (180MB)
+                  v3.5.189 APK (180MB)
                 </span>
               </div>
               <p className="text-[11px] font-semibold text-neutral-900 truncate">

@@ -12,9 +12,13 @@
 #   public *;
 #}
 
-# Keep WebView JavascriptInterface methods for LocalStreamServer
+# Keep WebView JavascriptInterface methods for LocalStreamServer & MainActivity PlayerBridge
 -keepattributes *Annotation*
 -keepclassmembers class com.moviebox.stream.app.LocalStreamServer$JsBridge {
+    @android.webkit.JavascriptInterface <methods>;
+    public *;
+}
+-keepclassmembers class com.moviebox.stream.app.MainActivity$PlayerBridge {
     @android.webkit.JavascriptInterface <methods>;
     public *;
 }

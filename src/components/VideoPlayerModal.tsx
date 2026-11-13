@@ -98,6 +98,7 @@ export default function VideoPlayerModal({
 
   // Playback state
   const [isPlaying, setIsPlaying] = useState(false);
+  const isPlayingRef = useRef(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(initialDuration);
   const [bufferedTime, setBufferedTime] = useState(0);
@@ -339,19 +340,43 @@ export default function VideoPlayerModal({
     };
   }, [isOpen, activeStreamUrl, currentQuality, streamFallbackMode, streamStartOffset, useLocalBridgeFallback, retryNonce]);
 
-  // Initial Autohide timer on open & cleanup (only runs when isOpen changes)
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
+  // Initial Autohide timer on open, playback orientation lock & cleanup (only runs when isOpen changes)
   useEffect(() => {
     if (!isOpen) return;
 
     isInteractingRef.current = false;
     showControlsWithTimer();
     setSelectedAudio(verifiedLanguageRef.current);
+
+    if (Capacitor.isNativePlatform()) {
+      try {
+        (window as any).AndroidPlayerBridge?.setPlaybackActive?.(true);
+      } catch {}
+    }
+
     try {
       window.history.pushState({ playerModalOpen: true }, '');
     } catch (e) {}
 
     const handlePopState = (e: PopStateEvent) => {
       e.preventDefault();
+      if (document.fullscreenElement || (document as any).webkitFullscreenElement) {
+        try {
+          if (document.exitFullscreen) {
+            document.exitFullscreen().catch(() => {});
+          } else if ((document as any).webkitExitFullscreen) {
+            (document as any).webkitExitFullscreen();
+          }
+        } catch {}
+        try {
+          window.history.pushState({ playerModalOpen: true }, '');
+        } catch {}
+        return;
+      }
       onCloseRef.current();
     };
 
@@ -376,6 +401,24 @@ export default function VideoPlayerModal({
       window.removeEventListener('pointerup', handleGlobalPointerRelease);
       window.removeEventListener('pointercancel', handleGlobalPointerRelease);
       window.removeEventListener('touchend', handleGlobalPointerRelease);
+
+      try {
+        if (document.fullscreenElement && document.exitFullscreen) {
+          document.exitFullscreen().catch(() => {});
+        } else if ((document as any).webkitFullscreenElement && (document as any).webkitExitFullscreen) {
+          (document as any).webkitExitFullscreen();
+        }
+      } catch {}
+
+      if (Capacitor.isNativePlatform()) {
+        try {
+          (window as any).AndroidPlayerBridge?.setPlaybackActive?.(false);
+        } catch {}
+      } else {
+        try {
+          (screen as any).orientation?.unlock?.();
+        } catch {}
+      }
     };
   }, [isOpen]);
 
@@ -385,17 +428,32 @@ export default function VideoPlayerModal({
     }
   }, [isOpen, verifiedLanguage]);
 
-  // Fullscreen listeners
+  // Fullscreen listeners (syncs state, orientation lock, and uninterrupted playback)
   useEffect(() => {
     const handleFullscreenChange = () => {
       const isFull = Boolean(document.fullscreenElement || (document as any).webkitFullscreenElement);
       setIsFullscreen(isFull);
       if (Capacitor.isNativePlatform()) {
         try {
+          (window as any).AndroidPlayerBridge?.setPlaybackFullscreen?.(isFull);
           if (isFull) {
             StatusBar.hide().catch(() => {});
           }
         } catch (e) {}
+      } else {
+        try {
+          const ori = (screen as any).orientation;
+          if (isFull && ori && typeof ori.lock === 'function' && /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)) {
+            ori.lock('landscape').catch(() => {});
+          } else if (!isFull && ori && typeof ori.unlock === 'function') {
+            ori.unlock();
+          }
+        } catch {}
+      }
+
+      const vid = videoRef.current;
+      if (vid && isPlayingRef.current && vid.paused && !vid.ended) {
+        vid.play().catch(() => {});
       }
     };
 
@@ -826,24 +884,88 @@ export default function VideoPlayerModal({
     currentTimeRef.current = time;
   };
 
-  // Real Fullscreen Toggle
-  const toggleFullscreen = () => {
+  // Real Fullscreen Toggle (controlled strictly by fullscreen button without interrupting playback)
+  const toggleFullscreen = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     resetAutoHideTimer();
-    if (!containerRef.current) return;
-    if (!document.fullscreenElement && !(document as any).webkitFullscreenElement) {
-      if (containerRef.current.requestFullscreen) {
-        containerRef.current.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
-      } else if ((containerRef.current as any).webkitRequestFullscreen) {
-        (containerRef.current as any).webkitRequestFullscreen();
-        setIsFullscreen(true);
-      }
+    const target = containerRef.current;
+    if (!target) return;
+
+    const vid = videoRef.current;
+    const wasPlaying = Boolean(vid && !vid.paused);
+    const docAny = document as any;
+    const elAny = target as any;
+    const activeFs = Boolean(document.fullscreenElement || docAny.webkitFullscreenElement || isFullscreen);
+
+    if (!activeFs) {
+      const enterPromise = target.requestFullscreen
+        ? target.requestFullscreen({ navigationUI: 'hide' } as any).catch(() => target.requestFullscreen())
+        : elAny.webkitRequestFullscreen
+          ? Promise.resolve(elAny.webkitRequestFullscreen())
+          : Promise.reject(new Error('Fullscreen API unavailable'));
+
+      enterPromise
+        .then(() => {
+          setIsFullscreen(true);
+          if (Capacitor.isNativePlatform()) {
+            try {
+              (window as any).AndroidPlayerBridge?.setPlaybackFullscreen?.(true);
+            } catch {}
+          } else {
+            try {
+              const ori = (screen as any).orientation;
+              if (ori && typeof ori.lock === 'function' && /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)) {
+                ori.lock('landscape').catch(() => {});
+              }
+            } catch {}
+          }
+          if (wasPlaying && vid && vid.paused) {
+            vid.play().catch(() => {});
+          }
+        })
+        .catch(() => {
+          if (Capacitor.isNativePlatform()) {
+            try {
+              (window as any).AndroidPlayerBridge?.setPlaybackFullscreen?.(true);
+              setIsFullscreen(true);
+            } catch {}
+          } else if (vid && typeof (vid as any).webkitEnterFullscreen === 'function') {
+            try {
+              (vid as any).webkitEnterFullscreen();
+            } catch {}
+          }
+        });
     } else {
-      if (document.exitFullscreen) {
-        document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
-      } else if ((document as any).webkitExitFullscreen) {
-        (document as any).webkitExitFullscreen();
-        setIsFullscreen(false);
-      }
+      const exitPromise = (document.fullscreenElement && document.exitFullscreen)
+        ? document.exitFullscreen()
+        : (docAny.webkitFullscreenElement && docAny.webkitExitFullscreen)
+          ? Promise.resolve(docAny.webkitExitFullscreen())
+          : Promise.resolve();
+
+      exitPromise
+        .then(() => {
+          setIsFullscreen(false);
+          if (Capacitor.isNativePlatform()) {
+            try {
+              (window as any).AndroidPlayerBridge?.setPlaybackFullscreen?.(false);
+            } catch {}
+          } else {
+            try {
+              (screen as any).orientation?.unlock?.();
+            } catch {}
+          }
+          if (wasPlaying && vid && vid.paused) {
+            vid.play().catch(() => {});
+          }
+        })
+        .catch(() => {
+          if (Capacitor.isNativePlatform()) {
+            try {
+              (window as any).AndroidPlayerBridge?.setPlaybackFullscreen?.(false);
+              setIsFullscreen(false);
+            } catch {}
+          }
+        });
     }
   };
 

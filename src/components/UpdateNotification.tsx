@@ -23,7 +23,7 @@ export default function UpdateNotification() {
           </div>
           
           <div className="flex-grow">
-            <h3 className="text-sm font-black uppercase tracking-tight text-yellow-400">New Movie Portal Update Available</h3>
+            <h3 className="text-sm font-black uppercase tracking-tight text-yellow-400">Movie Portal New Update Pleses Update This App</h3>
             <p className="text-xs text-gray-300 mt-1 leading-relaxed">
               A new version is available. Update now to enjoy the latest improvements.
             </p>

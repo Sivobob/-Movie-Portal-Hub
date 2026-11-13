@@ -11,7 +11,7 @@ interface UpdateInfo {
 }
 
 // Baseline version code for the current installed APK
-const CURRENT_VERSION_CODE = 3408;
+const CURRENT_VERSION_CODE = 3409;
 
 // Direct raw GitHub fallback which is 100% public, permanent and never blocked by cookie checks
 const GITHUB_VERSION_URL = 'https://raw.githubusercontent.com/Sivobob/-Movie-Portal-Hub/main/public/version.json';
