@@ -1,0 +1,25 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Movies collection - Public read for all users, write allowed for Admin Panel operations
+    match /movies/{movieId} {
+      allow read, write: if true;
+    }
+
+    // Announcements collection - Public read and updates for new releases
+    match /announcements/{announcementId} {
+      allow read, write: if true;
+    }
+
+    // Admins collection - Manage admin records
+    match /admins/{uid} {
+      allow read, write: if true;
+    }
+
+    // Remote app configuration (e.g. android_update) - Public read for APK version check, admin write
+    match /app_config/{configId} {
+      allow read, write: if true;
+    }
+  }
+}
