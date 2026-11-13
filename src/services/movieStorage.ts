@@ -1,5 +1,6 @@
 import { db } from '../firebase';
 import { collection, getDocs, doc, setDoc, deleteDoc, query, orderBy } from 'firebase/firestore';
+import { normalizeMoviePosters } from '../utils/posterUrl';
 
 export interface MovieData {
   id: string;
@@ -39,7 +40,7 @@ const COLLECTION_NAME = 'movies';
 export async function fetchMoviesFromFirestore(): Promise<MovieData[]> {
   try {
     const snapshot = await getDocs(collection(db, COLLECTION_NAME));
-    const movies = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MovieData));
+    const movies = snapshot.docs.map(doc => normalizeMoviePosters({ id: doc.id, ...doc.data() } as MovieData));
     movies.sort((a, b) => (Number(b.releaseYear) || 0) - (Number(a.releaseYear) || 0));
     if (movies.length > 0) {
       saveLocalMovies(movies);
@@ -54,8 +55,9 @@ export async function fetchMoviesFromFirestore(): Promise<MovieData[]> {
 
 export async function saveMovieToFirestore(movie: MovieData): Promise<void> {
   try {
-    await setDoc(doc(db, COLLECTION_NAME, movie.id), movie);
-    saveMovieLocally(movie); // Sync local cache immediately
+    const normalized = normalizeMoviePosters(movie);
+    await setDoc(doc(db, COLLECTION_NAME, normalized.id), normalized);
+    saveMovieLocally(normalized); // Sync local cache immediately
   } catch (e) {
     console.error('Error saving movie to Firestore', e);
     throw e;
@@ -86,7 +88,7 @@ export function getLocalMovies(): MovieData[] {
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      return parsed.filter((m: any) => m && m.id);
+      return parsed.filter((m: any) => m && m.id).map((m: any) => normalizeMoviePosters(m));
     }
     return [];
   } catch (e) {

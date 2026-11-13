@@ -1,5 +1,6 @@
 import React, { memo } from 'react';
 import { motion } from 'framer-motion';
+import { upgradePosterUrl } from '../utils/posterUrl';
 
 const MovieCard = memo(({ 
   movie, 
@@ -8,18 +9,31 @@ const MovieCard = memo(({
   movie: any; 
   onClick: () => void; 
 }) => {
+  const rawPoster = movie.posterUrl || movie.backdropUrl || '';
+  const hdPoster = upgradePosterUrl(rawPoster, 1080) || rawPoster;
+
   return (
     <motion.div 
-      className="relative rounded-xl overflow-hidden aspect-[2/3] cursor-pointer group shadow-lg border border-neutral-800/80 bg-neutral-950 will-change-transform transform-gpu"
+      className="relative rounded-xl overflow-hidden aspect-[2/3] cursor-pointer group shadow-lg border border-neutral-800/80 bg-neutral-950"
       whileHover={{ scale: 1.04 }}
       onClick={onClick}
     >
-      {/* Clean Poster Image */}
+      {/* Clean HD Poster Image */}
       <img 
-        src={movie.posterUrl || undefined} 
+        src={hdPoster || undefined} 
         alt={movie.title} 
+        loading="lazy"
+        decoding="async"
         className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" 
-        onError={(e: any) => { e.target.src = 'https://images.unsplash.com/photo-1595760205842-8356d2cf98b1?q=80&w=400'; }} 
+        onError={(e: any) => {
+          const img = e.currentTarget;
+          if (rawPoster && img.src !== rawPoster && !img.dataset.triedRaw) {
+            img.dataset.triedRaw = '1';
+            img.src = rawPoster;
+            return;
+          }
+          img.src = 'https://images.unsplash.com/photo-1595760205842-8356d2cf98b1?q=80&w=800';
+        }} 
       />
 
       {/* Top Right HD Badge */}

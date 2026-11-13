@@ -13,6 +13,7 @@ import {
   FolderDown
 } from 'lucide-react';
 import { ActiveDownload, DownloadedItem } from '../hooks/useDownloads';
+import { upgradePosterUrl } from '../utils/posterUrl';
 
 interface DownloadsViewProps {
   activeDownloads: ActiveDownload[];
@@ -118,11 +119,11 @@ export default function DownloadsView({
                     {/* Poster */}
                     <div className="w-14 h-20 rounded-xl overflow-hidden bg-neutral-900 border border-neutral-800 flex-shrink-0">
                       <img
-                        src={task.posterUrl || ''}
+                        src={upgradePosterUrl(task.posterUrl, 1080) || task.posterUrl || ''}
                         alt={task.title}
                         className="w-full h-full object-cover"
                         onError={(e: any) => {
-                          e.target.src = 'https://images.unsplash.com/photo-1595760205842-8356d2cf98b1?q=80&w=400';
+                          e.target.src = 'https://images.unsplash.com/photo-1595760205842-8356d2cf98b1?q=80&w=800';
                         }}
                       />
                     </div>
@@ -235,11 +236,11 @@ export default function DownloadsView({
                   })}
                 >
                   <img
-                    src={item.posterUrl || ''}
+                    src={upgradePosterUrl(item.posterUrl, 1080) || item.posterUrl || ''}
                     alt={item.title}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     onError={(e: any) => {
-                      e.target.src = 'https://images.unsplash.com/photo-1595760205842-8356d2cf98b1?q=80&w=400';
+                      e.target.src = 'https://images.unsplash.com/photo-1595760205842-8356d2cf98b1?q=80&w=800';
                     }}
                   />
                   <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">

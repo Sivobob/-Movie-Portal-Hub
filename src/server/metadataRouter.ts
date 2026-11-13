@@ -1,6 +1,7 @@
 import express from 'express';
 import type { Request, Response } from 'express';
 import { requireAdmin, AuthRequest } from './authMiddleware.ts';
+import { upgradePosterUrl } from '../utils/posterUrl.ts';
 
 const router = express.Router();
 
@@ -128,11 +129,8 @@ async function fetchImdbSuggestions(query: string): Promise<Array<{
           itemType = 'game';
         }
 
-        // Format high quality poster image
-        let poster = item.i?.imageUrl || '';
-        if (poster && poster.includes('._V1_') && poster.endsWith('.jpg')) {
-          poster = poster.replace(/\._V1_.*\.jpg$/, '._V1_QL75_UX380_CR0,0,380,562_.jpg');
-        }
+        // Preserve high-resolution poster image (1080px wide, QL90, uncropped)
+        const poster = upgradePosterUrl(item.i?.imageUrl || '', 1080);
 
         return {
           imdbId: item.id,
@@ -167,10 +165,18 @@ router.get('/search', async (req: Request, res: Response) => {
     const imdbId = imdbIdMatch[1].toLowerCase();
     try {
       const url = `https://www.omdbapi.com/?apikey=${encodeURIComponent(key)}&i=${encodeURIComponent(imdbId)}&plot=short`;
-      const resp = await fetch(url);
-      const data = await resp.json();
+      const [omdbRes, imdbSuggestions] = await Promise.all([
+        fetch(url).then((r) => r.json()).catch(() => null),
+        fetchImdbSuggestions(imdbId)
+      ]);
+      const data = omdbRes;
+      const imdbHit = imdbSuggestions.find((x) => x.imdbId.toLowerCase() === imdbId) || imdbSuggestions[0];
 
-      if (data.Response === 'True') {
+      if (data && data.Response === 'True') {
+        const bestPoster = upgradePosterUrl(
+          imdbHit?.posterUrl || (data.Poster && data.Poster !== 'N/A' ? data.Poster : ''),
+          1080
+        );
         return res.json({
           status: 'ok',
           provider: 'IMDb / OMDb API',
@@ -179,19 +185,27 @@ router.get('/search', async (req: Request, res: Response) => {
             title: data.Title,
             year: data.Year,
             type: data.Type || 'movie',
-            posterUrl: data.Poster && data.Poster !== 'N/A' ? data.Poster : '',
-            cast: data.Actors && data.Actors !== 'N/A' ? data.Actors : ''
+            posterUrl: bestPoster,
+            cast: data.Actors && data.Actors !== 'N/A' ? data.Actors : (imdbHit?.cast || '')
           }]
         });
       }
 
-      if (data.Error === 'Invalid API key!') {
+      if (imdbHit) {
+        return res.json({
+          status: 'ok',
+          provider: 'IMDb Live Search',
+          results: [imdbHit]
+        });
+      }
+
+      if (data?.Error === 'Invalid API key!') {
         return res.status(401).json({ status: 'invalid_key', results: [], message: 'Invalid API key.' });
       }
-      if (data.Error === 'Request limit reached!') {
+      if (data?.Error === 'Request limit reached!') {
         return res.status(429).json({ status: 'limit_reached', results: [], message: 'Daily request limit reached.' });
       }
-      return res.json({ status: 'not_found', results: [], message: data.Error || `No title found with IMDb ID ${imdbId}.` });
+      return res.json({ status: 'not_found', results: [], message: data?.Error || `No title found with IMDb ID ${imdbId}.` });
     } catch (err: any) {
       console.error('[metadataRouter] Direct IMDb ID lookup error:', err);
       return res.status(503).json({ status: 'network_error', results: [], message: 'Network error connecting to metadata service.' });
@@ -250,7 +264,7 @@ router.get('/search', async (req: Request, res: Response) => {
             title: item.Title,
             year: item.Year,
             type: item.Type || 'movie',
-            posterUrl: item.Poster && item.Poster !== 'N/A' ? item.Poster : '',
+            posterUrl: upgradePosterUrl(item.Poster, 1080),
           });
         }
       }
@@ -315,10 +329,18 @@ router.get('/detail', async (req: Request, res: Response) => {
       ? `https://www.omdbapi.com/?apikey=${encodeURIComponent(key)}&i=${encodeURIComponent(id)}&plot=full`
       : `https://www.omdbapi.com/?apikey=${encodeURIComponent(key)}&t=${encodeURIComponent(titleParam)}&plot=full`;
 
-    const response = await fetch(url);
-    const data = await response.json();
+    const imdbLookupKey = id || titleParam;
+    const [omdbRes, imdbSuggestions] = await Promise.all([
+      fetch(url).then((r) => r.json()).catch(() => null),
+      imdbLookupKey ? fetchImdbSuggestions(imdbLookupKey) : Promise.resolve([])
+    ]);
 
-    if (data.Response === 'True') {
+    const data = omdbRes;
+    const imdbHit = id
+      ? (imdbSuggestions.find((x) => x.imdbId.toLowerCase() === id) || imdbSuggestions[0])
+      : imdbSuggestions[0];
+
+    if (data && data.Response === 'True') {
       const genre = data.Genre && data.Genre !== 'N/A' ? data.Genre : 'Action';
       const lang = data.Language && data.Language !== 'N/A' ? data.Language : 'Hindi';
       const country = data.Country && data.Country !== 'N/A' ? data.Country : '';
@@ -331,7 +353,9 @@ router.get('/detail', async (req: Request, res: Response) => {
       else if (isAnime) cat = 'Anime Movie';
       else if (isBollywood) cat = 'Bollywood Movie';
 
-      const posterUrl = data.Poster && data.Poster !== 'N/A' ? data.Poster : '';
+      const rawPoster = imdbHit?.posterUrl || (data.Poster && data.Poster !== 'N/A' ? data.Poster : '');
+      const posterUrl = upgradePosterUrl(rawPoster, 1080);
+      const backdropUrl = upgradePosterUrl(rawPoster, 1280) || posterUrl;
 
       return res.json({
         status: 'ok',
@@ -342,11 +366,11 @@ router.get('/detail', async (req: Request, res: Response) => {
           originalTitle: data.Title || '',
           releaseYear: parseInt(data.Year) || new Date().getFullYear(),
           posterUrl,
-          backdropUrl: posterUrl,
+          backdropUrl,
           genre,
           description: data.Plot && data.Plot !== 'N/A' ? data.Plot : '',
           director: data.Director && data.Director !== 'N/A' ? data.Director : '',
-          cast: data.Actors && data.Actors !== 'N/A' ? data.Actors : '',
+          cast: data.Actors && data.Actors !== 'N/A' ? data.Actors : (imdbHit?.cast || ''),
           runtime: data.Runtime && data.Runtime !== 'N/A' ? data.Runtime : '',
           language: lang,
           rating: parseFloat(data.imdbRating) || 8.0,
@@ -355,14 +379,39 @@ router.get('/detail', async (req: Request, res: Response) => {
       });
     }
 
-    if (data.Error === 'Invalid API key!') {
+    if (imdbHit) {
+      const posterUrl = upgradePosterUrl(imdbHit.posterUrl, 1080);
+      const backdropUrl = upgradePosterUrl(imdbHit.posterUrl, 1280) || posterUrl;
+      return res.json({
+        status: 'ok',
+        provider: 'IMDb Live Engine',
+        data: {
+          imdbId: imdbHit.imdbId || id,
+          title: imdbHit.title || '',
+          originalTitle: imdbHit.title || '',
+          releaseYear: parseInt(String(imdbHit.year)) || new Date().getFullYear(),
+          posterUrl,
+          backdropUrl,
+          genre: 'Action',
+          description: '',
+          director: '',
+          cast: imdbHit.cast || '',
+          runtime: '',
+          language: 'Hindi',
+          rating: 8.0,
+          suggestedCategory: imdbHit.type === 'series' ? 'Web Series' : 'Bollywood Movie'
+        }
+      });
+    }
+
+    if (data?.Error === 'Invalid API key!') {
       return res.status(401).json({ error: 'Invalid OMDb API key.' });
     }
-    if (data.Error === 'Request limit reached!') {
+    if (data?.Error === 'Request limit reached!') {
       return res.status(429).json({ error: 'OMDb API daily request limit reached.' });
     }
 
-    return res.status(404).json({ error: data.Error || 'Metadata details not found.' });
+    return res.status(404).json({ error: data?.Error || 'Metadata details not found.' });
   } catch (err: any) {
     console.error('[metadataRouter] Detail fetch error:', err);
     return res.status(503).json({ error: 'Failed to communicate with metadata service.' });

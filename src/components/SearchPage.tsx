@@ -6,6 +6,7 @@ import { db } from '../firebase';
 import VideoPlayerModal from './VideoPlayerModal';
 import MovieCard from './MovieCard';
 import { fetchMoviesFromFirestore } from '../services/movieStorage';
+import { normalizeMoviePosters } from '../utils/posterUrl';
 
 const GENRES = [
   "Action", "Adult", "Adventure", "Animation", "Animated Series", "Anime", "Biography", "Ceremony",
@@ -42,7 +43,7 @@ export default function SearchPage() {
       try {
         const q = query(collection(db, 'movies'), limit(100));
         const snapshot = await getDocs(q);
-        list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter((m: any) => m.published !== false && !m.id?.startsWith('sample-'));
+        list = snapshot.docs.map(doc => normalizeMoviePosters({ id: doc.id, ...doc.data() })).filter((m: any) => m.published !== false && !m.id?.startsWith('sample-'));
       } catch (e: any) {
         console.warn('Search falling back to storage service:', e?.message || e);
         list = await fetchMoviesFromFirestore();

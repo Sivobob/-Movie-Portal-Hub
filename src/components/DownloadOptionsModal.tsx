@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { upgradePosterUrl } from '../utils/posterUrl';
 import { 
   X, 
   Download, 
@@ -111,7 +112,7 @@ export default function DownloadOptionsModal({
     setIsStarting(true);
     onConfirmDownload({
       title: downloadTitle,
-      posterUrl: movie.posterUrl || movie.backdropUrl || '',
+      posterUrl: upgradePosterUrl(movie.posterUrl || movie.backdropUrl, 1080) || movie.posterUrl || movie.backdropUrl || '',
       videoUrl: targetStreamUrl,
       quality: activeQualityObj.label,
       estimatedSizeMb: activeQualityObj.sizeMb,
@@ -171,11 +172,18 @@ export default function DownloadOptionsModal({
             <div className="flex gap-3.5 bg-neutral-950 p-3.5 rounded-2xl border border-neutral-800/90">
               <div className="w-16 h-24 sm:w-20 sm:h-28 rounded-xl overflow-hidden bg-neutral-900 flex-shrink-0 border border-neutral-800 shadow-md">
                 <img
-                  src={movie.posterUrl || movie.backdropUrl || ''}
+                  src={upgradePosterUrl(movie.posterUrl || movie.backdropUrl, 1080) || movie.posterUrl || movie.backdropUrl || ''}
                   alt={movie.title}
                   className="w-full h-full object-cover"
                   onError={(e: any) => {
-                    e.target.src = 'https://images.unsplash.com/photo-1595760205842-8356d2cf98b1?q=80&w=400';
+                    const img = e.currentTarget;
+                    const raw = movie.posterUrl || movie.backdropUrl;
+                    if (raw && img.src !== raw && !img.dataset.triedRaw) {
+                      img.dataset.triedRaw = '1';
+                      img.src = raw;
+                      return;
+                    }
+                    img.src = 'https://images.unsplash.com/photo-1595760205842-8356d2cf98b1?q=80&w=800';
                   }}
                 />
               </div>

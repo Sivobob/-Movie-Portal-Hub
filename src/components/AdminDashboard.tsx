@@ -55,6 +55,7 @@ import {
 } from '../services/movieStorage';
 import { loginWithGoogle } from '../services/authService';
 import { buildApiUrl } from '../utils/apiConfig';
+import { upgradePosterUrl } from '../utils/posterUrl';
 
 interface MetadataSearchResult {
   imdbId: string;
@@ -270,10 +271,7 @@ export default function AdminDashboard() {
             const items = data.d
               .filter((item: any) => item.id && item.id.startsWith('tt'))
               .map((item: any) => {
-                let poster = item.i?.imageUrl || '';
-                if (poster && poster.includes('._V1_') && poster.endsWith('.jpg')) {
-                  poster = poster.replace(/\._V1_.*\.jpg$/, '._V1_QL75_UX380_CR0,0,380,562_.jpg');
-                }
+                const poster = upgradePosterUrl(item.i?.imageUrl || '', 1080);
                 return {
                   imdbId: item.id,
                   title: item.l,
@@ -302,7 +300,7 @@ export default function AdminDashboard() {
             title: item.Title,
             year: item.Year,
             type: item.Type || 'movie',
-            posterUrl: item.Poster && item.Poster !== 'N/A' ? item.Poster : '',
+            posterUrl: upgradePosterUrl(item.Poster, 1080),
           }));
         }
       }
@@ -316,39 +314,69 @@ export default function AdminDashboard() {
   const fetchClientSideImdbDetail = async (imdbIdToFetch: string) => {
     try {
       const url = `https://www.omdbapi.com/?apikey=trilogy&i=${encodeURIComponent(imdbIdToFetch)}&plot=full`;
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.Response === 'True') {
-          const genre = data.Genre && data.Genre !== 'N/A' ? data.Genre : 'Action';
-          const lang = data.Language && data.Language !== 'N/A' ? data.Language : 'Hindi';
-          const country = data.Country && data.Country !== 'N/A' ? data.Country : '';
-          const isAnime = genre.toLowerCase().includes('animation') && (lang.toLowerCase().includes('japanese') || country.toLowerCase().includes('japan'));
-          const isBollywood = country.toLowerCase().includes('india') || lang.toLowerCase().includes('hindi');
-          let cat = 'Hollywood Movie';
-          if (data.Type === 'series') cat = isAnime ? 'Anime Series' : 'Web Series';
-          else if (isAnime) cat = 'Anime Movie';
-          else if (isBollywood) cat = 'Bollywood Movie';
+      const imdbUrl = `https://v3.sg.media-imdb.com/suggestion/x/${encodeURIComponent(imdbIdToFetch)}.json`;
+      const [omdbData, imdbData] = await Promise.all([
+        fetch(url).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        fetch(imdbUrl).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      ]);
 
-          const posterUrl = data.Poster && data.Poster !== 'N/A' ? data.Poster : '';
+      const imdbHit = Array.isArray(imdbData?.d)
+        ? imdbData.d.find((x: any) => x.id?.toLowerCase() === imdbIdToFetch.toLowerCase()) || imdbData.d[0]
+        : null;
+      const imdbRawPoster = imdbHit?.i?.imageUrl || '';
 
-          return {
-            imdbId: data.imdbID || imdbIdToFetch,
-            title: data.Title || '',
-            originalTitle: data.Title || '',
-            releaseYear: parseInt(data.Year) || new Date().getFullYear(),
-            posterUrl,
-            backdropUrl: posterUrl,
-            genre,
-            description: data.Plot && data.Plot !== 'N/A' ? data.Plot : '',
-            director: data.Director && data.Director !== 'N/A' ? data.Director : '',
-            cast: data.Actors && data.Actors !== 'N/A' ? data.Actors : '',
-            runtime: data.Runtime && data.Runtime !== 'N/A' ? data.Runtime : '',
-            language: lang,
-            rating: parseFloat(data.imdbRating) || 8.0,
-            suggestedCategory: cat
-          };
-        }
+      if (omdbData && omdbData.Response === 'True') {
+        const genre = omdbData.Genre && omdbData.Genre !== 'N/A' ? omdbData.Genre : 'Action';
+        const lang = omdbData.Language && omdbData.Language !== 'N/A' ? omdbData.Language : 'Hindi';
+        const country = omdbData.Country && omdbData.Country !== 'N/A' ? omdbData.Country : '';
+        const isAnime = genre.toLowerCase().includes('animation') && (lang.toLowerCase().includes('japanese') || country.toLowerCase().includes('japan'));
+        const isBollywood = country.toLowerCase().includes('india') || lang.toLowerCase().includes('hindi');
+        let cat = 'Hollywood Movie';
+        if (omdbData.Type === 'series') cat = isAnime ? 'Anime Series' : 'Web Series';
+        else if (isAnime) cat = 'Anime Movie';
+        else if (isBollywood) cat = 'Bollywood Movie';
+
+        const rawPoster = imdbRawPoster || (omdbData.Poster && omdbData.Poster !== 'N/A' ? omdbData.Poster : '');
+        const posterUrl = upgradePosterUrl(rawPoster, 1080);
+        const backdropUrl = upgradePosterUrl(rawPoster, 1280) || posterUrl;
+
+        return {
+          imdbId: omdbData.imdbID || imdbIdToFetch,
+          title: omdbData.Title || '',
+          originalTitle: omdbData.Title || '',
+          releaseYear: parseInt(omdbData.Year) || new Date().getFullYear(),
+          posterUrl,
+          backdropUrl,
+          genre,
+          description: omdbData.Plot && omdbData.Plot !== 'N/A' ? omdbData.Plot : '',
+          director: omdbData.Director && omdbData.Director !== 'N/A' ? omdbData.Director : '',
+          cast: omdbData.Actors && omdbData.Actors !== 'N/A' ? omdbData.Actors : (imdbHit?.s || ''),
+          runtime: omdbData.Runtime && omdbData.Runtime !== 'N/A' ? omdbData.Runtime : '',
+          language: lang,
+          rating: parseFloat(omdbData.imdbRating) || 8.0,
+          suggestedCategory: cat
+        };
+      }
+
+      if (imdbHit) {
+        const posterUrl = upgradePosterUrl(imdbRawPoster, 1080);
+        const backdropUrl = upgradePosterUrl(imdbRawPoster, 1280) || posterUrl;
+        return {
+          imdbId: imdbHit.id || imdbIdToFetch,
+          title: imdbHit.l || '',
+          originalTitle: imdbHit.l || '',
+          releaseYear: parseInt(imdbHit.y) || new Date().getFullYear(),
+          posterUrl,
+          backdropUrl,
+          genre: 'Action',
+          description: '',
+          director: '',
+          cast: imdbHit.s || '',
+          runtime: '',
+          language: 'Hindi',
+          rating: 8.0,
+          suggestedCategory: (imdbHit.q || '').toLowerCase().includes('series') ? 'Web Series' : 'Bollywood Movie'
+        };
       }
     } catch (e) {
       console.warn('Client-side OMDb detail fetch error:', e);
@@ -381,11 +409,13 @@ export default function AdminDashboard() {
       }
 
       if (d) {
+        const bestPoster = upgradePosterUrl(d.posterUrl, 1080) || d.posterUrl || '';
+        const bestBackdrop = upgradePosterUrl(d.backdropUrl || d.posterUrl, 1280) || bestPoster;
         setTitle(d.title || '');
         setOriginalTitle(d.originalTitle || d.title || '');
         setReleaseYear(d.releaseYear || new Date().getFullYear());
-        setPosterUrl(d.posterUrl || '');
-        setBackdropUrl(d.backdropUrl || d.posterUrl || '');
+        setPosterUrl(bestPoster);
+        setBackdropUrl(bestBackdrop);
         setGenre(d.genre || 'Action');
         setDescription(d.description || '');
         setDirector(d.director || '');
@@ -444,8 +474,12 @@ export default function AdminDashboard() {
         try {
           // Remove local-only id to let Firestore generate one, or keep if preferred
           const { id, ...payload } = movie as any;
+          const cleanPoster = upgradePosterUrl(payload.posterUrl, 1080) || payload.posterUrl || '';
+          const cleanBackdrop = upgradePosterUrl(payload.backdropUrl || payload.posterUrl, 1280) || cleanPoster;
           await addDoc(collection(db, 'movies'), {
             ...payload,
+            posterUrl: cleanPoster,
+            backdropUrl: cleanBackdrop,
             published: true, // Ensure they are published
             updatedAt: serverTimestamp()
           });
@@ -664,11 +698,13 @@ export default function AdminDashboard() {
     setSearchResults([]); // close results dropdown immediately
 
     // Immediate auto-fill from search results (basic info)
+    const initialPoster = upgradePosterUrl(item.posterUrl, 1080) || item.posterUrl || '';
+    const initialBackdrop = upgradePosterUrl(item.posterUrl, 1280) || initialPoster;
     setTitle(item.title || '');
     setOriginalTitle(item.title || '');
     setReleaseYear(parseInt(String(item.year)) || new Date().getFullYear());
-    setPosterUrl(item.posterUrl || '');
-    setBackdropUrl(item.posterUrl || '');
+    setPosterUrl(initialPoster);
+    setBackdropUrl(initialBackdrop);
     setImdbId(item.imdbId || '');
     if (item.cast) setCast(item.cast);
 
@@ -690,11 +726,13 @@ export default function AdminDashboard() {
       }
 
       if (d) {
+        const bestPoster = upgradePosterUrl(d.posterUrl || item.posterUrl, 1080) || d.posterUrl || initialPoster;
+        const bestBackdrop = upgradePosterUrl(d.backdropUrl || d.posterUrl || item.posterUrl, 1280) || bestPoster;
         setTitle(d.title || item.title || '');
         setOriginalTitle(d.originalTitle || item.title || '');
         setReleaseYear(d.releaseYear || parseInt(String(item.year)) || new Date().getFullYear());
-        setPosterUrl(d.posterUrl || item.posterUrl || '');
-        setBackdropUrl(d.backdropUrl || d.posterUrl || item.posterUrl || '');
+        setPosterUrl(bestPoster);
+        setBackdropUrl(bestBackdrop);
         setGenre(d.genre || 'Action');
         setDescription(d.description || '');
         setDirector(d.director || '');
@@ -820,12 +858,15 @@ export default function AdminDashboard() {
       if (url1080p.trim()) videoQualities['1080p'] = url1080p.trim();
       if (url4k.trim()) videoQualities['4K'] = url4k.trim();
 
+      const cleanPosterUrl = upgradePosterUrl(posterUrl, 1080) || posterUrl.trim();
+      const cleanBackdropUrl = upgradePosterUrl(backdropUrl || posterUrl, 1280) || backdropUrl.trim() || cleanPosterUrl;
+
       const moviePayload = {
         title: title.trim(),
         originalTitle: originalTitle.trim() || title.trim(),
         description: description.trim(),
-        posterUrl: posterUrl.trim(),
-        backdropUrl: backdropUrl.trim() || posterUrl.trim(),
+        posterUrl: cleanPosterUrl,
+        backdropUrl: cleanBackdropUrl,
         releaseYear: Number(releaseYear) || new Date().getFullYear(),
         originalCategory: catToSave,
         displayCategory: autoDisplayCategory,
@@ -1778,6 +1819,10 @@ export default function AdminDashboard() {
                       required
                       value={posterUrl}
                       onChange={(e) => setPosterUrl(e.target.value)}
+                      onBlur={(e) => {
+                        const hd = upgradePosterUrl(e.target.value, 1080);
+                        if (hd && hd !== e.target.value) setPosterUrl(hd);
+                      }}
                       placeholder="https://..."
                       className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-white placeholder-gray-600 focus:outline-none focus:border-yellow-400 text-[11px]"
                     />
@@ -1788,6 +1833,10 @@ export default function AdminDashboard() {
                       type="url"
                       value={backdropUrl}
                       onChange={(e) => setBackdropUrl(e.target.value)}
+                      onBlur={(e) => {
+                        const hd = upgradePosterUrl(e.target.value, 1280);
+                        if (hd && hd !== e.target.value) setBackdropUrl(hd);
+                      }}
                       placeholder="https://..."
                       className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-white placeholder-gray-600 focus:outline-none focus:border-yellow-400 text-[11px]"
                     />
@@ -1798,14 +1847,22 @@ export default function AdminDashboard() {
                 {posterUrl && (
                   <div className="flex items-center gap-3 bg-neutral-950 p-2 rounded border border-neutral-800">
                     <img
-                      src={posterUrl || undefined}
+                      src={upgradePosterUrl(posterUrl, 1080) || posterUrl || undefined}
                       alt="Preview"
-                      className="w-10 h-14 object-cover rounded bg-neutral-900"
-                      onError={(e: any) => { e.target.style.display = 'none'; }}
+                      className="w-12 h-16 object-cover rounded bg-neutral-900"
+                      onError={(e: any) => {
+                        const img = e.currentTarget;
+                        if (posterUrl && img.src !== posterUrl && !img.dataset.triedRaw) {
+                          img.dataset.triedRaw = '1';
+                          img.src = posterUrl;
+                          return;
+                        }
+                        img.style.display = 'none';
+                      }}
                     />
                     <div className="text-[11px] text-gray-400">
-                      <span className="text-green-400 font-bold block">Poster Preview Ready</span>
-                      <span className="text-[10px] text-gray-500">Aspect ratio: 2/3 portrait</span>
+                      <span className="text-green-400 font-bold block">HD Poster Preview Ready</span>
+                      <span className="text-[10px] text-gray-500">Aspect ratio: 2/3 portrait • Full HD</span>
                     </div>
                   </div>
                 )}
@@ -2342,10 +2399,16 @@ export default function AdminDashboard() {
 
                         {/* Thumbnail */}
                         <img
-                          src={movie.posterUrl || undefined}
+                          src={upgradePosterUrl(movie.posterUrl, 1080) || movie.posterUrl || undefined}
                           alt={movie.title}
                           onError={(e: any) => {
-                            e.target.src = 'https://images.unsplash.com/photo-1595760205842-8356d2cf98b1?q=80&w=400';
+                            const img = e.currentTarget;
+                            if (movie.posterUrl && img.src !== movie.posterUrl && !img.dataset.triedRaw) {
+                              img.dataset.triedRaw = '1';
+                              img.src = movie.posterUrl;
+                              return;
+                            }
+                            img.src = 'https://images.unsplash.com/photo-1595760205842-8356d2cf98b1?q=80&w=800';
                           }}
                           className="w-12 h-16 object-cover rounded bg-neutral-800 flex-shrink-0"
                         />
@@ -2463,7 +2526,7 @@ export default function AdminDashboard() {
             {deleteModal.type === 'single' && deleteModal.item && (
               <div className="bg-neutral-950 p-3.5 rounded-xl border border-neutral-800 mb-5 flex items-start gap-3">
                 <img
-                  src={deleteModal.item.posterUrl || 'https://images.unsplash.com/photo-1595760205842-8356d2cf98b1?q=80&w=400'}
+                  src={upgradePosterUrl(deleteModal.item.posterUrl, 1080) || deleteModal.item.posterUrl || 'https://images.unsplash.com/photo-1595760205842-8356d2cf98b1?q=80&w=800'}
                   alt={deleteModal.item.title}
                   className="w-12 h-16 object-cover rounded bg-neutral-800 flex-shrink-0"
                 />

@@ -13,6 +13,7 @@ import { loginWithGoogle } from '../services/authService';
 import { fetchMoviesFromFirestore, getLocalMovies, saveLocalMovies } from '../services/movieStorage';
 import { isNativeAndroid, isInstalledPhoneApp, downloadOfficialApk } from '../utils/platform';
 import AndroidBottomNav from './AndroidBottomNav';
+import { upgradePosterUrl, normalizeMoviePosters } from '../utils/posterUrl';
 
 export default function HomePage() {
   const isAndroid = isNativeAndroid();
@@ -136,7 +137,7 @@ export default function HomePage() {
       q,
       (snapshot) => {
         if (!isMounted) return;
-        const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+        const list = snapshot.docs.map((d) => normalizeMoviePosters({ id: d.id, ...d.data() })) as any[];
         console.log(`[Sync] Real-time update: Received ${list.length} published movies`);
         
         setIsLoading(false);
@@ -354,7 +355,7 @@ export default function HomePage() {
       ) : (
         /* Cinematic Main Homepage Slider - Fixed Full Screen height */
         <div 
-          className="relative flex-grow h-screen flex flex-col justify-end overflow-hidden pb-12 touch-pan-y cursor-pointer will-change-transform transform-gpu"
+          className="relative flex-grow h-screen flex flex-col justify-end overflow-hidden pb-12 touch-pan-y cursor-pointer"
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
@@ -376,10 +377,21 @@ export default function HomePage() {
               transition={{ duration: 1 }}
               className="absolute inset-0"
             >
-              <div 
-                className="absolute inset-0 bg-cover bg-center w-full h-full"
-                style={{
-                  backgroundImage: `url(${currentFeatured.posterUrl || currentFeatured.backdropUrl || 'https://images.unsplash.com/photo-1626814026160-2237a95fc5a0?q=80&w=1200'})`,
+              <img
+                src={upgradePosterUrl(currentFeatured.posterUrl || currentFeatured.backdropUrl, 1200) || currentFeatured.posterUrl || currentFeatured.backdropUrl || 'https://images.unsplash.com/photo-1626814026160-2237a95fc5a0?q=80&w=1200'}
+                alt={currentFeatured.title || 'Featured'}
+                decoding="async"
+                fetchPriority="high"
+                className="absolute inset-0 w-full h-full object-cover object-center"
+                onError={(e: any) => {
+                  const img = e.currentTarget;
+                  const raw = currentFeatured.posterUrl || currentFeatured.backdropUrl;
+                  if (raw && img.src !== raw && !img.dataset.triedRaw) {
+                    img.dataset.triedRaw = '1';
+                    img.src = raw;
+                    return;
+                  }
+                  img.src = 'https://images.unsplash.com/photo-1626814026160-2237a95fc5a0?q=80&w=1200';
                 }}
               />
               {/* Cinematic Vignette Overlay - Lighter at the top to show poster behind logo */}
@@ -442,11 +454,19 @@ export default function HomePage() {
               className="relative w-full aspect-[3/4] bg-neutral-950 overflow-hidden cursor-pointer group"
             >
               <img
-                src={selectedMovie.posterUrl || selectedMovie.backdropUrl || undefined}
+                src={upgradePosterUrl(selectedMovie.posterUrl || selectedMovie.backdropUrl, 1080) || selectedMovie.posterUrl || selectedMovie.backdropUrl || undefined}
                 alt={selectedMovie.title}
+                decoding="async"
                 className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                 onError={(e: any) => {
-                  e.target.src = 'https://images.unsplash.com/photo-1595760205842-8356d2cf98b1?q=80&w=800';
+                  const img = e.currentTarget;
+                  const raw = selectedMovie.posterUrl || selectedMovie.backdropUrl;
+                  if (raw && img.src !== raw && !img.dataset.triedRaw) {
+                    img.dataset.triedRaw = '1';
+                    img.src = raw;
+                    return;
+                  }
+                  img.src = 'https://images.unsplash.com/photo-1595760205842-8356d2cf98b1?q=80&w=800';
                 }}
               />
 
