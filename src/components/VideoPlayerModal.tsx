@@ -135,14 +135,7 @@ export default function VideoPlayerModal({
   const [realSubtitleTracks, setRealSubtitleTracks] = useState<Array<{ id: number | string; label: string; lang?: string }>>([]);
   const [selectedSubtitle, setSelectedSubtitle] = useState<string>('Off');
 
-  // Quality State
-  const availableQualities = Object.keys(videoQualities)
-    .filter((k) => typeof videoQualities[k] === 'string' && videoQualities[k].trim().length > 0)
-    .sort((a, b) => (parseInt(b) || 0) - (parseInt(a) || 0));
 
-  const [currentQuality, setCurrentQuality] = useState<string>(() => {
-    return availableQualities.length > 0 ? availableQualities[0] : 'Default';
-  });
 
   // Autohide controls state & timer (3 seconds inactivity)
   const AUTO_HIDE_DELAY_MS = 3000;
@@ -282,7 +275,7 @@ export default function VideoPlayerModal({
     const resetDur = initialDuration || 0;
     setDuration(resetDur);
     durationRef.current = resetDur;
-  }, [isOpen, activeStreamUrl, currentQuality, initialDuration]);
+  }, [isOpen, activeStreamUrl, initialDuration]);
 
   // Resolve playable stream URL
   const [playableUrl, setPlayableUrl] = useState<string>('');
@@ -295,7 +288,7 @@ export default function VideoPlayerModal({
     setIsLoading(true);
 
     const resolveUrl = async () => {
-      const activeSource = (videoQualities && videoQualities[currentQuality]) || activeStreamUrl;
+      const activeSource = activeStreamUrl;
       if (!activeSource || !activeSource.trim()) {
         if (!cancelled) {
           setPlayableUrl('');
@@ -338,7 +331,7 @@ export default function VideoPlayerModal({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, activeStreamUrl, currentQuality, streamFallbackMode, streamStartOffset, useLocalBridgeFallback, retryNonce]);
+  }, [isOpen, activeStreamUrl, streamFallbackMode, streamStartOffset, useLocalBridgeFallback, retryNonce]);
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
@@ -576,7 +569,7 @@ export default function VideoPlayerModal({
       if (durationRef.current > 0) return;
 
       try {
-        const activeSrc = (videoQualities && videoQualities[currentQuality]) || activeStreamUrl;
+        const activeSrc = activeStreamUrl;
         const cachedMeta = (window as any).__tgStreamBridge?.getCachedMeta?.(activeSrc);
         if (cachedMeta && cachedMeta.durationSec > 0) {
           setDuration(cachedMeta.durationSec);
@@ -1014,26 +1007,7 @@ export default function VideoPlayerModal({
     }
   };
 
-  // Real Quality Change
-  const handleQualityChange = (quality: string) => {
-    if (quality === currentQuality) return;
-    const time = videoRef.current?.currentTime || 0;
-    const wasPlaying = isPlaying;
 
-    setCurrentQuality(quality);
-    setShowSettingsMenu(false);
-    setIsLoading(true);
-    resetAutoHideTimer();
-
-    const onLoaded = () => {
-      if (videoRef.current) {
-        videoRef.current.currentTime = time;
-        if (wasPlaying) videoRef.current.play().catch(() => {});
-      }
-      videoRef.current?.removeEventListener('loadedmetadata', onLoaded);
-    };
-    videoRef.current?.addEventListener('loadedmetadata', onLoaded);
-  };
 
   // Real Season Selection (Shows only actually uploaded seasons)
   const handleSelectSeason = (sIdx: number) => {
@@ -1614,26 +1588,7 @@ export default function VideoPlayerModal({
                       Player Settings
                     </div>
 
-                    {/* Quality Selector if multiple available */}
-                    {availableQualities.length > 0 && (
-                      <div className="px-1">
-                        <div className="text-xs text-neutral-300 font-semibold mb-1.5">Stream Quality</div>
-                        <div className="grid grid-cols-3 gap-1">
-                          {availableQualities.map((q) => (
-                            <button
-                              key={q}
-                              type="button"
-                              onClick={() => handleQualityChange(q)}
-                              className={`px-2 py-1 text-xs rounded-lg font-bold transition-colors cursor-pointer ${
-                                currentQuality === q ? 'bg-yellow-400 text-black' : 'bg-neutral-800 hover:bg-neutral-700 text-white'
-                              }`}
-                            >
-                              {q}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+
 
                     {/* Cast to Smart TV */}
                     <button

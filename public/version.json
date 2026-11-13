@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.190",
-  "minimumRequiredVersion": "3.5.190",
-  "latestVersionCode": 3410,
-  "minimumRequiredVersionCode": 3410,
+  "latestVersion": "3.5.191",
+  "minimumRequiredVersion": "3.5.191",
+  "latestVersionCode": 3411,
+  "minimumRequiredVersionCode": 3411,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
   "updateMessage": "A new version of Movie Box is available. Please update the app to continue watching movies and series.",
-  "releaseNotes": "Admin Movie Quality Badges (HD / HDTC / No Badge) and mandatory Android app update support."
+  "releaseNotes": "Removed manual video quality selection and implemented real Google Cast / Presentation API device discovery and streaming cast controller."
 }
