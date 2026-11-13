@@ -1,9 +1,12 @@
 package com.moviebox.stream.app;
 
+import android.app.DownloadManager;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.database.Cursor;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
@@ -26,13 +29,7 @@ import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.BridgeWebChromeClient;
-import java.io.BufferedInputStream;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.InputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import org.json.JSONObject;
 
 public class MainActivity extends BridgeActivity {
@@ -55,6 +52,8 @@ public class MainActivity extends BridgeActivity {
     private volatile String apkUpdateMessage = "";
     private volatile File downloadedApkFile = null;
     private volatile boolean isDownloadingApk = false;
+    private long activeDownloadId = -1;
+    private DownloadManager downloadManager;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -260,9 +259,9 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void launchApkPackageInstaller(File apkFile) {
-        if (apkFile == null || !apkFile.exists()) {
+        if (apkFile == null || !apkFile.exists() || apkFile.length() < 1024L) {
             apkUpdateState = "error";
-            apkUpdateMessage = "Downloaded update file was not found. Please tap Retry.";
+            apkUpdateMessage = "Downloaded update file was not found or is incomplete. Please tap Retry.";
             return;
         }
 
@@ -295,122 +294,105 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
-    private void startApkDownloadThread(final String apkUrl) {
+    private void startApkDownloadManager(final String apkUrl) {
         if (isDownloadingApk) return;
         isDownloadingApk = true;
         apkUpdateState = "downloading";
         apkUpdateProgress = 0;
-        apkUpdateMessage = "Connecting to official update server...";
+        apkUpdateMessage = "Preparing download via Android DownloadManager...";
 
-        new Thread(() -> {
-            HttpURLConnection conn = null;
+        try {
+            Uri uri = Uri.parse(apkUrl);
+            DownloadManager.Request request = new DownloadManager.Request(uri);
+            request.setTitle("Movie Portal Update");
+            request.setDescription("Downloading Movie Portal v3.5.192 APK...");
+            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+            
             File targetDir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
             if (targetDir == null) {
                 targetDir = getCacheDir();
             }
-            File tempFile = new File(targetDir, "Movie-Portal-update.tmp.apk");
-            File finalFile = new File(targetDir, "Movie-Portal-update.apk");
+            File apkFile = new File(targetDir, "Movie-Portal-update.apk");
+            if (apkFile.exists()) {
+                apkFile.delete();
+            }
+            request.setDestinationUri(Uri.fromFile(apkFile));
+            request.setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI | DownloadManager.Request.NETWORK_MOBILE);
+            request.setAllowedOverRoaming(true);
 
-            try {
-                String currentUrl = apkUrl;
-                int redirects = 0;
-                while (redirects < 8) {
-                    URL url = new URL(currentUrl);
-                    conn = (HttpURLConnection) url.openConnection();
-                    conn.setInstanceFollowRedirects(false);
-                    conn.setConnectTimeout(15000);
-                    conn.setReadTimeout(30000);
-                    conn.setRequestProperty("User-Agent", "MoviePortal-Android-Updater/1.0");
-                    int status = conn.getResponseCode();
-                    if (status == HttpURLConnection.HTTP_MOVED_PERM ||
-                        status == HttpURLConnection.HTTP_MOVED_TEMP ||
-                        status == HttpURLConnection.HTTP_SEE_OTHER ||
-                        status == 307 ||
-                        status == 308) {
-                        String location = conn.getHeaderField("Location");
-                        conn.disconnect();
-                        if (location == null || location.isEmpty()) {
-                            throw new Exception("Update redirect URL missing.");
+            downloadManager = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+            if (downloadManager != null) {
+                activeDownloadId = downloadManager.enqueue(request);
+                downloadedApkFile = apkFile;
+                startDownloadProgressPolling();
+            } else {
+                throw new Exception("DownloadManager service not available.");
+            }
+        } catch (Exception e) {
+            isDownloadingApk = false;
+            apkUpdateState = "error";
+            apkUpdateProgress = 0;
+            apkUpdateMessage = "Download failed: " + (e.getMessage() != null ? e.getMessage() : "Unknown error");
+        }
+    }
+
+    private void startDownloadProgressPolling() {
+        new Thread(() -> {
+            while (isDownloadingApk && activeDownloadId != -1 && downloadManager != null) {
+                try {
+                    DownloadManager.Query query = new DownloadManager.Query();
+                    query.setFilterById(activeDownloadId);
+                    Cursor cursor = downloadManager.query(query);
+                    if (cursor != null && cursor.moveToFirst()) {
+                        int statusIndex = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS);
+                        int downloadedIndex = cursor.getColumnIndex(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR);
+                        int totalIndex = cursor.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES);
+
+                        if (statusIndex >= 0) {
+                            int status = cursor.getInt(statusIndex);
+                            if (downloadedIndex >= 0 && totalIndex >= 0) {
+                                long downloaded = cursor.getLong(downloadedIndex);
+                                long total = cursor.getLong(totalIndex);
+                                if (total > 0) {
+                                    int pct = (int) Math.min(99, (downloaded * 100L) / total);
+                                    apkUpdateProgress = pct;
+                                    long mbDone = downloaded / (1024L * 1024L);
+                                    long mbTotal = total / (1024L * 1024L);
+                                    apkUpdateMessage = "Downloading update (" + mbDone + " MB / " + mbTotal + " MB)...";
+                                } else {
+                                    long mbDone = downloaded / (1024L * 1024L);
+                                    apkUpdateMessage = "Downloading update (" + mbDone + " MB)...";
+                                }
+                            }
+
+                            if (status == DownloadManager.STATUS_SUCCESSFUL) {
+                                isDownloadingApk = false;
+                                apkUpdateState = "installing";
+                                apkUpdateProgress = 100;
+                                apkUpdateMessage = "Download Complete. Opening Package Installer...";
+                                final File readyFile = downloadedApkFile;
+                                runOnUiThread(() -> launchApkPackageInstaller(readyFile));
+                                cursor.close();
+                                break;
+                            } else if (status == DownloadManager.STATUS_FAILED) {
+                                isDownloadingApk = false;
+                                int reasonIndex = cursor.getColumnIndex(DownloadManager.COLUMN_REASON);
+                                int reason = reasonIndex >= 0 ? cursor.getInt(reasonIndex) : -1;
+                                apkUpdateState = "error";
+                                apkUpdateProgress = 0;
+                                apkUpdateMessage = "Download failed (reason code " + reason + "). Please tap Retry.";
+                                cursor.close();
+                                break;
+                            }
                         }
-                        currentUrl = new URL(url, location).toString();
-                        redirects++;
-                        continue;
+                        cursor.close();
                     }
+                } catch (Exception ignored) {}
+                try {
+                    Thread.sleep(600);
+                } catch (InterruptedException e) {
                     break;
                 }
-
-                if (conn == null) {
-                    throw new Exception("Unable to connect to download server.");
-                }
-
-                int status = conn.getResponseCode();
-                if (status < 200 || status >= 300) {
-                    throw new Exception("Download failed (HTTP " + status + "). Please tap Retry.");
-                }
-
-                String contentType = conn.getContentType() != null ? conn.getContentType().toLowerCase() : "";
-                if (contentType.contains("text/html")) {
-                    throw new Exception("Invalid update package received instead of an APK file.");
-                }
-
-                long totalLength = conn.getContentLengthLong();
-                if (tempFile.exists()) {
-                    tempFile.delete();
-                }
-
-                try (InputStream in = new BufferedInputStream(conn.getInputStream());
-                     FileOutputStream out = new FileOutputStream(tempFile)) {
-                    byte[] buffer = new byte[32768];
-                    long downloaded = 0;
-                    int bytesRead;
-                    while ((bytesRead = in.read(buffer)) != -1) {
-                        out.write(buffer, 0, bytesRead);
-                        downloaded += bytesRead;
-                        if (totalLength > 0) {
-                            int pct = (int) Math.min(99, (downloaded * 100L) / totalLength);
-                            apkUpdateProgress = pct;
-                            long mbDone = downloaded / (1024L * 1024L);
-                            long mbTotal = Math.max(1L, totalLength / (1024L * 1024L));
-                            apkUpdateMessage = "Downloading update (" + mbDone + " MB / " + mbTotal + " MB)...";
-                        } else {
-                            long mbDone = downloaded / (1024L * 1024L);
-                            apkUpdateMessage = "Downloading update (" + mbDone + " MB)...";
-                        }
-                    }
-                    out.flush();
-                }
-
-                // Verify APK magic header ('PK') and minimum size before launching PackageInstaller
-                if (!tempFile.exists() || tempFile.length() < 1024L * 100L) {
-                    throw new Exception("Downloaded APK file is incomplete. Please tap Retry.");
-                }
-                byte[] magic = new byte[2];
-                try (FileInputStream fis = new FileInputStream(tempFile)) {
-                    if (fis.read(magic) < 2 || magic[0] != 0x50 || magic[1] != 0x4B) {
-                        throw new Exception("Downloaded file is not a valid Android APK package.");
-                    }
-                }
-
-                if (finalFile.exists()) {
-                    finalFile.delete();
-                }
-                if (!tempFile.renameTo(finalFile)) {
-                    finalFile = tempFile;
-                }
-                downloadedApkFile = finalFile;
-                apkUpdateProgress = 100;
-
-                final File readyFile = finalFile;
-                runOnUiThread(() -> launchApkPackageInstaller(readyFile));
-            } catch (Exception e) {
-                apkUpdateState = "error";
-                apkUpdateProgress = 0;
-                apkUpdateMessage = "Download failed: " + (e.getMessage() != null ? e.getMessage() : "Check your internet connection and retry.");
-            } finally {
-                if (conn != null) {
-                    try { conn.disconnect(); } catch (Exception ignored) {}
-                }
-                isDownloadingApk = false;
             }
         }).start();
     }
@@ -468,11 +450,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.190");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.192");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.190\",\"versionCode\":3410}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.192\",\"versionCode\":3412}";
             }
         }
 
@@ -493,7 +475,7 @@ public class MainActivity extends BridgeActivity {
                 apkUpdateMessage = "Official APK download URL is missing.";
                 return;
             }
-            startApkDownloadThread(apkUrl.trim());
+            startApkDownloadManager(apkUrl.trim());
         }
 
         @JavascriptInterface
