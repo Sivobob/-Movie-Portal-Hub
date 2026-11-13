@@ -7,12 +7,31 @@ import androidx.core.view.WindowInsetsControllerCompat;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
+    private LocalStreamServer localStreamServer;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         enableImmersiveStickyMode();
         configureWebView();
         createNotificationChannel();
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        if (localStreamServer == null) {
+            configureWebView();
+        }
+    }
+
+    @Override
+    public void onDestroy() {
+        if (localStreamServer != null) {
+            localStreamServer.stopServer();
+            localStreamServer = null;
+        }
+        super.onDestroy();
     }
 
     private void createNotificationChannel() {
@@ -41,10 +60,6 @@ public class MainActivity extends BridgeActivity {
         try {
             android.webkit.CookieManager cookieManager = android.webkit.CookieManager.getInstance();
             cookieManager.setAcceptCookie(true);
-            String streamUrl = "https://ais-dev-zazx2gelikm5prxjdf6l6j-755452514312.asia-northeast1.run.app";
-            cookieManager.setCookie(streamUrl, "__SECURE-aistudio_auth_flow_may_set_cookies=true; Path=/; Secure; SameSite=None");
-            cookieManager.setCookie("https://ais-pre-zazx2gelikm5prxjdf6l6j-755452514312.asia-northeast1.run.app", "__SECURE-aistudio_auth_flow_may_set_cookies=true; Path=/; Secure; SameSite=None");
-            cookieManager.flush();
             if (getBridge() != null && getBridge().getWebView() != null) {
                 android.webkit.WebView webView = getBridge().getWebView();
                 cookieManager.setAcceptThirdPartyCookies(webView, true);
@@ -60,6 +75,11 @@ public class MainActivity extends BridgeActivity {
                 settings.setAllowUniversalAccessFromFileURLs(true);
                 settings.setMediaPlaybackRequiresUserGesture(false);
                 settings.setMixedContentMode(android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+
+                if (localStreamServer == null) {
+                    localStreamServer = new LocalStreamServer(webView);
+                    webView.addJavascriptInterface(localStreamServer.createJsInterface(), "AndroidStreamBridge");
+                }
             }
         } catch (Exception e) {
             e.printStackTrace();

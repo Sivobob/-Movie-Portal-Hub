@@ -22,8 +22,7 @@ import { Capacitor } from '@capacitor/core';
 import { StatusBar } from '@capacitor/status-bar';
 import {
   buildApiUrl,
-  diagnoseBackendHealth,
-  getApiBaseUrl,
+  isUsingLocalNativeBridge,
   probeWorkingBackendUrl,
 } from '../utils/apiConfig';
 
@@ -105,13 +104,7 @@ export default function VideoPlayerModal({
   const [error, setError] = useState<string | null>(null);
   const [streamFallbackMode, setStreamFallbackMode] = useState<'direct' | 'remux' | 'transcode'>('direct');
   const [streamStartOffset, setStreamStartOffset] = useState<number>(0);
-  const [customServerInput, setCustomServerInput] = useState<string>(() => {
-    try {
-      return localStorage.getItem('movie_portal_backend_url') || '';
-    } catch {
-      return '';
-    }
-  });
+  const [retryNonce, setRetryNonce] = useState(0);
   const wasMutedByAutoplayRef = useRef(false);
   const durationRef = useRef(initialDuration || 0);
   const currentTimeRef = useRef(0);
@@ -289,7 +282,7 @@ export default function VideoPlayerModal({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, activeStreamUrl, currentQuality, streamFallbackMode, streamStartOffset]);
+  }, [isOpen, activeStreamUrl, currentQuality, streamFallbackMode, streamStartOffset, retryNonce]);
 
   // Initial Autohide timer on open & cleanup
   useEffect(() => {
@@ -516,30 +509,13 @@ export default function VideoPlayerModal({
       }
     };
 
-    const onError = async () => {
+    const onError = () => {
       if (cancelled) return;
       const mediaErr = video.error;
       console.warn('Video stream error event fired:', mediaErr?.code, mediaErr?.message);
 
-      if (/t\.me|telegram\.me/i.test(activeStreamUrl)) {
-        // Diagnose if backend itself is unreachable / blocked by AI Studio auth bridge
-        const health = await diagnoseBackendHealth(getApiBaseUrl());
-        if (cancelled) return;
-
-        if (health === 'auth_blocked') {
-          setIsLoading(false);
-          setIsPlaying(false);
-          setError('backend_auth_blocked');
-          return;
-        }
-        if (health === 'unreachable') {
-          setIsLoading(false);
-          setIsPlaying(false);
-          setError('backend_unreachable');
-          return;
-        }
-
-        // Backend is healthy: automatically retry with MKV->fMP4 remux, then H.264/AAC transcode
+      if (/t\.me|telegram\.me/i.test(activeStreamUrl) && !isUsingLocalNativeBridge()) {
+        // Automatically retry with MKV->fMP4 remux, then H.264/AAC transcode when using Node backend
         if (streamFallbackMode === 'direct') {
           setIsLoading(true);
           setStreamStartOffset(currentTimeRef.current);
@@ -552,15 +528,11 @@ export default function VideoPlayerModal({
           setStreamFallbackMode('transcode');
           return;
         }
-
-        setIsLoading(false);
-        setIsPlaying(false);
-        setError('telegram_notice');
-      } else {
-        setIsLoading(false);
-        setIsPlaying(false);
-        setError('stream_error');
       }
+
+      setIsLoading(false);
+      setIsPlaying(false);
+      setError('stream_error');
     };
 
     video.addEventListener('play', onPlay);
@@ -669,11 +641,7 @@ export default function VideoPlayerModal({
       }
       videoRef.current.play().catch((err) => {
         console.warn('Video play error:', err);
-        if (/t\.me|telegram\.me/i.test(activeStreamUrl)) {
-          setError('telegram_notice');
-        } else {
-          setError('stream_error');
-        }
+        setError('stream_error');
       });
     }
   };
@@ -895,9 +863,9 @@ export default function VideoPlayerModal({
           )}
         </div>
 
-        {/* Stream Error or Backend Diagnostic Dialog */}
+        {/* Clean Non-Redirecting Playback Error Overlay */}
         {error && (
-          <div 
+          <div
             onClick={(e) => e.stopPropagation()}
             className="absolute inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200"
           >
@@ -907,94 +875,36 @@ export default function VideoPlayerModal({
               </div>
 
               <h3 className="text-base font-black text-white uppercase tracking-tight mb-2">
-                {error === 'backend_auth_blocked'
-                  ? 'Streaming Server Auth Required'
-                  : error === 'backend_unreachable'
-                  ? 'Streaming Server Unreachable'
-                  : error === 'telegram_notice'
-                  ? 'Telegram Stream Notice'
-                  : 'Stream Unavailable'}
+                Unable to Play Video
               </h3>
 
-              <p className="text-xs text-gray-300 mb-4 leading-relaxed">
-                {error === 'backend_auth_blocked'
-                  ? 'The configured backend URL redirected to a login gate instead of streaming video bytes. Deploy the backend to a public Node/Render URL or configure your public server URL below.'
-                  : error === 'backend_unreachable'
-                  ? 'Could not reach the streaming server from the app. Check your internet connection or verify your public Render/Node server URL below.'
-                  : error === 'telegram_notice'
-                  ? 'This video stream could not be decoded by the device player. You can retry or open directly in the Telegram App.'
-                  : 'Unable to load this video stream. Please check your internet connection or verify the stream source.'}
+              <p className="text-xs text-gray-300 mb-5 leading-relaxed">
+                Could not load this video stream right now. Please check your internet connection and try again.
               </p>
 
-              {(error === 'backend_auth_blocked' || error === 'backend_unreachable') && (
-                <div className="mb-4 text-left space-y-2">
-                  <input
-                    type="url"
-                    value={customServerInput}
-                    onChange={(e) => setCustomServerInput(e.target.value)}
-                    placeholder="https://your-server.onrender.com"
-                    className="w-full bg-neutral-950 border border-neutral-700 focus:border-yellow-400 rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const trimmed = customServerInput.trim().replace(/\/+$/, '');
-                      try {
-                        if (trimmed) localStorage.setItem('movie_portal_backend_url', trimmed);
-                        else localStorage.removeItem('movie_portal_backend_url');
-                      } catch {}
-                      setError(null);
-                      setIsLoading(true);
-                      setStreamFallbackMode('direct');
-                      setPlayableUrl('');
-                      setTimeout(() => {
-                        const activeSource = (videoQualities && videoQualities[currentQuality]) || activeStreamUrl;
-                        if (activeSource && /t\.me|telegram\.me/i.test(activeSource)) {
-                          setPlayableUrl(buildApiUrl(`/api/stream?url=${encodeURIComponent(activeSource.trim())}&ext=.mp4`));
-                        }
-                      }, 50);
-                    }}
-                    className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-black text-xs py-2.5 px-4 rounded-xl transition-all cursor-pointer uppercase"
-                  >
-                    Save Server URL & Retry
-                  </button>
-                </div>
-              )}
-
               <div className="space-y-2.5">
-                {activeStreamUrl && /t\.me|telegram\.me/i.test(activeStreamUrl) && (
-                  <a
-                    href={activeStreamUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-black text-xs py-3 px-4 rounded-xl shadow-lg shadow-yellow-400/20 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 uppercase tracking-wider no-underline"
-                  >
-                    <Play size={16} fill="currentColor" />
-                    <span>Open in Telegram App</span>
-                  </a>
-                )}
-
                 <button
                   type="button"
                   onClick={() => {
                     setError(null);
                     setIsLoading(true);
                     setStreamFallbackMode('direct');
+                    setRetryNonce((n) => n + 1);
                     if (videoRef.current) {
                       videoRef.current.load();
                       videoRef.current.play().catch(() => {});
                     }
                   }}
-                  className="w-full bg-neutral-800 hover:bg-neutral-700 text-white font-bold text-xs py-2.5 px-4 rounded-xl border border-neutral-700 transition-colors flex items-center justify-center gap-2 cursor-pointer active:scale-95 uppercase"
+                  className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-black text-xs py-3 px-4 rounded-xl shadow-lg shadow-yellow-400/20 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 uppercase tracking-wider"
                 >
-                  <RefreshCw size={14} />
-                  <span>Retry Stream</span>
+                  <RefreshCw size={15} />
+                  <span>Retry</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={onClose}
-                  className="w-full text-xs text-gray-400 hover:text-white py-2 font-semibold transition-colors cursor-pointer"
+                  className="w-full bg-neutral-800 hover:bg-neutral-700 text-white font-bold text-xs py-2.5 px-4 rounded-xl border border-neutral-700 transition-colors cursor-pointer"
                 >
                   Back to Movies
                 </button>

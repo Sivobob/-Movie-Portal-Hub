@@ -1,7 +1,7 @@
 {
-  "latestVersion": "3.5.180",
-  "latestVersionCode": 3400,
+  "latestVersion": "3.5.185",
+  "latestVersionCode": 3405,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "releaseNotes": "Official Release v3.5.180: Fixed Firestore write permission error. Seamless cloud sync for movie and series uploads."
+  "releaseNotes": "Official Release v3.5.185: Built-in native in-app Telegram streaming engine, clean in-player error handling, and zero external redirects."
 }

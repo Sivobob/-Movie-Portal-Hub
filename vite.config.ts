@@ -4,11 +4,21 @@ import path from 'path';
 import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
+  const rootDir = import.meta.dirname || '.';
   return {
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
-        '@': path.resolve(import.meta.dirname || '.', '.'),
+        '@': path.resolve(rootDir, '.'),
+        crypto: path.resolve(rootDir, 'src/utils/shims/cryptoShim.ts'),
+        websocket: path.resolve(rootDir, 'src/utils/shims/websocketShim.ts'),
+        path: 'path-browserify',
+        util: path.resolve(rootDir, 'src/utils/shims/nodeStubs.ts'),
+        fs: path.resolve(rootDir, 'src/utils/shims/nodeStubs.ts'),
+        net: path.resolve(rootDir, 'src/utils/shims/nodeStubs.ts'),
+        os: path.resolve(rootDir, 'src/utils/shims/nodeStubs.ts'),
+        socks: path.resolve(rootDir, 'src/utils/shims/nodeStubs.ts'),
+        'node-localstorage': path.resolve(rootDir, 'src/utils/shims/nodeStubs.ts'),
       },
     },
     server: {

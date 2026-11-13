@@ -30,14 +30,17 @@ var firebase_applet_config_default = {
 // src/server/firebaseAdmin.ts
 var projectId = process.env.FIREBASE_PROJECT_ID || firebase_applet_config_default.projectId || "movie-portal-hub-apk";
 var app = getApps().length === 0 ? initializeApp({ projectId }) : getApp();
+var databaseId = firebase_applet_config_default.firestoreDatabaseId;
 var adminAuth = getAuth(app);
-var adminDb = getFirestore(app);
+var adminDb = databaseId ? getFirestore(app, databaseId) : getFirestore(app);
 
 // src/server/authMiddleware.ts
 var AUTHORIZED_ADMIN_EMAILS = [
+  "riteshdahiyajaat00@gmail.com",
   "adityaantil260@gmail.com",
   "amandabasladpuriya@gmail.com",
-  "movieboxproapk007711@gmail.com"
+  "movieboxproapk007711@gmail.com",
+  "movieboxproapp0011@gmail.com"
 ];
 async function requireAdmin(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -582,39 +585,18 @@ async function resolveTelegramMedia(client2, parsed) {
     candidatePeers.push(`-100${cleanId}`);
     candidatePeers.push(cleanId);
   }
-  try {
-    const me = await client2.getMe().catch(() => null);
-    if (me && !me.bot) {
-      const dialogs = await client2.getDialogs({ limit: 50 });
-      for (const dialog of dialogs) {
-        const entity = dialog.entity;
-        if (entity && (entity instanceof Api.Channel || entity.className === "Channel")) {
-          const ch = entity;
-          if (ch.id.toString() === cleanId || ch.id.toString() === parsed.rawChannelId) {
-            if (ch.accessHash) {
-              saveChannelEntity(ch.id.toString(), ch.accessHash.toString(), ch.title, ch.username);
-              candidatePeers.unshift(new Api.InputPeerChannel({
-                channelId: bigInt(ch.id.toString()),
-                accessHash: bigInt(ch.accessHash.toString())
-              }));
-            }
-          }
-        }
+  if (cleanId && !cachedHash) {
+    try {
+      const entity = await client2.getEntity(`-100${cleanId}`);
+      if (entity && entity.accessHash) {
+        saveChannelEntity(cleanId, entity.accessHash.toString(), entity.title, entity.username);
+        candidatePeers.unshift(new Api.InputPeerChannel({
+          channelId: bigInt(cleanId),
+          accessHash: bigInt(entity.accessHash.toString())
+        }));
       }
-    } else if (cleanId) {
-      try {
-        const entity = await client2.getEntity(`-100${cleanId}`);
-        if (entity && entity.accessHash) {
-          saveChannelEntity(cleanId, entity.accessHash.toString(), entity.title, entity.username);
-          candidatePeers.unshift(new Api.InputPeerChannel({
-            channelId: bigInt(cleanId),
-            accessHash: bigInt(entity.accessHash.toString())
-          }));
-        }
-      } catch (botEntityErr) {
-      }
+    } catch (e) {
     }
-  } catch (dErr) {
   }
   let foundMsg = null;
   let lastError = "";
@@ -730,9 +712,10 @@ async function getTelegramClient() {
     });
     return newClient;
   })().catch((err) => {
-    connectingPromise = null;
     client = null;
     throw err;
+  }).finally(() => {
+    connectingPromise = null;
   });
   return connectingPromise;
 }
@@ -988,90 +971,84 @@ router2.post("/verify", async (req, res) => {
     });
   }
 });
+var mediaCache = /* @__PURE__ */ new Map();
+var MEDIA_CACHE_TTL_MS = 5 * 60 * 1e3;
 async function handleStream(req, res) {
   const urlParam = req.query.url;
+  const isRemuxParam = req.query.remux === "1";
   const isTranscodeParam = req.query.transcode === "1";
-  console.log(`[Stream Req] Transcode: ${isTranscodeParam}. Client: ${req.headers["user-agent"]?.substring(0, 50)}`);
-  console.log(`[Stream Range] ${req.headers.range || "No Range"}`);
+  const isRawParam = req.query.raw === "1";
+  const startSecParam = req.query.start ? Math.max(0, parseFloat(req.query.start) || 0) : 0;
   if (!urlParam) return res.status(400).send("URL required");
-  console.log(`[Stream] Incoming request for: ${urlParam.substring(0, 100)}${urlParam.length > 100 ? "..." : ""}`);
-  const fallbackSampleStream = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
   if (!urlParam.includes("t.me") && !urlParam.includes("telegram.me")) {
-    console.log(`[Stream] Redirecting direct video URL: ${urlParam.substring(0, 60)}...`);
     return res.redirect(urlParam);
   }
   const parsed = parseTelegramUrl(urlParam);
   if (!parsed.isValid || parsed.isInviteLink || !parsed.messageId) {
-    console.log(`[Stream] Invite link or unparsed URL: ${urlParam}. Redirecting to fallback stream...`);
-    return res.redirect(fallbackSampleStream);
+    return res.status(400).json({
+      error: "Invalid or invite-only Telegram URL. A specific post link (e.g. https://t.me/c/...) is required."
+    });
   }
   try {
     const { apiId, apiHash, botToken, sessionStr } = getTelegramCredentials();
     const client2 = apiId && apiHash && (botToken || sessionStr) ? await getTelegramClient() : null;
     if (!client2) {
-      console.warn("[Stream] Telegram client unconfigured. Redirecting to fallback stream...");
-      return res.redirect(fallbackSampleStream);
+      return res.status(503).json({ error: "Telegram client backend not configured." });
     }
-    const { message: msg, error: fetchErr } = await resolveTelegramMedia(client2, parsed);
-    if (!msg) {
-      console.warn(`[Stream] Could not resolve Telegram message #${parsed.messageId}. Redirecting to fallback stream...`);
-      return res.redirect(fallbackSampleStream);
+    const cacheKey = `${parsed.chatId}:${parsed.messageId}`;
+    let entry = mediaCache.get(cacheKey);
+    if (entry && Date.now() - entry.cachedAt > MEDIA_CACHE_TTL_MS) {
+      mediaCache.delete(cacheKey);
+      entry = void 0;
     }
-    let document = null;
-    if (msg.media) {
-      if (msg.media instanceof Api2.MessageMediaDocument && msg.media.document instanceof Api2.Document) {
-        document = msg.media.document;
-      } else if (msg.media instanceof Api2.MessageMediaWebPage && msg.media.webpage?.document instanceof Api2.Document) {
-        document = msg.media.webpage.document;
+    if (!entry) {
+      const { message: msg, error: fetchErr } = await resolveTelegramMedia(client2, parsed);
+      if (!msg) {
+        return res.status(404).json({
+          error: `Telegram post #${parsed.messageId} not found or bot lacks channel access.`,
+          detail: fetchErr || void 0
+        });
       }
-    }
-    if (!document) {
-      console.warn(`[Stream] No media document found in message #${parsed.messageId}. Redirecting to fallback stream...`);
-      return res.redirect(fallbackSampleStream);
-    }
-    console.log(`[Stream] Resolving document: ${document.id} (${document.size} bytes) for message ${parsed.messageId}`);
-    const fileSize = Number(document.size);
-    const rangeHeader = req.headers.range;
-    let start = 0;
-    let endPos = fileSize - 1;
-    const MAX_RANGE_CHUNK = 50 * 1024 * 1024;
-    if (rangeHeader) {
-      const match = rangeHeader.match(/bytes=(\d+)-(\d+)?/);
-      if (match) {
-        start = parseInt(match[1], 10) || 0;
-        if (match[2]) {
-          endPos = parseInt(match[2], 10);
-        } else {
-          endPos = Math.min(start + MAX_RANGE_CHUNK - 1, fileSize - 1);
+      let document2 = null;
+      if (msg.media) {
+        if (msg.media instanceof Api2.MessageMediaDocument && msg.media.document instanceof Api2.Document) {
+          document2 = msg.media.document;
+        } else if (msg.media instanceof Api2.MessageMediaWebPage && msg.media.webpage?.document instanceof Api2.Document) {
+          document2 = msg.media.webpage.document;
         }
       }
-    } else {
-      endPos = Math.min(start + MAX_RANGE_CHUNK - 1, fileSize - 1);
+      if (!document2) {
+        return res.status(404).json({ error: `No playable video document found in Telegram post #${parsed.messageId}.` });
+      }
+      const fileSize2 = Number(document2.size);
+      let durationSec2 = 0;
+      const videoAttr = document2.attributes.find((a) => a instanceof Api2.DocumentAttributeVideo);
+      if (videoAttr) {
+        durationSec2 = videoAttr.duration || 0;
+      }
+      let fileName = "";
+      const fnAttr = document2.attributes.find((a) => a.className === "DocumentAttributeFilename" || a instanceof Api2.DocumentAttributeFilename);
+      if (fnAttr && fnAttr.fileName) {
+        fileName = fnAttr.fileName;
+      }
+      const rawMime = (document2.mimeType || "").toLowerCase();
+      const lowerName = fileName.toLowerCase();
+      const isWebm = lowerName.endsWith(".webm") || rawMime.includes("webm");
+      const isMkv = lowerName.endsWith(".mkv") || rawMime.includes("matroska") || rawMime.includes("mkv");
+      const mimeType2 = isWebm ? "video/webm" : "video/mp4";
+      entry = {
+        document: document2,
+        fileSize: fileSize2,
+        durationSec: durationSec2,
+        fileName,
+        mimeType: mimeType2,
+        isMkv,
+        cachedAt: Date.now()
+      };
+      mediaCache.set(cacheKey, entry);
+      console.log(`[Stream] Cached document ${document2.id} (${formatBytes(fileSize2)}, ${fileName || rawMime}) for msg ${parsed.messageId}`);
     }
-    if (start >= fileSize) {
-      res.setHeader("Content-Range", `bytes */${fileSize}`);
-      return res.status(416).send("Range Not Satisfiable");
-    }
-    endPos = Math.min(endPos, fileSize - 1);
-    const chunkSize = endPos - start + 1;
-    let durationSec = 0;
-    const videoAttr = document.attributes.find((a) => a instanceof Api2.DocumentAttributeVideo);
-    if (videoAttr) {
-      durationSec = videoAttr.duration || 0;
-    }
-    let fileName = "";
-    const fnAttr = document.attributes.find((a) => a.className === "DocumentAttributeFilename" || a instanceof Api2.DocumentAttributeFilename);
-    if (fnAttr && fnAttr.fileName) {
-      fileName = fnAttr.fileName;
-    }
-    let rawMime = (document.mimeType || "").toLowerCase();
-    const lowerName = fileName.toLowerCase();
-    const isMkv = lowerName.endsWith(".mkv") || rawMime.includes("matroska") || rawMime.includes("mkv");
-    const isWebm = lowerName.endsWith(".webm") || rawMime.includes("webm");
-    const isHevc = lowerName.includes("hevc") || lowerName.includes("x265") || lowerName.includes("h265") || lowerName.includes("h.265") || lowerName.includes("10bit");
-    const isTranscodeRequired = isMkv || isHevc || req.query.transcode === "1" || req.query.transcode === "true";
-    let mimeType = "video/mp4";
-    if (isWebm && !isTranscodeRequired) mimeType = "video/webm";
+    const { document, fileSize, durationSec, mimeType } = entry;
     const commonHeaders = {
       "Access-Control-Expose-Headers": "Content-Range, Accept-Ranges, Content-Length, X-Video-Duration, Content-Type",
       "X-Video-Duration": durationSec.toString(),
@@ -1088,113 +1065,113 @@ async function handleStream(req, res) {
       });
       return res.end();
     }
+    if ((isRemuxParam || isTranscodeParam) && !isRawParam) {
+      const localPort = process.env.INTERNAL_APP_PORT || process.env.APP_PORT || "3000";
+      const localSourceUrl = `http://127.0.0.1:${localPort}/api/stream?url=${encodeURIComponent(urlParam)}&raw=1`;
+      const ffArgs = [];
+      if (startSecParam > 0) {
+        ffArgs.push("-ss", startSecParam.toString());
+      }
+      ffArgs.push(
+        "-reconnect",
+        "1",
+        "-reconnect_streamed",
+        "1",
+        "-reconnect_delay_max",
+        "3",
+        "-i",
+        localSourceUrl,
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a:0?"
+      );
+      if (isRemuxParam && !isTranscodeParam) {
+        ffArgs.push("-c:v", "copy", "-c:a", "aac", "-ac", "2", "-b:a", "128k");
+      } else {
+        ffArgs.push(
+          "-c:v",
+          "libx264",
+          "-preset",
+          "ultrafast",
+          "-tune",
+          "zerolatency",
+          "-pix_fmt",
+          "yuv420p",
+          "-c:a",
+          "aac",
+          "-ac",
+          "2",
+          "-b:a",
+          "128k"
+        );
+      }
+      ffArgs.push(
+        "-movflags",
+        "frag_keyframe+empty_moov+default_base_moof",
+        "-f",
+        "mp4",
+        "pipe:1"
+      );
+      res.writeHead(200, {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Expose-Headers": "Content-Length, X-Video-Duration, Content-Type",
+        "X-Video-Duration": durationSec.toString(),
+        "Content-Type": "video/mp4",
+        "Cache-Control": "no-cache, no-store, must-revalidate"
+      });
+      const ffProc = spawn("ffmpeg", ffArgs, { stdio: ["ignore", "pipe", "pipe"] });
+      let procClosed = false;
+      ffProc.stdout.pipe(res);
+      ffProc.stderr.on("data", (chunk) => {
+        const msg = chunk.toString();
+        if (msg.toLowerCase().includes("error")) {
+          console.warn(`[FFmpeg ${isTranscodeParam ? "Transcode" : "Remux"}]`, msg.trim());
+        }
+      });
+      ffProc.on("error", (err) => {
+        console.error("[FFmpeg] Spawn error:", err.message);
+        if (!res.writableEnded) res.end();
+      });
+      ffProc.on("close", () => {
+        procClosed = true;
+        if (!res.writableEnded) res.end();
+      });
+      req.on("close", () => {
+        if (!procClosed) {
+          try {
+            ffProc.kill("SIGKILL");
+          } catch {
+          }
+        }
+      });
+      return;
+    }
+    const rangeHeader = req.headers.range;
+    let start = 0;
+    let endPos = fileSize - 1;
+    const MAX_RANGE_CHUNK = 8 * 1024 * 1024;
+    if (rangeHeader) {
+      const match = rangeHeader.match(/bytes=(\d+)-(\d+)?/);
+      if (match) {
+        start = parseInt(match[1], 10) || 0;
+        if (match[2]) {
+          endPos = parseInt(match[2], 10);
+        } else {
+          endPos = Math.min(start + MAX_RANGE_CHUNK - 1, fileSize - 1);
+        }
+      }
+    }
+    if (start >= fileSize) {
+      res.setHeader("Content-Range", `bytes */${fileSize}`);
+      return res.status(416).send("Range Not Satisfiable");
+    }
+    endPos = Math.min(endPos, fileSize - 1);
+    const chunkSize = endPos - start + 1;
     let isClosed = false;
     req.on("close", () => {
       isClosed = true;
     });
-    if (isTranscodeRequired) {
-      console.log(`[Stream] Transcoding MKV/HEVC for msg ${parsed.messageId}. File: ${fileName}`);
-      let startByte = 0;
-      let startSeconds = 0;
-      const startParam = req.query.start ? parseFloat(req.query.start) : 0;
-      if (!isNaN(startParam) && startParam > 0) {
-        startSeconds = startParam;
-        if (fileSize > 0 && durationSec > 0) {
-          startByte = Math.floor(startSeconds / durationSec * fileSize);
-        }
-      } else if (rangeHeader && fileSize > 0 && durationSec > 0) {
-        const matchRange = rangeHeader.match(/bytes=(\d+)-/);
-        if (matchRange) {
-          startByte = parseInt(matchRange[1], 10) || 0;
-          startSeconds = Math.floor(startByte / fileSize * durationSec);
-        }
-      }
-      const transcodeStatusCode = rangeHeader ? 206 : 200;
-      const transcodeHeaders = { ...commonHeaders };
-      delete transcodeHeaders["Accept-Ranges"];
-      const responseHeaders = {
-        ...transcodeHeaders,
-        "Content-Type": "video/mp4",
-        "Content-Disposition": `inline; filename="stream.mp4"`,
-        "Cache-Control": "no-cache"
-      };
-      if (rangeHeader) {
-        responseHeaders["Content-Range"] = `bytes ${startByte}-${fileSize - 1}/${fileSize}`;
-        responseHeaders["Content-Length"] = (fileSize - startByte).toString();
-      }
-      const ALIGNMENT2 = 4096;
-      const alignedStartByte = Math.floor(startByte / ALIGNMENT2) * ALIGNMENT2;
-      res.writeHead(transcodeStatusCode, responseHeaders);
-      const ffmpegArgs = [
-        ...startSeconds > 3 ? ["-ss", startSeconds.toString()] : [],
-        "-i",
-        "pipe:0",
-        "-map",
-        "0:v:0",
-        "-map",
-        "0:a?",
-        "-c:v",
-        "libx264",
-        "-profile:v",
-        "baseline",
-        "-level",
-        "3.0",
-        "-preset",
-        "faster",
-        "-tune",
-        "zerolatency",
-        "-crf",
-        "28",
-        "-c:a",
-        "aac",
-        "-ac",
-        "2",
-        "-b:a",
-        "128k",
-        "-f",
-        "mp4",
-        "-movflags",
-        "frag_keyframe+empty_moov+default_base_moof",
-        "pipe:1"
-      ];
-      const ffmpegProc = spawn("ffmpeg", ffmpegArgs);
-      ffmpegProc.stdout.pipe(res);
-      ffmpegProc.stderr.on("data", (d) => {
-        const msg2 = d.toString();
-        if (msg2.includes("Error") && !isClosed) console.log("[FFMPEG Err]", msg2.trim());
-      });
-      req.on("close", () => {
-        isClosed = true;
-        try {
-          ffmpegProc.kill("SIGKILL");
-        } catch (e) {
-        }
-      });
-      try {
-        const fileLocation = new Api2.InputDocumentFileLocation({
-          id: document.id,
-          accessHash: document.accessHash,
-          fileReference: document.fileReference,
-          thumbSize: ""
-        });
-        const stream = client2.iterDownload({
-          file: fileLocation,
-          offset: bigInt2(alignedStartByte),
-          requestSize: 2 * 1024 * 1024
-        });
-        for await (let chunk of stream) {
-          if (isClosed || res.writableEnded) break;
-          const canWrite = ffmpegProc.stdin.write(chunk);
-          if (!canWrite && !isClosed) {
-            await new Promise((r) => ffmpegProc.stdin.once("drain", r));
-          }
-        }
-        if (!isClosed) ffmpegProc.stdin.end();
-      } catch (tErr) {
-        if (!isClosed) console.warn("[Stream] Transcode loop notice:", tErr.message);
-      }
-      return;
-    }
     const ALIGNMENT = 4096;
     const alignedStart = Math.floor(start / ALIGNMENT) * ALIGNMENT;
     let actualSkip = start - alignedStart;
@@ -1207,7 +1184,7 @@ async function handleStream(req, res) {
     if (rangeHeader) {
       headers["Content-Range"] = `bytes ${start}-${endPos}/${fileSize}`;
     }
-    console.log(`[Stream] Status ${statusCode} | ${mimeType} | msg ${parsed.messageId} | bytes ${start}-${endPos} (${formatBytes(chunkSize)})`);
+    console.log(`[Stream] Status ${statusCode} | ${mimeType} | msg ${parsed.messageId} | bytes ${start}-${endPos}/${fileSize}`);
     res.writeHead(statusCode, headers);
     let delivered = 0;
     try {
@@ -1220,9 +1197,9 @@ async function handleStream(req, res) {
       const stream = client2.iterDownload({
         file: fileLocation,
         offset: bigInt2(alignedStart),
-        requestSize: 4 * 1024 * 1024
+        requestSize: 1024 * 1024
       });
-      for await (let chunk of stream) {
+      for await (const chunk of stream) {
         if (isClosed || res.writableEnded || delivered >= chunkSize) break;
         let data = chunk;
         if (actualSkip > 0) {
@@ -1244,19 +1221,22 @@ async function handleStream(req, res) {
         }
       }
     } catch (err) {
+      if (err?.message?.includes("FILE_REFERENCE")) {
+        mediaCache.delete(cacheKey);
+      }
       if (!isClosed) {
         console.error("[Stream] Chunk transfer notice:", err.message);
       }
     } finally {
       if (!res.writableEnded) res.end();
-      console.log(`[Stream] Completed chunk ${parsed.messageId}. Delivered: ${formatBytes(delivered)}/${formatBytes(chunkSize)}`);
     }
   } catch (err) {
     console.error("[Stream] Global streaming error:", err.message);
-    if (!res.headersSent) res.status(500).send(err.message);
+    if (!res.headersSent) res.status(500).json({ error: err.message });
   }
 }
 router2.get("/stream", handleStream);
+router2.head("/stream", handleStream);
 var telegramRouter_default = router2;
 
 // src/server/videoRouter.ts
@@ -1553,13 +1533,21 @@ var __filename3 = fileURLToPath3(import.meta.url);
 var __dirname3 = path5.dirname(__filename3);
 dotenv.config({ path: path5.resolve(__dirname3, ".env") });
 var app2 = express3();
-var PORT = Number(process.env.PORT) || 3e3;
+var PORT = 3e3;
+if (process.env.APP_PORT) {
+  PORT = Number(process.env.APP_PORT) || 3e3;
+} else if (process.env.RENDER && process.env.PORT) {
+  PORT = Number(process.env.PORT) || 3e3;
+} else if (process.env.PORT && process.env.PORT !== "8080") {
+  PORT = Number(process.env.PORT) || 3e3;
+}
 var args = process.argv.slice(2);
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--port" && args[i + 1]) {
     PORT = Number(args[i + 1]) || PORT;
   }
 }
+process.env.INTERNAL_APP_PORT = String(PORT);
 app2.use(express3.json());
 app2.use((req, _res, next) => {
   console.log(`[${(/* @__PURE__ */ new Date()).toISOString()}] ${req.method} ${req.url}`);
@@ -1594,6 +1582,7 @@ app2.get("/api/debug-env", (req, res) => {
 app2.use("/api/metadata", metadataRouter_default);
 app2.use("/api/telegram", telegramRouter_default);
 app2.get("/api/stream", handleStream);
+app2.head("/api/stream", handleStream);
 app2.use("/api/video", videoRouter_default);
 app2.use("/api", downloadCastRouter_default);
 app2.use("/api", (req, res) => {

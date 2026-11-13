@@ -110,7 +110,8 @@ function AppContent() {
   );
 }
 
-import { StatusBar, Style } from '@capacitor/status-bar';
+import { StatusBar } from '@capacitor/status-bar';
+import { ensureAndroidStreamBridge } from './utils/apiConfig';
 
 export default function App() {
   useEffect(() => {
@@ -118,6 +119,7 @@ export default function App() {
     
     // Hide top status bar by default for immersive app experience
     if (Capacitor.isNativePlatform()) {
+      ensureAndroidStreamBridge().catch(() => {});
       try {
         StatusBar.hide().catch(() => {});
         StatusBar.setOverlaysWebView({ overlay: true }).catch(() => {});

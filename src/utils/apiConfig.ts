@@ -1,6 +1,6 @@
 export const LIVE_BACKEND_URL = 'https://ais-dev-zazx2gelikm5prxjdf6l6j-755452514312.asia-northeast1.run.app';
 export const PRE_BACKEND_URL = 'https://ais-pre-zazx2gelikm5prxjdf6l6j-755452514312.asia-northeast1.run.app';
-export const APP_VERSION = 'v3.5.184';
+export const APP_VERSION = 'v3.5.185';
 
 const ENV_BACKEND_URL = (
   (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_BASE_URL) ||
@@ -11,6 +11,7 @@ const ENV_BACKEND_URL = (
   .replace(/\/+$/, '');
 
 let resolvedNativeBackendUrl: string | null = null;
+let bridgeReadyPromise: Promise<void> | null = null;
 
 function isNativeAppRuntime(): boolean {
   if (typeof window === 'undefined') return false;
@@ -18,15 +19,53 @@ function isNativeAppRuntime(): boolean {
   return Boolean(cap && typeof cap.isNativePlatform === 'function' ? cap.isNativePlatform() : cap?.isNativePlatform);
 }
 
+export function getNativeLocalBridgeUrl(): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    const bridge = (window as any).AndroidStreamBridge;
+    if (bridge && typeof bridge.getLocalBaseUrl === 'function') {
+      const url = String(bridge.getLocalBaseUrl() || '').trim().replace(/\/+$/, '');
+      if (url.startsWith('http://127.0.0.1:')) {
+        return url;
+      }
+    }
+  } catch {}
+  return '';
+}
+
+export function isUsingLocalNativeBridge(): boolean {
+  const base = getApiBaseUrl();
+  return /^https?:\/\/127\.0\.0\.1:\d+/i.test(base);
+}
+
+export async function ensureAndroidStreamBridge(): Promise<string> {
+  if (typeof window === 'undefined' || !isNativeAppRuntime()) return '';
+  const localUrl = getNativeLocalBridgeUrl();
+  if (!localUrl) return '';
+
+  if (!bridgeReadyPromise) {
+    bridgeReadyPromise = import('./browserTelegramStream')
+      .then((mod) => {
+        mod.installAndroidStreamBridge(localUrl);
+      })
+      .catch((err) => {
+        console.warn('[AndroidBridge] Initialization warning:', err);
+      });
+  }
+  await bridgeReadyPromise;
+  return localUrl;
+}
+
 /**
  * Returns the base URL for API requests.
- * - Browser sessions (AI Studio, Render, Cloud Run, localhost web): use relative `/api/...` paths.
- * - Native Android APK (Capacitor https://localhost): resolve live public backend URL.
+ * - Browser sessions (Chrome on AI Studio, Render, Cloud Run, localhost web): use relative `/api/...` paths.
+ * - Native Android APK (Capacitor https://localhost): resolve live public backend URL,
+ *   or built-in localhost Telegram streaming bridge if no public backend is reachable.
  */
 export function getApiBaseUrl(): string {
   if (typeof window === 'undefined') return '';
 
-  // 1. User manual override (e.g. Render / VPS / custom server URL)
+  // 1. User or runtime override (only if explicitly configured)
   try {
     const customServer = localStorage.getItem('movie_portal_backend_url');
     if (customServer && customServer.trim()) {
@@ -39,19 +78,17 @@ export function getApiBaseUrl(): string {
     return '';
   }
 
-  // 3. For Native APK: prefer build-time public backend (Render), then probed working backend, then fallback URL
-  return ENV_BACKEND_URL || resolvedNativeBackendUrl || LIVE_BACKEND_URL;
+  // 3. For Native APK: prefer build-time public backend, probed reachable backend, or local Android bridge
+  return ENV_BACKEND_URL || resolvedNativeBackendUrl || getNativeLocalBridgeUrl() || LIVE_BACKEND_URL;
 }
 
-export type BackendHealthStatus = 'ok' | 'auth_blocked' | 'unreachable';
-
-export async function diagnoseBackendHealth(baseUrl?: string): Promise<BackendHealthStatus> {
-  const target = (baseUrl ?? getApiBaseUrl()).replace(/\/+$/, '');
+async function isBackendHealthy(baseUrl: string): Promise<boolean> {
+  const target = baseUrl.replace(/\/+$/, '');
   const healthUrl = target ? `${target}/api/health` : '/api/health';
 
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
+    const timer = setTimeout(() => controller.abort(), 3500);
     const res = await fetch(healthUrl, {
       method: 'GET',
       cache: 'no-store',
@@ -60,21 +97,18 @@ export async function diagnoseBackendHealth(baseUrl?: string): Promise<BackendHe
     clearTimeout(timer);
 
     if (res.redirected && /aistudio\.google\.com|__cookie_check|accounts\.google/i.test(res.url)) {
-      return 'auth_blocked';
+      return false;
     }
 
     const ct = (res.headers.get('content-type') || '').toLowerCase();
-    if (!res.ok) {
-      return res.status === 401 || res.status === 403 ? 'auth_blocked' : 'unreachable';
-    }
-    if (!ct.includes('application/json')) {
-      return 'auth_blocked';
+    if (!res.ok || !ct.includes('application/json')) {
+      return false;
     }
 
     const data = await res.json().catch(() => null);
-    return data && data.status === 'ok' ? 'ok' : 'unreachable';
+    return Boolean(data && data.status === 'ok');
   } catch {
-    return 'unreachable';
+    return false;
   }
 }
 
@@ -84,17 +118,24 @@ export async function probeWorkingBackendUrl(): Promise<string | null> {
     custom = (localStorage.getItem('movie_portal_backend_url') || '').trim().replace(/\/+$/, '');
   } catch {}
 
-  const candidates = Array.from(
+  const remoteCandidates = Array.from(
     new Set([custom, ENV_BACKEND_URL, PRE_BACKEND_URL, LIVE_BACKEND_URL].filter(Boolean))
   );
 
-  for (const candidate of candidates) {
-    const status = await diagnoseBackendHealth(candidate);
-    if (status === 'ok') {
+  for (const candidate of remoteCandidates) {
+    if (await isBackendHealthy(candidate)) {
       resolvedNativeBackendUrl = candidate;
       return candidate;
     }
   }
+
+  // Fallback on native Android APK: use built-in in-app localhost streaming bridge
+  const localBridgeUrl = await ensureAndroidStreamBridge();
+  if (localBridgeUrl) {
+    resolvedNativeBackendUrl = localBridgeUrl;
+    return localBridgeUrl;
+  }
+
   return null;
 }
 
@@ -106,4 +147,3 @@ export function buildApiUrl(path: string): string {
   const base = getApiBaseUrl();
   return base ? `${base}${cleanPath}` : cleanPath;
 }
-
