@@ -139,9 +139,15 @@ export default function VideoPlayerModal({
     return availableQualities.length > 0 ? availableQualities[0] : 'Default';
   });
 
-  // Autohide controls state & timer
+  // Autohide controls state & timer (3 seconds inactivity)
+  const AUTO_HIDE_DELAY_MS = 3000;
   const [showControls, setShowControls] = useState(true);
-  const autoHideTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const showControlsRef = useRef(true);
+  const isInteractingRef = useRef(false);
+  const autoHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const verifiedLanguageRef = useRef(language || (movie?.language) || 'Hindi');
 
   // Determine series information
   const targetMovie = movie || {};
@@ -171,27 +177,70 @@ export default function VideoPlayerModal({
   const displayCat = category || targetMovie.displayCategory || (isSeries ? 'Web Series' : 'Movie');
   const subtitleLine = `${displayCat} • ${verifiedLanguage}`;
 
-  // Automatically start / reset 5-second autohide timer
-  // CRITICAL REQUIREMENT: Controls disappear after exactly 5 seconds even if paused
-  const resetAutoHideTimer = () => {
+  verifiedLanguageRef.current = verifiedLanguage;
+
+  const clearAutoHideTimer = () => {
     if (autoHideTimerRef.current) {
       clearTimeout(autoHideTimerRef.current);
       autoHideTimerRef.current = null;
     }
+  };
+
+  const closeAllMenus = () => {
+    setShowSpeedMenu(false);
+    setShowAudioMenu(false);
+    setShowSubtitlesMenu(false);
+    setShowSettingsMenu(false);
+    setShowSeasonDropdown(false);
+    setShowEpisodeDropdown(false);
+  };
+
+  const hideControlsNow = () => {
+    clearAutoHideTimer();
+    showControlsRef.current = false;
+    setShowControls(false);
+    closeAllMenus();
+    try {
+      const activeEl = document.activeElement;
+      if (activeEl instanceof HTMLElement && containerRef.current?.contains(activeEl)) {
+        activeEl.blur();
+      }
+    } catch {}
+  };
+
+  const scheduleAutoHideTimer = () => {
+    clearAutoHideTimer();
+    if (isInteractingRef.current) return;
     autoHideTimerRef.current = setTimeout(() => {
-      setShowControls(false);
-      setShowSpeedMenu(false);
-      setShowAudioMenu(false);
-      setShowSubtitlesMenu(false);
-      setShowSettingsMenu(false);
-      setShowSeasonDropdown(false);
-      setShowEpisodeDropdown(false);
-    }, 5000);
+      if (isInteractingRef.current) return;
+      hideControlsNow();
+    }, AUTO_HIDE_DELAY_MS);
+  };
+
+  // Reset 3-second inactivity timer only when controls are currently visible
+  const resetAutoHideTimer = () => {
+    if (!showControlsRef.current) return;
+    scheduleAutoHideTimer();
   };
 
   const showControlsWithTimer = () => {
+    showControlsRef.current = true;
     setShowControls(true);
-    resetAutoHideTimer();
+    scheduleAutoHideTimer();
+  };
+
+  const handleControlInteractionStart = (e: React.SyntheticEvent) => {
+    e.stopPropagation();
+    isInteractingRef.current = true;
+    clearAutoHideTimer();
+  };
+
+  const handleControlInteractionEnd = (e: React.SyntheticEvent) => {
+    e.stopPropagation();
+    isInteractingRef.current = false;
+    if (showControlsRef.current) {
+      scheduleAutoHideTimer();
+    }
   };
 
   const episodeResumeKey = isSeries ? (currentEpisodeTitle || seriesOrMovieTitle) : seriesOrMovieTitle;
@@ -205,22 +254,15 @@ export default function VideoPlayerModal({
   };
 
   // Screen Tap Handler:
-  // When hidden: tap anywhere reveals controls immediately and starts 5s timer
-  // When visible: tap on the video backdrop toggles controls off immediately
+  // When hidden: tap anywhere on video area reveals controls and starts 3s timer
+  // When visible: tap on video area hides controls immediately without interrupting playback
   const handleViewportTap = (e: React.MouseEvent<HTMLDivElement>) => {
     e.stopPropagation();
     ensureUnmutedOnInteraction();
-    if (!showControls) {
+    if (!showControlsRef.current) {
       showControlsWithTimer();
     } else {
-      if (autoHideTimerRef.current) clearTimeout(autoHideTimerRef.current);
-      setShowControls(false);
-      setShowSpeedMenu(false);
-      setShowAudioMenu(false);
-      setShowSubtitlesMenu(false);
-      setShowSettingsMenu(false);
-      setShowSeasonDropdown(false);
-      setShowEpisodeDropdown(false);
+      hideControlsNow();
     }
   };
 
@@ -284,28 +326,51 @@ export default function VideoPlayerModal({
     };
   }, [isOpen, activeStreamUrl, currentQuality, streamFallbackMode, streamStartOffset, retryNonce]);
 
-  // Initial Autohide timer on open & cleanup
+  // Initial Autohide timer on open & cleanup (only runs when isOpen changes)
   useEffect(() => {
-    if (isOpen) {
-      showControlsWithTimer();
-      setSelectedAudio(verifiedLanguage);
-      try {
-        window.history.pushState({ playerModalOpen: true }, '');
-      } catch (e) {}
-    }
+    if (!isOpen) return;
+
+    isInteractingRef.current = false;
+    showControlsWithTimer();
+    setSelectedAudio(verifiedLanguageRef.current);
+    try {
+      window.history.pushState({ playerModalOpen: true }, '');
+    } catch (e) {}
 
     const handlePopState = (e: PopStateEvent) => {
       e.preventDefault();
-      onClose();
+      onCloseRef.current();
+    };
+
+    const handleGlobalPointerRelease = () => {
+      if (isInteractingRef.current) {
+        isInteractingRef.current = false;
+        if (showControlsRef.current) {
+          scheduleAutoHideTimer();
+        }
+      }
     };
 
     window.addEventListener('popstate', handlePopState);
+    window.addEventListener('pointerup', handleGlobalPointerRelease);
+    window.addEventListener('pointercancel', handleGlobalPointerRelease);
+    window.addEventListener('touchend', handleGlobalPointerRelease);
 
     return () => {
-      if (autoHideTimerRef.current) clearTimeout(autoHideTimerRef.current);
+      clearAutoHideTimer();
+      isInteractingRef.current = false;
       window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('pointerup', handleGlobalPointerRelease);
+      window.removeEventListener('pointercancel', handleGlobalPointerRelease);
+      window.removeEventListener('touchend', handleGlobalPointerRelease);
     };
-  }, [isOpen, onClose, verifiedLanguage]);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (isOpen) {
+      setSelectedAudio(verifiedLanguage);
+    }
+  }, [isOpen, verifiedLanguage]);
 
   // Fullscreen listeners
   useEffect(() => {
@@ -387,12 +452,12 @@ export default function VideoPlayerModal({
 
     const onPlay = () => {
       setIsPlaying(true);
-      resetAutoHideTimer();
+      if (showControlsRef.current) scheduleAutoHideTimer();
     };
 
     const onPause = () => {
       setIsPlaying(false);
-      resetAutoHideTimer();
+      if (showControlsRef.current) scheduleAutoHideTimer();
     };
 
     const onTimeUpdate = () => {
@@ -450,10 +515,10 @@ export default function VideoPlayerModal({
           });
         }
         setRealAudioTracks(detected);
-        setSelectedAudio(detected[0]?.label || verifiedLanguage);
+        setSelectedAudio(detected[0]?.label || verifiedLanguageRef.current);
       } else {
-        setRealAudioTracks([{ id: 0, label: verifiedLanguage, lang: verifiedLanguage.toLowerCase() }]);
-        setSelectedAudio(verifiedLanguage);
+        setRealAudioTracks([{ id: 0, label: verifiedLanguageRef.current, lang: verifiedLanguageRef.current.toLowerCase() }]);
+        setSelectedAudio(verifiedLanguageRef.current);
       }
 
       // Detect HTML5 Text / Subtitle Tracks
@@ -493,7 +558,7 @@ export default function VideoPlayerModal({
     const onPlaying = () => {
       setIsLoading(false);
       setIsPlaying(true);
-      resetAutoHideTimer();
+      if (showControlsRef.current) scheduleAutoHideTimer();
     };
 
     const onCanPlay = () => setIsLoading(false);
@@ -600,20 +665,27 @@ export default function VideoPlayerModal({
       video.removeEventListener('ended', onEnded);
       video.removeEventListener('error', onError);
     };
-  }, [playableUrl, isYouTube, episodeResumeKey, verifiedLanguage, streamFallbackMode, streamStartOffset]);
+  }, [playableUrl, isYouTube, episodeResumeKey, streamFallbackMode, streamStartOffset]);
 
   // Keyboard shortcut listener (Space = play/pause, Left/Right = skip, Escape = close)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!isOpen) return;
-      resetAutoHideTimer();
-      if (e.key === 'Escape') onClose();
-      else if (e.key === ' ' && !isYouTube) {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      if (e.key === 'Escape') {
+        onCloseRef.current();
+      } else if (e.key === ' ' && !isYouTube) {
         e.preventDefault();
+        showControlsWithTimer();
         togglePlay();
       } else if (e.key === 'ArrowLeft') {
+        showControlsWithTimer();
         handleSkip(-10);
       } else if (e.key === 'ArrowRight') {
+        showControlsWithTimer();
         handleSkip(10);
       }
     };
@@ -841,6 +913,7 @@ export default function VideoPlayerModal({
                 playsInline
                 preload="auto"
                 controlsList="nodownload"
+                disablePictureInPicture
                 className="w-full h-full object-contain pointer-events-none bg-black"
               />
 
@@ -915,13 +988,20 @@ export default function VideoPlayerModal({
 
         {/* TOP BAR OVERLAY */}
         <div
-          onClick={(e) => { e.stopPropagation(); resetAutoHideTimer(); }}
-          className={`absolute top-0 left-0 w-full bg-gradient-to-b from-black/90 via-black/50 to-transparent p-4 sm:p-6 flex items-center justify-between z-40 transition-opacity duration-300 ${
-            showControls ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+          className={`absolute top-0 left-0 w-full bg-gradient-to-b from-black/90 via-black/50 to-transparent p-4 sm:p-6 flex items-center justify-between z-40 transition-opacity duration-300 pointer-events-none ${
+            showControls ? 'opacity-100' : 'opacity-0'
           }`}
         >
           {/* Top-Left: Back Arrow, Title, Subtitle, and Season/Episode Selectors on the SAME horizontal row */}
-          <div className="flex items-center gap-2.5 sm:gap-4 max-w-[70%] sm:max-w-[75%] min-w-0">
+          <div
+            onClick={(e) => { e.stopPropagation(); resetAutoHideTimer(); }}
+            onPointerDown={handleControlInteractionStart}
+            onPointerUp={handleControlInteractionEnd}
+            onPointerCancel={handleControlInteractionEnd}
+            className={`flex items-center gap-2.5 sm:gap-4 max-w-[70%] sm:max-w-[75%] min-w-0 ${
+              showControls ? 'pointer-events-auto' : 'pointer-events-none'
+            }`}
+          >
             <button
               type="button"
               onClick={onClose}
@@ -964,7 +1044,10 @@ export default function VideoPlayerModal({
                     </button>
 
                     {showSeasonDropdown && (
-                      <div className="absolute top-full left-0 mt-2 bg-neutral-900/95 border border-neutral-700 rounded-xl shadow-2xl py-1 min-w-[130px] max-h-60 overflow-y-auto backdrop-blur-lg z-50">
+                      <div
+                        onScroll={() => resetAutoHideTimer()}
+                        className="absolute top-full left-0 mt-2 bg-neutral-900/95 border border-neutral-700 rounded-xl shadow-2xl py-1 min-w-[130px] max-h-60 overflow-y-auto backdrop-blur-lg z-50"
+                      >
                         <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800">
                           Seasons ({seasonsList.length})
                         </div>
@@ -1007,7 +1090,10 @@ export default function VideoPlayerModal({
                     </button>
 
                     {showEpisodeDropdown && (
-                      <div className="absolute top-full left-0 mt-2 bg-neutral-900/95 border border-neutral-700 rounded-xl shadow-2xl py-1 min-w-[200px] max-w-xs max-h-64 overflow-y-auto backdrop-blur-lg z-50">
+                      <div
+                        onScroll={() => resetAutoHideTimer()}
+                        className="absolute top-full left-0 mt-2 bg-neutral-900/95 border border-neutral-700 rounded-xl shadow-2xl py-1 min-w-[200px] max-w-xs max-h-64 overflow-y-auto backdrop-blur-lg z-50"
+                      >
                         <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800">
                           Season {currentSeason?.seasonNumber} Episodes ({episodesList.length})
                         </div>
@@ -1036,7 +1122,15 @@ export default function VideoPlayerModal({
           </div>
 
           {/* Top-Right: Fullscreen Only */}
-          <div className="flex items-center gap-1 sm:gap-2">
+          <div
+            onClick={(e) => { e.stopPropagation(); resetAutoHideTimer(); }}
+            onPointerDown={handleControlInteractionStart}
+            onPointerUp={handleControlInteractionEnd}
+            onPointerCancel={handleControlInteractionEnd}
+            className={`flex items-center gap-1 sm:gap-2 ${
+              showControls ? 'pointer-events-auto' : 'pointer-events-none'
+            }`}
+          >
             <button
               type="button"
               onClick={toggleFullscreen}
@@ -1051,6 +1145,9 @@ export default function VideoPlayerModal({
         {/* CENTER CONTROLS: 10s Rewind, Play/Pause, 10s Forward */}
         <div
           onClick={(e) => { e.stopPropagation(); resetAutoHideTimer(); }}
+          onPointerDown={handleControlInteractionStart}
+          onPointerUp={handleControlInteractionEnd}
+          onPointerCancel={handleControlInteractionEnd}
           className={`absolute inset-0 m-auto w-fit h-fit flex items-center justify-center gap-6 sm:gap-12 z-40 transition-opacity duration-300 ${
             showControls ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
           }`}
@@ -1093,6 +1190,9 @@ export default function VideoPlayerModal({
         {/* BOTTOM CONTROLS OVERLAY: Progress Bar, Speed, Audio, Subtitles, Fullscreen */}
         <div
           onClick={(e) => { e.stopPropagation(); resetAutoHideTimer(); }}
+          onPointerDown={handleControlInteractionStart}
+          onPointerUp={handleControlInteractionEnd}
+          onPointerCancel={handleControlInteractionEnd}
           className={`absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/95 via-black/70 to-transparent p-4 sm:p-6 pb-6 sm:pb-8 space-y-3 sm:space-y-4 z-40 transition-opacity duration-300 ${
             showControls ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
           }`}
@@ -1110,7 +1210,12 @@ export default function VideoPlayerModal({
                 max={duration || 100}
                 value={currentTime}
                 onChange={handleSeek}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-30"
+                onInput={handleSeek as any}
+                onPointerDown={handleControlInteractionStart}
+                onPointerUp={handleControlInteractionEnd}
+                onTouchStart={handleControlInteractionStart}
+                onTouchEnd={handleControlInteractionEnd}
+                className="absolute -top-3 -bottom-3 inset-x-0 w-full h-8 opacity-0 cursor-pointer z-30"
               />
               {/* Buffered progress */}
               <div
