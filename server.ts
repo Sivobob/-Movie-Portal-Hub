@@ -19,6 +19,8 @@ const app = express();
 let PORT = 3000;
 if (process.env.APP_PORT) {
   PORT = Number(process.env.APP_PORT) || 3000;
+} else if (process.env.RENDER && process.env.PORT) {
+  PORT = Number(process.env.PORT) || 3000;
 } else if (process.env.PORT && process.env.PORT !== '8080') {
   PORT = Number(process.env.PORT) || 3000;
 }
@@ -28,6 +30,7 @@ for (let i = 0; i < args.length; i++) {
     PORT = Number(args[i + 1]) || PORT;
   }
 }
+process.env.INTERNAL_APP_PORT = String(PORT);
 
 app.use(express.json());
 
@@ -73,6 +76,7 @@ app.get('/api/debug-env', (req, res) => {
 app.use('/api/metadata', metadataRouter);
 app.use('/api/telegram', telegramRouter);
 app.get('/api/stream', handleStream);
+app.head('/api/stream', handleStream);
 app.use('/api/video', videoRouter);
 app.use('/api', downloadCastRouter);
 

@@ -1,7 +1,7 @@
 {
-  "latestVersion": "3.5.181",
-  "latestVersionCode": 3401,
+  "latestVersion": "3.5.184",
+  "latestVersionCode": 3404,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "releaseNotes": "Official Release v3.5.181: Fixed Play button position and added real-time movie sync for open apps."
+  "releaseNotes": "Official Release v3.5.184: Android WebView video playback compatibility fixes (MKV remux/transcode fallback, Range streaming, hardware acceleration)."
 }

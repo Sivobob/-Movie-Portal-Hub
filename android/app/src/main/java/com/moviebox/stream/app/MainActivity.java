@@ -40,14 +40,18 @@ public class MainActivity extends BridgeActivity {
     private void configureWebView() {
         try {
             android.webkit.CookieManager cookieManager = android.webkit.CookieManager.getInstance();
-            String streamUrl = "https://ais-dev-d4oy4g4wkdxchvgc5wbbty-835315626292.asia-northeast1.run.app";
+            cookieManager.setAcceptCookie(true);
+            String streamUrl = "https://ais-dev-zazx2gelikm5prxjdf6l6j-755452514312.asia-northeast1.run.app";
             cookieManager.setCookie(streamUrl, "__SECURE-aistudio_auth_flow_may_set_cookies=true; Path=/; Secure; SameSite=None");
-            cookieManager.setCookie("https://ais-pre-d4oy4g4wkdxchvgc5wbbty-835315626292.asia-northeast1.run.app", "__SECURE-aistudio_auth_flow_may_set_cookies=true; Path=/; Secure; SameSite=None");
+            cookieManager.setCookie("https://ais-pre-zazx2gelikm5prxjdf6l6j-755452514312.asia-northeast1.run.app", "__SECURE-aistudio_auth_flow_may_set_cookies=true; Path=/; Secure; SameSite=None");
             cookieManager.flush();
             if (getBridge() != null && getBridge().getWebView() != null) {
-                cookieManager.setAcceptThirdPartyCookies(getBridge().getWebView(), true);
-                android.webkit.WebSettings settings = getBridge().getWebView().getSettings();
+                android.webkit.WebView webView = getBridge().getWebView();
+                cookieManager.setAcceptThirdPartyCookies(webView, true);
+                webView.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null);
+                android.webkit.WebSettings settings = webView.getSettings();
                 settings.setJavaScriptEnabled(true);
+                settings.setJavaScriptCanOpenWindowsAutomatically(true);
                 settings.setDomStorageEnabled(true);
                 settings.setDatabaseEnabled(true);
                 settings.setAllowFileAccess(true);

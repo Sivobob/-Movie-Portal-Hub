@@ -15,13 +15,19 @@ import {
   Check,
   ChevronDown,
   Tv,
-  Download,
   RefreshCw,
+  AlertCircle,
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar } from '@capacitor/status-bar';
-import { useDownloads } from '../hooks/useDownloads';
-import { buildApiUrl } from '../utils/apiConfig';
+import {
+  buildApiUrl,
+  diagnoseBackendHealth,
+  getApiBaseUrl,
+  probeWorkingBackendUrl,
+} from '../utils/apiConfig';
+
+const BLACK_POSTER_DATA_URI = 'data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs=';
 
 export interface VideoPlayerModalProps {
   isOpen: boolean;
@@ -41,7 +47,6 @@ export interface VideoPlayerModalProps {
   onNextEpisode?: () => void;
   onPrevEpisode?: () => void;
   onEpisodeChange?: (seasonIndex: number, episodeIndex: number) => void;
-  onRequestDownload?: (movie: any) => void;
 }
 
 // Custom 10-Second Rewind Icon matching reference design
@@ -84,7 +89,6 @@ export default function VideoPlayerModal({
   hasNext,
   hasPrev,
   initialDuration = 0,
-  onRequestDownload,
 }: VideoPlayerModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -99,6 +103,18 @@ export default function VideoPlayerModal({
   const [isLoading, setIsLoading] = useState(true);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [error, setError] = useState<string | null>(null);
+  const [streamFallbackMode, setStreamFallbackMode] = useState<'direct' | 'remux' | 'transcode'>('direct');
+  const [streamStartOffset, setStreamStartOffset] = useState<number>(0);
+  const [customServerInput, setCustomServerInput] = useState<string>(() => {
+    try {
+      return localStorage.getItem('movie_portal_backend_url') || '';
+    } catch {
+      return '';
+    }
+  });
+  const wasMutedByAutoplayRef = useRef(false);
+  const durationRef = useRef(initialDuration || 0);
+  const currentTimeRef = useRef(0);
 
   // Active series season and episode indices
   const [activeSeasonIdx, setActiveSeasonIdx] = useState(seasonIndex);
@@ -129,10 +145,6 @@ export default function VideoPlayerModal({
   const [currentQuality, setCurrentQuality] = useState<string>(() => {
     return availableQualities.length > 0 ? availableQualities[0] : 'Default';
   });
-
-  // Download integration
-  const { startDownload } = useDownloads();
-  const [isDownloading, setIsDownloading] = useState(false);
 
   // Autohide controls state & timer
   const [showControls, setShowControls] = useState(true);
@@ -189,11 +201,22 @@ export default function VideoPlayerModal({
     resetAutoHideTimer();
   };
 
+  const episodeResumeKey = isSeries ? (currentEpisodeTitle || seriesOrMovieTitle) : seriesOrMovieTitle;
+
+  const ensureUnmutedOnInteraction = () => {
+    const vid = videoRef.current;
+    if (vid && wasMutedByAutoplayRef.current) {
+      vid.muted = false;
+      wasMutedByAutoplayRef.current = false;
+    }
+  };
+
   // Screen Tap Handler:
   // When hidden: tap anywhere reveals controls immediately and starts 5s timer
   // When visible: tap on the video backdrop toggles controls off immediately
   const handleViewportTap = (e: React.MouseEvent<HTMLDivElement>) => {
     e.stopPropagation();
+    ensureUnmutedOnInteraction();
     if (!showControls) {
       showControlsWithTimer();
     } else {
@@ -208,31 +231,65 @@ export default function VideoPlayerModal({
     }
   };
 
+  // Reset playback state when switching movies, episodes, or stream quality
+  useEffect(() => {
+    setStreamFallbackMode('direct');
+    setStreamStartOffset(0);
+    setCurrentTime(0);
+    currentTimeRef.current = 0;
+    setBufferedTime(0);
+    const resetDur = initialDuration || 0;
+    setDuration(resetDur);
+    durationRef.current = resetDur;
+  }, [isOpen, activeStreamUrl, currentQuality, initialDuration]);
+
   // Resolve playable stream URL
   const [playableUrl, setPlayableUrl] = useState<string>('');
 
   useEffect(() => {
     if (!isOpen) return;
 
+    let cancelled = false;
     setError(null);
     setIsLoading(true);
 
-    const activeSource = (videoQualities && videoQualities[currentQuality]) || activeStreamUrl;
-    if (!activeSource || !activeSource.trim()) {
-      setIsLoading(false);
-      return;
-    }
+    const resolveUrl = async () => {
+      const activeSource = (videoQualities && videoQualities[currentQuality]) || activeStreamUrl;
+      if (!activeSource || !activeSource.trim()) {
+        if (!cancelled) {
+          setPlayableUrl('');
+          setIsLoading(false);
+        }
+        return;
+      }
 
-    const trimmed = activeSource.trim();
-    const isTelegram = /t\.me|telegram\.me/i.test(trimmed);
+      const trimmed = activeSource.trim();
+      const isTelegram = /t\.me|telegram\.me/i.test(trimmed);
 
-    if (isTelegram) {
-      const params = `?url=${encodeURIComponent(trimmed)}&ext=.mp4`;
-      setPlayableUrl(buildApiUrl(`/api/stream${params}`));
-    } else {
-      setPlayableUrl(trimmed);
-    }
-  }, [isOpen, activeStreamUrl, currentQuality]);
+      if (isTelegram) {
+        if (Capacitor.isNativePlatform()) {
+          await probeWorkingBackendUrl().catch(() => null);
+        }
+        if (cancelled) return;
+        let params = `?url=${encodeURIComponent(trimmed)}&ext=.mp4`;
+        if (streamFallbackMode === 'remux') {
+          params += `&remux=1`;
+          if (streamStartOffset > 1) params += `&start=${Math.floor(streamStartOffset)}`;
+        } else if (streamFallbackMode === 'transcode') {
+          params += `&transcode=1`;
+          if (streamStartOffset > 1) params += `&start=${Math.floor(streamStartOffset)}`;
+        }
+        setPlayableUrl(buildApiUrl(`/api/stream${params}`));
+      } else {
+        setPlayableUrl(trimmed);
+      }
+    };
+
+    resolveUrl();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, activeStreamUrl, currentQuality, streamFallbackMode, streamStartOffset]);
 
   // Initial Autohide timer on open & cleanup
   useEffect(() => {
@@ -287,6 +344,7 @@ export default function VideoPlayerModal({
     const video = videoRef.current;
     if (!video || isYouTube || !playableUrl) return;
 
+    let cancelled = false;
     let hlsInstance: Hls | null = null;
     const isHlsUrl = /\.m3u8/i.test(playableUrl);
 
@@ -301,7 +359,6 @@ export default function VideoPlayerModal({
 
       hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
         setIsLoading(false);
-        // Detect HLS Audio tracks
         if (hlsInstance && hlsInstance.audioTracks && hlsInstance.audioTracks.length > 0) {
           const tracks = hlsInstance.audioTracks.map((t, idx) => ({
             id: idx,
@@ -313,7 +370,6 @@ export default function VideoPlayerModal({
             setSelectedAudio(tracks[hlsInstance.audioTrack]?.label || tracks[0].label);
           }
         }
-        // Detect HLS Subtitles
         if (hlsInstance && hlsInstance.subtitleTracks && hlsInstance.subtitleTracks.length > 0) {
           const subTracks = hlsInstance.subtitleTracks.map((s, idx) => ({
             id: idx,
@@ -347,19 +403,21 @@ export default function VideoPlayerModal({
     };
 
     const onTimeUpdate = () => {
-      const cur = video.currentTime;
-      setCurrentTime(cur);
+      const effectiveTime = (streamFallbackMode !== 'direct' ? streamStartOffset : 0) + video.currentTime;
+      setCurrentTime(effectiveTime);
+      currentTimeRef.current = effectiveTime;
 
-      if (cur > 10 && seriesOrMovieTitle) {
+      if (effectiveTime > 10 && episodeResumeKey) {
         try {
-          localStorage.setItem(`resume_pos_${seriesOrMovieTitle}`, cur.toString());
+          localStorage.setItem(`resume_pos_${episodeResumeKey}`, effectiveTime.toString());
         } catch (e) {}
       }
 
       if (video.buffered.length > 0) {
+        const offsetBase = streamFallbackMode !== 'direct' ? streamStartOffset : 0;
         for (let i = 0; i < video.buffered.length; i++) {
-          if (video.buffered.start(i) <= cur && video.buffered.end(i) >= cur) {
-            setBufferedTime(video.buffered.end(i));
+          if (video.buffered.start(i) <= video.currentTime && video.buffered.end(i) >= video.currentTime) {
+            setBufferedTime(offsetBase + video.buffered.end(i));
             break;
           }
         }
@@ -368,8 +426,22 @@ export default function VideoPlayerModal({
 
     const onLoadedMetadata = () => {
       const vidDuration = video.duration;
-      if (vidDuration && vidDuration !== Infinity && (duration <= 0 || vidDuration > duration)) {
+      if (vidDuration && isFinite(vidDuration) && vidDuration > 0) {
         setDuration(vidDuration);
+        durationRef.current = vidDuration;
+      } else if (playableUrl.includes('/api/stream') && durationRef.current <= 0) {
+        fetch(playableUrl, { method: 'HEAD' })
+          .then(res => {
+            const customDuration = res.headers.get('X-Video-Duration');
+            if (customDuration) {
+              const parsed = parseFloat(customDuration);
+              if (!isNaN(parsed) && parsed > 0) {
+                setDuration(parsed);
+                durationRef.current = parsed;
+              }
+            }
+          })
+          .catch(() => {});
       }
       setIsLoading(false);
 
@@ -387,7 +459,6 @@ export default function VideoPlayerModal({
         setRealAudioTracks(detected);
         setSelectedAudio(detected[0]?.label || verifiedLanguage);
       } else {
-        // Fallback to verified movie metadata audio language
         setRealAudioTracks([{ id: 0, label: verifiedLanguage, lang: verifiedLanguage.toLowerCase() }]);
         setSelectedAudio(verifiedLanguage);
       }
@@ -408,30 +479,19 @@ export default function VideoPlayerModal({
         setRealSubtitleTracks(subs);
       }
 
-      // Resume position
-      if (seriesOrMovieTitle) {
+      // Resume position for direct streams
+      if (streamFallbackMode === 'direct' && episodeResumeKey) {
         try {
-          const savedPos = parseFloat(localStorage.getItem(`resume_pos_${seriesOrMovieTitle}`) || '0');
-          if (savedPos > 15 && (!vidDuration || savedPos < vidDuration - 45)) {
+          const savedPos = parseFloat(localStorage.getItem(`resume_pos_${episodeResumeKey}`) || '0');
+          const knownDur = (vidDuration && isFinite(vidDuration) ? vidDuration : durationRef.current);
+          if (savedPos > 15 && (!knownDur || savedPos < knownDur - 45)) {
             video.currentTime = savedPos;
             setCurrentTime(savedPos);
+            currentTimeRef.current = savedPos;
           }
         } catch (e) {}
       }
     };
-
-    // Check custom header duration for remux streams
-    if (playableUrl && playableUrl.includes('/api/stream')) {
-      fetch(playableUrl, { method: 'HEAD' })
-        .then(res => {
-          const customDuration = res.headers.get('X-Video-Duration');
-          if (customDuration) {
-            const parsed = parseFloat(customDuration);
-            if (!isNaN(parsed) && parsed > 0) setDuration(parsed);
-          }
-        })
-        .catch(() => {});
-    }
 
     const onWaiting = () => {
       if (video.currentTime > 0.5) setIsLoading(true);
@@ -446,9 +506,9 @@ export default function VideoPlayerModal({
     const onCanPlay = () => setIsLoading(false);
     const onLoadedData = () => setIsLoading(false);
     const onEnded = () => {
-      if (seriesOrMovieTitle) {
+      if (episodeResumeKey) {
         try {
-          localStorage.removeItem(`resume_pos_${seriesOrMovieTitle}`);
+          localStorage.removeItem(`resume_pos_${episodeResumeKey}`);
         } catch (e) {}
       }
       if (onNextEpisode && hasNext) {
@@ -456,8 +516,51 @@ export default function VideoPlayerModal({
       }
     };
 
-    const onError = () => {
-      setIsLoading(false);
+    const onError = async () => {
+      if (cancelled) return;
+      const mediaErr = video.error;
+      console.warn('Video stream error event fired:', mediaErr?.code, mediaErr?.message);
+
+      if (/t\.me|telegram\.me/i.test(activeStreamUrl)) {
+        // Diagnose if backend itself is unreachable / blocked by AI Studio auth bridge
+        const health = await diagnoseBackendHealth(getApiBaseUrl());
+        if (cancelled) return;
+
+        if (health === 'auth_blocked') {
+          setIsLoading(false);
+          setIsPlaying(false);
+          setError('backend_auth_blocked');
+          return;
+        }
+        if (health === 'unreachable') {
+          setIsLoading(false);
+          setIsPlaying(false);
+          setError('backend_unreachable');
+          return;
+        }
+
+        // Backend is healthy: automatically retry with MKV->fMP4 remux, then H.264/AAC transcode
+        if (streamFallbackMode === 'direct') {
+          setIsLoading(true);
+          setStreamStartOffset(currentTimeRef.current);
+          setStreamFallbackMode('remux');
+          return;
+        }
+        if (streamFallbackMode === 'remux') {
+          setIsLoading(true);
+          setStreamStartOffset(currentTimeRef.current);
+          setStreamFallbackMode('transcode');
+          return;
+        }
+
+        setIsLoading(false);
+        setIsPlaying(false);
+        setError('telegram_notice');
+      } else {
+        setIsLoading(false);
+        setIsPlaying(false);
+        setError('stream_error');
+      }
     };
 
     video.addEventListener('play', onPlay);
@@ -472,31 +575,43 @@ export default function VideoPlayerModal({
     video.addEventListener('error', onError);
 
     if (!isHlsUrl && playableUrl) {
-      if (video.src !== playableUrl) {
-        video.src = playableUrl;
-      }
+      video.muted = false;
+      wasMutedByAutoplayRef.current = false;
       const playPromise = video.play();
       if (playPromise !== undefined) {
         playPromise.then(() => {
-          setIsLoading(false);
-          setIsPlaying(true);
-        }).catch(() => {
-          // Fallback muted autoplay for mobile browser policies
-          video.muted = true;
-          video.play().then(() => {
+          if (!cancelled) {
             setIsLoading(false);
             setIsPlaying(true);
+          }
+        }).catch(() => {
+          if (cancelled) return;
+          // Fallback muted autoplay if WebView blocks unmuted autoplay; unmutes on first user tap
+          video.muted = true;
+          wasMutedByAutoplayRef.current = true;
+          video.play().then(() => {
+            if (!cancelled) {
+              setIsLoading(false);
+              setIsPlaying(true);
+            }
           }).catch(() => {
-            setIsLoading(false);
-            setIsPlaying(false);
+            if (!cancelled) {
+              video.muted = false;
+              wasMutedByAutoplayRef.current = false;
+              setIsLoading(false);
+              setIsPlaying(false);
+            }
           });
         });
       }
     }
 
-    const safetyTimer = setTimeout(() => setIsLoading(false), 2500);
+    const safetyTimer = setTimeout(() => {
+      if (!cancelled) setIsLoading(false);
+    }, 10000);
 
     return () => {
+      cancelled = true;
       clearTimeout(safetyTimer);
       if (hlsInstance) {
         hlsInstance.destroy();
@@ -513,7 +628,7 @@ export default function VideoPlayerModal({
       video.removeEventListener('ended', onEnded);
       video.removeEventListener('error', onError);
     };
-  }, [playableUrl, isYouTube, seriesOrMovieTitle, verifiedLanguage]);
+  }, [playableUrl, isYouTube, episodeResumeKey, verifiedLanguage, streamFallbackMode, streamStartOffset]);
 
   // Keyboard shortcut listener (Space = play/pause, Left/Right = skip, Escape = close)
   useEffect(() => {
@@ -540,13 +655,26 @@ export default function VideoPlayerModal({
   const togglePlay = () => {
     if (!videoRef.current) return;
     resetAutoHideTimer();
+    ensureUnmutedOnInteraction();
     if (!videoRef.current.paused) {
       videoRef.current.pause();
     } else {
+      if (videoRef.current.error) {
+        setError(null);
+        setIsLoading(true);
+        videoRef.current.load();
+      }
       if (!videoRef.current.src && playableUrl) {
         videoRef.current.src = playableUrl;
       }
-      videoRef.current.play().catch(() => {});
+      videoRef.current.play().catch((err) => {
+        console.warn('Video play error:', err);
+        if (/t\.me|telegram\.me/i.test(activeStreamUrl)) {
+          setError('telegram_notice');
+        } else {
+          setError('stream_error');
+        }
+      });
     }
   };
 
@@ -554,18 +682,36 @@ export default function VideoPlayerModal({
   const handleSkip = (seconds: number) => {
     if (!videoRef.current) return;
     resetAutoHideTimer();
-    const newTime = Math.max(0, Math.min(duration || 0, videoRef.current.currentTime + seconds));
+    ensureUnmutedOnInteraction();
+    const newTime = Math.max(0, Math.min(duration || 0, currentTime + seconds));
+    if (streamFallbackMode !== 'direct') {
+      setIsLoading(true);
+      setCurrentTime(newTime);
+      currentTimeRef.current = newTime;
+      setStreamStartOffset(newTime);
+      return;
+    }
     videoRef.current.currentTime = newTime;
     setCurrentTime(newTime);
+    currentTimeRef.current = newTime;
   };
 
   // Real Seek via Progress Bar
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!videoRef.current) return;
     resetAutoHideTimer();
+    ensureUnmutedOnInteraction();
     const time = Number(e.target.value);
+    if (streamFallbackMode !== 'direct') {
+      setIsLoading(true);
+      setCurrentTime(time);
+      currentTimeRef.current = time;
+      setStreamStartOffset(time);
+      return;
+    }
     videoRef.current.currentTime = time;
     setCurrentTime(time);
+    currentTimeRef.current = time;
   };
 
   // Real Fullscreen Toggle
@@ -688,31 +834,6 @@ export default function VideoPlayerModal({
     }
   };
 
-  // Real Download Handling
-  const handleDownload = () => {
-    if (!activeStreamUrl) return;
-    if (onRequestDownload) {
-      onRequestDownload({
-        title: currentEpisodeTitle,
-        posterUrl,
-        streamingUrl: playableUrl || activeStreamUrl,
-        displayCategory: displayCat,
-        videoQualities,
-      });
-      return;
-    }
-    if (isDownloading) return;
-    setIsDownloading(true);
-    startDownload({
-      title: currentEpisodeTitle,
-      posterUrl: posterUrl || '',
-      videoUrl: playableUrl || activeStreamUrl,
-      quality: currentQuality || '720p HD',
-      originalCategory: displayCat,
-    });
-    setTimeout(() => setIsDownloading(false), 2000);
-  };
-
   // Format Time into hh:mm:ss or mm:ss
   const formatTime = (secs: number) => {
     if (isNaN(secs) || !isFinite(secs) || secs < 0) return '00:00';
@@ -748,9 +869,11 @@ export default function VideoPlayerModal({
                 key={playableUrl}
                 ref={videoRef}
                 src={playableUrl || undefined}
+                poster={BLACK_POSTER_DATA_URI}
                 playsInline
                 preload="auto"
-                className="w-full h-full object-contain pointer-events-none"
+                controlsList="nodownload"
+                className="w-full h-full object-contain pointer-events-none bg-black"
               />
 
               {/* Loading Indicator */}
@@ -771,6 +894,114 @@ export default function VideoPlayerModal({
             />
           )}
         </div>
+
+        {/* Stream Error or Backend Diagnostic Dialog */}
+        {error && (
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="absolute inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200"
+          >
+            <div className="bg-neutral-900 border border-neutral-800 rounded-3xl max-w-sm w-full p-6 text-center shadow-2xl">
+              <div className="w-14 h-14 rounded-2xl bg-yellow-400/10 border border-yellow-500/30 flex items-center justify-center text-yellow-400 mx-auto mb-4 shadow">
+                <AlertCircle size={28} />
+              </div>
+
+              <h3 className="text-base font-black text-white uppercase tracking-tight mb-2">
+                {error === 'backend_auth_blocked'
+                  ? 'Streaming Server Auth Required'
+                  : error === 'backend_unreachable'
+                  ? 'Streaming Server Unreachable'
+                  : error === 'telegram_notice'
+                  ? 'Telegram Stream Notice'
+                  : 'Stream Unavailable'}
+              </h3>
+
+              <p className="text-xs text-gray-300 mb-4 leading-relaxed">
+                {error === 'backend_auth_blocked'
+                  ? 'The configured backend URL redirected to a login gate instead of streaming video bytes. Deploy the backend to a public Node/Render URL or configure your public server URL below.'
+                  : error === 'backend_unreachable'
+                  ? 'Could not reach the streaming server from the app. Check your internet connection or verify your public Render/Node server URL below.'
+                  : error === 'telegram_notice'
+                  ? 'This video stream could not be decoded by the device player. You can retry or open directly in the Telegram App.'
+                  : 'Unable to load this video stream. Please check your internet connection or verify the stream source.'}
+              </p>
+
+              {(error === 'backend_auth_blocked' || error === 'backend_unreachable') && (
+                <div className="mb-4 text-left space-y-2">
+                  <input
+                    type="url"
+                    value={customServerInput}
+                    onChange={(e) => setCustomServerInput(e.target.value)}
+                    placeholder="https://your-server.onrender.com"
+                    className="w-full bg-neutral-950 border border-neutral-700 focus:border-yellow-400 rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const trimmed = customServerInput.trim().replace(/\/+$/, '');
+                      try {
+                        if (trimmed) localStorage.setItem('movie_portal_backend_url', trimmed);
+                        else localStorage.removeItem('movie_portal_backend_url');
+                      } catch {}
+                      setError(null);
+                      setIsLoading(true);
+                      setStreamFallbackMode('direct');
+                      setPlayableUrl('');
+                      setTimeout(() => {
+                        const activeSource = (videoQualities && videoQualities[currentQuality]) || activeStreamUrl;
+                        if (activeSource && /t\.me|telegram\.me/i.test(activeSource)) {
+                          setPlayableUrl(buildApiUrl(`/api/stream?url=${encodeURIComponent(activeSource.trim())}&ext=.mp4`));
+                        }
+                      }, 50);
+                    }}
+                    className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-black text-xs py-2.5 px-4 rounded-xl transition-all cursor-pointer uppercase"
+                  >
+                    Save Server URL & Retry
+                  </button>
+                </div>
+              )}
+
+              <div className="space-y-2.5">
+                {activeStreamUrl && /t\.me|telegram\.me/i.test(activeStreamUrl) && (
+                  <a
+                    href={activeStreamUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-black text-xs py-3 px-4 rounded-xl shadow-lg shadow-yellow-400/20 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 uppercase tracking-wider no-underline"
+                  >
+                    <Play size={16} fill="currentColor" />
+                    <span>Open in Telegram App</span>
+                  </a>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setError(null);
+                    setIsLoading(true);
+                    setStreamFallbackMode('direct');
+                    if (videoRef.current) {
+                      videoRef.current.load();
+                      videoRef.current.play().catch(() => {});
+                    }
+                  }}
+                  className="w-full bg-neutral-800 hover:bg-neutral-700 text-white font-bold text-xs py-2.5 px-4 rounded-xl border border-neutral-700 transition-colors flex items-center justify-center gap-2 cursor-pointer active:scale-95 uppercase"
+                >
+                  <RefreshCw size={14} />
+                  <span>Retry Stream</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="w-full text-xs text-gray-400 hover:text-white py-2 font-semibold transition-colors cursor-pointer"
+                >
+                  Back to Movies
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* TOP BAR OVERLAY */}
         <div
@@ -919,7 +1150,7 @@ export default function VideoPlayerModal({
             type="button"
             onClick={() => handleSkip(-10)}
             title="Rewind 10 seconds"
-            className="w-14 h-14 sm:w-18 sm:h-18 rounded-full bg-black/55 hover:bg-black/75 backdrop-blur-md border border-white/15 text-white hover:text-yellow-400 flex items-center justify-center transition-transform hover:scale-110 active:scale-95 shadow-2xl cursor-pointer"
+            className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-neutral-900/90 hover:bg-neutral-800 border border-neutral-700 text-white hover:text-yellow-400 flex items-center justify-center transition-transform hover:scale-110 active:scale-95 cursor-pointer"
           >
             <Rewind10Icon />
           </button>
@@ -929,12 +1160,12 @@ export default function VideoPlayerModal({
             type="button"
             onClick={togglePlay}
             title={isPlaying ? "Pause" : "Play"}
-            className="w-18 h-18 sm:w-22 sm:h-22 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md border border-white/20 text-white flex items-center justify-center transition-transform hover:scale-105 active:scale-95 shadow-2xl cursor-pointer"
+            className="w-18 h-18 sm:w-20 sm:h-20 rounded-full bg-neutral-900/95 hover:bg-neutral-800 border border-neutral-600 text-white flex items-center justify-center transition-transform hover:scale-105 active:scale-95 cursor-pointer"
           >
             {isPlaying ? (
-              <Pause size={32} className="sm:w-10 sm:h-10 fill-white stroke-none" />
+              <Pause size={32} className="sm:w-9 sm:h-9 fill-white stroke-none" />
             ) : (
-              <Play size={32} className="sm:w-10 sm:h-10 fill-white stroke-none ml-1" />
+              <Play size={32} className="sm:w-9 sm:h-9 fill-white stroke-none ml-1" />
             )}
           </button>
 
@@ -943,7 +1174,7 @@ export default function VideoPlayerModal({
             type="button"
             onClick={() => handleSkip(10)}
             title="Forward 10 seconds"
-            className="w-14 h-14 sm:w-18 sm:h-18 rounded-full bg-black/55 hover:bg-black/75 backdrop-blur-md border border-white/15 text-white hover:text-yellow-400 flex items-center justify-center transition-transform hover:scale-110 active:scale-95 shadow-2xl cursor-pointer"
+            className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-neutral-900/90 hover:bg-neutral-800 border border-neutral-700 text-white hover:text-yellow-400 flex items-center justify-center transition-transform hover:scale-110 active:scale-95 cursor-pointer"
           >
             <Forward10Icon />
           </button>
@@ -1212,21 +1443,7 @@ export default function VideoPlayerModal({
                       <span>Cast to TV / Chromecast</span>
                     </button>
 
-                    {/* Download Video (Movies Only) */}
-                    {!isSeries && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowSettingsMenu(false);
-                          handleDownload();
-                          resetAutoHideTimer();
-                        }}
-                        className="w-full text-left px-2 py-2 rounded-lg text-xs font-semibold hover:bg-white/10 flex items-center gap-2.5 cursor-pointer transition-colors"
-                      >
-                        <Download size={16} className="text-yellow-400 flex-shrink-0" />
-                        <span>Download</span>
-                      </button>
-                    )}
+
                   </div>
                 )}
               </div>

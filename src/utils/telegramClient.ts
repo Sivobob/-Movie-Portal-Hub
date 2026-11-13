@@ -93,11 +93,14 @@ export async function getTelegramClient(): Promise<TelegramClient> {
     });
 
     return newClient;
-  })().catch(err => {
-    connectingPromise = null;
-    client = null;
-    throw err;
-  });
+  })()
+    .catch(err => {
+      client = null;
+      throw err;
+    })
+    .finally(() => {
+      connectingPromise = null;
+    });
 
   return connectingPromise;
 }

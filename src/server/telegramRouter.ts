@@ -311,115 +311,117 @@ router.post('/verify', async (req: Request, res: Response) => {
   }
 });
 
+// Cache resolved Telegram document metadata for 5 minutes to speed up HTTP Range seeking
+interface CachedMediaEntry {
+  document: Api.Document;
+  fileSize: number;
+  durationSec: number;
+  fileName: string;
+  mimeType: string;
+  isMkv: boolean;
+  cachedAt: number;
+}
+const mediaCache = new Map<string, CachedMediaEntry>();
+const MEDIA_CACHE_TTL_MS = 5 * 60 * 1000;
+
 /**
- * GET /api/telegram/stream & GET /api/stream
- * Robust chunk-based HTTP Range streaming proxy supporting video files up to 3 GB
+ * GET/HEAD /api/telegram/stream & /api/stream
+ * Robust chunk-based HTTP Range streaming proxy supporting direct Range 206,
+ * full Content-Length 200 for non-Range clients, and ffmpeg remux/transcode fallback for Android WebView.
  */
 export async function handleStream(req: Request, res: Response) {
   const urlParam = req.query.url as string;
+  const isRemuxParam = req.query.remux === '1';
   const isTranscodeParam = req.query.transcode === '1';
-  
-  console.log(`[Stream Req] Transcode: ${isTranscodeParam}. Client: ${req.headers['user-agent']?.substring(0, 50)}`);
-  console.log(`[Stream Range] ${req.headers.range || 'No Range'}`);
+  const isRawParam = req.query.raw === '1';
+  const startSecParam = req.query.start ? Math.max(0, parseFloat(req.query.start as string) || 0) : 0;
 
   if (!urlParam) return res.status(400).send('URL required');
-  console.log(`[Stream] Incoming request for: ${urlParam.substring(0, 100)}${urlParam.length > 100 ? '...' : ''}`);
-
-  const fallbackSampleStream = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
 
   // 1. Handle Direct Non-Telegram URLs: Redirect directly
   if (!urlParam.includes('t.me') && !urlParam.includes('telegram.me')) {
-    console.log(`[Stream] Redirecting direct video URL: ${urlParam.substring(0, 60)}...`);
     return res.redirect(urlParam);
   }
 
   // 2. Parse Telegram URL
   const parsed = parseTelegramUrl(urlParam);
   if (!parsed.isValid || parsed.isInviteLink || !parsed.messageId) {
-    console.log(`[Stream] Invite link or unparsed URL: ${urlParam}. Redirecting to fallback stream...`);
-    return res.redirect(fallbackSampleStream);
+    return res.status(400).json({
+      error: 'Invalid or invite-only Telegram URL. A specific post link (e.g. https://t.me/c/...) is required.'
+    });
   }
 
   try {
     const { apiId, apiHash, botToken, sessionStr } = getTelegramCredentials();
     const client = (apiId && apiHash && (botToken || sessionStr)) ? await getTelegramClient() : null;
     if (!client) {
-      console.warn('[Stream] Telegram client unconfigured. Redirecting to fallback stream...');
-      return res.redirect(fallbackSampleStream);
+      return res.status(503).json({ error: 'Telegram client backend not configured.' });
     }
 
-    const { message: msg, error: fetchErr } = await resolveTelegramMedia(client, parsed);
-
-    if (!msg) {
-      console.warn(`[Stream] Could not resolve Telegram message #${parsed.messageId}. Redirecting to fallback stream...`);
-      return res.redirect(fallbackSampleStream);
+    const cacheKey = `${parsed.chatId}:${parsed.messageId}`;
+    let entry = mediaCache.get(cacheKey);
+    if (entry && Date.now() - entry.cachedAt > MEDIA_CACHE_TTL_MS) {
+      mediaCache.delete(cacheKey);
+      entry = undefined;
     }
 
-    let document: Api.Document | null = null;
-    if (msg.media) {
-      if (msg.media instanceof Api.MessageMediaDocument && msg.media.document instanceof Api.Document) {
-        document = msg.media.document;
-      } else if (msg.media instanceof Api.MessageMediaWebPage && (msg.media as any).webpage?.document instanceof Api.Document) {
-        document = (msg.media as any).webpage.document;
+    if (!entry) {
+      const { message: msg, error: fetchErr } = await resolveTelegramMedia(client, parsed);
+      if (!msg) {
+        return res.status(404).json({
+          error: `Telegram post #${parsed.messageId} not found or bot lacks channel access.`,
+          detail: fetchErr || undefined,
+        });
       }
-    }
 
-    if (!document) {
-      console.warn(`[Stream] No media document found in message #${parsed.messageId}. Redirecting to fallback stream...`);
-      return res.redirect(fallbackSampleStream);
-    }
-
-    console.log(`[Stream] Resolving document: ${document.id} (${document.size} bytes) for message ${parsed.messageId}`);
-
-    const fileSize = Number(document.size);
-    const rangeHeader = req.headers.range;
-
-    let start = 0;
-    let endPos = fileSize - 1;
-
-    // Stream chunk limit: 8 MB per HTTP Range request for instantaneous video start & smooth buffering
-    const MAX_RANGE_CHUNK = 8 * 1024 * 1024; // 8 MB
-
-    if (rangeHeader) {
-      const match = rangeHeader.match(/bytes=(\d+)-(\d+)?/);
-      if (match) {
-        start = parseInt(match[1], 10) || 0;
-        if (match[2]) {
-          endPos = parseInt(match[2], 10);
-        } else {
-          endPos = Math.min(start + MAX_RANGE_CHUNK - 1, fileSize - 1);
+      let document: Api.Document | null = null;
+      if (msg.media) {
+        if (msg.media instanceof Api.MessageMediaDocument && msg.media.document instanceof Api.Document) {
+          document = msg.media.document;
+        } else if (msg.media instanceof Api.MessageMediaWebPage && (msg.media as any).webpage?.document instanceof Api.Document) {
+          document = (msg.media as any).webpage.document;
         }
       }
-    } else {
-      endPos = Math.min(start + MAX_RANGE_CHUNK - 1, fileSize - 1);
+
+      if (!document) {
+        return res.status(404).json({ error: `No playable video document found in Telegram post #${parsed.messageId}.` });
+      }
+
+      const fileSize = Number(document.size);
+      let durationSec = 0;
+      const videoAttr = document.attributes.find(a => a instanceof Api.DocumentAttributeVideo);
+      if (videoAttr) {
+        durationSec = (videoAttr as Api.DocumentAttributeVideo).duration || 0;
+      }
+
+      let fileName = '';
+      const fnAttr = document.attributes.find(a => (a as any).className === 'DocumentAttributeFilename' || a instanceof Api.DocumentAttributeFilename);
+      if (fnAttr && (fnAttr as Api.DocumentAttributeFilename).fileName) {
+        fileName = (fnAttr as Api.DocumentAttributeFilename).fileName;
+      }
+
+      const rawMime = (document.mimeType || '').toLowerCase();
+      const lowerName = fileName.toLowerCase();
+      const isWebm = lowerName.endsWith('.webm') || rawMime.includes('webm');
+      const isMkv = lowerName.endsWith('.mkv') || rawMime.includes('matroska') || rawMime.includes('mkv');
+      const mimeType = isWebm ? 'video/webm' : 'video/mp4';
+
+      entry = {
+        document,
+        fileSize,
+        durationSec,
+        fileName,
+        mimeType,
+        isMkv,
+        cachedAt: Date.now(),
+      };
+      mediaCache.set(cacheKey, entry);
+      console.log(`[Stream] Cached document ${document.id} (${formatBytes(fileSize)}, ${fileName || rawMime}) for msg ${parsed.messageId}`);
     }
 
-    if (start >= fileSize) {
-      res.setHeader('Content-Range', `bytes */${fileSize}`);
-      return res.status(416).send('Range Not Satisfiable');
-    }
+    const { document, fileSize, durationSec, mimeType } = entry;
 
-    endPos = Math.min(endPos, fileSize - 1);
-    const chunkSize = (endPos - start) + 1;
-
-    let durationSec = 0;
-    const videoAttr = document.attributes.find(a => a instanceof Api.DocumentAttributeVideo);
-    if (videoAttr) {
-      durationSec = (videoAttr as Api.DocumentAttributeVideo).duration || 0;
-    }
-
-    let fileName = '';
-    const fnAttr = document.attributes.find(a => (a as any).className === 'DocumentAttributeFilename' || a instanceof Api.DocumentAttributeFilename);
-    if (fnAttr && (fnAttr as Api.DocumentAttributeFilename).fileName) {
-      fileName = (fnAttr as Api.DocumentAttributeFilename).fileName;
-    }
-
-    let rawMime = (document.mimeType || '').toLowerCase();
-    const lowerName = fileName.toLowerCase();
-    const isWebm = lowerName.endsWith('.webm') || rawMime.includes('webm');
-    const mimeType = isWebm ? 'video/webm' : 'video/mp4';
-
-    const commonHeaders: any = {
+    const commonHeaders: Record<string, string> = {
       'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length, X-Video-Duration, Content-Type',
       'X-Video-Duration': durationSec.toString(),
       'Access-Control-Allow-Origin': '*',
@@ -437,16 +439,123 @@ export async function handleStream(req: Request, res: Response) {
       return res.end();
     }
 
+    // Android Compatibility Remux / Transcode Mode (triggered automatically on fallback if direct playback errors)
+    if ((isRemuxParam || isTranscodeParam) && !isRawParam) {
+      const localPort = process.env.INTERNAL_APP_PORT || process.env.APP_PORT || '3000';
+      const localSourceUrl = `http://127.0.0.1:${localPort}/api/stream?url=${encodeURIComponent(urlParam)}&raw=1`;
+
+      const ffArgs: string[] = [];
+      if (startSecParam > 0) {
+        ffArgs.push('-ss', startSecParam.toString());
+      }
+      ffArgs.push(
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '3',
+        '-i', localSourceUrl,
+        '-map', '0:v:0',
+        '-map', '0:a:0?'
+      );
+
+      if (isRemuxParam && !isTranscodeParam) {
+        // Fast stream-copy video into fragmented MP4 (fixes MKV container / PNG cover stream issues)
+        ffArgs.push('-c:v', 'copy', '-c:a', 'aac', '-ac', '2', '-b:a', '128k');
+      } else {
+        // Universal H.264 + AAC fragmented MP4 (fixes HEVC / unsupported codec on older Android devices)
+        ffArgs.push(
+          '-c:v', 'libx264',
+          '-preset', 'ultrafast',
+          '-tune', 'zerolatency',
+          '-pix_fmt', 'yuv420p',
+          '-c:a', 'aac',
+          '-ac', '2',
+          '-b:a', '128k'
+        );
+      }
+
+      ffArgs.push(
+        '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+        '-f', 'mp4',
+        'pipe:1'
+      );
+
+      res.writeHead(200, {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Expose-Headers': 'Content-Length, X-Video-Duration, Content-Type',
+        'X-Video-Duration': durationSec.toString(),
+        'Content-Type': 'video/mp4',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+      });
+
+      const ffProc = spawn('ffmpeg', ffArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+      let procClosed = false;
+
+      ffProc.stdout.pipe(res);
+      ffProc.stderr.on('data', (chunk: Buffer) => {
+        const msg = chunk.toString();
+        if (msg.toLowerCase().includes('error')) {
+          console.warn(`[FFmpeg ${isTranscodeParam ? 'Transcode' : 'Remux'}]`, msg.trim());
+        }
+      });
+
+      ffProc.on('error', (err) => {
+        console.error('[FFmpeg] Spawn error:', err.message);
+        if (!res.writableEnded) res.end();
+      });
+
+      ffProc.on('close', () => {
+        procClosed = true;
+        if (!res.writableEnded) res.end();
+      });
+
+      req.on('close', () => {
+        if (!procClosed) {
+          try {
+            ffProc.kill('SIGKILL');
+          } catch {}
+        }
+      });
+      return;
+    }
+
+    // Standard HTTP Range / Full Stream Proxy
+    const rangeHeader = req.headers.range;
+    let start = 0;
+    let endPos = fileSize - 1;
+
+    // Limit open-ended Range requests (`bytes=0-`) to 8MB chunks for snappy buffering & seeking;
+    // for non-Range requests, return true full Content-Length so Android MediaPlayer never truncates at 8MB.
+    const MAX_RANGE_CHUNK = 8 * 1024 * 1024; // 8 MB
+
+    if (rangeHeader) {
+      const match = rangeHeader.match(/bytes=(\d+)-(\d+)?/);
+      if (match) {
+        start = parseInt(match[1], 10) || 0;
+        if (match[2]) {
+          endPos = parseInt(match[2], 10);
+        } else {
+          endPos = Math.min(start + MAX_RANGE_CHUNK - 1, fileSize - 1);
+        }
+      }
+    }
+
+    if (start >= fileSize) {
+      res.setHeader('Content-Range', `bytes */${fileSize}`);
+      return res.status(416).send('Range Not Satisfiable');
+    }
+
+    endPos = Math.min(endPos, fileSize - 1);
+    const chunkSize = (endPos - start) + 1;
+
     let isClosed = false;
     req.on('close', () => { isClosed = true; });
 
-    // Direct MP4 / WebM streaming with HTTP Range support
     const ALIGNMENT = 4096;
     const alignedStart = Math.floor(start / ALIGNMENT) * ALIGNMENT;
     let actualSkip = start - alignedStart;
 
     const statusCode = rangeHeader ? 206 : 200;
-    const headers: any = {
+    const headers: Record<string, string> = {
       ...commonHeaders,
       'Content-Type': mimeType,
       'Content-Length': chunkSize.toString(),
@@ -456,7 +565,7 @@ export async function handleStream(req: Request, res: Response) {
       headers['Content-Range'] = `bytes ${start}-${endPos}/${fileSize}`;
     }
 
-    console.log(`[Stream] Status ${statusCode} | ${mimeType} | msg ${parsed.messageId} | bytes ${start}-${endPos} (${formatBytes(chunkSize)})`);
+    console.log(`[Stream] Status ${statusCode} | ${mimeType} | msg ${parsed.messageId} | bytes ${start}-${endPos}/${fileSize}`);
     res.writeHead(statusCode, headers);
 
     let delivered = 0;
@@ -471,10 +580,10 @@ export async function handleStream(req: Request, res: Response) {
       const stream = client.iterDownload({
         file: fileLocation,
         offset: bigInt(alignedStart) as any,
-        requestSize: 1024 * 1024, // 1 MB chunks for immediate first-frame delivery
+        requestSize: 1024 * 1024,
       });
 
-      for await (let chunk of stream) {
+      for await (const chunk of stream) {
         if (isClosed || res.writableEnded || delivered >= chunkSize) break;
 
         let data = chunk;
@@ -500,18 +609,21 @@ export async function handleStream(req: Request, res: Response) {
         }
       }
     } catch (err: any) {
+      if (err?.message?.includes('FILE_REFERENCE')) {
+        mediaCache.delete(cacheKey);
+      }
       if (!isClosed) {
         console.error('[Stream] Chunk transfer notice:', err.message);
       }
     } finally {
       if (!res.writableEnded) res.end();
-      console.log(`[Stream] Completed chunk ${parsed.messageId}. Delivered: ${formatBytes(delivered)}/${formatBytes(chunkSize)}`);
     }
   } catch (err: any) {
     console.error('[Stream] Global streaming error:', err.message);
-    if (!res.headersSent) res.status(500).send(err.message);
+    if (!res.headersSent) res.status(500).json({ error: err.message });
   }
 }
 
 router.get('/stream', handleStream);
+router.head('/stream', handleStream);
 export default router;

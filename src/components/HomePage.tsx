@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { collection, query, where, onSnapshot, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import MovieCard from './MovieCard';
-import { Search, Play, X, Star, Calendar, Globe, Film, ShieldCheck, LogIn, LogOut, Smartphone, Download } from 'lucide-react';
+import { Search, Play, X, Star, Calendar, Globe, Film, ShieldCheck, LogIn, LogOut, Smartphone } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -12,26 +12,11 @@ import { loginWithGoogle } from '../services/authService';
 
 import { fetchMoviesFromFirestore, getLocalMovies, saveLocalMovies } from '../services/movieStorage';
 import { isNativeAndroid, isInstalledPhoneApp, downloadOfficialApk } from '../utils/platform';
-import { useDownloads } from '../hooks/useDownloads';
-import DownloadOptionsModal from './DownloadOptionsModal';
-import DownloadsView from './DownloadsView';
 import AndroidBottomNav from './AndroidBottomNav';
 
 export default function HomePage() {
   const isAndroid = isNativeAndroid();
   const { user, isAdmin, handleLogout, signInWithEmail } = useAuth();
-  const { 
-    downloads, 
-    activeDownloads, 
-    startDownload, 
-    removeDownload, 
-    cancelActiveDownload, 
-    pauseActiveDownload, 
-    resumeActiveDownload, 
-    lastNotification, 
-    setLastNotification 
-  } = useDownloads();
-  const [downloadModalMovie, setDownloadModalMovie] = useState<any | null>(null);
   const [movies, setMovies] = useState<any[]>(getLocalMovies());
   const [featuredMovies, setFeaturedMovies] = useState<any[]>(getLocalMovies());
   const [searchParams, setSearchParams] = useSearchParams();
@@ -59,7 +44,6 @@ export default function HomePage() {
   const categoryRef = useRef(category);
   const selectedMovieRef = useRef(selectedMovie);
   const playingMovieRef = useRef(playingMovie);
-  const downloadModalMovieRef = useRef(downloadModalMovie);
 
   useEffect(() => {
     categoryRef.current = category;
@@ -72,10 +56,6 @@ export default function HomePage() {
   useEffect(() => {
     playingMovieRef.current = playingMovie;
   }, [playingMovie]);
-
-  useEffect(() => {
-    downloadModalMovieRef.current = downloadModalMovie;
-  }, [downloadModalMovie]);
 
   // Method to open category folder and record in history for hardware back navigation
   const openCategory = (cat: string) => {
@@ -91,10 +71,6 @@ export default function HomePage() {
       }
       if (selectedMovieRef.current) {
         setSelectedMovie(null);
-        return;
-      }
-      if (downloadModalMovieRef.current) {
-        setDownloadModalMovie(null);
         return;
       }
       if (categoryRef.current) {
@@ -116,11 +92,6 @@ export default function HomePage() {
           }
           if (selectedMovieRef.current) {
             setSelectedMovie(null);
-            try { window.history.back(); } catch (e) {}
-            return;
-          }
-          if (downloadModalMovieRef.current) {
-            setDownloadModalMovie(null);
             try { window.history.back(); } catch (e) {}
             return;
           }
@@ -323,12 +294,7 @@ export default function HomePage() {
     }
   };
 
-  const openDownloadModal = (movie: any) => {
-    setDownloadModalMovie(movie);
-    try {
-      window.history.pushState({ appModal: 'download_modal' }, '');
-    } catch (e) {}
-  };
+
 
   const handleDownloadAPK = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -361,17 +327,6 @@ export default function HomePage() {
                 No {category === 'Series' ? 'series' : `${category.toLowerCase()} movies`} have been uploaded yet.
               </p>
             </div>
-          ) : category === 'Downloads' ? (
-            <DownloadsView
-              activeDownloads={activeDownloads}
-              completedDownloads={downloads}
-              onPlayMovie={(movie) => setPlayingMovie(movie)}
-              onRemoveCompleted={removeDownload}
-              onCancelActive={cancelActiveDownload}
-              onPauseActive={pauseActiveDownload}
-              onResumeActive={resumeActiveDownload}
-              onBrowseMovies={() => setCategory(null)}
-            />
           ) : (
             <div className="grid grid-cols-3 gap-2 px-2">
               {categoryMovies.map((movie) => (
@@ -379,7 +334,6 @@ export default function HomePage() {
                   key={movie.id} 
                   movie={movie} 
                   onClick={() => handleMovieClick(movie)} 
-                  onDownloadClick={!(movie.seasons && movie.seasons.length > 0) ? () => setDownloadModalMovie(movie) : undefined}
                 />
               ))}
             </div>
@@ -725,59 +679,13 @@ export default function HomePage() {
               });
             }
           }}
-          onRequestDownload={(m) => setDownloadModalMovie(m)}
+
         />
       )}
 
-      {/* Download Options & Quality Selector Modal */}
-      {downloadModalMovie && (
-        <DownloadOptionsModal
-          isOpen={Boolean(downloadModalMovie)}
-          onClose={() => setDownloadModalMovie(null)}
-          movie={downloadModalMovie}
-          onConfirmDownload={(opts) => {
-            startDownload({
-              title: opts.title,
-              posterUrl: opts.posterUrl,
-              videoUrl: opts.videoUrl,
-              quality: opts.quality,
-              estimatedSizeMb: opts.estimatedSizeMb,
-              originalCategory: downloadModalMovie.displayCategory || 'Movie',
-              releaseYear: downloadModalMovie.releaseYear,
-            });
-          }}
-          onViewDownloads={() => {
-            setDownloadModalMovie(null);
-            setCategory('Downloads');
-          }}
-        />
-      )}
-
-      {/* Floating Download Notification Toast */}
-      {lastNotification && (
-        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 bg-neutral-900 border border-yellow-400/80 text-white px-4 py-2.5 rounded-2xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-300 max-w-[90vw]">
-          <div className="w-7 h-7 rounded-full bg-yellow-400 text-black flex items-center justify-center flex-shrink-0 animate-bounce">
-            <Download size={14} className="stroke-[2.5]" />
-          </div>
-          <span className="text-xs font-bold truncate max-w-xs">{lastNotification}</span>
-          <button
-            type="button"
-            onClick={() => {
-              setCategory('Downloads');
-              setLastNotification(null);
-            }}
-            className="text-[11px] bg-yellow-400 hover:bg-yellow-500 text-black font-black px-2.5 py-1 rounded-lg uppercase tracking-wider whitespace-nowrap cursor-pointer active:scale-95"
-          >
-            View
-          </button>
-        </div>
-      )}
-
-      {/* Fixed Bottom Navigation matching design with 4 categories: Bollywood, Hollywood, Series, Downloads */}
-      <nav className={`bg-black/95 backdrop-blur-md border-t border-neutral-900 flex items-center fixed bottom-0 left-0 w-full z-40 pb-[env(safe-area-inset-bottom)] ${
-        isAndroid ? 'p-3 justify-around' : 'p-3.5 justify-around text-yellow-400 text-xs font-bold uppercase'
-      }`}>
-        {(['Bollywood', 'Hollywood', 'Series', 'Downloads'] as const).map((cat) => (
+      {/* Fixed Bottom Navigation with large, beautifully styled category pills for Bollywood, Hollywood, Series */}
+      <nav className="bg-black/95 backdrop-blur-xl border-t border-neutral-900 flex items-center justify-around fixed bottom-0 left-0 w-full z-40 py-3 px-4 pb-[env(safe-area-inset-bottom)] shadow-2xl">
+        {(['Bollywood', 'Hollywood', 'Series'] as const).map((cat) => (
           <button
             key={cat}
             onClick={() => {
@@ -787,25 +695,16 @@ export default function HomePage() {
                 openCategory(cat);
               }
             }}
-            className={`transition-colors rounded cursor-pointer uppercase inline-flex items-center gap-1 ${
-              isAndroid
-                ? `py-1.5 px-3 text-[13px] sm:text-sm font-black tracking-wide ${
-                    category === cat ? 'text-white border-b-2 border-yellow-400' : 'text-yellow-400 hover:text-yellow-300'
-                  }`
-                : `py-1 px-3 ${
-                    category === cat ? 'text-white border-b-2 border-yellow-400 font-extrabold' : 'text-yellow-400 hover:text-yellow-300'
-                  }`
+            className={`flex-1 mx-2 py-3 px-4 rounded-2xl text-center font-black uppercase text-base sm:text-lg tracking-wide transition-all cursor-pointer active:scale-95 shadow-lg flex items-center justify-center gap-2 ${
+              category === cat
+                ? 'bg-yellow-400 text-black border-2 border-yellow-300 shadow-[0_0_25px_rgba(250,204,21,0.5)] scale-105'
+                : 'bg-neutral-900/90 text-yellow-400 hover:bg-neutral-800 border border-neutral-800'
             }`}
           >
-            <span>{cat}</span>
-            {cat === 'Downloads' && activeDownloads.length > 0 && (
-              <span className="px-1.5 py-0.2 bg-yellow-400 text-black text-[9px] font-black rounded-full animate-pulse">
-                {activeDownloads.length}
-              </span>
-            )}
+            <span className="truncate">{cat}</span>
+            {category === cat && <span className="w-2.5 h-2.5 rounded-full bg-black"></span>}
           </button>
         ))}
-
       </nav>
     </div>
   );

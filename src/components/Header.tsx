@@ -147,7 +147,7 @@ export default function Header() {
                   </span>
                 </div>
                 <p className="text-[10px] font-semibold text-neutral-900 truncate">
-                  High-speed streaming & direct phone downloads!
+                  High-speed streaming directly on your phone!
                 </p>
               </div>
             </div>
@@ -328,7 +328,7 @@ export default function Header() {
                 </span>
               </div>
               <p className="text-[11px] font-semibold text-neutral-900 truncate">
-                Download app for high-speed streaming & direct phone downloads!
+                Download app for high-speed streaming on your phone!
               </p>
             </div>
           </div>
