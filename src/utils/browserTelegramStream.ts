@@ -8,6 +8,7 @@ const TG_API_ID = 31425129;
 const TG_API_HASH = 'd1069176c0bd22479ffed449cb9b3d2a';
 const TG_BOT_TOKEN = '8993099137:AAH5ppM00ckVZvMek7fv623fbeYty3qgsxM';
 const SESSION_STORAGE_KEY = 'tg_browser_bot_session_v1';
+const CHANNEL_HASH_STORAGE_KEY = 'tg_known_channel_hashes_v1';
 
 // Known private channel access hashes (same registry used by backend)
 const KNOWN_ACCESS_HASHES: Record<string, string> = {
@@ -28,6 +29,32 @@ const MEDIA_CACHE_TTL_MS = 5 * 60 * 1000;
 let browserClient: TelegramClient | null = null;
 let connectPromise: Promise<TelegramClient> | null = null;
 
+function getSavedChannelHash(cleanId: string): string | null {
+  if (!cleanId) return null;
+  if (KNOWN_ACCESS_HASHES[cleanId]) return KNOWN_ACCESS_HASHES[cleanId];
+  try {
+    const raw = localStorage.getItem(CHANNEL_HASH_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed[cleanId] === 'string' && parsed[cleanId] !== '0') {
+        return parsed[cleanId];
+      }
+    }
+  } catch {}
+  return null;
+}
+
+function saveChannelHash(cleanId: string, accessHash: string) {
+  if (!cleanId || !accessHash || accessHash === '0') return;
+  KNOWN_ACCESS_HASHES[cleanId] = accessHash;
+  try {
+    const raw = localStorage.getItem(CHANNEL_HASH_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    parsed[cleanId] = accessHash;
+    localStorage.setItem(CHANNEL_HASH_STORAGE_KEY, JSON.stringify(parsed));
+  } catch {}
+}
+
 function getSavedBrowserSession(): string {
   try {
     return (localStorage.getItem(SESSION_STORAGE_KEY) || '').trim();
@@ -44,30 +71,50 @@ function saveBrowserSession(sess: string) {
   } catch {}
 }
 
-export async function getBrowserTelegramClient(): Promise<TelegramClient> {
-  if (browserClient && browserClient.connected) {
+function clearSavedBrowserSession() {
+  try {
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch {}
+}
+
+export async function resetBrowserTelegramClient(): Promise<void> {
+  const prev = browserClient;
+  browserClient = null;
+  connectPromise = null;
+  if (prev) {
+    try {
+      await prev.disconnect();
+    } catch {}
+  }
+}
+
+export async function getBrowserTelegramClient(forceReconnect = false): Promise<TelegramClient> {
+  if (!forceReconnect && browserClient && browserClient.connected) {
     return browserClient;
+  }
+  if (forceReconnect) {
+    await resetBrowserTelegramClient();
   }
   if (connectPromise) return connectPromise;
 
   connectPromise = (async () => {
-    const saved = getSavedBrowserSession();
-    const client = new TelegramClient(new StringSession(saved), TG_API_ID, TG_API_HASH, {
-      connectionRetries: 8,
-      autoReconnect: true,
-      useWSS: true,
-      floodSleepThreshold: 60,
-    });
-
+    const saved = forceReconnect ? '' : getSavedBrowserSession();
     if (saved) {
       try {
+        const client = new TelegramClient(new StringSession(saved), TG_API_ID, TG_API_HASH, {
+          connectionRetries: 8,
+          autoReconnect: true,
+          useWSS: true,
+          floodSleepThreshold: 60,
+          maxConcurrentDownloads: 8,
+        });
         await client.connect();
         if (client.connected) {
           browserClient = client;
           return client;
         }
       } catch {
-        // Fallback to fresh bot authorization if saved session fails
+        clearSavedBrowserSession();
       }
     }
 
@@ -76,6 +123,7 @@ export async function getBrowserTelegramClient(): Promise<TelegramClient> {
       autoReconnect: true,
       useWSS: true,
       floodSleepThreshold: 60,
+      maxConcurrentDownloads: 8,
     });
     await freshClient.start({ botAuthToken: TG_BOT_TOKEN });
     const exported = freshClient.session.save() as unknown as string;
@@ -94,7 +142,18 @@ export async function getBrowserTelegramClient(): Promise<TelegramClient> {
   return connectPromise;
 }
 
-async function resolveTelegramDocument(telegramUrl: string): Promise<CachedBrowserMedia> {
+function isRecoverableClientError(err: any): boolean {
+  const msg = String(err?.message || err?.errorMessage || '').toUpperCase();
+  return (
+    msg.includes('AUTH_KEY_UNREGISTERED') ||
+    msg.includes('SESSION_REVOKED') ||
+    msg.includes('WEBSOCKET WAS CLOSED') ||
+    msg.includes('CONNECTION') ||
+    msg.includes('NOT CONNECTED')
+  );
+}
+
+async function resolveTelegramDocument(telegramUrl: string, allowRetry = true): Promise<CachedBrowserMedia> {
   const parsed = parseTelegramUrl(telegramUrl);
   if (!parsed.isValid || parsed.isInviteLink || !parsed.messageId) {
     throw new Error('Invalid Telegram post URL');
@@ -109,26 +168,60 @@ async function resolveTelegramDocument(telegramUrl: string): Promise<CachedBrows
   const client = await getBrowserTelegramClient();
   const messageId = parseInt(parsed.messageId, 10);
   const cleanId = parsed.rawChannelId ? parsed.rawChannelId.replace('-100', '') : '';
+  const cachedHash = getSavedChannelHash(cleanId);
 
   const candidates: any[] = [];
-  if (cleanId && KNOWN_ACCESS_HASHES[cleanId]) {
+  if (cleanId && cachedHash) {
     candidates.push(
       new Api.InputPeerChannel({
         channelId: bigInt(cleanId),
-        accessHash: bigInt(KNOWN_ACCESS_HASHES[cleanId]),
+        accessHash: bigInt(cachedHash),
+      })
+    );
+    candidates.push(
+      new Api.InputChannel({
+        channelId: bigInt(cleanId),
+        accessHash: bigInt(cachedHash),
       })
     );
   }
   if (parsed.chatId && parsed.chatId.startsWith('@')) {
     try {
-      const ent = await client.getEntity(parsed.chatId);
-      if (ent) candidates.push(ent);
+      const ent: any = await client.getEntity(parsed.chatId);
+      if (ent) {
+        if (ent.accessHash && ent.id) {
+          saveChannelHash(ent.id.toString().replace('-100', ''), ent.accessHash.toString());
+        }
+        candidates.push(ent);
+      }
+    } catch {}
+  }
+  if (cleanId && !cachedHash) {
+    try {
+      const ent: any = await client.getEntity(`-100${cleanId}`);
+      if (ent && ent.accessHash) {
+        saveChannelHash(cleanId, ent.accessHash.toString());
+        candidates.unshift(
+          new Api.InputPeerChannel({
+            channelId: bigInt(cleanId),
+            accessHash: bigInt(ent.accessHash.toString()),
+          })
+        );
+      }
     } catch {}
   }
   if (parsed.chatId) candidates.push(parsed.chatId);
-  if (cleanId) candidates.push(`-100${cleanId}`);
+  if (cleanId) {
+    if (/^\d+$/.test(cleanId)) {
+      candidates.push(bigInt(cleanId));
+    }
+    const prefixed = `-100${cleanId}`;
+    if (!candidates.includes(prefixed)) candidates.push(prefixed);
+    if (!candidates.includes(cleanId)) candidates.push(cleanId);
+  }
 
   let foundMsg: any = null;
+  let lastErr: any = null;
   for (const peer of candidates) {
     if (foundMsg) break;
     try {
@@ -137,11 +230,35 @@ async function resolveTelegramDocument(telegramUrl: string): Promise<CachedBrows
         foundMsg = msgs[0];
         break;
       }
-    } catch {}
+    } catch (e: any) {
+      lastErr = e;
+      if (allowRetry && isRecoverableClientError(e)) {
+        clearSavedBrowserSession();
+        await resetBrowserTelegramClient();
+        return resolveTelegramDocument(telegramUrl, false);
+      }
+    }
+  }
+
+  // Fallback: scan recent messages in channel if direct ID query missed
+  if (!foundMsg) {
+    for (const peer of candidates) {
+      if (foundMsg) break;
+      try {
+        const recent = await client.getMessages(peer, { limit: 25 });
+        const exact = recent?.find((m: any) => m && m.id === messageId);
+        if (exact) {
+          foundMsg = exact;
+          break;
+        }
+      } catch (e: any) {
+        if (!lastErr) lastErr = e;
+      }
+    }
   }
 
   if (!foundMsg || !foundMsg.media) {
-    throw new Error(`Telegram message #${messageId} not found`);
+    throw new Error(lastErr?.message || `Telegram message #${messageId} not found`);
   }
 
   let document: Api.Document | null = null;
@@ -243,6 +360,15 @@ export async function testDownloadChunk(
   };
 }
 
+function uint8ToBase64(bytes: Uint8Array): string {
+  const CHUNK = 0x8000;
+  const parts: string[] = [];
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    parts.push(String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK))));
+  }
+  return btoa(parts.join(''));
+}
+
 let bridgeInstalled = false;
 
 export function installAndroidStreamBridge(localBaseUrl: string) {
@@ -251,6 +377,7 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
 
   const base = localBaseUrl.replace(/\/+$/, '');
   const abortedReqs = new Set<string>();
+  const nativeBridge = () => (window as any).AndroidStreamBridge;
 
   const postBridge = async (path: string, body: BodyInit, contentType: string) => {
     try {
@@ -265,40 +392,89 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
     }
   };
 
+  const sendMeta = async (reqId: string, payload: Record<string, any>) => {
+    const json = JSON.stringify(payload);
+    const nb = nativeBridge();
+    if (nb && typeof nb.postMeta === 'function') {
+      try {
+        nb.postMeta(reqId, json);
+        return;
+      } catch {}
+    }
+    await postBridge(`/__bridge/meta?id=${encodeURIComponent(reqId)}`, json, 'application/json');
+  };
+
+  const sendEnd = async (reqId: string, error?: string) => {
+    const nb = nativeBridge();
+    if (nb && typeof nb.postEnd === 'function') {
+      try {
+        nb.postEnd(reqId, error || '');
+        return;
+      } catch {}
+    }
+    const qs = error
+      ? `/__bridge/end?id=${encodeURIComponent(reqId)}&error=${encodeURIComponent(error)}`
+      : `/__bridge/end?id=${encodeURIComponent(reqId)}`;
+    await postBridge(qs, '', 'text/plain');
+  };
+
+  const sendChunk = async (reqId: string, data: Uint8Array): Promise<number> => {
+    const status = await postBridge(
+      `/__bridge/chunk?id=${encodeURIComponent(reqId)}`,
+      data as unknown as BodyInit,
+      'application/octet-stream'
+    );
+    if (status !== 0) return status;
+
+    const nb = nativeBridge();
+    if (nb && typeof nb.postChunkBase64 === 'function') {
+      try {
+        return Number(nb.postChunkBase64(reqId, uint8ToBase64(data))) || 200;
+      } catch {
+        return 0;
+      }
+    }
+    return 0;
+  };
+
   (window as any).__tgStreamBridge = {
     abort(reqId: string) {
       abortedReqs.add(reqId);
     },
 
+    getCachedMeta(telegramUrl: string) {
+      const parsed = parseTelegramUrl(telegramUrl);
+      if (!parsed.isValid || !parsed.messageId) return null;
+      const entry = mediaCache.get(`${parsed.chatId}:${parsed.messageId}`);
+      if (!entry) return null;
+      return {
+        fileSize: entry.fileSize,
+        durationSec: entry.durationSec,
+        mimeType: entry.mimeType,
+      };
+    },
+
     async resolveMeta(reqId: string, telegramUrl: string) {
       try {
         const meta = await resolveTelegramDocument(telegramUrl);
-        await postBridge(
-          `/__bridge/meta?id=${encodeURIComponent(reqId)}`,
-          JSON.stringify({
-            ok: true,
-            fileSize: meta.fileSize,
-            durationSec: meta.durationSec,
-            mimeType: meta.mimeType,
-          }),
-          'application/json'
-        );
+        await sendMeta(reqId, {
+          ok: true,
+          fileSize: meta.fileSize,
+          durationSec: meta.durationSec,
+          mimeType: meta.mimeType,
+        });
       } catch (err: any) {
-        await postBridge(
-          `/__bridge/meta?id=${encodeURIComponent(reqId)}`,
-          JSON.stringify({
-            ok: false,
-            error: err?.message || 'Failed to resolve Telegram video',
-          }),
-          'application/json'
-        );
+        await sendMeta(reqId, {
+          ok: false,
+          error: err?.message || 'Failed to resolve Telegram video',
+        });
       }
     },
 
     async pumpRange(reqId: string, telegramUrl: string, startByte: number, endByte: number) {
       try {
         let entry = await resolveTelegramDocument(telegramUrl);
-        const client = await getBrowserTelegramClient();
+        let client = await getBrowserTelegramClient();
 
         const chunkTotal = Math.max(0, endByte - startByte + 1);
         const alignedStart = Math.floor(startByte / 4096) * 4096;
@@ -337,11 +513,7 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
               data = data.slice(0, remaining);
             }
 
-            const status = await postBridge(
-              `/__bridge/chunk?id=${encodeURIComponent(reqId)}`,
-              data,
-              'application/octet-stream'
-            );
+            const status = await sendChunk(reqId, data);
             if (status !== 200) {
               abortedReqs.add(reqId);
               break;
@@ -360,18 +532,18 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
             entry = await resolveTelegramDocument(telegramUrl);
             actualSkip = startByte - alignedStart;
             await runPump(entry.document);
+          } else if (isRecoverableClientError(err) && delivered === 0) {
+            client = await getBrowserTelegramClient(true);
+            actualSkip = startByte - alignedStart;
+            await runPump(entry.document);
           } else {
             throw err;
           }
         }
 
-        await postBridge(`/__bridge/end?id=${encodeURIComponent(reqId)}`, '', 'text/plain');
+        await sendEnd(reqId);
       } catch (err: any) {
-        await postBridge(
-          `/__bridge/end?id=${encodeURIComponent(reqId)}&error=${encodeURIComponent(err?.message || 'stream_failed')}`,
-          '',
-          'text/plain'
-        );
+        await sendEnd(reqId, err?.message || 'stream_failed');
       } finally {
         abortedReqs.delete(reqId);
       }

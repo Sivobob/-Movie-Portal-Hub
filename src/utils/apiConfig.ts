@@ -1,6 +1,6 @@
-export const LIVE_BACKEND_URL = 'https://ais-dev-zazx2gelikm5prxjdf6l6j-755452514312.asia-northeast1.run.app';
-export const PRE_BACKEND_URL = 'https://ais-pre-zazx2gelikm5prxjdf6l6j-755452514312.asia-northeast1.run.app';
-export const APP_VERSION = 'v3.5.186';
+export const LIVE_BACKEND_URL = 'https://ais-dev-gzj74auo2flwr723yjzyo6-560942295760.asia-northeast1.run.app';
+export const PRE_BACKEND_URL = 'https://ais-pre-gzj74auo2flwr723yjzyo6-560942295760.asia-northeast1.run.app';
+export const APP_VERSION = 'v3.5.187';
 
 const ENV_BACKEND_URL = (
   (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_BASE_URL) ||
@@ -11,7 +11,10 @@ const ENV_BACKEND_URL = (
   .replace(/\/+$/, '');
 
 let resolvedNativeBackendUrl: string | null = null;
+let lastProbeTimestamp = 0;
+let inflightProbePromise: Promise<string | null> | null = null;
 let bridgeReadyPromise: Promise<void> | null = null;
+const PROBE_CACHE_TTL_MS = 60 * 1000;
 
 function isNativeAppRuntime(): boolean {
   if (typeof window === 'undefined') return false;
@@ -38,6 +41,15 @@ export function isUsingLocalNativeBridge(): boolean {
   return /^https?:\/\/127\.0\.0\.1:\d+/i.test(base);
 }
 
+export function forceUseLocalNativeBridge(): string {
+  const localUrl = getNativeLocalBridgeUrl();
+  if (localUrl) {
+    resolvedNativeBackendUrl = localUrl;
+    lastProbeTimestamp = Date.now();
+  }
+  return localUrl;
+}
+
 export async function ensureAndroidStreamBridge(): Promise<string> {
   if (typeof window === 'undefined' || !isNativeAppRuntime()) return '';
   const localUrl = getNativeLocalBridgeUrl();
@@ -49,6 +61,7 @@ export async function ensureAndroidStreamBridge(): Promise<string> {
         mod.installAndroidStreamBridge(localUrl);
       })
       .catch((err) => {
+        bridgeReadyPromise = null;
         console.warn('[AndroidBridge] Initialization warning:', err);
       });
   }
@@ -82,13 +95,13 @@ export function getApiBaseUrl(): string {
   return ENV_BACKEND_URL || resolvedNativeBackendUrl || getNativeLocalBridgeUrl() || LIVE_BACKEND_URL;
 }
 
-async function isBackendHealthy(baseUrl: string): Promise<boolean> {
+async function isBackendHealthy(baseUrl: string, timeoutMs = 2000): Promise<boolean> {
   const target = baseUrl.replace(/\/+$/, '');
   const healthUrl = target ? `${target}/api/health` : '/api/health';
 
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3500);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     const res = await fetch(healthUrl, {
       method: 'GET',
       cache: 'no-store',
@@ -112,31 +125,63 @@ async function isBackendHealthy(baseUrl: string): Promise<boolean> {
   }
 }
 
-export async function probeWorkingBackendUrl(): Promise<string | null> {
-  let custom = '';
-  try {
-    custom = (localStorage.getItem('movie_portal_backend_url') || '').trim().replace(/\/+$/, '');
-  } catch {}
+export async function probeWorkingBackendUrl(force = false): Promise<string | null> {
+  // Always make sure local Android bridge is initialized & pre-warmed in parallel
+  const bridgeInitPromise = ensureAndroidStreamBridge().catch(() => '');
 
-  const remoteCandidates = Array.from(
-    new Set([custom, ENV_BACKEND_URL, PRE_BACKEND_URL, LIVE_BACKEND_URL].filter(Boolean))
-  );
+  if (
+    !force &&
+    resolvedNativeBackendUrl &&
+    Date.now() - lastProbeTimestamp < PROBE_CACHE_TTL_MS
+  ) {
+    await bridgeInitPromise;
+    return resolvedNativeBackendUrl;
+  }
 
-  for (const candidate of remoteCandidates) {
-    if (await isBackendHealthy(candidate)) {
-      resolvedNativeBackendUrl = candidate;
-      return candidate;
+  if (!force && inflightProbePromise) {
+    return inflightProbePromise;
+  }
+
+  inflightProbePromise = (async () => {
+    let custom = '';
+    try {
+      custom = (localStorage.getItem('movie_portal_backend_url') || '').trim().replace(/\/+$/, '');
+    } catch {}
+
+    const remoteCandidates = Array.from(
+      new Set([custom, ENV_BACKEND_URL, PRE_BACKEND_URL, LIVE_BACKEND_URL].filter(Boolean))
+    );
+
+    if (remoteCandidates.length > 0) {
+      const checks = await Promise.all(
+        remoteCandidates.map(async (candidate) => ({
+          candidate,
+          ok: await isBackendHealthy(candidate, 2000),
+        }))
+      );
+      const firstHealthy = checks.find((c) => c.ok);
+      if (firstHealthy) {
+        resolvedNativeBackendUrl = firstHealthy.candidate;
+        lastProbeTimestamp = Date.now();
+        await bridgeInitPromise;
+        return firstHealthy.candidate;
+      }
     }
-  }
 
-  // Fallback on native Android APK: use built-in in-app localhost streaming bridge
-  const localBridgeUrl = await ensureAndroidStreamBridge();
-  if (localBridgeUrl) {
-    resolvedNativeBackendUrl = localBridgeUrl;
-    return localBridgeUrl;
-  }
+    // Fallback on native Android APK: use built-in in-app localhost streaming bridge
+    const localBridgeUrl = await bridgeInitPromise;
+    if (localBridgeUrl) {
+      resolvedNativeBackendUrl = localBridgeUrl;
+      lastProbeTimestamp = Date.now();
+      return localBridgeUrl;
+    }
 
-  return null;
+    return null;
+  })().finally(() => {
+    inflightProbePromise = null;
+  });
+
+  return inflightProbePromise;
 }
 
 /**

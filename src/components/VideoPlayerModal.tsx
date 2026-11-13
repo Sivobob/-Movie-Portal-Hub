@@ -22,6 +22,9 @@ import { Capacitor } from '@capacitor/core';
 import { StatusBar } from '@capacitor/status-bar';
 import {
   buildApiUrl,
+  ensureAndroidStreamBridge,
+  forceUseLocalNativeBridge,
+  getNativeLocalBridgeUrl,
   isUsingLocalNativeBridge,
   probeWorkingBackendUrl,
 } from '../utils/apiConfig';
@@ -104,6 +107,7 @@ export default function VideoPlayerModal({
   const [error, setError] = useState<string | null>(null);
   const [streamFallbackMode, setStreamFallbackMode] = useState<'direct' | 'remux' | 'transcode'>('direct');
   const [streamStartOffset, setStreamStartOffset] = useState<number>(0);
+  const [useLocalBridgeFallback, setUseLocalBridgeFallback] = useState(false);
   const [retryNonce, setRetryNonce] = useState(0);
   const wasMutedByAutoplayRef = useRef(false);
   const durationRef = useRef(initialDuration || 0);
@@ -270,6 +274,7 @@ export default function VideoPlayerModal({
   useEffect(() => {
     setStreamFallbackMode('direct');
     setStreamStartOffset(0);
+    setUseLocalBridgeFallback(false);
     setCurrentTime(0);
     currentTimeRef.current = 0;
     setBufferedTime(0);
@@ -303,7 +308,15 @@ export default function VideoPlayerModal({
 
       if (isTelegram) {
         if (Capacitor.isNativePlatform()) {
-          await probeWorkingBackendUrl().catch(() => null);
+          if (useLocalBridgeFallback) {
+            await ensureAndroidStreamBridge().catch(() => '');
+            forceUseLocalNativeBridge();
+          } else {
+            await probeWorkingBackendUrl(retryNonce > 0).catch(() => null);
+            if (isUsingLocalNativeBridge()) {
+              await ensureAndroidStreamBridge().catch(() => '');
+            }
+          }
         }
         if (cancelled) return;
         let params = `?url=${encodeURIComponent(trimmed)}&ext=.mp4`;
@@ -324,7 +337,7 @@ export default function VideoPlayerModal({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, activeStreamUrl, currentQuality, streamFallbackMode, streamStartOffset, retryNonce]);
+  }, [isOpen, activeStreamUrl, currentQuality, streamFallbackMode, streamStartOffset, useLocalBridgeFallback, retryNonce]);
 
   // Initial Autohide timer on open & cleanup (only runs when isOpen changes)
   useEffect(() => {
@@ -437,7 +450,20 @@ export default function VideoPlayerModal({
           setRealSubtitleTracks(subTracks);
         }
 
-        video.play().catch(() => {});
+        video.muted = false;
+        wasMutedByAutoplayRef.current = false;
+        video.play().catch(() => {
+          if (cancelled) return;
+          video.muted = true;
+          wasMutedByAutoplayRef.current = true;
+          video.play().catch(() => {
+            if (!cancelled) {
+              video.muted = false;
+              wasMutedByAutoplayRef.current = false;
+              setIsPlaying(false);
+            }
+          });
+        });
       });
 
       hlsInstance.on(Hls.Events.ERROR, (_event, data) => {
@@ -482,12 +508,26 @@ export default function VideoPlayerModal({
       }
     };
 
-    const onLoadedMetadata = () => {
+    const syncDurationFallback = () => {
       const vidDuration = video.duration;
       if (vidDuration && isFinite(vidDuration) && vidDuration > 0) {
         setDuration(vidDuration);
         durationRef.current = vidDuration;
-      } else if (playableUrl.includes('/api/stream') && durationRef.current <= 0) {
+        return;
+      }
+      if (durationRef.current > 0) return;
+
+      try {
+        const activeSrc = (videoQualities && videoQualities[currentQuality]) || activeStreamUrl;
+        const cachedMeta = (window as any).__tgStreamBridge?.getCachedMeta?.(activeSrc);
+        if (cachedMeta && cachedMeta.durationSec > 0) {
+          setDuration(cachedMeta.durationSec);
+          durationRef.current = cachedMeta.durationSec;
+          return;
+        }
+      } catch {}
+
+      if (playableUrl.includes('/api/stream')) {
         fetch(playableUrl, { method: 'HEAD' })
           .then(res => {
             const customDuration = res.headers.get('X-Video-Duration');
@@ -501,6 +541,18 @@ export default function VideoPlayerModal({
           })
           .catch(() => {});
       }
+    };
+
+    const onDurationChange = () => {
+      if (video.duration && isFinite(video.duration) && video.duration > 0) {
+        setDuration(video.duration);
+        durationRef.current = video.duration;
+      }
+    };
+
+    const onLoadedMetadata = () => {
+      const vidDuration = video.duration;
+      syncDurationFallback();
       setIsLoading(false);
 
       // Detect HTML5 Audio Tracks if browser exposes them
@@ -593,6 +645,14 @@ export default function VideoPlayerModal({
           setStreamFallbackMode('transcode');
           return;
         }
+        // If remote Node backend still failed on native APK, fall back to built-in Android stream bridge
+        if (Capacitor.isNativePlatform() && !useLocalBridgeFallback && getNativeLocalBridgeUrl()) {
+          setIsLoading(true);
+          setStreamStartOffset(0);
+          setStreamFallbackMode('direct');
+          setUseLocalBridgeFallback(true);
+          return;
+        }
       }
 
       setIsLoading(false);
@@ -600,9 +660,18 @@ export default function VideoPlayerModal({
       setError('stream_error');
     };
 
+    const onVisibilityChange = () => {
+      if (cancelled || document.hidden) return;
+      setIsPlaying(!video.paused && !video.ended);
+      if (video.readyState >= 3) {
+        setIsLoading(false);
+      }
+    };
+
     video.addEventListener('play', onPlay);
     video.addEventListener('pause', onPause);
     video.addEventListener('timeupdate', onTimeUpdate);
+    video.addEventListener('durationchange', onDurationChange);
     video.addEventListener('loadedmetadata', onLoadedMetadata);
     video.addEventListener('loadeddata', onLoadedData);
     video.addEventListener('waiting', onWaiting);
@@ -610,6 +679,7 @@ export default function VideoPlayerModal({
     video.addEventListener('canplay', onCanPlay);
     video.addEventListener('ended', onEnded);
     video.addEventListener('error', onError);
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
     if (!isHlsUrl && playableUrl) {
       video.muted = false;
@@ -657,6 +727,7 @@ export default function VideoPlayerModal({
       video.removeEventListener('play', onPlay);
       video.removeEventListener('pause', onPause);
       video.removeEventListener('timeupdate', onTimeUpdate);
+      video.removeEventListener('durationchange', onDurationChange);
       video.removeEventListener('loadedmetadata', onLoadedMetadata);
       video.removeEventListener('loadeddata', onLoadedData);
       video.removeEventListener('waiting', onWaiting);
@@ -664,8 +735,9 @@ export default function VideoPlayerModal({
       video.removeEventListener('canplay', onCanPlay);
       video.removeEventListener('ended', onEnded);
       video.removeEventListener('error', onError);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [playableUrl, isYouTube, episodeResumeKey, streamFallbackMode, streamStartOffset]);
+  }, [playableUrl, isYouTube, episodeResumeKey, streamFallbackMode, streamStartOffset, retryNonce]);
 
   // Keyboard shortcut listener (Space = play/pause, Left/Right = skip, Escape = close)
   useEffect(() => {
@@ -906,7 +978,7 @@ export default function VideoPlayerModal({
           {!isYouTube ? (
             <>
               <video
-                key={playableUrl}
+                key={`${playableUrl}|${retryNonce}`}
                 ref={videoRef}
                 src={playableUrl || undefined}
                 poster={BLACK_POSTER_DATA_URI}
@@ -962,11 +1034,8 @@ export default function VideoPlayerModal({
                     setError(null);
                     setIsLoading(true);
                     setStreamFallbackMode('direct');
+                    setUseLocalBridgeFallback(false);
                     setRetryNonce((n) => n + 1);
-                    if (videoRef.current) {
-                      videoRef.current.load();
-                      videoRef.current.play().catch(() => {});
-                    }
                   }}
                   className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-black text-xs py-3 px-4 rounded-xl shadow-lg shadow-yellow-400/20 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 uppercase tracking-wider"
                 >

@@ -1,7 +1,7 @@
 {
-  "latestVersion": "3.5.186",
-  "latestVersionCode": 3406,
+  "latestVersion": "3.5.187",
+  "latestVersionCode": 3407,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "releaseNotes": "Official Release v3.5.186: Fixed video player controls tap-to-toggle and 3-second auto-hide behavior for uninterrupted playback on Android and Chrome."
+  "releaseNotes": "Official Release v3.5.187: Fixed Android APK local stream bridge PNA/CORS headers, native JavascriptInterface chunk delivery, channel entity resolution, and Chrome-to-Android video streaming parity."
 }

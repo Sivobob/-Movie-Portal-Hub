@@ -1,5 +1,6 @@
 package com.moviebox.stream.app;
 
+import android.util.Base64;
 import android.util.Log;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
@@ -67,8 +68,9 @@ public class LocalStreamServer {
     }
 
     private static class StreamSession {
-        final BlockingQueue<byte[]> queue = new LinkedBlockingQueue<>(24);
+        final BlockingQueue<byte[]> queue = new LinkedBlockingQueue<>(32);
         volatile boolean aborted = false;
+        volatile boolean ended = false;
         volatile String error = null;
     }
 
@@ -92,7 +94,61 @@ public class LocalStreamServer {
         return "http://127.0.0.1:" + port;
     }
 
-    public static class JsBridge {
+    private void completeMeta(String id, String jsonBody) {
+        CompletableFuture<MetaResult> fut = id != null ? pendingMetaById.remove(id) : null;
+        if (fut == null) return;
+        try {
+            JSONObject json = new JSONObject(jsonBody != null ? jsonBody : "{}");
+            MetaResult res = new MetaResult(
+                    json.optBoolean("ok", false),
+                    json.optLong("fileSize", 0L),
+                    json.optDouble("durationSec", 0.0),
+                    json.optString("mimeType", "video/mp4"),
+                    json.optString("error", "")
+            );
+            fut.complete(res);
+        } catch (Exception e) {
+            fut.complete(new MetaResult(false, 0, 0, "video/mp4", e.getMessage()));
+        }
+    }
+
+    private int enqueueChunk(String id, byte[] data) {
+        StreamSession sess = id != null ? activeStreams.get(id) : null;
+        if (sess == null || sess.aborted) {
+            return 499;
+        }
+        if (data != null && data.length > 0) {
+            try {
+                while (!sess.aborted && running) {
+                    if (sess.queue.offer(data, 200, TimeUnit.MILLISECONDS)) {
+                        break;
+                    }
+                }
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        return (sess.aborted || !running) ? 499 : 200;
+    }
+
+    private void completeStreamEnd(String id, String error) {
+        StreamSession sess = id != null ? activeStreams.get(id) : null;
+        if (sess != null) {
+            sess.error = error;
+            sess.ended = true;
+            try {
+                while (!sess.aborted && running) {
+                    if (sess.queue.offer(END_SENTINEL, 200, TimeUnit.MILLISECONDS)) {
+                        break;
+                    }
+                }
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    public class JsBridge {
         private final String baseUrl;
 
         public JsBridge(String baseUrl) {
@@ -102,6 +158,23 @@ public class LocalStreamServer {
         @JavascriptInterface
         public String getLocalBaseUrl() {
             return baseUrl;
+        }
+
+        @JavascriptInterface
+        public void postMeta(String id, String jsonBody) {
+            completeMeta(id, jsonBody);
+        }
+
+        @JavascriptInterface
+        public int postChunkBase64(String id, String base64Data) {
+            if (base64Data == null || base64Data.isEmpty()) return 200;
+            byte[] decoded = Base64.decode(base64Data, Base64.DEFAULT);
+            return enqueueChunk(id, decoded);
+        }
+
+        @JavascriptInterface
+        public void postEnd(String id, String error) {
+            completeStreamEnd(id, error);
         }
     }
 
@@ -122,6 +195,7 @@ public class LocalStreamServer {
             try {
                 Socket client = serverSocket.accept();
                 client.setTcpNoDelay(true);
+                client.setSoTimeout(30000);
                 executor.execute(() -> handleClient(client));
             } catch (IOException e) {
                 if (running) {
@@ -235,6 +309,7 @@ public class LocalStreamServer {
         return "Access-Control-Allow-Origin: *\r\n"
                 + "Access-Control-Allow-Methods: GET, POST, HEAD, OPTIONS\r\n"
                 + "Access-Control-Allow-Headers: *\r\n"
+                + "Access-Control-Allow-Private-Network: true\r\n"
                 + "Access-Control-Expose-Headers: Content-Range, Accept-Ranges, Content-Length, X-Video-Duration, Content-Type\r\n";
     }
 
@@ -272,45 +347,15 @@ public class LocalStreamServer {
 
             if ("POST".equals(req.method) && "/__bridge/meta".equals(req.path)) {
                 String id = req.query.get("id");
-                CompletableFuture<MetaResult> fut = id != null ? pendingMetaById.remove(id) : null;
-                if (fut != null) {
-                    try {
-                        JSONObject json = new JSONObject(new String(req.body, StandardCharsets.UTF_8));
-                        MetaResult res = new MetaResult(
-                                json.optBoolean("ok", false),
-                                json.optLong("fileSize", 0L),
-                                json.optDouble("durationSec", 0.0),
-                                json.optString("mimeType", "video/mp4"),
-                                json.optString("error", "")
-                        );
-                        fut.complete(res);
-                    } catch (Exception e) {
-                        fut.complete(new MetaResult(false, 0, 0, "video/mp4", e.getMessage()));
-                    }
-                }
+                completeMeta(id, new String(req.body, StandardCharsets.UTF_8));
                 sendSimpleResponse(out, 200, "OK", "text/plain", new byte[0]);
                 return;
             }
 
             if ("POST".equals(req.method) && "/__bridge/chunk".equals(req.path)) {
                 String id = req.query.get("id");
-                StreamSession sess = id != null ? activeStreams.get(id) : null;
-                if (sess == null || sess.aborted) {
-                    sendSimpleResponse(out, 499, "Client Closed Request", "text/plain", new byte[0]);
-                    return;
-                }
-                if (req.body.length > 0) {
-                    try {
-                        while (!sess.aborted) {
-                            if (sess.queue.offer(req.body, 250, TimeUnit.MILLISECONDS)) {
-                                break;
-                            }
-                        }
-                    } catch (InterruptedException ignored) {
-                        Thread.currentThread().interrupt();
-                    }
-                }
-                if (sess.aborted) {
+                int status = enqueueChunk(id, req.body);
+                if (status == 499) {
                     sendSimpleResponse(out, 499, "Client Closed Request", "text/plain", new byte[0]);
                 } else {
                     sendSimpleResponse(out, 200, "OK", "text/plain", new byte[0]);
@@ -320,15 +365,7 @@ public class LocalStreamServer {
 
             if ("POST".equals(req.method) && "/__bridge/end".equals(req.path)) {
                 String id = req.query.get("id");
-                StreamSession sess = id != null ? activeStreams.get(id) : null;
-                if (sess != null) {
-                    sess.error = req.query.get("error");
-                    try {
-                        sess.queue.offer(END_SENTINEL, 2, TimeUnit.SECONDS);
-                    } catch (InterruptedException ignored) {
-                        Thread.currentThread().interrupt();
-                    }
-                }
+                completeStreamEnd(id, req.query.get("error"));
                 sendSimpleResponse(out, 200, "OK", "text/plain", new byte[0]);
                 return;
             }
@@ -354,13 +391,13 @@ public class LocalStreamServer {
 
         CompletableFuture<MetaResult> existingInflight = inflightMetaByUrl.get(telegramUrl);
         if (existingInflight != null) {
-            return existingInflight.get(30, TimeUnit.SECONDS);
+            return existingInflight.get(45, TimeUnit.SECONDS);
         }
 
         CompletableFuture<MetaResult> urlFuture = new CompletableFuture<>();
         CompletableFuture<MetaResult> prev = inflightMetaByUrl.putIfAbsent(telegramUrl, urlFuture);
         if (prev != null) {
-            return prev.get(30, TimeUnit.SECONDS);
+            return prev.get(45, TimeUnit.SECONDS);
         }
 
         String reqId = UUID.randomUUID().toString();
@@ -371,7 +408,7 @@ public class LocalStreamServer {
                     + JSONObject.quote(reqId) + "," + JSONObject.quote(telegramUrl) + ");";
             webView.post(() -> webView.evaluateJavascript(js, null));
 
-            MetaResult res = urlFuture.get(30, TimeUnit.SECONDS);
+            MetaResult res = urlFuture.get(45, TimeUnit.SECONDS);
             if (res.ok && res.fileSize > 0) {
                 metaCache.put(telegramUrl, res);
             }
@@ -478,9 +515,21 @@ public class LocalStreamServer {
                     + start + "," + end + ");";
             webView.post(() -> webView.evaluateJavascript(js, null));
 
-            while (!session.aborted) {
-                byte[] chunk = session.queue.poll(30, TimeUnit.SECONDS);
-                if (chunk == null || chunk == END_SENTINEL) {
+            long idleElapsedMs = 0;
+            while (!session.aborted && running) {
+                byte[] chunk = session.queue.poll(5, TimeUnit.SECONDS);
+                if (chunk == null) {
+                    idleElapsedMs += 5000;
+                    if (session.ended || idleElapsedMs >= 45000) {
+                        break;
+                    }
+                    continue;
+                }
+                idleElapsedMs = 0;
+                if (chunk == END_SENTINEL) {
+                    if (session.error != null && !session.error.isEmpty()) {
+                        Log.w(TAG, "Stream ended with error: " + session.error);
+                    }
                     break;
                 }
                 out.write(chunk);

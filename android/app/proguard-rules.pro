@@ -12,10 +12,9 @@
 #   public *;
 #}
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
-
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# Keep WebView JavascriptInterface methods for LocalStreamServer
+-keepattributes *Annotation*
+-keepclassmembers class com.moviebox.stream.app.LocalStreamServer$JsBridge {
+    @android.webkit.JavascriptInterface <methods>;
+    public *;
+}
