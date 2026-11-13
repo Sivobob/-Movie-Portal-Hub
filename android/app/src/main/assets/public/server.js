@@ -91,6 +91,40 @@ async function requireAdmin(req, res, next) {
   }
 }
 
+// src/utils/posterUrl.ts
+function upgradePosterUrl(rawUrl, targetWidth = 1080) {
+  if (!rawUrl || typeof rawUrl !== "string") return "";
+  let url = rawUrl.trim();
+  if (!url || url === "N/A") return "";
+  if (/^http:\/\/([^/]*\.)?(media-amazon\.com|media-imdb\.com|images-amazon\.com)/i.test(url)) {
+    url = url.replace(/^http:\/\//i, "https://");
+  }
+  if (/(media-amazon\.com|media-imdb\.com|images-amazon\.com)/i.test(url) || /\._V1/i.test(url)) {
+    const hdSuffix = `._V1_QL90_UX${targetWidth}_.jpg`;
+    if (/\._V1[^/]*\.(jpg|jpeg|png|webp)(\?.*)?$/i.test(url)) {
+      return url.replace(/\._V1[^/]*\.(jpg|jpeg|png|webp)(\?.*)?$/i, hdSuffix);
+    }
+    if (/(@+)\.(jpg|jpeg|png|webp)(\?.*)?$/i.test(url)) {
+      return url.replace(/(@+)\.(jpg|jpeg|png|webp)(\?.*)?$/i, `$1${hdSuffix}`);
+    }
+  }
+  if (/image\.tmdb\.org\/t\/p\/(w\d+|original)\//i.test(url)) {
+    const tmdbSize = targetWidth >= 1200 ? "original" : "w780";
+    return url.replace(/\/t\/p\/(w\d+|original)\//i, `/t/p/${tmdbSize}/`);
+  }
+  if (/images\.unsplash\.com/i.test(url)) {
+    let updated = url;
+    if (/[?&]w=\d+/i.test(updated)) {
+      updated = updated.replace(/([?&])w=\d+/i, `$1w=${Math.max(targetWidth, 1080)}`);
+    }
+    if (/[?&]q=\d+/i.test(updated)) {
+      updated = updated.replace(/([?&])q=\d+/i, "$1q=90");
+    }
+    return updated;
+  }
+  return url;
+}
+
 // src/server/metadataRouter.ts
 var router = express.Router();
 function getApiKey() {
@@ -180,10 +214,7 @@ async function fetchImdbSuggestions(query) {
       } else if (q.includes("video game")) {
         itemType = "game";
       }
-      let poster = item.i?.imageUrl || "";
-      if (poster && poster.includes("._V1_") && poster.endsWith(".jpg")) {
-        poster = poster.replace(/\._V1_.*\.jpg$/, "._V1_QL75_UX380_CR0,0,380,562_.jpg");
-      }
+      const poster = upgradePosterUrl(item.i?.imageUrl || "", 1080);
       return {
         imdbId: item.id,
         title: item.l,
@@ -210,9 +241,17 @@ router.get("/search", async (req, res) => {
     const imdbId = imdbIdMatch[1].toLowerCase();
     try {
       const url = `https://www.omdbapi.com/?apikey=${encodeURIComponent(key)}&i=${encodeURIComponent(imdbId)}&plot=short`;
-      const resp = await fetch(url);
-      const data = await resp.json();
-      if (data.Response === "True") {
+      const [omdbRes, imdbSuggestions] = await Promise.all([
+        fetch(url).then((r) => r.json()).catch(() => null),
+        fetchImdbSuggestions(imdbId)
+      ]);
+      const data = omdbRes;
+      const imdbHit = imdbSuggestions.find((x) => x.imdbId.toLowerCase() === imdbId) || imdbSuggestions[0];
+      if (data && data.Response === "True") {
+        const bestPoster = upgradePosterUrl(
+          imdbHit?.posterUrl || (data.Poster && data.Poster !== "N/A" ? data.Poster : ""),
+          1080
+        );
         return res.json({
           status: "ok",
           provider: "IMDb / OMDb API",
@@ -221,18 +260,25 @@ router.get("/search", async (req, res) => {
             title: data.Title,
             year: data.Year,
             type: data.Type || "movie",
-            posterUrl: data.Poster && data.Poster !== "N/A" ? data.Poster : "",
-            cast: data.Actors && data.Actors !== "N/A" ? data.Actors : ""
+            posterUrl: bestPoster,
+            cast: data.Actors && data.Actors !== "N/A" ? data.Actors : imdbHit?.cast || ""
           }]
         });
       }
-      if (data.Error === "Invalid API key!") {
+      if (imdbHit) {
+        return res.json({
+          status: "ok",
+          provider: "IMDb Live Search",
+          results: [imdbHit]
+        });
+      }
+      if (data?.Error === "Invalid API key!") {
         return res.status(401).json({ status: "invalid_key", results: [], message: "Invalid API key." });
       }
-      if (data.Error === "Request limit reached!") {
+      if (data?.Error === "Request limit reached!") {
         return res.status(429).json({ status: "limit_reached", results: [], message: "Daily request limit reached." });
       }
-      return res.json({ status: "not_found", results: [], message: data.Error || `No title found with IMDb ID ${imdbId}.` });
+      return res.json({ status: "not_found", results: [], message: data?.Error || `No title found with IMDb ID ${imdbId}.` });
     } catch (err) {
       console.error("[metadataRouter] Direct IMDb ID lookup error:", err);
       return res.status(503).json({ status: "network_error", results: [], message: "Network error connecting to metadata service." });
@@ -270,7 +316,7 @@ router.get("/search", async (req, res) => {
             title: item.Title,
             year: item.Year,
             type: item.Type || "movie",
-            posterUrl: item.Poster && item.Poster !== "N/A" ? item.Poster : ""
+            posterUrl: upgradePosterUrl(item.Poster, 1080)
           });
         }
       }
@@ -321,9 +367,14 @@ router.get("/detail", async (req, res) => {
   }
   try {
     const url = id ? `https://www.omdbapi.com/?apikey=${encodeURIComponent(key)}&i=${encodeURIComponent(id)}&plot=full` : `https://www.omdbapi.com/?apikey=${encodeURIComponent(key)}&t=${encodeURIComponent(titleParam)}&plot=full`;
-    const response = await fetch(url);
-    const data = await response.json();
-    if (data.Response === "True") {
+    const imdbLookupKey = id || titleParam;
+    const [omdbRes, imdbSuggestions] = await Promise.all([
+      fetch(url).then((r) => r.json()).catch(() => null),
+      imdbLookupKey ? fetchImdbSuggestions(imdbLookupKey) : Promise.resolve([])
+    ]);
+    const data = omdbRes;
+    const imdbHit = id ? imdbSuggestions.find((x) => x.imdbId.toLowerCase() === id) || imdbSuggestions[0] : imdbSuggestions[0];
+    if (data && data.Response === "True") {
       const genre = data.Genre && data.Genre !== "N/A" ? data.Genre : "Action";
       const lang = data.Language && data.Language !== "N/A" ? data.Language : "Hindi";
       const country = data.Country && data.Country !== "N/A" ? data.Country : "";
@@ -333,7 +384,9 @@ router.get("/detail", async (req, res) => {
       if (data.Type === "series") cat = isAnime ? "Anime Series" : "Web Series";
       else if (isAnime) cat = "Anime Movie";
       else if (isBollywood) cat = "Bollywood Movie";
-      const posterUrl = data.Poster && data.Poster !== "N/A" ? data.Poster : "";
+      const rawPoster = imdbHit?.posterUrl || (data.Poster && data.Poster !== "N/A" ? data.Poster : "");
+      const posterUrl = upgradePosterUrl(rawPoster, 1080);
+      const backdropUrl = upgradePosterUrl(rawPoster, 1280) || posterUrl;
       return res.json({
         status: "ok",
         provider: isCustom ? "OMDb (Custom Key)" : "OMDb API",
@@ -343,11 +396,11 @@ router.get("/detail", async (req, res) => {
           originalTitle: data.Title || "",
           releaseYear: parseInt(data.Year) || (/* @__PURE__ */ new Date()).getFullYear(),
           posterUrl,
-          backdropUrl: posterUrl,
+          backdropUrl,
           genre,
           description: data.Plot && data.Plot !== "N/A" ? data.Plot : "",
           director: data.Director && data.Director !== "N/A" ? data.Director : "",
-          cast: data.Actors && data.Actors !== "N/A" ? data.Actors : "",
+          cast: data.Actors && data.Actors !== "N/A" ? data.Actors : imdbHit?.cast || "",
           runtime: data.Runtime && data.Runtime !== "N/A" ? data.Runtime : "",
           language: lang,
           rating: parseFloat(data.imdbRating) || 8,
@@ -355,13 +408,37 @@ router.get("/detail", async (req, res) => {
         }
       });
     }
-    if (data.Error === "Invalid API key!") {
+    if (imdbHit) {
+      const posterUrl = upgradePosterUrl(imdbHit.posterUrl, 1080);
+      const backdropUrl = upgradePosterUrl(imdbHit.posterUrl, 1280) || posterUrl;
+      return res.json({
+        status: "ok",
+        provider: "IMDb Live Engine",
+        data: {
+          imdbId: imdbHit.imdbId || id,
+          title: imdbHit.title || "",
+          originalTitle: imdbHit.title || "",
+          releaseYear: parseInt(String(imdbHit.year)) || (/* @__PURE__ */ new Date()).getFullYear(),
+          posterUrl,
+          backdropUrl,
+          genre: "Action",
+          description: "",
+          director: "",
+          cast: imdbHit.cast || "",
+          runtime: "",
+          language: "Hindi",
+          rating: 8,
+          suggestedCategory: imdbHit.type === "series" ? "Web Series" : "Bollywood Movie"
+        }
+      });
+    }
+    if (data?.Error === "Invalid API key!") {
       return res.status(401).json({ error: "Invalid OMDb API key." });
     }
-    if (data.Error === "Request limit reached!") {
+    if (data?.Error === "Request limit reached!") {
       return res.status(429).json({ error: "OMDb API daily request limit reached." });
     }
-    return res.status(404).json({ error: data.Error || "Metadata details not found." });
+    return res.status(404).json({ error: data?.Error || "Metadata details not found." });
   } catch (err) {
     console.error("[metadataRouter] Detail fetch error:", err);
     return res.status(503).json({ error: "Failed to communicate with metadata service." });
@@ -1557,6 +1634,7 @@ app2.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, HEAD");
   res.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization, Range");
+  res.setHeader("Access-Control-Allow-Private-Network", "true");
   res.setHeader("Access-Control-Expose-Headers", "Content-Range, Accept-Ranges, Content-Length, X-Video-Duration, Content-Type");
   if (req.method === "OPTIONS") {
     return res.status(204).end();

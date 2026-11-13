@@ -14,6 +14,7 @@ import { fetchMoviesFromFirestore, getLocalMovies, saveLocalMovies } from '../se
 import { isNativeAndroid, isInstalledPhoneApp, downloadOfficialApk } from '../utils/platform';
 import AndroidBottomNav from './AndroidBottomNav';
 import { upgradePosterUrl, normalizeMoviePosters } from '../utils/posterUrl';
+import { getVisibleQualityBadge } from '../utils/qualityBadge';
 
 export default function HomePage() {
   const isAndroid = isNativeAndroid();
@@ -86,6 +87,9 @@ export default function HomePage() {
     if (Capacitor.isNativePlatform()) {
       import('@capacitor/app').then(({ App: CapApp }) => {
         backListener = CapApp.addListener('backButton', () => {
+          if (typeof window !== 'undefined' && (window as any).__MOVIE_PORTAL_MANDATORY_UPDATE__) {
+            return;
+          }
           if (playingMovieRef.current) {
             setPlayingMovie(null);
             try { window.history.back(); } catch (e) {}
@@ -470,12 +474,14 @@ export default function HomePage() {
                 }}
               />
 
-              {/* HD Badge */}
-              <div className="absolute top-3.5 left-3.5 z-10">
-                <span className="bg-black/90 text-[#facc15] font-black text-xs sm:text-sm px-2.5 py-1 rounded-md border border-amber-400/30 shadow-md tracking-wider">
-                  HD
-                </span>
-              </div>
+              {/* Quality Badge (Admin-controlled: HD, HDTC, or hidden) */}
+              {getVisibleQualityBadge(selectedMovie) && (
+                <div className="absolute top-3.5 left-3.5 z-10">
+                  <span className="bg-black/90 text-[#facc15] font-black text-xs sm:text-sm px-2.5 py-1 rounded-md border border-amber-400/30 shadow-md tracking-wider uppercase">
+                    {getVisibleQualityBadge(selectedMovie)}
+                  </span>
+                </div>
+              )}
 
               {/* Bottom-Right Play Overlay */}
               <div className="absolute bottom-4 right-4 z-20">

@@ -23,7 +23,10 @@ export interface MovieData {
   streamingUrl?: string;
   featured?: boolean;
   published: boolean;
+  qualityBadge?: 'HD' | 'HDTC' | 'NONE' | string;
   createdAt?: any;
+  updatedAt?: any;
+  contentType?: string | null;
   seasons?: Array<{
     seasonNumber: number;
     episodes: Array<{

@@ -1,6 +1,7 @@
 import React, { memo } from 'react';
 import { motion } from 'framer-motion';
 import { upgradePosterUrl } from '../utils/posterUrl';
+import { getVisibleQualityBadge } from '../utils/qualityBadge';
 
 const MovieCard = memo(({ 
   movie, 
@@ -11,6 +12,7 @@ const MovieCard = memo(({
 }) => {
   const rawPoster = movie.posterUrl || movie.backdropUrl || '';
   const hdPoster = upgradePosterUrl(rawPoster, 1080) || rawPoster;
+  const qualityBadge = getVisibleQualityBadge(movie);
 
   return (
     <motion.div 
@@ -36,10 +38,12 @@ const MovieCard = memo(({
         }} 
       />
 
-      {/* Top Right HD Badge */}
-      <div className="absolute top-2 right-2 bg-black/90 border border-yellow-400/40 text-yellow-400 text-[10px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider shadow z-10">
-        HD
-      </div>
+      {/* Top Right Quality Badge (Admin-controlled: HD, HDTC, or hidden for No Badge) */}
+      {qualityBadge && (
+        <div className="absolute top-2 right-2 bg-black/90 border border-yellow-400/40 text-yellow-400 text-[10px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider shadow z-10">
+          {qualityBadge}
+        </div>
+      )}
 
       {/* Bottom Right Yellow Circular Play Button */}
       <div className="absolute bottom-2.5 right-2.5 z-20 group-hover:scale-110 transition-transform duration-200">

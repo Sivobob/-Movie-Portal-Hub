@@ -37,7 +37,10 @@ import {
   AlertTriangle,
   CheckSquare,
   Square,
-  Lock
+  Lock,
+  Pencil,
+  Smartphone,
+  Save
 } from 'lucide-react';
 import VideoPlayerModal from './VideoPlayerModal';
 import { 
@@ -56,6 +59,13 @@ import {
 import { loginWithGoogle } from '../services/authService';
 import { buildApiUrl } from '../utils/apiConfig';
 import { upgradePosterUrl } from '../utils/posterUrl';
+import { normalizeQualityBadge, getVisibleQualityBadge, QualityBadgeValue } from '../utils/qualityBadge';
+import {
+  RemoteUpdateConfig,
+  DEFAULT_REMOTE_UPDATE_CONFIG,
+  fetchRemoteUpdateConfig,
+  saveRemoteUpdateConfig
+} from '../services/appUpdateConfig';
 
 interface MetadataSearchResult {
   imdbId: string;
@@ -131,6 +141,13 @@ export default function AdminDashboard() {
   const [streamingUrl, setStreamingUrl] = useState('');
   const [featured, setFeatured] = useState(false);
   const [published, setPublished] = useState(true);
+  const [qualityBadge, setQualityBadge] = useState<QualityBadgeValue>('HD');
+  const [editingMovie, setEditingMovie] = useState<MovieData | null>(null);
+
+  // Firebase Remote App Update Config State
+  const [showUpdateConfigPanel, setShowUpdateConfigPanel] = useState(false);
+  const [savingUpdateConfig, setSavingUpdateConfig] = useState(false);
+  const [updateConfigForm, setUpdateConfigForm] = useState<RemoteUpdateConfig>(DEFAULT_REMOTE_UPDATE_CONFIG);
 
   // Quality URLs state
   const [url480p, setUrl480p] = useState('');
@@ -480,6 +497,7 @@ export default function AdminDashboard() {
             ...payload,
             posterUrl: cleanPoster,
             backdropUrl: cleanBackdrop,
+            qualityBadge: normalizeQualityBadge(payload.qualityBadge),
             published: true, // Ensure they are published
             updatedAt: serverTimestamp()
           });
@@ -622,11 +640,37 @@ export default function AdminDashboard() {
     }
   };
 
+  const loadRemoteUpdateConfig = async () => {
+    try {
+      const cfg = await fetchRemoteUpdateConfig();
+      if (cfg) {
+        setUpdateConfigForm(cfg);
+      }
+    } catch (e) {
+      console.warn('Could not load remote update config:', e);
+    }
+  };
+
+  const handleSaveRemoteUpdateConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingUpdateConfig(true);
+    try {
+      const saved = await saveRemoteUpdateConfig(updateConfigForm);
+      setUpdateConfigForm(saved);
+      showNotification('success', `✅ Remote Android update config saved (Min Required: v${saved.minimumRequiredVersion}).`);
+    } catch (err: any) {
+      showNotification('error', `Failed to save remote update config: ${err?.message || 'Permission denied'}`);
+    } finally {
+      setSavingUpdateConfig(false);
+    }
+  };
+
   useEffect(() => {
     if ((user && (isAdmin || isAuthorizedEmail)) || isUnlockedSession) {
       fetchMovies();
       checkApiStatus();
       fetchTelegramStatus();
+      loadRemoteUpdateConfig();
     }
   }, [user, isAdmin, isAuthorizedEmail, isUnlockedSession]);
 
@@ -821,7 +865,89 @@ export default function AdminDashboard() {
     }
   };
 
-  // Universal Publish / Save Draft Content (Movies, Web Series, Anime)
+  const resetMovieForm = () => {
+    setEditingMovie(null);
+    setTitle('');
+    setOriginalTitle('');
+    setDescription('');
+    setPosterUrl('');
+    setBackdropUrl('');
+    setReleaseYear(new Date().getFullYear());
+    setOriginalCategory('Bollywood Movie');
+    setLanguage('Hindi');
+    setGenre('Action');
+    setDirector('');
+    setCast('');
+    setRuntime('');
+    setRating(8.5);
+    setImdbId('');
+    setTrailerUrl('');
+    setStreamingUrl('');
+    setUrl480p('');
+    setUrl720p('');
+    setUrl1080p('');
+    setUrl4k('');
+    setFeatured(false);
+    setPublished(true);
+    setQualityBadge('HD');
+    setAutoTranscode(false);
+    setSeasons([
+      {
+        seasonNumber: 1,
+        episodes: [
+          { episodeNumber: 1, title: 'Episode 1', streamUrl: '' },
+          { episodeNumber: 2, title: 'Episode 2', streamUrl: '' },
+        ],
+      },
+    ]);
+  };
+
+  const handleStartEditMovie = (movie: MovieData) => {
+    setEditingMovie(movie);
+    setTitle(movie.title || '');
+    setOriginalTitle(movie.originalTitle || movie.title || '');
+    setDescription(movie.description || '');
+    setPosterUrl(movie.posterUrl || '');
+    setBackdropUrl(movie.backdropUrl || '');
+    setReleaseYear(Number(movie.releaseYear) || new Date().getFullYear());
+    setOriginalCategory(movie.originalCategory || 'Bollywood Movie');
+    setLanguage(movie.language || 'Hindi');
+    setGenre(movie.genre || 'Action');
+    setDirector(movie.director || '');
+    setCast(movie.cast || '');
+    setRuntime(movie.runtime || '');
+    setRating(Number(movie.rating) || 8.0);
+    setImdbId(movie.imdbId || '');
+    setTrailerUrl(movie.trailerUrl || '');
+    const vq = (movie as any).videoQualities || {};
+    const masterUrl = movie.streamingUrl || vq['1080p'] || vq['720p'] || vq['480p'] || '';
+    setStreamingUrl(movie.streamingUrl || '');
+    setUrl480p(vq['480p'] || masterUrl);
+    setUrl720p(vq['720p'] || masterUrl);
+    setUrl1080p(vq['1080p'] || masterUrl);
+    setUrl4k(vq['4K'] || masterUrl);
+    setFeatured(Boolean(movie.featured));
+    setPublished(movie.published !== false);
+    setQualityBadge(normalizeQualityBadge(movie.qualityBadge));
+    if (Array.isArray(movie.seasons) && movie.seasons.length > 0) {
+      setSeasons(JSON.parse(JSON.stringify(movie.seasons)));
+    } else {
+      setSeasons([
+        {
+          seasonNumber: 1,
+          episodes: [
+            { episodeNumber: 1, title: 'Episode 1', streamUrl: '' },
+            { episodeNumber: 2, title: 'Episode 2', streamUrl: '' },
+          ],
+        },
+      ]);
+    }
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  // Universal Publish / Update / Save Draft Content (Movies, Web Series, Anime)
   const handleSaveMovie = async (asDraft: boolean, overrideCategory?: string) => {
     if (!title.trim() || !posterUrl.trim()) {
       showNotification('error', 'Title and Poster URL are required to publish content.');
@@ -830,10 +956,13 @@ export default function AdminDashboard() {
 
     const catToSave = overrideCategory || originalCategory;
 
-    // Check for duplicate IMDb ID
+    // Check for duplicate IMDb ID (skip current item when editing)
     if (imdbId.trim()) {
       const existingMovie = movies.find(
-        (m) => m.imdbId && m.imdbId.toLowerCase() === imdbId.trim().toLowerCase()
+        (m) =>
+          m.id !== editingMovie?.id &&
+          m.imdbId &&
+          m.imdbId.toLowerCase() === imdbId.trim().toLowerCase()
       );
       if (existingMovie) {
         showNotification(
@@ -849,7 +978,14 @@ export default function AdminDashboard() {
       const autoDisplayCategory = getDisplayCategory(catToSave);
 
       const isSeries = catToSave === 'Web Series' || catToSave === 'Anime Series';
-      const firstEpStream = isSeries && seasons.length > 0 && seasons[0].episodes.length > 0 ? seasons[0].episodes[0].streamUrl : '';
+      const resolvedSeasons = isSeries
+        ? (editingMovie?.seasons && editingMovie.seasons.length > 0 && (!seasons || seasons.length === 0)
+            ? editingMovie.seasons
+            : seasons)
+        : (editingMovie?.seasons || []);
+      const firstEpStream = isSeries && resolvedSeasons.length > 0 && resolvedSeasons[0].episodes?.length > 0
+        ? resolvedSeasons[0].episodes[0].streamUrl
+        : '';
 
       // Build quality map
       const videoQualities: any = {};
@@ -880,18 +1016,43 @@ export default function AdminDashboard() {
         imdbId: imdbId.trim(),
         trailerUrl: trailerUrl.trim(),
         streamingUrl: streamingUrl.trim() || firstEpStream || url1080p.trim() || url720p.trim() || url480p.trim(),
-        videoQualities: !isSeries ? videoQualities : {},
-        seasons: isSeries ? seasons : [],
+        videoQualities: !isSeries ? videoQualities : ((editingMovie as any)?.videoQualities || {}),
+        seasons: resolvedSeasons,
         featured: Boolean(featured),
         published: asDraft ? false : true,
-        duration: testingStream?.duration || 0,
-        createdAt: serverTimestamp(),
+        qualityBadge,
+        duration: testingStream?.duration || (editingMovie as any)?.duration || 0,
         updatedAt: serverTimestamp(),
       };
 
+      if (editingMovie) {
+        try {
+          await updateDoc(doc(db, 'movies', editingMovie.id), moviePayload);
+          const updatedLocal = {
+            ...editingMovie,
+            ...moviePayload,
+            id: editingMovie.id,
+            updatedAt: Date.now(),
+          } as MovieData;
+          saveMovieLocally(updatedLocal);
+          setMovies((prev) => prev.map((m) => (m.id === editingMovie.id ? updatedLocal : m)));
+          showNotification('success', `✅ Updated "${moviePayload.title}" (Badge: ${qualityBadge === 'NONE' ? 'No Badge' : qualityBadge}).`);
+          resetMovieForm();
+          await fetchMovies();
+        } catch (fsErr: any) {
+          console.error('Firestore update failed:', fsErr);
+          handleFirestoreError(fsErr, OperationType.UPDATE, 'movies');
+          throw new Error(fsErr.message || 'Database update failed.');
+        }
+        return;
+      }
+
       let newDocId = `local-${Date.now()}`;
       try {
-        const docRef = await addDoc(collection(db, 'movies'), moviePayload);
+        const docRef = await addDoc(collection(db, 'movies'), {
+          ...moviePayload,
+          createdAt: serverTimestamp(),
+        });
         newDocId = docRef.id;
 
         // Create a public announcement notification for all users to see
@@ -955,24 +1116,7 @@ export default function AdminDashboard() {
         // Always persist to local cache as well
         saveMovieLocally({ id: newDocId, ...moviePayload } as any);
 
-        // Reset form
-        setTitle('');
-        setOriginalTitle('');
-        setDescription('');
-        setPosterUrl('');
-        setBackdropUrl('');
-        setDirector('');
-        setCast('');
-        setRuntime('');
-        setImdbId('');
-        setTrailerUrl('');
-        setStreamingUrl('');
-        setUrl480p('');
-        setUrl720p('');
-        setUrl1080p('');
-        setUrl4k('');
-        setFeatured(false);
-        setAutoTranscode(false);
+        resetMovieForm();
 
         // Trigger transcoding if requested
         if (autoTranscode && imdbId.trim() && (url1080p.trim() || url720p.trim())) {
@@ -1470,11 +1614,133 @@ export default function AdminDashboard() {
               )}
             </div>
 
+            {/* MANDATORY ANDROID APP UPDATE REMOTE CONFIGURATION */}
+            <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 shadow-xl">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Smartphone className="text-yellow-400" size={16} />
+                  <span className="text-xs font-black uppercase text-white tracking-wide">
+                    Android App Update Control
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowUpdateConfigPanel((prev) => !prev)}
+                  className="text-[10px] text-yellow-400 hover:text-yellow-300 font-bold underline cursor-pointer"
+                >
+                  {showUpdateConfigPanel ? 'Hide Config' : 'Manage Version'}
+                </button>
+              </div>
+              <div className="mt-2 flex items-center justify-between text-[10px] text-gray-400 bg-neutral-950 px-2.5 py-2 rounded-lg border border-neutral-800/80">
+                <span>
+                  Latest: <strong className="text-white">v{updateConfigForm.latestVersion}</strong> (#{updateConfigForm.latestVersionCode})
+                </span>
+                <span>
+                  Min Required: <strong className="text-yellow-400">v{updateConfigForm.minimumRequiredVersion}</strong>
+                </span>
+              </div>
+
+              {showUpdateConfigPanel && (
+                <form onSubmit={handleSaveRemoteUpdateConfig} className="mt-3 pt-3 border-t border-neutral-800 space-y-2.5 text-xs">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="block text-gray-400 text-[10px] font-semibold mb-1">Latest Version</label>
+                      <input
+                        type="text"
+                        required
+                        value={updateConfigForm.latestVersion}
+                        onChange={(e) => setUpdateConfigForm((p) => ({ ...p, latestVersion: e.target.value }))}
+                        placeholder="3.5.190"
+                        className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-white font-mono text-[11px] focus:outline-none focus:border-yellow-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-gray-400 text-[10px] font-semibold mb-1">Min Required</label>
+                      <input
+                        type="text"
+                        required
+                        value={updateConfigForm.minimumRequiredVersion}
+                        onChange={(e) => setUpdateConfigForm((p) => ({ ...p, minimumRequiredVersion: e.target.value }))}
+                        placeholder="3.5.190"
+                        className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-white font-mono text-[11px] focus:outline-none focus:border-yellow-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-gray-400 text-[10px] font-semibold mb-1">Version Code</label>
+                      <input
+                        type="number"
+                        required
+                        value={updateConfigForm.latestVersionCode}
+                        onChange={(e) => {
+                          const code = Number(e.target.value) || 0;
+                          setUpdateConfigForm((p) => ({
+                            ...p,
+                            latestVersionCode: code,
+                            minimumRequiredVersionCode: code,
+                          }));
+                        }}
+                        className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-white font-mono text-[11px] focus:outline-none focus:border-yellow-400"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-gray-400 text-[10px] font-semibold mb-1">Official APK Download URL (.apk)</label>
+                    <input
+                      type="url"
+                      required
+                      value={updateConfigForm.apkDownloadUrl}
+                      onChange={(e) => setUpdateConfigForm((p) => ({ ...p, apkDownloadUrl: e.target.value }))}
+                      placeholder="https://github.com/.../Movie-Portal.apk"
+                      className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-white font-mono text-[10px] focus:outline-none focus:border-yellow-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-gray-400 text-[10px] font-semibold mb-1">Update Message</label>
+                    <textarea
+                      rows={2}
+                      required
+                      value={updateConfigForm.updateMessage}
+                      onChange={(e) => setUpdateConfigForm((p) => ({ ...p, updateMessage: e.target.value }))}
+                      className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-white text-[11px] focus:outline-none focus:border-yellow-400"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={savingUpdateConfig}
+                    className="w-full bg-yellow-400 hover:bg-yellow-500 disabled:opacity-50 text-black font-black text-xs py-2 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                  >
+                    <Save size={13} />
+                    <span>{savingUpdateConfig ? 'Saving to Firebase...' : 'Save Remote Update Config'}</span>
+                  </button>
+                </form>
+              )}
+            </div>
+
             <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-5 shadow-xl">
-              <h2 className="text-base font-bold text-white mb-3 flex items-center gap-2">
-                <PlusCircle className="text-yellow-400" size={18} />
-                Add Movie & Auto-Fill
-              </h2>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-base font-bold text-white flex items-center gap-2">
+                  {editingMovie ? (
+                    <>
+                      <Pencil className="text-yellow-400" size={18} />
+                      Edit Movie: <span className="text-yellow-400 truncate max-w-[180px]">{editingMovie.title}</span>
+                    </>
+                  ) : (
+                    <>
+                      <PlusCircle className="text-yellow-400" size={18} />
+                      Add Movie & Auto-Fill
+                    </>
+                  )}
+                </h2>
+                {editingMovie && (
+                  <button
+                    type="button"
+                    onClick={resetMovieForm}
+                    className="text-[11px] font-bold text-red-400 hover:text-red-300 bg-red-950/40 border border-red-800/50 px-2.5 py-1 rounded-lg flex items-center gap-1 cursor-pointer"
+                  >
+                    <X size={12} /> Cancel Edit
+                  </button>
+                )}
+              </div>
 
               {/* FEATURE 1: IMDb EXCLUSIVE AUTO-FILL SEARCH BAR */}
               <div className="bg-neutral-950 border border-yellow-500/20 rounded-lg p-3.5 mb-4 shadow-inner">
@@ -1807,6 +2073,41 @@ export default function AdminDashboard() {
                         <option value="Anime Movie">Anime Movie → [Series Section]</option>
                       </optgroup>
                     </select>
+                  </div>
+                </div>
+
+                {/* Movie Quality Badge Selection */}
+                <div className="bg-neutral-950 border border-neutral-800 rounded-lg p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-gray-300 font-semibold text-xs">
+                      Movie Quality Badge
+                    </label>
+                    <span className="text-[10px] text-gray-400">
+                      Top-right corner of poster
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {([
+                      { value: 'HD', label: 'HD' },
+                      { value: 'HDTC', label: 'HDTC' },
+                      { value: 'NONE', label: 'No Badge' },
+                    ] as const).map((option) => {
+                      const active = qualityBadge === option.value;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => setQualityBadge(option.value)}
+                          className={`py-2 px-2 rounded-lg font-black text-xs border transition-all cursor-pointer ${
+                            active
+                              ? 'bg-yellow-400 text-black border-yellow-400 shadow-lg shadow-yellow-400/20'
+                              : 'bg-neutral-900 text-gray-300 border-neutral-800 hover:text-white hover:border-neutral-700'
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -2258,26 +2559,28 @@ export default function AdminDashboard() {
                   </label>
                 </div>
 
-                {/* Single Universal PUBLISH Action & Draft Button */}
+                {/* Single Universal PUBLISH / UPDATE Action & Draft Button */}
                 <div className="pt-2 space-y-2">
                   <button
                     type="submit"
                     disabled={formLoading}
-                    className="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-black py-3 px-4 rounded-lg shadow-lg hover:shadow-yellow-400/20 transition-all active:scale-[0.98] disabled:opacity-50 text-sm flex flex-col items-center justify-center gap-0.5 tracking-wider"
+                    className="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-black py-3 px-4 rounded-lg shadow-lg hover:shadow-yellow-400/20 transition-all active:scale-[0.98] disabled:opacity-50 text-sm flex flex-col items-center justify-center gap-0.5 tracking-wider cursor-pointer"
                   >
                     {formLoading ? (
                       <div className="flex items-center gap-2">
                         <RefreshCw className="animate-spin" size={16} />
-                        <span>PUBLISHING...</span>
+                        <span>{editingMovie ? 'SAVING CHANGES...' : 'PUBLISHING...'}</span>
                       </div>
                     ) : (
                       <>
                         <div className="flex items-center gap-1.5 text-base">
                           <Check size={18} className="stroke-[3]" />
-                          <span>PUBLISH</span>
+                          <span>{editingMovie ? 'UPDATE MOVIE' : 'PUBLISH'}</span>
                         </div>
                         <span className="text-[10px] font-semibold text-black/80 normal-case">
-                          Publishes as {originalCategory} → [{getDisplayCategory(originalCategory)} Section]
+                          {editingMovie
+                            ? `Updates "${title || editingMovie.title}" • Badge: ${qualityBadge === 'NONE' ? 'No Badge' : qualityBadge}`
+                            : `Publishes as ${originalCategory} → [${getDisplayCategory(originalCategory)} Section]`}
                         </span>
                       </>
                     )}
@@ -2287,9 +2590,9 @@ export default function AdminDashboard() {
                     type="button"
                     onClick={() => handleSaveMovie(true)}
                     disabled={formLoading}
-                    className="w-full bg-neutral-800 hover:bg-neutral-700 text-gray-300 font-bold py-2 rounded-lg border border-neutral-700 transition-colors disabled:opacity-50 text-xs flex items-center justify-center gap-1.5"
+                    className="w-full bg-neutral-800 hover:bg-neutral-700 text-gray-300 font-bold py-2 rounded-lg border border-neutral-700 transition-colors disabled:opacity-50 text-xs flex items-center justify-center gap-1.5 cursor-pointer"
                   >
-                    Save as Draft (Unpublished)
+                    {editingMovie ? 'Save Edit as Draft (Unpublished)' : 'Save as Draft (Unpublished)'}
                   </button>
                 </div>
               </form>
@@ -2417,6 +2720,15 @@ export default function AdminDashboard() {
                         <div className="flex-grow min-w-0">
                           <div className="flex items-center gap-2">
                             <h3 className="font-bold text-white text-xs truncate">{movie.title}</h3>
+                            {getVisibleQualityBadge(movie) ? (
+                              <span className="bg-black border border-yellow-400/40 text-yellow-400 text-[9px] px-1.5 py-0.2 rounded font-black uppercase">
+                                {getVisibleQualityBadge(movie)}
+                              </span>
+                            ) : (
+                              <span className="bg-neutral-900 border border-neutral-700 text-gray-500 text-[9px] px-1.5 py-0.2 rounded font-semibold">
+                                No Badge
+                              </span>
+                            )}
                             {movie.featured && (
                               <span className="bg-yellow-400/20 text-yellow-400 border border-yellow-400/30 text-[9px] px-1.5 py-0.2 rounded font-bold">
                                 Featured
@@ -2445,6 +2757,20 @@ export default function AdminDashboard() {
 
                         {/* Controls */}
                         <div className="flex items-center gap-1.5 flex-shrink-0">
+                          {/* Edit Movie & Quality Badge button */}
+                          <button
+                            type="button"
+                            onClick={() => handleStartEditMovie(movie)}
+                            title="Edit Movie & Quality Badge"
+                            className={`p-1.5 rounded transition-colors cursor-pointer ${
+                              editingMovie?.id === movie.id
+                                ? 'bg-yellow-400 text-black'
+                                : 'text-sky-400 hover:bg-sky-950/50'
+                            }`}
+                          >
+                            <Pencil size={15} />
+                          </button>
+
                           {/* Stream preview button if available */}
                           {movie.streamingUrl && (
                             <button

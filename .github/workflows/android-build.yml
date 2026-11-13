@@ -47,6 +47,16 @@ jobs:
           echo "Injecting clean 160MB uncompressed asset for 170MB+ APK size..."
           dd if=/dev/zero of=android/app/src/main/assets/core_payload.dat bs=1M count=160
 
+      - name: Restore Persistent Signing Keystore (If Configured)
+        run: |
+          mkdir -p ~/.android
+          if [ -n "${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}" ]; then
+            echo "${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}" | base64 -d > ~/.android/debug.keystore
+            echo "Restored persistent debug keystore from GitHub Secrets."
+          else
+            echo "No persistent ANDROID_DEBUG_KEYSTORE_B64 secret set; using Gradle default debug signing."
+          fi
+
       - name: Build Android APK (Gradle)
         working-directory: android
         run: |

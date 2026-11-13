@@ -1,7 +1,11 @@
 {
-  "latestVersion": "3.5.189",
-  "latestVersionCode": 3409,
+  "latestVersion": "3.5.190",
+  "minimumRequiredVersion": "3.5.190",
+  "latestVersionCode": 3410,
+  "minimumRequiredVersionCode": 3410,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
+  "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "releaseNotes": "Movie Portal New Update Pleses Update This App — Fixed true fullscreen playback, disabled auto-rotation during playback, and added HD posters."
+  "updateMessage": "A new version of Movie Box is available. Please update the app to continue watching movies and series.",
+  "releaseNotes": "Admin Movie Quality Badges (HD / HDTC / No Badge) and mandatory Android app update support."
 }

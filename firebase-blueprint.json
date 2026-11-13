@@ -15,6 +15,7 @@
         "language": { "type": "string" },
         "genre": { "type": "string" },
         "rating": { "type": "number" },
+        "qualityBadge": { "type": "string" },
         "featured": { "type": "boolean" },
         "published": { "type": "boolean" },
         "createdAt": { "type": "number" },
@@ -46,6 +47,27 @@
         "expiresAt": { "type": "number" }
       },
       "required": ["title", "posterUrl", "message"]
+    },
+    "appUpdateConfig": {
+      "title": "App Update Config",
+      "description": "Remote mandatory update configuration for Android APK users",
+      "type": "object",
+      "properties": {
+        "latestVersion": { "type": "string" },
+        "minimumRequiredVersion": { "type": "string" },
+        "latestVersionCode": { "type": "number" },
+        "minimumRequiredVersionCode": { "type": "number" },
+        "apkDownloadUrl": { "type": "string" },
+        "updateMessage": { "type": "string" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": [
+        "latestVersion",
+        "minimumRequiredVersion",
+        "latestVersionCode",
+        "apkDownloadUrl",
+        "updateMessage"
+      ]
     }
   },
   "firestore": {
@@ -60,6 +82,10 @@
     "/announcements/{announcementId}": {
       "schema": "announcement",
       "description": "Collection of public notifications"
+    },
+    "/app_config/{configId}": {
+      "schema": "appUpdateConfig",
+      "description": "Remote configuration including Android mandatory app update settings"
     }
   }
 }

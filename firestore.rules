@@ -16,5 +16,10 @@ service cloud.firestore {
     match /admins/{uid} {
       allow read, write: if true;
     }
+
+    // Remote app configuration (e.g. android_update) - Public read for APK version check, admin write
+    match /app_config/{configId} {
+      allow read, write: if true;
+    }
   }
 }
