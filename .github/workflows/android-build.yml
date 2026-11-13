@@ -80,23 +80,31 @@ jobs:
             ./gradlew clean assembleDebug --no-daemon --stacktrace
           fi
 
-      - name: Prepare APK Asset
+      - name: Verify Signed Release APK
         run: |
-          APK_PATH=""
-          if [ -f "android/app/build/outputs/apk/release/app-release.apk" ]; then
-            APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
-          elif [ -f "android/app/build/outputs/apk/debug/app-debug.apk" ]; then
-            APK_PATH="android/app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -f "android/app/build/outputs/apk/release/app-release.apk" ]; then
+            echo "ERROR: Expected signed release APK not found!"
+            exit 1
+          fi
+          APKSIGNER=$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -name apksigner 2>/dev/null | sort -V | tail -n 1)
+          if [ -n "$APKSIGNER" ]; then
+            echo "Verifying APK with $APKSIGNER..."
+            "$APKSIGNER" verify --print-certs android/app/build/outputs/apk/release/app-release.apk
+          else
+            echo "apksigner not found in $ANDROID_HOME/build-tools, skipping apksigner check"
           fi
 
-          if [ -n "$APK_PATH" ] && [ -f "$APK_PATH" ]; then
+      - name: Prepare APK Asset
+        run: |
+          APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
+          if [ -f "$APK_PATH" ]; then
             # Universal file names so download link always works on latest release
             cp "$APK_PATH" Movie-Portal.apk
             cp "$APK_PATH" Movie-Portal-latest.apk
             cp "$APK_PATH" Movie-Portal-v3.5.${{ github.run_number }}.apk
-            echo "APK assets prepared from $APK_PATH: Movie-Portal.apk, Movie-Portal-latest.apk, Movie-Portal-v3.5.${{ github.run_number }}.apk"
+            echo "Signed release APK assets prepared: Movie-Portal.apk, Movie-Portal-latest.apk, Movie-Portal-v3.5.${{ github.run_number }}.apk"
           else
-            echo "APK NOT FOUND!"
+            echo "Signed release APK NOT FOUND!"
             find android -name "*.apk"
             exit 1
           fi
