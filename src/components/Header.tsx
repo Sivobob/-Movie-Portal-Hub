@@ -3,6 +3,7 @@ import { useAuth, isAuthorizedAdminEmail } from '../context/AuthContext';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { ShieldCheck, Settings, ArrowLeft, Lock, Eye, EyeOff, X, KeyRound, LogOut, Search, Download, Smartphone } from 'lucide-react';
 import { isNativeAndroid, isInstalledPhoneApp, downloadOfficialApk, OFFICIAL_APK_DOWNLOAD_URL } from '../utils/platform';
+import { CURRENT_VERSION_NAME } from '../services/appUpdateConfig';
 
 export const MoviePortal3DLogo = React.memo(function MoviePortal3DLogo() {
   return (
@@ -324,7 +325,7 @@ export default function Header() {
                   Movie Portal Official Android App
                 </span>
                 <span className="bg-black/20 text-black text-[10px] font-extrabold px-1.5 py-0.2 rounded uppercase">
-                  v3.5.193 APK (180MB)
+                  v{CURRENT_VERSION_NAME} APK (180MB)
                 </span>
               </div>
               <p className="text-[11px] font-semibold text-neutral-900 truncate">

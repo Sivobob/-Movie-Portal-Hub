@@ -29,13 +29,6 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          api-level: 34
-          build-tools: 34.0.0
-          force-sdk-install: true
-
       - name: Install dependencies
         run: |
           rm -f package-lock.json
@@ -54,6 +47,19 @@ jobs:
           echo "Injecting clean 160MB uncompressed asset for 170MB+ APK size..."
           dd if=/dev/zero of=android/app/src/main/assets/core_payload.dat bs=1M count=160
 
+      - name: Restore Persistent Signing Keystore (If Configured)
+        run: |
+          mkdir -p android/app/keystores ~/.android
+          if [ -n "${{ secrets.RELEASE_KEYSTORE_B64 }}" ]; then
+            echo "${{ secrets.RELEASE_KEYSTORE_B64 }}" | base64 -d > android/app/keystores/release.jks
+            echo "Restored permanent release keystore from GitHub Secrets."
+          elif [ -n "${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}" ]; then
+            echo "${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}" | base64 -d > ~/.android/debug.keystore
+            echo "Restored persistent debug keystore from GitHub Secrets."
+          else
+            echo "No persistent keystore secret configured; using Gradle default debug keystore."
+          fi
+
       - name: Build Android APK (Gradle)
         working-directory: android
         run: |
@@ -62,8 +68,17 @@ jobs:
           rm -rf ~/.gradle/caches/transforms-*
           rm -rf ~/.gradle/caches/journal-*
           rm -rf ~/.gradle/caches/8.2.1/transforms/
-          echo "Building standard APK..."
-          ./gradlew clean assembleDebug --no-daemon --stacktrace
+          if [ -f "app/keystores/release.jks" ] && [ -n "${{ secrets.RELEASE_STORE_PASSWORD }}" ] && [ -n "${{ secrets.RELEASE_KEY_ALIAS }}" ] && [ -n "${{ secrets.RELEASE_KEY_PASSWORD }}" ]; then
+            echo "Building signed release APK..."
+            ./gradlew clean assembleRelease --no-daemon --stacktrace \
+              -PRELEASE_STORE_FILE="keystores/release.jks" \
+              -PRELEASE_STORE_PASSWORD="${{ secrets.RELEASE_STORE_PASSWORD }}" \
+              -PRELEASE_KEY_ALIAS="${{ secrets.RELEASE_KEY_ALIAS }}" \
+              -PRELEASE_KEY_PASSWORD="${{ secrets.RELEASE_KEY_PASSWORD }}"
+          else
+            echo "Building standard APK..."
+            ./gradlew clean assembleDebug --no-daemon --stacktrace
+          fi
 
       - name: Prepare APK Asset
         run: |

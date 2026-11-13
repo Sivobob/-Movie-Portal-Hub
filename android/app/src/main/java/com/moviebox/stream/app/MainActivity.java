@@ -355,7 +355,7 @@ public class MainActivity extends BridgeActivity {
             Uri uri = Uri.parse(apkUrl);
             DownloadManager.Request request = new DownloadManager.Request(uri);
             request.setTitle("Movie Portal Update");
-            request.setDescription("Downloading Movie Portal v3.5.192 APK...");
+            request.setDescription("Downloading latest Movie Portal update APK...");
             request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
             
             File targetDir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
