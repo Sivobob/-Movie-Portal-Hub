@@ -1,34 +1,70 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Tv, Wifi, CheckCircle2, RefreshCw, ShieldCheck, Play, Pause, Volume2 } from 'lucide-react';
+import { X, Tv, Wifi, CheckCircle2, RefreshCw, ShieldCheck, Play, Pause } from 'lucide-react';
+import { LIVE_BACKEND_URL } from '../utils/apiConfig';
 
 interface TVCastModalProps {
   isOpen: boolean;
   onClose: () => void;
   title: string;
   videoUrl: string;
+  poster?: string;
+  currentTime?: number;
+  onCastConnected?: () => void;
 }
 
-export default function TVCastModal({ isOpen, onClose, title, videoUrl }: TVCastModalProps) {
+export default function TVCastModal({
+  isOpen,
+  onClose,
+  title,
+  videoUrl,
+  poster,
+  currentTime = 0,
+  onCastConnected,
+}: TVCastModalProps) {
   const [isSearching, setIsSearching] = useState(false);
   const [castConnected, setCastConnected] = useState(false);
   const [connectedDevice, setConnectedDevice] = useState<string | null>(null);
   const [discoveredDevices, setDiscoveredDevices] = useState<Array<{ id: string; name: string; type: string }>>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // PresentationConnection reference for remote control
+  // PresentationConnection reference for browser-based Cast
   const connectionRef = useRef<any>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [isRemotePlaying, setIsRemotePlaying] = useState(true);
-  const [remoteCurrentTime, setRemoteCurrentTime] = useState(0);
-  const [remoteDuration, setRemoteDuration] = useState(0);
+  const [, setRemoteCurrentTime] = useState(0);
+  const [, setRemoteDuration] = useState(0);
+
+  // Helper to resolve a public HTTPS video stream URL for TV receivers
+  const getCastTargetUrl = (sourceUrl: string): string => {
+    if (!sourceUrl) return '';
+    let target = sourceUrl.trim();
+    if (target.startsWith('/') || target.includes('127.0.0.1') || target.includes('localhost')) {
+      const queryIdx = target.indexOf('?');
+      const query = queryIdx >= 0 ? target.substring(queryIdx) : '';
+      return `${LIVE_BACKEND_URL}/api/stream${query}`;
+    }
+    return target;
+  };
 
   useEffect(() => {
     if (!isOpen) {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
       if (connectionRef.current) {
         try {
           connectionRef.current.close();
         } catch {}
         connectionRef.current = null;
       }
+      try {
+        const bridge = (window as any).AndroidPlayerBridge;
+        if (bridge && typeof bridge.stopCastDiscovery === 'function') {
+          bridge.stopCastDiscovery();
+        }
+      } catch {}
+
       setCastConnected(false);
       setConnectedDevice(null);
       setDiscoveredDevices([]);
@@ -37,6 +73,13 @@ export default function TVCastModal({ isOpen, onClose, title, videoUrl }: TVCast
     } else {
       startDeviceDiscovery();
     }
+
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    };
   }, [isOpen]);
 
   const startDeviceDiscovery = async () => {
@@ -44,21 +87,88 @@ export default function TVCastModal({ isOpen, onClose, title, videoUrl }: TVCast
     setDiscoveredDevices([]);
     setErrorMessage(null);
 
+    const bridge = (window as any).AndroidPlayerBridge;
+
+    // 1. Native Android Google Cast SDK via AndroidPlayerBridge
+    if (bridge && typeof bridge.startCastDiscovery === 'function') {
+      try {
+        bridge.startCastDiscovery();
+      } catch (err) {
+        console.warn('Native Cast discovery start notice:', err);
+      }
+
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+
+      const pollRealCastState = () => {
+        try {
+          if (typeof bridge.getDiscoveredCastDevices === 'function') {
+            const rawDevices = bridge.getDiscoveredCastDevices();
+            if (rawDevices) {
+              const parsed = JSON.parse(rawDevices);
+              if (Array.isArray(parsed)) {
+                setDiscoveredDevices(parsed);
+              }
+            }
+          }
+
+          if (typeof bridge.getCastSessionStatus === 'function') {
+            const rawStatus = bridge.getCastSessionStatus();
+            if (rawStatus) {
+              const status = JSON.parse(rawStatus);
+              if (status.connected) {
+                setCastConnected(true);
+                setConnectedDevice(status.deviceName || 'Chromecast');
+                setIsRemotePlaying(status.isPlaying !== false);
+                if (typeof status.currentTime === 'number') setRemoteCurrentTime(status.currentTime);
+                if (typeof status.duration === 'number') setRemoteDuration(status.duration);
+                if (onCastConnected) onCastConnected();
+              } else if (status.state === 'error' && status.errorMessage) {
+                setErrorMessage(status.errorMessage);
+                setIsSearching(false);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('Cast polling notice:', e);
+        }
+      };
+
+      pollRealCastState();
+      pollIntervalRef.current = setInterval(pollRealCastState, 800);
+
+      // Give real mDNS/Wi-Fi multicast discovery 3 seconds to populate
+      setTimeout(() => {
+        setIsSearching(false);
+      }, 3000);
+      return;
+    }
+
+    // 2. Web Browser standard Presentation API (Chrome desktop / mobile Cast sender)
     try {
-      // 1. Try W3C Presentation API (Chromecast / AirPlay / DLNA browser bridge)
       if ('PresentationRequest' in window && videoUrl) {
-        const presentationUrl = videoUrl;
-        const request = new (window as any).PresentationRequest([presentationUrl]);
-        
-        // Check availability if supported
+        const presentationTargetUrl = getCastTargetUrl(videoUrl);
+        const request = new (window as any).PresentationRequest([presentationTargetUrl]);
+
         if (request.getAvailability) {
           try {
             const availability = await request.getAvailability();
-            availability.onchange = () => {
+            const updateAvailability = () => {
               if (availability.value) {
-                // Devices available
+                setDiscoveredDevices([
+                  {
+                    id: 'web-google-cast-receiver',
+                    name: 'Chromecast / Google TV Display',
+                    type: 'Google Cast',
+                  },
+                ]);
+              } else {
+                setDiscoveredDevices([]);
               }
             };
+            updateAvailability();
+            availability.onchange = updateAvailability;
           } catch (availErr) {
             console.warn('Presentation availability check notice:', availErr);
           }
@@ -66,32 +176,41 @@ export default function TVCastModal({ isOpen, onClose, title, videoUrl }: TVCast
       }
     } catch (e) {
       console.warn('PresentationRequest setup notice:', e);
+    } finally {
+      setTimeout(() => {
+        setIsSearching(false);
+      }, 1800);
     }
-
-    // 2. Discover local Wi-Fi Cast / DLNA devices via network probe or browser APIs
-    setTimeout(() => {
-      setIsSearching(false);
-      // Real local network discovery scan results
-      const realDevices = [
-        { id: 'chromecast-living', name: 'Living Room Chromecast (Google TV)', type: 'Google Cast' },
-        { id: 'androidtv-bed', name: 'Bedroom Android TV', type: 'Android TV' },
-        { id: 'smarttv-samsung', name: 'Samsung 4K Smart TV', type: 'DLNA / DIAL' },
-        { id: 'firetv-stick', name: 'Amazon Fire TV Stick 4K', type: 'Miracast / DLNA' }
-      ];
-      setDiscoveredDevices(realDevices);
-      if (realDevices.length === 0) {
-        setErrorMessage('No compatible Chromecast devices found. Make sure your phone and TV are connected to the same Wi-Fi network.');
-      }
-    }, 1800);
   };
 
   const handleConnectDevice = async (device: { id: string; name: string; type: string }) => {
     setIsSearching(true);
     setErrorMessage(null);
 
+    const targetUrl = getCastTargetUrl(videoUrl);
+    const bridge = (window as any).AndroidPlayerBridge;
+
+    // 1. Native Android Google Cast SDK connection
+    if (bridge && typeof bridge.connectToCastDevice === 'function') {
+      try {
+        bridge.connectToCastDevice(
+          device.id,
+          targetUrl,
+          title || 'Movie Portal',
+          poster || '',
+          currentTime || 0
+        );
+      } catch (err: any) {
+        setErrorMessage('Failed to trigger Cast connection: ' + (err.message || 'Unknown error'));
+        setIsSearching(false);
+      }
+      return;
+    }
+
+    // 2. Web browser Presentation API connection
     try {
-      if ('PresentationRequest' in window && videoUrl) {
-        const request = new (window as any).PresentationRequest([videoUrl]);
+      if ('PresentationRequest' in window && targetUrl) {
+        const request = new (window as any).PresentationRequest([targetUrl]);
         const connection = await request.start();
         connectionRef.current = connection;
 
@@ -110,21 +229,24 @@ export default function TVCastModal({ isOpen, onClose, title, videoUrl }: TVCast
         setCastConnected(true);
         setConnectedDevice(device.name);
         setIsSearching(false);
+        if (onCastConnected) onCastConnected();
         return;
       }
     } catch (err: any) {
       console.warn('Presentation connection prompt notice:', err);
-    }
-
-    // Fallback simulation of successful active cast connection
-    setTimeout(() => {
+      setErrorMessage('Cast prompt dismissed or unavailable on this browser.');
       setIsSearching(false);
-      setCastConnected(true);
-      setConnectedDevice(device.name);
-    }, 1000);
+    }
   };
 
   const handleDisconnect = () => {
+    const bridge = (window as any).AndroidPlayerBridge;
+    if (bridge && typeof bridge.disconnectCast === 'function') {
+      try {
+        bridge.disconnectCast();
+      } catch {}
+    }
+
     if (connectionRef.current) {
       try {
         connectionRef.current.close();
@@ -136,19 +258,23 @@ export default function TVCastModal({ isOpen, onClose, title, videoUrl }: TVCast
   };
 
   const handleRemotePlayPause = () => {
-    setIsRemotePlaying(!isRemotePlaying);
-    if (connectionRef.current && typeof connectionRef.current.send === 'function') {
+    const nextState = !isRemotePlaying;
+    setIsRemotePlaying(nextState);
+
+    const bridge = (window as any).AndroidPlayerBridge;
+    if (bridge) {
       try {
-        connectionRef.current.send(JSON.stringify({ type: isRemotePlaying ? 'PAUSE' : 'PLAY' }));
+        if (nextState) {
+          bridge.castPlay?.();
+        } else {
+          bridge.castPause?.();
+        }
       } catch {}
     }
-  };
 
-  const handleRemoteSeek = (secs: number) => {
-    setRemoteCurrentTime(secs);
     if (connectionRef.current && typeof connectionRef.current.send === 'function') {
       try {
-        connectionRef.current.send(JSON.stringify({ type: 'SEEK', time: secs }));
+        connectionRef.current.send(JSON.stringify({ type: nextState ? 'PLAY' : 'PAUSE' }));
       } catch {}
     }
   };

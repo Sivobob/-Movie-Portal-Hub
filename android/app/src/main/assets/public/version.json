@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.192",
-  "minimumRequiredVersion": "3.5.192",
-  "latestVersionCode": 3412,
-  "minimumRequiredVersionCode": 3412,
+  "latestVersion": "3.5.193",
+  "minimumRequiredVersion": "3.5.193",
+  "latestVersionCode": 3413,
+  "minimumRequiredVersionCode": 3413,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "A new version of Movie Box is available. Please update the app to continue watching movies and series.",
-  "releaseNotes": "Upgraded Android APK download to native Android DownloadManager to prevent connection aborts and ensure reliable 180MB+ downloads."
+  "updateMessage": "Movie Portal New Update Pleses Update This App",
+  "releaseNotes": "Integrated official Google Cast SDK for real Android TV and Chromecast device streaming and remote playback control."
 }

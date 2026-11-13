@@ -22,3 +22,9 @@
     @android.webkit.JavascriptInterface <methods>;
     public *;
 }
+
+# Google Cast SDK & MediaRouter
+-keep class com.moviebox.stream.app.CastOptionsProvider { *; }
+-keep class com.google.android.gms.cast.** { *; }
+-keep class androidx.mediarouter.** { *; }
+

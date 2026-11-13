@@ -1064,6 +1064,13 @@ export default function VideoPlayerModal({
           onClose={() => setShowTVCastModal(false)}
           title={currentEpisodeTitle}
           videoUrl={playableUrl || activeStreamUrl}
+          poster={posterUrl || movie?.posterUrl || ''}
+          currentTime={currentTime}
+          onCastConnected={() => {
+            if (videoRef.current && !videoRef.current.paused) {
+              videoRef.current.pause();
+            }
+          }}
         />
 
         {/* Video Screen Viewport */}
