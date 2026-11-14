@@ -16,7 +16,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
 import android.view.Gravity;
-import android.view.TextureView;
+import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
@@ -43,6 +43,7 @@ import androidx.media3.common.Tracks;
 import androidx.media3.common.VideoSize;
 import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.exoplayer.DefaultLoadControl;
+import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.mediarouter.media.MediaRouter;
@@ -117,7 +118,7 @@ public class MainActivity extends BridgeActivity {
 
     // Native Media3 ExoPlayer state (universal phone hardware/software codec playback)
     private FrameLayout exoContainer;
-    private TextureView exoTextureView;
+    private SurfaceView exoSurfaceView;
     private ExoPlayer exoPlayer;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private volatile boolean exoActive = false;
@@ -306,13 +307,13 @@ public class MainActivity extends BridgeActivity {
             exoContainer.setBackgroundColor(Color.BLACK);
             exoContainer.setVisibility(View.GONE);
 
-            exoTextureView = new TextureView(this);
+            exoSurfaceView = new SurfaceView(this);
             FrameLayout.LayoutParams tvParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 Gravity.CENTER
             );
-            exoContainer.addView(exoTextureView, tvParams);
+            exoContainer.addView(exoSurfaceView, tvParams);
             exoContainer.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
                 if ((r - l) != (or - ol) || (b - t) != (ob - ot)) {
                     updateExoVideoSurfaceSize();
@@ -333,7 +334,7 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void updateExoVideoSurfaceSize() {
-        if (exoContainer == null || exoTextureView == null) return;
+        if (exoContainer == null || exoSurfaceView == null) return;
         int cw = exoContainer.getWidth();
         int ch = exoContainer.getHeight();
         if (cw <= 0 || ch <= 0) return;
@@ -355,7 +356,7 @@ public class MainActivity extends BridgeActivity {
             }
         }
 
-        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) exoTextureView.getLayoutParams();
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) exoSurfaceView.getLayoutParams();
         if (lp == null) {
             lp = new FrameLayout.LayoutParams(targetW, targetH, Gravity.CENTER);
         } else {
@@ -363,7 +364,7 @@ public class MainActivity extends BridgeActivity {
             lp.height = targetH;
             lp.gravity = Gravity.CENTER;
         }
-        exoTextureView.setLayoutParams(lp);
+        exoSurfaceView.setLayoutParams(lp);
     }
 
     private void refreshExoStateSnapshot() {
@@ -429,7 +430,10 @@ public class MainActivity extends BridgeActivity {
                 DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
                     .setBufferDurationsMs(15000, 90000, 1000, 2500)
                     .build();
-                exoPlayer = new ExoPlayer.Builder(this)
+                DefaultRenderersFactory renderersFactory = new DefaultRenderersFactory(this)
+                    .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
+                    .setEnableDecoderFallback(true);
+                exoPlayer = new ExoPlayer.Builder(this, renderersFactory)
                     .setMediaSourceFactory(new DefaultMediaSourceFactory(this).setDataSourceFactory(httpFactory))
                     .setLoadControl(loadControl)
                     .build();
@@ -502,8 +506,8 @@ public class MainActivity extends BridgeActivity {
                 });
             }
 
-            if (exoTextureView != null) {
-                exoPlayer.setVideoTextureView(exoTextureView);
+            if (exoSurfaceView != null) {
+                exoPlayer.setVideoSurfaceView(exoSurfaceView);
             }
 
             // Disable text subtitles by default until user selects one
@@ -538,7 +542,7 @@ public class MainActivity extends BridgeActivity {
             try {
                 exoPlayer.stop();
                 exoPlayer.clearMediaItems();
-                exoPlayer.setVideoTextureView(null);
+                exoPlayer.setVideoSurfaceView(null);
             } catch (Exception ignored) {}
         }
         if (exoContainer != null) {
@@ -1138,11 +1142,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.203");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.204");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.203\",\"versionCode\":3423}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.204\",\"versionCode\":3424}";
             }
         }
 
