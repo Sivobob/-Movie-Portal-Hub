@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.200",
-  "minimumRequiredVersion": "3.5.200",
-  "latestVersionCode": 3420,
-  "minimumRequiredVersionCode": 3420,
+  "latestVersion": "3.5.201",
+  "minimumRequiredVersion": "3.5.201",
+  "latestVersionCode": 3421,
+  "minimumRequiredVersionCode": 3421,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Portal v3.5.200 update is ready! Tap UPDATE NOW for perfect full-screen fitting across all phone models and zero black screen during playback.",
-  "releaseNotes": "Perfect responsive mobile screen fitting across all Android phone models, absolute zero black-screen protection with automatic H.264 video decoding, and instant 3s slider."
+  "updateMessage": "Movie Portal v3.5.201 update is ready! Tap UPDATE NOW for fast parallel streaming, zero audio-only black screens, accurate duration, and smooth seeking.",
+  "releaseNotes": "Fast parallel Telegram block streaming with RAM LRU cache, automatic HEVC/10-bit video transcoding (no black screen), exact ffprobe duration metadata, and instant buffered seeking."
 }

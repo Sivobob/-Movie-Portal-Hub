@@ -112,7 +112,8 @@ try {
     const vite = await createServer({
       server: { 
         middlewareMode: true,
-        hmr: false
+        hmr: false,
+        allowedHosts: true,
       },
       appType: 'spa',
     });

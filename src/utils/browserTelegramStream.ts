@@ -472,16 +472,19 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
     },
 
     async pumpRange(reqId: string, telegramUrl: string, startByte: number, endByte: number) {
+      const BLOCK = 512 * 1024;
+      const CONCURRENCY = 3;
+      const localBlockCache = ((window as any).__tgBlockCache ||= new Map<string, Uint8Array>());
+
       try {
         let entry = await resolveTelegramDocument(telegramUrl);
         let client = await getBrowserTelegramClient();
 
-        const chunkTotal = Math.max(0, endByte - startByte + 1);
-        const alignedStart = Math.floor(startByte / 4096) * 4096;
-        let actualSkip = startByte - alignedStart;
-        let delivered = 0;
+        const fetchOneBlock = async (doc: Api.Document, blockIdx: number): Promise<Uint8Array> => {
+          const cacheKey = `${doc.id.toString()}:${blockIdx}`;
+          const cached = localBlockCache.get(cacheKey);
+          if (cached) return cached;
 
-        const runPump = async (doc: Api.Document) => {
           const fileLocation = new Api.InputDocumentFileLocation({
             id: doc.id,
             accessHash: doc.accessHash,
@@ -489,52 +492,84 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
             thumbSize: '',
           });
 
-          const stream = client.iterDownload({
+          let collected: Uint8Array | null = null;
+          for await (const chunk of client.iterDownload({
             file: fileLocation,
-            offset: bigInt(alignedStart) as any,
-            requestSize: 512 * 1024,
-          });
-
-          for await (const chunk of stream) {
-            if (abortedReqs.has(reqId) || delivered >= chunkTotal) break;
-
-            let data = new Uint8Array(chunk);
-            if (actualSkip > 0) {
-              if (data.length <= actualSkip) {
-                actualSkip -= data.length;
-                continue;
-              }
-              data = data.slice(actualSkip);
-              actualSkip = 0;
-            }
-
-            const remaining = chunkTotal - delivered;
-            if (data.length > remaining) {
-              data = data.slice(0, remaining);
-            }
-
-            const status = await sendChunk(reqId, data);
-            if (status !== 200) {
-              abortedReqs.add(reqId);
-              break;
-            }
-            delivered += data.length;
-            if (delivered >= chunkTotal) break;
+            offset: bigInt(blockIdx * BLOCK) as any,
+            requestSize: BLOCK,
+            dcId: (doc as any).dcId,
+            fileSize: doc.size,
+          })) {
+            collected = new Uint8Array(chunk);
+            break;
           }
+          const result = collected || new Uint8Array(0);
+          if (result.length > 0) {
+            if (localBlockCache.size >= 40) {
+              const oldest = localBlockCache.keys().next().value;
+              if (oldest !== undefined) localBlockCache.delete(oldest);
+            }
+            localBlockCache.set(cacheKey, result);
+          }
+          return result;
+        };
+
+        const runPump = async (doc: Api.Document) => {
+          const firstBlock = Math.floor(startByte / BLOCK);
+          const lastBlock = Math.floor(endByte / BLOCK);
+          const pending = new Map<number, Promise<Uint8Array>>();
+          let nextQueue = firstBlock;
+
+          const queueAhead = (upTo: number) => {
+            const cap = Math.min(lastBlock, upTo);
+            while (nextQueue <= cap && !abortedReqs.has(reqId)) {
+              const idx = nextQueue++;
+              if (!pending.has(idx)) {
+                const p = fetchOneBlock(doc, idx);
+                p.catch(() => {});
+                pending.set(idx, p);
+              }
+            }
+          };
+
+          queueAhead(firstBlock + CONCURRENCY - 1);
+
+          for (let blockIdx = firstBlock; blockIdx <= lastBlock; blockIdx++) {
+            if (abortedReqs.has(reqId)) break;
+            queueAhead(blockIdx + CONCURRENCY);
+
+            const blockData = await (pending.get(blockIdx) || fetchOneBlock(doc, blockIdx));
+            pending.delete(blockIdx);
+
+            if (abortedReqs.has(reqId) || blockData.length === 0) break;
+
+            const blockStart = blockIdx * BLOCK;
+            const sliceStart = Math.max(0, startByte - blockStart);
+            const sliceEnd = Math.min(blockData.length, endByte - blockStart + 1);
+
+            if (sliceEnd > sliceStart) {
+              const slice = blockData.subarray(sliceStart, sliceEnd);
+              const status = await sendChunk(reqId, slice);
+              if (status !== 200) {
+                abortedReqs.add(reqId);
+                break;
+              }
+            }
+            if (blockData.length < BLOCK) break;
+          }
+          pending.clear();
         };
 
         try {
           await runPump(entry.document);
         } catch (err: any) {
-          if (err?.message?.includes('FILE_REFERENCE') && delivered === 0) {
+          if (err?.message?.includes('FILE_REFERENCE')) {
             const parsed = parseTelegramUrl(telegramUrl);
             mediaCache.delete(`${parsed.chatId}:${parsed.messageId}`);
             entry = await resolveTelegramDocument(telegramUrl);
-            actualSkip = startByte - alignedStart;
             await runPump(entry.document);
-          } else if (isRecoverableClientError(err) && delivered === 0) {
+          } else if (isRecoverableClientError(err)) {
             client = await getBrowserTelegramClient(true);
-            actualSkip = startByte - alignedStart;
             await runPump(entry.document);
           } else {
             throw err;

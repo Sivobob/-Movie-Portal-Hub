@@ -107,11 +107,19 @@ export default function VideoPlayerModal({
   const [error, setError] = useState<string | null>(null);
   const [streamFallbackMode, setStreamFallbackMode] = useState<'direct' | 'remux' | 'transcode'>('direct');
   const [streamStartOffset, setStreamStartOffset] = useState<number>(0);
+  const [selectedAudioIdx, setSelectedAudioIdx] = useState<number>(0);
   const [useLocalBridgeFallback, setUseLocalBridgeFallback] = useState(false);
   const [retryNonce, setRetryNonce] = useState(0);
+  const [hasDecodedFrame, setHasDecodedFrame] = useState(false);
+  const [seekPreviewTime, setSeekPreviewTime] = useState<number | null>(null);
+  const isDraggingSeekRef = useRef(false);
+  const seekPreviewTimeRef = useRef<number | null>(null);
+  const handleSeekCommitRef = useRef<() => void>(() => {});
   const wasMutedByAutoplayRef = useRef(false);
   const durationRef = useRef(initialDuration || 0);
+  const knownDurationRef = useRef(initialDuration || 0);
   const currentTimeRef = useRef(0);
+  const preflightCacheRef = useRef<{ url: string; recommendedMode: 'direct' | 'remux' | 'transcode'; durationSec: number } | null>(null);
 
   // Active series season and episode indices
   const [activeSeasonIdx, setActiveSeasonIdx] = useState(seasonIndex);
@@ -263,30 +271,46 @@ export default function VideoPlayerModal({
     }
   };
 
-  // Reset playback state when switching movies, episodes, or stream quality
+  // Resolve playable stream URL & preflight metadata (once per movie/episode)
+  const [playableUrl, setPlayableUrl] = useState<string>('');
+  const [streamSourceKey, setStreamSourceKey] = useState<string>('');
+
+  // Reset playback state ONLY when opening or switching movies/episodes
   useEffect(() => {
+    if (!isOpen) {
+      setPlayableUrl('');
+      setStreamSourceKey('');
+      return;
+    }
+    preflightCacheRef.current = null;
     setStreamFallbackMode('direct');
     setStreamStartOffset(0);
+    setSelectedAudioIdx(0);
     setUseLocalBridgeFallback(false);
+    setHasDecodedFrame(false);
+    setSeekPreviewTime(null);
+    seekPreviewTimeRef.current = null;
+    isDraggingSeekRef.current = false;
     setCurrentTime(0);
     currentTimeRef.current = 0;
     setBufferedTime(0);
     const resetDur = initialDuration || 0;
     setDuration(resetDur);
     durationRef.current = resetDur;
-  }, [isOpen, activeStreamUrl, initialDuration]);
+    knownDurationRef.current = resetDur;
+    setPlayableUrl('');
+    setStreamSourceKey(`${activeStreamUrl}|${retryNonce}`);
+  }, [isOpen, activeStreamUrl, initialDuration, retryNonce]);
 
-  // Resolve playable stream URL
-  const [playableUrl, setPlayableUrl] = useState<string>('');
-
+  // Step 1: Run pre-flight stream inspection once per stream source to get real duration, codec mode & audio tracks
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !streamSourceKey) return;
 
     let cancelled = false;
     setError(null);
     setIsLoading(true);
 
-    const resolveUrl = async () => {
+    const initStream = async () => {
       const activeSource = activeStreamUrl;
       if (!activeSource || !activeSource.trim()) {
         if (!cancelled) {
@@ -299,38 +323,117 @@ export default function VideoPlayerModal({
       const trimmed = activeSource.trim();
       const isTelegram = /t\.me|telegram\.me/i.test(trimmed);
 
-      if (isTelegram) {
-        if (Capacitor.isNativePlatform()) {
-          if (useLocalBridgeFallback) {
+      if (!isTelegram) {
+        if (!cancelled) setPlayableUrl(trimmed);
+        return;
+      }
+
+      if (Capacitor.isNativePlatform()) {
+        if (useLocalBridgeFallback) {
+          await ensureAndroidStreamBridge().catch(() => '');
+          forceUseLocalNativeBridge();
+        } else {
+          await probeWorkingBackendUrl(retryNonce > 0).catch(() => null);
+          if (isUsingLocalNativeBridge()) {
             await ensureAndroidStreamBridge().catch(() => '');
-            forceUseLocalNativeBridge();
-          } else {
-            await probeWorkingBackendUrl(retryNonce > 0).catch(() => null);
-            if (isUsingLocalNativeBridge()) {
-              await ensureAndroidStreamBridge().catch(() => '');
-            }
           }
         }
-        if (cancelled) return;
-        let params = `?url=${encodeURIComponent(trimmed)}&ext=.mp4`;
-        if (streamFallbackMode === 'remux') {
-          params += `&remux=1`;
-          if (streamStartOffset > 1) params += `&start=${Math.floor(streamStartOffset)}`;
-        } else if (streamFallbackMode === 'transcode') {
-          params += `&transcode=1`;
-          if (streamStartOffset > 1) params += `&start=${Math.floor(streamStartOffset)}`;
+      }
+      if (cancelled) return;
+
+      let chosenMode: 'direct' | 'remux' | 'transcode' = 'direct';
+      let probedDuration = knownDurationRef.current;
+      let initialStart = 0;
+
+      if (!isUsingLocalNativeBridge()) {
+        try {
+          const infoUrl = buildApiUrl(`/api/telegram/stream-info?url=${encodeURIComponent(trimmed)}`);
+          const res = await fetch(infoUrl, { cache: 'no-store' });
+          if (res.ok) {
+            const info = await res.json();
+            if (!cancelled && info && info.status === 'ok') {
+              if (info.durationSec > 0) {
+                probedDuration = info.durationSec;
+                knownDurationRef.current = info.durationSec;
+                durationRef.current = info.durationSec;
+                setDuration(info.durationSec);
+              }
+              if (info.recommendedMode === 'remux' || info.recommendedMode === 'transcode' || info.recommendedMode === 'direct') {
+                chosenMode = info.recommendedMode;
+              }
+              if (Array.isArray(info.audioTracks) && info.audioTracks.length > 0) {
+                setRealAudioTracks(info.audioTracks);
+                const preferredLang = verifiedLanguageRef.current.toLowerCase();
+                const matchIdx = info.audioTracks.findIndex(
+                  (t: any) =>
+                    String(t.lang || '').toLowerCase().includes(preferredLang) ||
+                    String(t.label || '').toLowerCase().includes(preferredLang)
+                );
+                const chosenTrack = matchIdx >= 0 ? info.audioTracks[matchIdx] : info.audioTracks[0];
+                setSelectedAudio(chosenTrack.label);
+                if (typeof chosenTrack.id === 'number') {
+                  setSelectedAudioIdx(chosenTrack.id);
+                  if (chosenTrack.id > 0 && chosenMode === 'direct') {
+                    chosenMode = 'remux';
+                  }
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('[VideoPlayer] stream-info preflight notice:', err);
         }
-        setPlayableUrl(buildApiUrl(`/api/stream${params}`));
-      } else {
-        setPlayableUrl(trimmed);
+      }
+
+      if (cancelled) return;
+
+      // Apply saved resume position upfront for remux/transcode so user resumes instantly
+      if (chosenMode !== 'direct' && episodeResumeKey) {
+        try {
+          const savedPos = parseFloat(localStorage.getItem(`resume_pos_${episodeResumeKey}`) || '0');
+          if (savedPos > 15 && (!probedDuration || savedPos < probedDuration - 45)) {
+            initialStart = Math.floor(savedPos);
+          }
+        } catch {}
+      }
+
+      preflightCacheRef.current = {
+        url: trimmed,
+        recommendedMode: chosenMode,
+        durationSec: probedDuration,
+      };
+      setStreamFallbackMode(chosenMode);
+      setStreamStartOffset(initialStart);
+      if (initialStart > 0) {
+        setCurrentTime(initialStart);
+        currentTimeRef.current = initialStart;
       }
     };
 
-    resolveUrl();
+    initStream();
     return () => {
       cancelled = true;
     };
-  }, [isOpen, activeStreamUrl, streamFallbackMode, streamStartOffset, useLocalBridgeFallback, retryNonce]);
+  }, [isOpen, streamSourceKey, useLocalBridgeFallback]);
+
+  // Step 2: Build playableUrl whenever mode, seek offset, or audio track changes
+  useEffect(() => {
+    if (!isOpen || !preflightCacheRef.current) return;
+    const trimmed = preflightCacheRef.current.url;
+    if (!/t\.me|telegram\.me/i.test(trimmed)) return;
+
+    let params = `?url=${encodeURIComponent(trimmed)}&ext=.mp4`;
+    if (streamFallbackMode === 'remux') {
+      params += `&remux=1`;
+      if (streamStartOffset > 1) params += `&start=${Math.floor(streamStartOffset)}`;
+      if (selectedAudioIdx > 0) params += `&audioIdx=${selectedAudioIdx}`;
+    } else if (streamFallbackMode === 'transcode') {
+      params += `&transcode=1`;
+      if (streamStartOffset > 1) params += `&start=${Math.floor(streamStartOffset)}`;
+      if (selectedAudioIdx > 0) params += `&audioIdx=${selectedAudioIdx}`;
+    }
+    setPlayableUrl(buildApiUrl(`/api/stream${params}`));
+  }, [isOpen, streamFallbackMode, streamStartOffset, selectedAudioIdx, streamSourceKey]);
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
@@ -373,6 +476,9 @@ export default function VideoPlayerModal({
     };
 
     const handleGlobalPointerRelease = () => {
+      if (isDraggingSeekRef.current) {
+        handleSeekCommitRef.current();
+      }
       if (isInteractingRef.current) {
         isInteractingRef.current = false;
         if (showControlsRef.current) {
@@ -538,8 +644,18 @@ export default function VideoPlayerModal({
 
     const onTimeUpdate = () => {
       const effectiveTime = (streamFallbackMode !== 'direct' ? streamStartOffset : 0) + video.currentTime;
-      setCurrentTime(effectiveTime);
+      if (!isDraggingSeekRef.current) {
+        setCurrentTime(effectiveTime);
+      }
       currentTimeRef.current = effectiveTime;
+
+      if (video.videoWidth > 0 && video.videoHeight > 0) {
+        const quality = typeof video.getVideoPlaybackQuality === 'function' ? video.getVideoPlaybackQuality() : null;
+        const decodedFrames = quality ? quality.totalVideoFrames : (video as any).webkitDecodedFrameCount;
+        if (typeof decodedFrames !== 'number' || decodedFrames > 0) {
+          setHasDecodedFrame(true);
+        }
+      }
 
       if (effectiveTime > 10 && episodeResumeKey) {
         try {
@@ -558,24 +674,20 @@ export default function VideoPlayerModal({
       }
 
       // Black Screen & Audio-Only Auto-Recovery Guard:
-      // If audio is playing (video.currentTime > 1.2s and not paused), but browser decodes 0 video frames
-      // (videoWidth === 0 or webkitDecodedFrameCount === 0), auto-escalate to clean H.264 MP4.
-      if (video.currentTime > 1.2 && !video.paused && video.readyState >= 2 && /t\.me|telegram\.me/i.test(activeStreamUrl)) {
+      // If audio is playing (video.currentTime > 1.5s and not paused), but browser decodes 0 video frames
+      // (videoWidth === 0 or totalVideoFrames === 0), auto-escalate straight to clean H.264 MP4.
+      if (video.currentTime > 1.5 && !video.paused && video.readyState >= 2 && /t\.me|telegram\.me/i.test(activeStreamUrl) && !isUsingLocalNativeBridge()) {
         const isBlackScreen = video.videoWidth === 0 || video.videoHeight === 0;
-        const webkitFrames = (video as any).webkitDecodedFrameCount;
-        const hasZeroFrames = typeof webkitFrames === 'number' && webkitFrames === 0 && video.currentTime > 2.0;
+        const quality = typeof video.getVideoPlaybackQuality === 'function' ? video.getVideoPlaybackQuality() : null;
+        const decodedFrames = quality ? quality.totalVideoFrames : (video as any).webkitDecodedFrameCount;
+        const hasZeroFrames = typeof decodedFrames === 'number' && decodedFrames === 0 && video.currentTime > 1.8;
 
         if (isBlackScreen || hasZeroFrames) {
-          if (streamFallbackMode === 'direct') {
-            console.warn('[VideoPlayer] Black screen / audio-only detected. Auto-switching to remux mode...');
+          if (streamFallbackMode !== 'transcode') {
+            console.warn('[VideoPlayer] Black screen / 0 decoded video frames detected. Switching to H.264 transcode...');
             setIsLoading(true);
-            setStreamStartOffset(effectiveTime);
-            setStreamFallbackMode('remux');
-            return;
-          } else if (streamFallbackMode === 'remux') {
-            console.warn('[VideoPlayer] Black screen persisted in remux. Auto-switching to full H.264 transcode...');
-            setIsLoading(true);
-            setStreamStartOffset(effectiveTime);
+            setHasDecodedFrame(false);
+            setStreamStartOffset(Math.floor(effectiveTime));
             setStreamFallbackMode('transcode');
             return;
           }
@@ -585,11 +697,20 @@ export default function VideoPlayerModal({
 
     const syncDurationFallback = () => {
       const vidDuration = video.duration;
-      if (vidDuration && isFinite(vidDuration) && vidDuration > 0) {
-        setDuration(vidDuration);
-        durationRef.current = vidDuration;
+      // In remux/transcode fragmented MP4 mode, browser reports growing fragment duration or Infinity — never overwrite real known duration
+      if (streamFallbackMode === 'direct') {
+        if (vidDuration && isFinite(vidDuration) && vidDuration > 0) {
+          setDuration(vidDuration);
+          durationRef.current = vidDuration;
+          knownDurationRef.current = vidDuration;
+          return;
+        }
+      } else if (knownDurationRef.current > 0) {
+        setDuration(knownDurationRef.current);
+        durationRef.current = knownDurationRef.current;
         return;
       }
+
       if (durationRef.current > 0) return;
 
       try {
@@ -598,6 +719,7 @@ export default function VideoPlayerModal({
         if (cachedMeta && cachedMeta.durationSec > 0) {
           setDuration(cachedMeta.durationSec);
           durationRef.current = cachedMeta.durationSec;
+          knownDurationRef.current = cachedMeta.durationSec;
           return;
         }
       } catch {}
@@ -611,6 +733,7 @@ export default function VideoPlayerModal({
               if (!isNaN(parsed) && parsed > 0) {
                 setDuration(parsed);
                 durationRef.current = parsed;
+                knownDurationRef.current = parsed;
               }
             }
           })
@@ -619,9 +742,13 @@ export default function VideoPlayerModal({
     };
 
     const onDurationChange = () => {
+      if (streamFallbackMode !== 'direct' && knownDurationRef.current > 0) {
+        return;
+      }
       if (video.duration && isFinite(video.duration) && video.duration > 0) {
         setDuration(video.duration);
         durationRef.current = video.duration;
+        knownDurationRef.current = video.duration;
       }
     };
 
@@ -630,7 +757,7 @@ export default function VideoPlayerModal({
       syncDurationFallback();
       setIsLoading(false);
 
-      // Detect HTML5 Audio Tracks if browser exposes them
+      // Detect HTML5 Audio Tracks if browser exposes them (preserve server-probed tracks if already populated)
       const audioTracksApi = (video as any).audioTracks;
       if (audioTracksApi && audioTracksApi.length > 0) {
         const detected: Array<{ id: number; label: string; lang?: string }> = [];
@@ -643,7 +770,7 @@ export default function VideoPlayerModal({
         }
         setRealAudioTracks(detected);
         setSelectedAudio(detected[0]?.label || verifiedLanguageRef.current);
-      } else {
+      } else if (realAudioTracks.length === 0) {
         setRealAudioTracks([{ id: 0, label: verifiedLanguageRef.current, lang: verifiedLanguageRef.current.toLowerCase() }]);
         setSelectedAudio(verifiedLanguageRef.current);
       }
@@ -867,41 +994,84 @@ export default function VideoPlayerModal({
     }
   };
 
+  // Helper: commit seek to targetTime (handles both direct HTTP Range & remux/transcode buffered vs unbuffered seeks)
+  const commitSeek = (targetTime: number) => {
+    const vid = videoRef.current;
+    if (!vid) return;
+    const maxDur = durationRef.current || knownDurationRef.current || 0;
+    const clamped = maxDur > 0 ? Math.max(0, Math.min(maxDur, targetTime)) : Math.max(0, targetTime);
+
+    setSeekPreviewTime(null);
+    seekPreviewTimeRef.current = null;
+    isDraggingSeekRef.current = false;
+
+    if (streamFallbackMode === 'direct') {
+      vid.currentTime = clamped;
+      setCurrentTime(clamped);
+      currentTimeRef.current = clamped;
+      return;
+    }
+
+    // In remux/transcode mode: check if target is ALREADY buffered inside <video> to avoid restarting FFmpeg
+    const localTarget = clamped - streamStartOffset;
+    if (localTarget >= 0 && vid.buffered.length > 0) {
+      for (let i = 0; i < vid.buffered.length; i++) {
+        if (localTarget >= vid.buffered.start(i) && localTarget <= vid.buffered.end(i) - 0.5) {
+          vid.currentTime = localTarget;
+          setCurrentTime(clamped);
+          currentTimeRef.current = clamped;
+          return;
+        }
+      }
+    }
+
+    // Otherwise restart stream seamlessly at exact timestamp via FFmpeg -ss
+    setIsLoading(true);
+    setHasDecodedFrame(false);
+    setCurrentTime(clamped);
+    currentTimeRef.current = clamped;
+    setStreamStartOffset(Math.floor(clamped));
+  };
+
   // Real 10-Second Skip Control
   const handleSkip = (seconds: number) => {
     if (!videoRef.current) return;
     resetAutoHideTimer();
     ensureUnmutedOnInteraction();
-    const newTime = Math.max(0, Math.min(duration || 0, currentTime + seconds));
-    if (streamFallbackMode !== 'direct') {
-      setIsLoading(true);
-      setCurrentTime(newTime);
-      currentTimeRef.current = newTime;
-      setStreamStartOffset(newTime);
-      return;
-    }
-    videoRef.current.currentTime = newTime;
-    setCurrentTime(newTime);
-    currentTimeRef.current = newTime;
+    const baseTime = currentTimeRef.current || currentTime;
+    const maxDur = durationRef.current || knownDurationRef.current || 0;
+    const newTime = maxDur > 0
+      ? Math.max(0, Math.min(maxDur, baseTime + seconds))
+      : Math.max(0, baseTime + seconds);
+    commitSeek(newTime);
   };
 
-  // Real Seek via Progress Bar
-  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!videoRef.current) return;
+  // Real Seek via Progress Bar (smooth preview while dragging, commits on release)
+  const handleSeekInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     resetAutoHideTimer();
     ensureUnmutedOnInteraction();
     const time = Number(e.target.value);
-    if (streamFallbackMode !== 'direct') {
-      setIsLoading(true);
-      setCurrentTime(time);
-      currentTimeRef.current = time;
-      setStreamStartOffset(time);
+    if (streamFallbackMode === 'direct') {
+      commitSeek(time);
       return;
     }
-    videoRef.current.currentTime = time;
-    setCurrentTime(time);
-    currentTimeRef.current = time;
+    if (isDraggingSeekRef.current) {
+      setSeekPreviewTime(time);
+      seekPreviewTimeRef.current = time;
+    } else {
+      commitSeek(time);
+    }
   };
+
+  const handleSeekCommit = () => {
+    if (isDraggingSeekRef.current) {
+      isDraggingSeekRef.current = false;
+      if (seekPreviewTimeRef.current !== null) {
+        commitSeek(seekPreviewTimeRef.current);
+      }
+    }
+  };
+  handleSeekCommitRef.current = handleSeekCommit;
 
   // Real Fullscreen Toggle (controlled strictly by fullscreen button without interrupting playback)
   const toggleFullscreen = (e?: React.MouseEvent) => {
@@ -988,7 +1158,7 @@ export default function VideoPlayerModal({
     }
   };
 
-  // Real Audio Selection
+  // Real Audio Selection (supports HLS, HTML5 audioTracks, and server-side multi-audio Telegram switching)
   const handleSelectAudio = (track: { id: number | string; label: string }) => {
     setSelectedAudio(track.label);
     setShowAudioMenu(false);
@@ -997,11 +1167,18 @@ export default function VideoPlayerModal({
     // HLS multi-audio switch
     if (hlsRef.current && typeof track.id === 'number') {
       hlsRef.current.audioTrack = track.id;
-    } else if (videoRef.current && (videoRef.current as any).audioTracks) {
+    } else if (videoRef.current && (videoRef.current as any).audioTracks && (videoRef.current as any).audioTracks.length > 1) {
       const audioTracksApi = (videoRef.current as any).audioTracks;
       for (let i = 0; i < audioTracksApi.length; i++) {
         audioTracksApi[i].enabled = (i === track.id);
       }
+    } else if (/t\.me|telegram\.me/i.test(activeStreamUrl) && typeof track.id === 'number') {
+      setIsLoading(true);
+      setSelectedAudioIdx(track.id);
+      if (streamFallbackMode === 'direct' && track.id > 0) {
+        setStreamFallbackMode('remux');
+      }
+      setStreamStartOffset(Math.floor(currentTimeRef.current));
     }
   };
 
@@ -1110,7 +1287,7 @@ export default function VideoPlayerModal({
                 key={`${playableUrl}|${retryNonce}`}
                 ref={videoRef}
                 src={playableUrl || undefined}
-                poster={posterUrl || undefined}
+                poster={!hasDecodedFrame && posterUrl ? posterUrl : undefined}
                 playsInline
                 preload="auto"
                 controlsList="nodownload"
@@ -1396,46 +1573,67 @@ export default function VideoPlayerModal({
           }`}
         >
           {/* Progress Bar with Current Time and Total Duration */}
-          <div className="flex items-center gap-3 sm:gap-4">
-            <span className="text-xs sm:text-sm font-semibold text-white w-14 sm:w-16 text-right tabular-nums select-none">
-              {formatTime(currentTime)}
-            </span>
+          {(() => {
+            const displayCurrent = seekPreviewTime ?? currentTime;
+            const displayMax = duration > 0 ? duration : Math.max(100, displayCurrent);
+            const playedPct = displayMax > 0 ? Math.min(100, (displayCurrent / displayMax) * 100) : 0;
+            const bufferedPct = displayMax > 0 ? Math.min(100, (bufferedTime / displayMax) * 100) : 0;
 
-            <div className="relative flex-grow h-1.5 sm:h-2 bg-neutral-700/80 rounded-full group cursor-pointer">
-              <input
-                type="range"
-                min="0"
-                max={duration || 100}
-                value={currentTime}
-                onChange={handleSeek}
-                onInput={handleSeek as any}
-                onPointerDown={handleControlInteractionStart}
-                onPointerUp={handleControlInteractionEnd}
-                onTouchStart={handleControlInteractionStart}
-                onTouchEnd={handleControlInteractionEnd}
-                className="absolute -top-3 -bottom-3 inset-x-0 w-full h-8 opacity-0 cursor-pointer z-30"
-              />
-              {/* Buffered progress */}
-              <div
-                className="absolute h-full bg-white/25 rounded-full pointer-events-none"
-                style={{ width: `${(bufferedTime / (duration || 100)) * 100}%` }}
-              />
-              {/* Played progress (Yellow) */}
-              <div
-                className="absolute h-full bg-yellow-400 rounded-full pointer-events-none z-10"
-                style={{ width: `${(currentTime / (duration || 100)) * 100}%` }}
-              />
-              {/* Yellow Scrubber Handle */}
-              <div
-                className="absolute h-4 w-4 sm:h-4.5 sm:w-4.5 bg-yellow-400 rounded-full -top-[5px] shadow-lg pointer-events-none transition-transform group-hover:scale-125 z-20"
-                style={{ left: `calc(${(currentTime / (duration || 100)) * 100}% - 8px)` }}
-              />
-            </div>
+            return (
+              <div className="flex items-center gap-3 sm:gap-4">
+                <span className="text-xs sm:text-sm font-semibold text-white w-14 sm:w-16 text-right tabular-nums select-none">
+                  {formatTime(displayCurrent)}
+                </span>
 
-            <span className="text-xs sm:text-sm font-semibold text-white w-14 sm:w-16 tabular-nums select-none">
-              {formatTime(duration)}
-            </span>
-          </div>
+                <div className="relative flex-grow h-1.5 sm:h-2 bg-neutral-700/80 rounded-full group cursor-pointer">
+                  <input
+                    type="range"
+                    min="0"
+                    max={displayMax}
+                    value={Math.min(displayCurrent, displayMax)}
+                    onChange={handleSeekInput}
+                    onInput={handleSeekInput as any}
+                    onPointerDown={(e) => {
+                      isDraggingSeekRef.current = true;
+                      handleControlInteractionStart(e);
+                    }}
+                    onPointerUp={(e) => {
+                      handleSeekCommit();
+                      handleControlInteractionEnd(e);
+                    }}
+                    onTouchStart={(e) => {
+                      isDraggingSeekRef.current = true;
+                      handleControlInteractionStart(e);
+                    }}
+                    onTouchEnd={(e) => {
+                      handleSeekCommit();
+                      handleControlInteractionEnd(e);
+                    }}
+                    className="absolute -top-3 -bottom-3 inset-x-0 w-full h-8 opacity-0 cursor-pointer z-30"
+                  />
+                  {/* Buffered progress */}
+                  <div
+                    className="absolute h-full bg-white/25 rounded-full pointer-events-none"
+                    style={{ width: `${bufferedPct}%` }}
+                  />
+                  {/* Played progress (Yellow) */}
+                  <div
+                    className="absolute h-full bg-yellow-400 rounded-full pointer-events-none z-10"
+                    style={{ width: `${playedPct}%` }}
+                  />
+                  {/* Yellow Scrubber Handle */}
+                  <div
+                    className="absolute h-4 w-4 sm:h-4.5 sm:w-4.5 bg-yellow-400 rounded-full -top-[5px] shadow-lg pointer-events-none transition-transform group-hover:scale-125 z-20"
+                    style={{ left: `calc(${playedPct}% - 8px)` }}
+                  />
+                </div>
+
+                <span className="text-xs sm:text-sm font-semibold text-white w-14 sm:w-16 tabular-nums select-none">
+                  {formatTime(duration)}
+                </span>
+              </div>
+            );
+          })()}
 
           {/* Bottom Action Controls: Speed (left), Audio, Subtitles, Fullscreen (right) */}
           <div className="flex items-center justify-between gap-3">
