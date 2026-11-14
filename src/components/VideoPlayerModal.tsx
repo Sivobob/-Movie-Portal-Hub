@@ -29,7 +29,6 @@ import {
   probeWorkingBackendUrl,
 } from '../utils/apiConfig';
 
-const BLACK_POSTER_DATA_URI = 'data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs=';
 
 export interface VideoPlayerModalProps {
   isOpen: boolean;
@@ -554,6 +553,31 @@ export default function VideoPlayerModal({
           if (video.buffered.start(i) <= video.currentTime && video.buffered.end(i) >= video.currentTime) {
             setBufferedTime(offsetBase + video.buffered.end(i));
             break;
+          }
+        }
+      }
+
+      // Black Screen & Audio-Only Auto-Recovery Guard:
+      // If audio is playing (video.currentTime > 1.2s and not paused), but browser decodes 0 video frames
+      // (videoWidth === 0 or webkitDecodedFrameCount === 0), auto-escalate to clean H.264 MP4.
+      if (video.currentTime > 1.2 && !video.paused && video.readyState >= 2 && /t\.me|telegram\.me/i.test(activeStreamUrl)) {
+        const isBlackScreen = video.videoWidth === 0 || video.videoHeight === 0;
+        const webkitFrames = (video as any).webkitDecodedFrameCount;
+        const hasZeroFrames = typeof webkitFrames === 'number' && webkitFrames === 0 && video.currentTime > 2.0;
+
+        if (isBlackScreen || hasZeroFrames) {
+          if (streamFallbackMode === 'direct') {
+            console.warn('[VideoPlayer] Black screen / audio-only detected. Auto-switching to remux mode...');
+            setIsLoading(true);
+            setStreamStartOffset(effectiveTime);
+            setStreamFallbackMode('remux');
+            return;
+          } else if (streamFallbackMode === 'remux') {
+            console.warn('[VideoPlayer] Black screen persisted in remux. Auto-switching to full H.264 transcode...');
+            setIsLoading(true);
+            setStreamStartOffset(effectiveTime);
+            setStreamFallbackMode('transcode');
+            return;
           }
         }
       }
@@ -1086,7 +1110,7 @@ export default function VideoPlayerModal({
                 key={`${playableUrl}|${retryNonce}`}
                 ref={videoRef}
                 src={playableUrl || undefined}
-                poster={BLACK_POSTER_DATA_URI}
+                poster={posterUrl || undefined}
                 playsInline
                 preload="auto"
                 controlsList="nodownload"

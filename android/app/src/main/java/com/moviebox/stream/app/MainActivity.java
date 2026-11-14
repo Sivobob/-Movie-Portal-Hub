@@ -127,6 +127,11 @@ public class MainActivity extends BridgeActivity {
             getWindow().setAttributes(lp);
         }
 
+        getWindow().setFlags(
+            WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+            WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
+        );
+
         enableImmersiveStickyMode(false);
         configureWebView();
         createNotificationChannel();
@@ -187,7 +192,8 @@ public class MainActivity extends BridgeActivity {
             if (getBridge() != null && getBridge().getWebView() != null) {
                 WebView webView = getBridge().getWebView();
                 cookieManager.setAcceptThirdPartyCookies(webView, true);
-                webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+                // Crucial for video rendering: LAYER_TYPE_NONE prevents Android GPU SurfaceTexture compositing bugs (audio with black screen)
+                webView.setLayerType(View.LAYER_TYPE_NONE, null);
                 WebSettings settings = webView.getSettings();
                 settings.setJavaScriptEnabled(true);
                 settings.setJavaScriptCanOpenWindowsAutomatically(true);
@@ -776,11 +782,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.198");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.199");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.198\",\"versionCode\":3418}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.199\",\"versionCode\":3419}";
             }
         }
 

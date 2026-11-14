@@ -428,7 +428,7 @@ export async function handleStream(req: Request, res: Response) {
       console.log(`[Stream] Cached document ${document.id} (${formatBytes(fileSize)}, ${fileName || rawMime}) for msg ${parsed.messageId}`);
     }
 
-    const { document, fileSize, durationSec, mimeType, isHevc } = entry;
+    const { document, fileSize, durationSec, mimeType, isMkv, isHevc } = entry;
 
     const commonHeaders: Record<string, string> = {
       'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length, X-Video-Duration, Content-Type',
@@ -448,14 +448,16 @@ export async function handleStream(req: Request, res: Response) {
       return res.end();
     }
 
-    // Android Compatibility Remux / Transcode Mode (triggered automatically on fallback if direct playback errors)
-    if ((isRemuxParam || isTranscodeParam) && !isRawParam) {
+    // Android & Mobile Compatibility Remux / Transcode Mode
+    // Automatically activated for MKV and HEVC/10-bit files to prevent audio-only black screen in Chromium/Android WebView
+    const needsAutoProcessing = isMkv || isHevc;
+    if ((isRemuxParam || isTranscodeParam || needsAutoProcessing) && !isRawParam) {
       const localPort = process.env.INTERNAL_APP_PORT || process.env.APP_PORT || '3000';
       const localSourceUrl = `http://127.0.0.1:${localPort}/api/stream?url=${encodeURIComponent(urlParam)}&raw=1`;
 
       const ffArgs: string[] = [
-        '-probesize', '1000000',
-        '-analyzeduration', '1000000',
+        '-probesize', '2000000',
+        '-analyzeduration', '2000000',
         '-fflags', '+genpts',
         '-reconnect', '1',
         '-reconnect_streamed', '1',
@@ -466,23 +468,27 @@ export async function handleStream(req: Request, res: Response) {
       }
       ffArgs.push(
         '-i', localSourceUrl,
-        '-map', '0:v:0',
-        '-map', '0:a:0?',
         '-sn',
         '-dn',
         '-map_chapters', '-1'
       );
 
-      if (isRemuxParam && !isTranscodeParam) {
-        // Fast stream-copy video into fragmented MP4 (fixes MKV container / cover stream issues)
-        ffArgs.push('-c:v', 'copy');
-        if (isHevc) {
-          ffArgs.push('-tag:v', 'hvc1');
-        }
-        ffArgs.push('-c:a', 'aac', '-ac', '2', '-b:a', '128k');
-      } else {
-        // Universal H.264 + AAC fragmented MP4 (fixes HEVC Main 10 / unsupported codec in browsers & older Android)
+      const shouldTranscode = isTranscodeParam || isHevc;
+      if (!shouldTranscode) {
+        // Fast stream-copy real moving video into fragmented MP4 (selects 0:V:0 to ignore any embedded cover picture in MKV)
         ffArgs.push(
+          '-map', '0:V:0',
+          '-map', '0:a:0?',
+          '-c:v', 'copy',
+          '-c:a', 'aac',
+          '-ac', '2',
+          '-b:a', '128k'
+        );
+      } else {
+        // Universal H.264 Baseline/Main + AAC fragmented MP4 (guarantees video decodes with audio on all phone displays)
+        ffArgs.push(
+          '-map', '0:V:0',
+          '-map', '0:a:0?',
           '-c:v', 'libx264',
           '-preset', 'ultrafast',
           '-tune', 'zerolatency',
