@@ -371,6 +371,7 @@ public class MainActivity extends BridgeActivity {
         try {
             JSONObject obj = new JSONObject();
             obj.put("active", exoActive);
+            String decoderName = "";
             if (exoPlayer != null) {
                 int state = exoPlayer.getPlaybackState();
                 long posMs = Math.max(0L, exoPlayer.getCurrentPosition());
@@ -383,6 +384,19 @@ public class MainActivity extends BridgeActivity {
                 obj.put("currentTime", posMs / 1000.0);
                 obj.put("duration", (durMs > 0 && durMs != C.TIME_UNSET) ? (durMs / 1000.0) : 0.0);
                 obj.put("bufferedPosition", bufMs / 1000.0);
+
+                try {
+                    for (int i = 0; i < exoPlayer.getCurrentTracks().getGroups().size(); i++) {
+                        Tracks.Group g = exoPlayer.getCurrentTracks().getGroups().get(i);
+                        if (g.getType() == C.TRACK_TYPE_VIDEO && g.isSelected()) {
+                            Format fmt = g.getTrackFormat(0);
+                            if (fmt.sampleMimeType != null) {
+                                decoderName = fmt.sampleMimeType;
+                            }
+                            break;
+                        }
+                    }
+                } catch (Exception ignored) {}
             } else {
                 obj.put("state", Player.STATE_IDLE);
                 obj.put("isPlaying", false);
@@ -396,6 +410,8 @@ public class MainActivity extends BridgeActivity {
             obj.put("videoHeight", exoVideoHeight);
             obj.put("firstFrameRendered", exoFirstFrameRendered);
             obj.put("error", exoErrorMessage != null ? exoErrorMessage : "");
+            obj.put("decoderName", decoderName);
+            obj.put("surfaceVisible", exoContainer != null && exoContainer.getVisibility() == View.VISIBLE);
             obj.put("audioTracks", new JSONArray(exoAudioTracksJson != null ? exoAudioTracksJson : "[]"));
             obj.put("subtitleTracks", new JSONArray(exoSubtitleTracksJson != null ? exoSubtitleTracksJson : "[]"));
             cachedExoStateJson = obj.toString();
@@ -1142,11 +1158,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.206");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.207");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.206\",\"versionCode\":3426}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.207\",\"versionCode\":3427}";
             }
         }
 
