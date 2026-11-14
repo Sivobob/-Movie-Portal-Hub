@@ -276,6 +276,7 @@ export default function VideoPlayerModal({
   // Resolve playable stream URL & preflight metadata (once per movie/episode)
   const [playableUrl, setPlayableUrl] = useState<string>('');
   const [streamSourceKey, setStreamSourceKey] = useState<string>('');
+  const [preflightReadyKey, setPreflightReadyKey] = useState<number>(0);
 
   // Reset playback state ONLY when opening or switching movies/episodes
   useEffect(() => {
@@ -285,6 +286,7 @@ export default function VideoPlayerModal({
       return;
     }
     preflightCacheRef.current = null;
+    setPreflightReadyKey(0);
     setStreamFallbackMode('direct');
     setStreamStartOffset(0);
     setSelectedAudioIdx(0);
@@ -421,6 +423,7 @@ export default function VideoPlayerModal({
         setCurrentTime(initialStart);
         currentTimeRef.current = initialStart;
       }
+      setPreflightReadyKey((k) => k + 1);
     };
 
     initStream();
@@ -431,7 +434,7 @@ export default function VideoPlayerModal({
 
   // Step 2: Build playableUrl whenever mode, seek offset, or audio track changes
   useEffect(() => {
-    if (!isOpen || !preflightCacheRef.current) return;
+    if (!isOpen || !preflightCacheRef.current || preflightReadyKey === 0) return;
     const trimmed = preflightCacheRef.current.url;
     if (!/t\.me|telegram\.me/i.test(trimmed)) return;
 
@@ -446,7 +449,7 @@ export default function VideoPlayerModal({
       if (selectedAudioIdx > 0) params += `&audioIdx=${selectedAudioIdx}`;
     }
     setPlayableUrl(buildApiUrl(`/api/stream${params}`));
-  }, [isOpen, streamFallbackMode, streamStartOffset, selectedAudioIdx, streamSourceKey]);
+  }, [isOpen, streamFallbackMode, streamStartOffset, selectedAudioIdx, streamSourceKey, preflightReadyKey]);
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
@@ -1526,6 +1529,7 @@ export default function VideoPlayerModal({
                   onClick={() => {
                     setError(null);
                     setIsLoading(true);
+                    setExoFailedFallback(false);
                     setStreamFallbackMode('direct');
                     setUseLocalBridgeFallback(false);
                     setRetryNonce((n) => n + 1);
@@ -1731,7 +1735,9 @@ export default function VideoPlayerModal({
             title={isPlaying ? "Pause" : "Play"}
             className="w-18 h-18 sm:w-20 sm:h-20 rounded-full bg-neutral-900/95 hover:bg-neutral-800 border border-neutral-600 text-white flex items-center justify-center transition-transform hover:scale-105 active:scale-95 cursor-pointer"
           >
-            {isPlaying ? (
+            {isLoading && !isPlaying ? (
+              <RefreshCw size={28} className="animate-spin text-yellow-400" />
+            ) : isPlaying ? (
               <Pause size={32} className="sm:w-9 sm:h-9 fill-white stroke-none" />
             ) : (
               <Play size={32} className="sm:w-9 sm:h-9 fill-white stroke-none ml-1" />

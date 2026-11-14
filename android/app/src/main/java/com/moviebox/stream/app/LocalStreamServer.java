@@ -38,7 +38,7 @@ import java.util.regex.Pattern;
  */
 public class LocalStreamServer {
     private static final String TAG = "LocalStreamServer";
-    private static final long MAX_RANGE_CHUNK = 8L * 1024L * 1024L; // 8 MB per open-ended range
+    private static final long MAX_RANGE_CHUNK = 4L * 1024L * 1024L; // 4 MB per open-ended range
     private static final long META_CACHE_TTL_MS = 5L * 60L * 1000L;
     private static final byte[] END_SENTINEL = new byte[0];
     private static final Pattern RANGE_PATTERN = Pattern.compile("bytes=(\\d+)-(\\d*)");
@@ -391,13 +391,13 @@ public class LocalStreamServer {
 
         CompletableFuture<MetaResult> existingInflight = inflightMetaByUrl.get(telegramUrl);
         if (existingInflight != null) {
-            return existingInflight.get(45, TimeUnit.SECONDS);
+            return existingInflight.get(60, TimeUnit.SECONDS);
         }
 
         CompletableFuture<MetaResult> urlFuture = new CompletableFuture<>();
         CompletableFuture<MetaResult> prev = inflightMetaByUrl.putIfAbsent(telegramUrl, urlFuture);
         if (prev != null) {
-            return prev.get(45, TimeUnit.SECONDS);
+            return prev.get(60, TimeUnit.SECONDS);
         }
 
         String reqId = UUID.randomUUID().toString();
@@ -408,7 +408,7 @@ public class LocalStreamServer {
                     + JSONObject.quote(reqId) + "," + JSONObject.quote(telegramUrl) + ");";
             webView.post(() -> webView.evaluateJavascript(js, null));
 
-            MetaResult res = urlFuture.get(45, TimeUnit.SECONDS);
+            MetaResult res = urlFuture.get(60, TimeUnit.SECONDS);
             if (res.ok && res.fileSize > 0) {
                 metaCache.put(telegramUrl, res);
             }
@@ -520,7 +520,7 @@ public class LocalStreamServer {
                 byte[] chunk = session.queue.poll(5, TimeUnit.SECONDS);
                 if (chunk == null) {
                     idleElapsedMs += 5000;
-                    if (session.ended || idleElapsedMs >= 45000) {
+                    if (session.ended || idleElapsedMs >= 60000) {
                         break;
                     }
                     continue;

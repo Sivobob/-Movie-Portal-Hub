@@ -147,9 +147,11 @@ function isRecoverableClientError(err: any): boolean {
   return (
     msg.includes('AUTH_KEY_UNREGISTERED') ||
     msg.includes('SESSION_REVOKED') ||
-    msg.includes('WEBSOCKET WAS CLOSED') ||
+    msg.includes('WEBSOCKET') ||
     msg.includes('CONNECTION') ||
-    msg.includes('NOT CONNECTED')
+    msg.includes('NOT CONNECTED') ||
+    msg.includes('TIMEOUT') ||
+    msg.includes('ECONNRESET')
   );
 }
 
@@ -369,7 +371,7 @@ export async function testDownloadChunk(
 }
 
 function uint8ToBase64(bytes: Uint8Array): string {
-  const CHUNK = 0x8000;
+  const CHUNK = 0x4000;
   const parts: string[] = [];
   for (let i = 0; i < bytes.length; i += CHUNK) {
     parts.push(String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK))));
@@ -427,22 +429,19 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
   };
 
   const sendChunk = async (reqId: string, data: Uint8Array): Promise<number> => {
+    const nb = nativeBridge();
+    if (nb && typeof nb.postChunkBase64 === 'function') {
+      try {
+        return Number(nb.postChunkBase64(reqId, uint8ToBase64(data))) || 200;
+      } catch {}
+    }
+
     const status = await postBridge(
       `/__bridge/chunk?id=${encodeURIComponent(reqId)}`,
       data as unknown as BodyInit,
       'application/octet-stream'
     );
-    if (status !== 0) return status;
-
-    const nb = nativeBridge();
-    if (nb && typeof nb.postChunkBase64 === 'function') {
-      try {
-        return Number(nb.postChunkBase64(reqId, uint8ToBase64(data))) || 200;
-      } catch {
-        return 0;
-      }
-    }
-    return 0;
+    return status;
   };
 
   (window as any).__tgStreamBridge = {
@@ -481,7 +480,7 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
 
     async pumpRange(reqId: string, telegramUrl: string, startByte: number, endByte: number) {
       const BLOCK = 512 * 1024;
-      const CONCURRENCY = 3;
+      const CONCURRENCY = 2;
       const localBlockCache = ((window as any).__tgBlockCache ||= new Map<string, Uint8Array>());
 
       try {
@@ -513,7 +512,7 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
           }
           const result = collected || new Uint8Array(0);
           if (result.length > 0) {
-            if (localBlockCache.size >= 40) {
+            if (localBlockCache.size >= 80) {
               const oldest = localBlockCache.keys().next().value;
               if (oldest !== undefined) localBlockCache.delete(oldest);
             }
@@ -540,11 +539,14 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
             }
           };
 
-          queueAhead(firstBlock + CONCURRENCY - 1);
-
           for (let blockIdx = firstBlock; blockIdx <= lastBlock; blockIdx++) {
             if (abortedReqs.has(reqId)) break;
-            queueAhead(blockIdx + CONCURRENCY);
+            // Fetch the very first block solo so DC export authorization completes cleanly before pipelining
+            if (blockIdx > firstBlock) {
+              queueAhead(blockIdx + CONCURRENCY);
+            } else {
+              nextQueue = Math.max(nextQueue, firstBlock + 1);
+            }
 
             const blockData = await (pending.get(blockIdx) || fetchOneBlock(doc, blockIdx));
             pending.delete(blockIdx);

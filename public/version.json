@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.202",
-  "minimumRequiredVersion": "3.5.202",
-  "latestVersionCode": 3422,
-  "minimumRequiredVersionCode": 3422,
+  "latestVersion": "3.5.203",
+  "minimumRequiredVersion": "3.5.203",
+  "latestVersionCode": 3423,
+  "minimumRequiredVersionCode": 3423,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Portal v3.5.202 update is ready! Tap UPDATE NOW for native ExoPlayer playback (no black screen), unlimited movie & series uploads, and full responsive phone screen fit.",
-  "releaseNotes": "Added native Android ExoPlayer + WebView fallback to eliminate audio-only black screens on all phones, fixed >3 movie/series overwrite & Firestore cache limits, and refined mobile responsive layouts."
+  "updateMessage": "Movie Portal v3.5.203 update is ready! Tap UPDATE NOW to fix infinite buffering and stream loading across all phones.",
+  "releaseNotes": "Fixed stream preflight state trigger in VideoPlayerModal, eliminated HTTP chunk bridge bottlenecks, increased ExoPlayer HTTP connect/read timeouts, and optimized Telegram DC export."
 }

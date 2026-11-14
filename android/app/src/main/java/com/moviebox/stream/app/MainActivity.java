@@ -41,8 +41,10 @@ import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.Tracks;
 import androidx.media3.common.VideoSize;
+import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.mediarouter.media.MediaRouter;
 import androidx.mediarouter.media.MediaRouteSelector;
 import com.getcapacitor.BridgeActivity;
@@ -419,10 +421,16 @@ public class MainActivity extends BridgeActivity {
             exoSubtitleTracksJson = "[]";
 
             if (exoPlayer == null) {
+                DefaultHttpDataSource.Factory httpFactory = new DefaultHttpDataSource.Factory()
+                    .setConnectTimeoutMs(30000)
+                    .setReadTimeoutMs(45000)
+                    .setAllowCrossProtocolRedirects(true)
+                    .setUserAgent("MoviePortal/3.5 AndroidExoPlayer");
                 DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
-                    .setBufferDurationsMs(15000, 60000, 1500, 3000)
+                    .setBufferDurationsMs(15000, 90000, 1000, 2500)
                     .build();
                 exoPlayer = new ExoPlayer.Builder(this)
+                    .setMediaSourceFactory(new DefaultMediaSourceFactory(this).setDataSourceFactory(httpFactory))
                     .setLoadControl(loadControl)
                     .build();
                 exoPlayer.addListener(new Player.Listener() {
@@ -1130,11 +1138,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.202");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.203");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.202\",\"versionCode\":3422}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.203\",\"versionCode\":3423}";
             }
         }
 
