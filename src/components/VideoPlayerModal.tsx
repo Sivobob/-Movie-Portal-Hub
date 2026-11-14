@@ -752,11 +752,13 @@ export default function VideoPlayerModal({
               setIsLoading(false);
               setIsPlaying(true);
             }
-          }).catch(() => {
+          }).catch((playErr: any) => {
             if (!cancelled) {
               video.muted = false;
               wasMutedByAutoplayRef.current = false;
-              setIsLoading(false);
+              if (playErr?.name !== 'AbortError') {
+                setIsLoading(false);
+              }
               setIsPlaying(false);
             }
           });
@@ -766,7 +768,7 @@ export default function VideoPlayerModal({
 
     const safetyTimer = setTimeout(() => {
       if (!cancelled) setIsLoading(false);
-    }, 10000);
+    }, streamFallbackMode === 'direct' ? 10000 : 20000);
 
     return () => {
       cancelled = true;

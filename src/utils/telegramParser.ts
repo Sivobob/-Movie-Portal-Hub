@@ -33,7 +33,7 @@ export function parseTelegramUrl(urlStr: string): ParsedTelegramLink {
     return result;
   }
 
-  const privateMatch = cleanUrl.match(/(?:https?:\/\/)?(?:www\.)?(?:t\.me|telegram\.me)\/c\/(\d+)\/(\d+)/i);
+  const privateMatch = cleanUrl.match(/(?:https?:\/\/)?(?:www\.)?(?:t\.me|telegram\.me)\/c\/(\d+)\/(?:\d+\/)?(\d+)/i);
   if (privateMatch) {
     result.isValid = true;
     result.isPrivate = true;
@@ -43,7 +43,7 @@ export function parseTelegramUrl(urlStr: string): ParsedTelegramLink {
     return result;
   }
 
-  const publicMatch = cleanUrl.match(/(?:https?:\/\/)?(?:www\.)?(?:t\.me|telegram\.me)\/([a-zA-Z0-9_]{4,})\/(\d+)/i);
+  const publicMatch = cleanUrl.match(/(?:https?:\/\/)?(?:www\.)?(?:t\.me|telegram\.me)\/(?:s\/)?([a-zA-Z0-9_]{4,})\/(?:\d+\/)?(\d+)/i);
   if (publicMatch) {
     const username = publicMatch[1];
     if (!['joinchat', 'share', 'addstickers', 'contact'].includes(username.toLowerCase())) {

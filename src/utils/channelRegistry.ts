@@ -243,29 +243,37 @@ export async function resolveTelegramMedia(
     }
   }
 
-  // Fallback: Scan channel's recent messages if ID wasn't directly found
+  // Fallback: Scan channel's recent messages only for user sessions (bots cannot invoke messages.GetHistory)
   if (!foundMsg) {
-    console.log(`[ChannelRegistry] Message ${messageId} not found directly. Attempting recent scan fallback...`);
-    for (const peer of candidatePeers) {
-      if (foundMsg) break;
-      try {
-        const messages = await client.getMessages(peer, { limit: 25 });
-        if (messages && messages.length > 0) {
-          const exact = messages.find((m: any) => m.id === messageId);
-          if (exact) {
-            foundMsg = exact;
-            console.log(`[ChannelRegistry] ✅ Found message ${messageId} in recent scan of peer`);
-            break;
+    let isBotSession = false;
+    try {
+      const me: any = await client.getMe();
+      isBotSession = Boolean(me?.bot);
+    } catch {}
+
+    if (!isBotSession) {
+      console.log(`[ChannelRegistry] Message ${messageId} not found directly. Attempting recent scan fallback...`);
+      for (const peer of candidatePeers) {
+        if (foundMsg) break;
+        try {
+          const messages = await client.getMessages(peer, { limit: 25 });
+          if (messages && messages.length > 0) {
+            const exact = messages.find((m: any) => m.id === messageId);
+            if (exact) {
+              foundMsg = exact;
+              console.log(`[ChannelRegistry] ✅ Found message ${messageId} in recent scan of peer`);
+              break;
+            }
           }
+        } catch (err: any) {
+          if (!lastError) lastError = err?.message || '';
         }
-      } catch (err: any) {
-        if (!lastError) lastError = err?.message || '';
       }
     }
   }
 
   if (!foundMsg) {
-    console.error(`[ChannelRegistry] ❌ Could not resolve message ${messageId} for streaming.`);
+    console.error(`[ChannelRegistry] ❌ Could not resolve message ${messageId} for streaming. Last error: ${lastError || 'Message not found'}`);
   }
 
   return { message: foundMsg, error: lastError };

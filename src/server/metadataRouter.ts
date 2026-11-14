@@ -2,6 +2,11 @@ import express from 'express';
 import type { Request, Response } from 'express';
 import { requireAdmin, AuthRequest } from './authMiddleware.ts';
 import { upgradePosterUrl } from '../utils/posterUrl.ts';
+import {
+  searchWikipediaFilmSuggestions,
+  mergeImdbAndWikiResults,
+  fetchWikipediaFilmDetail,
+} from '../utils/wikipediaMetadata.ts';
 
 const router = express.Router();
 
@@ -230,8 +235,11 @@ router.get('/search', async (req: Request, res: Response) => {
       return null;
     });
 
+  // 4. Simultaneously query Wikipedia film/series index for brand-new releases & re-releases not yet split on IMDb
+  const wikiPromise = searchWikipediaFilmSuggestions(query);
+
   try {
-    const [imdbResults, omdbData] = await Promise.all([imdbPromise, omdbPromise]);
+    const [imdbResults, omdbData, wikiResults] = await Promise.all([imdbPromise, omdbPromise, wikiPromise]);
 
     const combinedResults: Array<{
       imdbId: string;
@@ -270,12 +278,14 @@ router.get('/search', async (req: Request, res: Response) => {
       }
     }
 
-    if (combinedResults.length > 0) {
+    const finalResults = mergeImdbAndWikiResults(query, combinedResults, wikiResults);
+
+    if (finalResults.length > 0) {
       return res.json({
         status: 'ok',
         provider: 'IMDb Live Search',
-        totalResults: combinedResults.length,
-        results: combinedResults,
+        totalResults: finalResults.length,
+        results: finalResults,
       });
     }
 
@@ -316,6 +326,18 @@ router.get('/detail', async (req: Request, res: Response) => {
   const { key, isCustom } = getApiKey();
 
   if (id) {
+    const wikiMatch = id.match(/(wiki-\d+)/i);
+    if (wikiMatch) {
+      const wikiDetail = await fetchWikipediaFilmDetail(wikiMatch[1]);
+      if (wikiDetail) {
+        return res.json({
+          status: 'ok',
+          provider: 'Wikipedia Cinema Index',
+          data: wikiDetail,
+        });
+      }
+      return res.status(404).json({ error: 'Metadata details not found.' });
+    }
     const match = id.match(/(tt\d+)/i);
     if (match) id = match[1].toLowerCase();
   }

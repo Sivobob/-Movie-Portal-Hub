@@ -222,7 +222,17 @@ router.post('/verify', async (req: Request, res: Response) => {
 
   try {
     const client = await getTelegramClient();
-    const { message: msg } = await resolveTelegramMedia(client, parsed);
+    const { message: msg, error: fetchErr } = await resolveTelegramMedia(client, parsed);
+
+    if (!msg) {
+      return res.status(404).json({
+        valid: false,
+        credentialsConfigured: true,
+        botIsAdmin: false,
+        error: `Telegram post #${parsed.messageId} not found or bot is not an admin in this channel.`,
+        detail: fetchErr || undefined,
+      });
+    }
 
     let document: Api.Document | null = null;
     if (msg && msg.media) {
@@ -286,27 +296,23 @@ router.post('/verify', async (req: Request, res: Response) => {
       });
     }
 
-    // Message exists or URL format is valid
-    return res.json({
-      valid: true,
+    return res.status(422).json({
+      valid: false,
       credentialsConfigured: true,
       botIsAdmin: true,
-      message: `✅ Telegram Post #${parsed.messageId} verified. Ready to Stream!`,
+      error: `Telegram post #${parsed.messageId} does not contain a downloadable video file.`,
       chatId: parsed.chatId,
       messageId: parsed.messageId,
-      duration: 0,
-      durationFormatted: '00:00',
     });
   } catch (err: any) {
-    return res.json({
-      valid: true,
+    console.error('[TelegramVerify] Error:', err?.message || err);
+    return res.status(502).json({
+      valid: false,
       credentialsConfigured: true,
-      botIsAdmin: true,
-      message: `✅ Telegram Post #${parsed.messageId} verified. Ready to Stream!`,
+      botIsAdmin: false,
+      error: `Failed to verify Telegram post #${parsed.messageId}: ${err?.message || 'Telegram connection error'}`,
       chatId: parsed.chatId,
       messageId: parsed.messageId,
-      duration: 0,
-      durationFormatted: '00:00',
     });
   }
 });
@@ -319,6 +325,7 @@ interface CachedMediaEntry {
   fileName: string;
   mimeType: string;
   isMkv: boolean;
+  isHevc: boolean;
   cachedAt: number;
 }
 const mediaCache = new Map<string, CachedMediaEntry>();
@@ -404,6 +411,7 @@ export async function handleStream(req: Request, res: Response) {
       const lowerName = fileName.toLowerCase();
       const isWebm = lowerName.endsWith('.webm') || rawMime.includes('webm');
       const isMkv = lowerName.endsWith('.mkv') || rawMime.includes('matroska') || rawMime.includes('mkv');
+      const isHevc = /\b(hevc|x265|h\.?265|10bit|10-bit)\b/i.test(lowerName);
       const mimeType = isWebm ? 'video/webm' : 'video/mp4';
 
       entry = {
@@ -413,13 +421,14 @@ export async function handleStream(req: Request, res: Response) {
         fileName,
         mimeType,
         isMkv,
+        isHevc,
         cachedAt: Date.now(),
       };
       mediaCache.set(cacheKey, entry);
       console.log(`[Stream] Cached document ${document.id} (${formatBytes(fileSize)}, ${fileName || rawMime}) for msg ${parsed.messageId}`);
     }
 
-    const { document, fileSize, durationSec, mimeType } = entry;
+    const { document, fileSize, durationSec, mimeType, isHevc } = entry;
 
     const commonHeaders: Record<string, string> = {
       'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length, X-Video-Duration, Content-Type',
@@ -444,29 +453,44 @@ export async function handleStream(req: Request, res: Response) {
       const localPort = process.env.INTERNAL_APP_PORT || process.env.APP_PORT || '3000';
       const localSourceUrl = `http://127.0.0.1:${localPort}/api/stream?url=${encodeURIComponent(urlParam)}&raw=1`;
 
-      const ffArgs: string[] = [];
+      const ffArgs: string[] = [
+        '-probesize', '1000000',
+        '-analyzeduration', '1000000',
+        '-fflags', '+genpts',
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '3',
+      ];
       if (startSecParam > 0) {
         ffArgs.push('-ss', startSecParam.toString());
       }
       ffArgs.push(
-        '-reconnect', '1',
-        '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '3',
         '-i', localSourceUrl,
         '-map', '0:v:0',
-        '-map', '0:a:0?'
+        '-map', '0:a:0?',
+        '-sn',
+        '-dn',
+        '-map_chapters', '-1'
       );
 
       if (isRemuxParam && !isTranscodeParam) {
-        // Fast stream-copy video into fragmented MP4 (fixes MKV container / PNG cover stream issues)
-        ffArgs.push('-c:v', 'copy', '-c:a', 'aac', '-ac', '2', '-b:a', '128k');
+        // Fast stream-copy video into fragmented MP4 (fixes MKV container / cover stream issues)
+        ffArgs.push('-c:v', 'copy');
+        if (isHevc) {
+          ffArgs.push('-tag:v', 'hvc1');
+        }
+        ffArgs.push('-c:a', 'aac', '-ac', '2', '-b:a', '128k');
       } else {
-        // Universal H.264 + AAC fragmented MP4 (fixes HEVC / unsupported codec on older Android devices)
+        // Universal H.264 + AAC fragmented MP4 (fixes HEVC Main 10 / unsupported codec in browsers & older Android)
         ffArgs.push(
           '-c:v', 'libx264',
           '-preset', 'ultrafast',
           '-tune', 'zerolatency',
           '-pix_fmt', 'yuv420p',
+          '-level', '4.1',
+          '-g', '48',
+          '-keyint_min', '48',
+          '-sc_threshold', '0',
           '-c:a', 'aac',
           '-ac', '2',
           '-b:a', '128k'
@@ -486,6 +510,7 @@ export async function handleStream(req: Request, res: Response) {
         'Content-Type': 'video/mp4',
         'Cache-Control': 'no-cache, no-store, must-revalidate',
       });
+      (res as any).flushHeaders?.();
 
       const ffProc = spawn('ffmpeg', ffArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
       let procClosed = false;
@@ -533,6 +558,9 @@ export async function handleStream(req: Request, res: Response) {
         start = parseInt(match[1], 10) || 0;
         if (match[2]) {
           endPos = parseInt(match[2], 10);
+        } else if (isRawParam) {
+          // Allow internal ffmpeg pipe to stream continuously without 8MB cutoffs
+          endPos = fileSize - 1;
         } else {
           endPos = Math.min(start + MAX_RANGE_CHUNK - 1, fileSize - 1);
         }

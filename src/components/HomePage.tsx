@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { collection, query, where, onSnapshot, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import MovieCard from './MovieCard';
-import { Search, Play, X, Star, Calendar, Globe, Film, ShieldCheck, LogIn, LogOut, Smartphone } from 'lucide-react';
+import { Search, Play, X, Star, Calendar, Globe, Film, ShieldCheck, LogIn, LogOut, Smartphone, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -15,6 +15,23 @@ import { isNativeAndroid, isInstalledPhoneApp, downloadOfficialApk } from '../ut
 import AndroidBottomNav from './AndroidBottomNav';
 import { upgradePosterUrl, normalizeMoviePosters } from '../utils/posterUrl';
 import { getVisibleQualityBadge } from '../utils/qualityBadge';
+
+const slideVariants = {
+  enter: (direction: number) => ({
+    x: direction > 0 ? '100%' : '-100%',
+    opacity: 0.35,
+  }),
+  center: {
+    x: 0,
+    opacity: 1,
+    zIndex: 1,
+  },
+  exit: (direction: number) => ({
+    x: direction > 0 ? '-100%' : '100%',
+    opacity: 0.35,
+    zIndex: 0,
+  }),
+};
 
 export default function HomePage() {
   const isAndroid = isNativeAndroid();
@@ -199,11 +216,12 @@ export default function HomePage() {
 
 
 
-  // Slider Touch & Interaction State
+  // Slider Animation, Swipe & Auto-slide State (3s auto-slide, instant manual slide)
+  const [slideDirection, setSlideDirection] = useState<number>(1);
   const [isUserInteracting, setIsUserInteracting] = useState(false);
-  const [touchStartX, setTouchStartX] = useState<number | null>(null);
-  const [touchEndX, setTouchEndX] = useState<number | null>(null);
   const [isSwiping, setIsSwiping] = useState(false);
+  const touchStartPosRef = useRef<{ x: number; y: number; time: number } | null>(null);
+  const isSwipingRef = useRef(false);
   const interactionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleInteractionStart = () => {
@@ -219,61 +237,114 @@ export default function HomePage() {
     }
     interactionTimeoutRef.current = setTimeout(() => {
       setIsUserInteracting(false);
-    }, 4000); // Resume auto-sliding after 4s idle
+    }, 3000); // Resume auto-sliding after 3s idle
   };
 
-  // Automatic slider timer (every 4s, pauses during user interaction)
+  // Automatic slider timer: exactly 3 seconds, instantly resets on user interaction
   useEffect(() => {
     if (category !== null) return; // Only run on main homepage
     if (featuredMovies.length <= 1) return;
     if (isUserInteracting) return;
 
     const interval = setInterval(() => {
+      setSlideDirection(1);
       setActiveSlideIndex((prev) => (prev + 1) % featuredMovies.length);
-    }, 4000);
+    }, 3000);
 
     return () => clearInterval(interval);
-  }, [category, featuredMovies.length, isUserInteracting]);
+  }, [category, featuredMovies.length, isUserInteracting, activeSlideIndex]);
 
+  // Preload adjacent slide images for zero latency when sliding
+  useEffect(() => {
+    if (featuredMovies.length <= 1) return;
+    const nextItem = featuredMovies[(activeSlideIndex + 1) % featuredMovies.length];
+    const prevItem = featuredMovies[(activeSlideIndex - 1 + featuredMovies.length) % featuredMovies.length];
+    [nextItem, prevItem].forEach((item) => {
+      if (item) {
+        const url = upgradePosterUrl(item.posterUrl || item.backdropUrl, 1200) || item.posterUrl || item.backdropUrl;
+        if (url) {
+          const img = new Image();
+          img.src = url;
+        }
+      }
+    });
+  }, [activeSlideIndex, featuredMovies]);
+
+  // Instant Manual Swipe / Navigation Handler
   const handleManualSwipe = (direction: 'left' | 'right') => {
     if (featuredMovies.length <= 1) return;
+    handleInteractionStart();
     if (direction === 'left') {
+      // Swiped left = next slide (entering from right)
+      setSlideDirection(1);
       setActiveSlideIndex((prev) => (prev + 1) % featuredMovies.length);
     } else {
+      // Swiped right = previous slide (entering from left)
+      setSlideDirection(-1);
       setActiveSlideIndex((prev) => (prev - 1 + featuredMovies.length) % featuredMovies.length);
     }
+    handleInteractionEnd();
   };
 
-  // Touch / Mouse Swipe Event Handlers
+  // Responsive Touch / Mouse Swipe Event Handlers
   const handleTouchStart = (e: React.TouchEvent | React.MouseEvent) => {
-    handleInteractionStart();
-    const clientX = 'touches' in e ? (e as React.TouchEvent).touches[0].clientX : (e as React.MouseEvent).clientX;
-    setTouchStartX(clientX);
-    setTouchEndX(clientX);
+    const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
+    touchStartPosRef.current = { x: clientX, y: clientY, time: Date.now() };
+    isSwipingRef.current = false;
     setIsSwiping(false);
+    handleInteractionStart();
   };
 
   const handleTouchMove = (e: React.TouchEvent | React.MouseEvent) => {
-    if (touchStartX === null) return;
-    const clientX = 'touches' in e ? (e as React.TouchEvent).touches[0].clientX : (e as React.MouseEvent).clientX;
-    setTouchEndX(clientX);
-    if (Math.abs(clientX - touchStartX) > 10) {
+    if (!touchStartPosRef.current) return;
+    const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
+    const diffX = clientX - touchStartPosRef.current.x;
+    const diffY = clientY - touchStartPosRef.current.y;
+
+    if (Math.abs(diffX) > 8 && Math.abs(diffX) > Math.abs(diffY)) {
+      isSwipingRef.current = true;
       setIsSwiping(true);
     }
   };
 
-  const handleTouchEnd = () => {
-    if (touchStartX !== null && touchEndX !== null) {
-      const distance = touchStartX - touchEndX;
-      if (distance > 40) {
-        handleManualSwipe('left');
-      } else if (distance < -40) {
-        handleManualSwipe('right');
+  const handleTouchEnd = (e: React.TouchEvent | React.MouseEvent) => {
+    if (touchStartPosRef.current) {
+      const clientX =
+        'changedTouches' in e
+          ? e.changedTouches[0].clientX
+          : (e as React.MouseEvent).clientX;
+      const clientY =
+        'changedTouches' in e
+          ? e.changedTouches[0].clientY
+          : (e as React.MouseEvent).clientY;
+      const diffX = clientX - touchStartPosRef.current.x;
+      const diffY = clientY - touchStartPosRef.current.y;
+      const elapsedTime = Date.now() - touchStartPosRef.current.time;
+
+      const isHorizontal = Math.abs(diffX) > Math.abs(diffY);
+      const isQuickSwipe = elapsedTime < 350 && Math.abs(diffX) >= 20;
+      const isLongSwipe = Math.abs(diffX) >= 30;
+
+      if (isHorizontal && (isQuickSwipe || isLongSwipe)) {
+        isSwipingRef.current = true;
+        setIsSwiping(true);
+        if (diffX < 0) {
+          handleManualSwipe('left'); // Next
+        } else {
+          handleManualSwipe('right'); // Prev
+        }
       }
     }
-    setTouchStartX(null);
-    setTouchEndX(null);
+    touchStartPosRef.current = null;
     handleInteractionEnd();
+
+    // Reset isSwiping after slight delay to prevent tap-to-play from firing on swipe release
+    setTimeout(() => {
+      isSwipingRef.current = false;
+      setIsSwiping(false);
+    }, 120);
   };
 
   const currentFeatured = featuredMovies.length > 0
@@ -487,34 +558,40 @@ export default function HomePage() {
       ) : (
         /* Cinematic Main Homepage Slider - Fixed Full Screen height */
         <div 
-          className="relative flex-grow h-screen flex flex-col justify-end overflow-hidden pb-12 touch-pan-y cursor-pointer"
+          className="relative flex-grow h-screen flex flex-col justify-end overflow-hidden pb-12 touch-none cursor-pointer select-none"
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
+          onTouchCancel={handleTouchEnd}
           onMouseDown={handleTouchStart}
           onMouseMove={handleTouchMove}
           onMouseUp={handleTouchEnd}
           onClick={() => {
-            if (!isSwiping && currentFeatured) {
+            if (!isSwiping && !isSwipingRef.current && currentFeatured) {
               handleMovieClick(currentFeatured);
             }
           }}
         >
-          <AnimatePresence mode="wait">
+          <AnimatePresence initial={false} custom={slideDirection}>
             <motion.div
               key={currentFeatured.id || activeSlideIndex}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 1 }}
-              className="absolute inset-0"
+              custom={slideDirection}
+              variants={slideVariants}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              transition={{
+                x: { type: 'tween', ease: [0.22, 1, 0.36, 1], duration: 0.35 },
+                opacity: { duration: 0.25 },
+              }}
+              className="absolute inset-0 will-change-transform"
             >
               <img
                 src={upgradePosterUrl(currentFeatured.posterUrl || currentFeatured.backdropUrl, 1200) || currentFeatured.posterUrl || currentFeatured.backdropUrl || 'https://images.unsplash.com/photo-1626814026160-2237a95fc5a0?q=80&w=1200'}
                 alt={currentFeatured.title || 'Featured'}
                 decoding="async"
                 fetchPriority="high"
-                className="absolute inset-0 w-full h-full object-cover object-center"
+                className="absolute inset-0 w-full h-full object-cover object-center pointer-events-none select-none"
                 onError={(e: any) => {
                   const img = e.currentTarget;
                   const raw = currentFeatured.posterUrl || currentFeatured.backdropUrl;
@@ -527,11 +604,39 @@ export default function HomePage() {
                 }}
               />
               {/* Cinematic Vignette Overlay - Lighter at the top to show poster behind logo */}
-              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
-              <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-transparent" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent pointer-events-none" />
+              <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-transparent pointer-events-none" />
             </motion.div>
           </AnimatePresence>
- 
+
+          {/* Quick Manual Navigation Arrows (Desktop / Tablet) */}
+          {featuredMovies.length > 1 && (
+            <>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleManualSwipe('right');
+                }}
+                aria-label="Previous Slide"
+                className="hidden sm:flex absolute left-4 top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full bg-black/40 hover:bg-black/75 text-white/80 hover:text-yellow-400 border border-white/10 hover:border-yellow-400/50 backdrop-blur-md items-center justify-center transition-all cursor-pointer active:scale-90"
+              >
+                <ChevronLeft size={24} />
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleManualSwipe('left');
+                }}
+                aria-label="Next Slide"
+                className="hidden sm:flex absolute right-4 top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full bg-black/40 hover:bg-black/75 text-white/80 hover:text-yellow-400 border border-white/10 hover:border-yellow-400/50 backdrop-blur-md items-center justify-center transition-all cursor-pointer active:scale-90"
+              >
+                <ChevronRight size={24} />
+              </button>
+            </>
+          )}
+
           {/* Slider Pagination Dots (Center Aligned Bottom) */}
           {featuredMovies.length > 1 && (
             <div 
@@ -543,11 +648,13 @@ export default function HomePage() {
                   key={idx}
                   onClick={(e) => {
                     e.stopPropagation();
+                    if (idx === activeSlideIndex) return;
+                    setSlideDirection(idx > activeSlideIndex ? 1 : -1);
                     setActiveSlideIndex(idx);
                     handleInteractionStart();
                     handleInteractionEnd();
                   }}
-                  className={`h-1 rounded-full transition-all duration-500 ${
+                  className={`h-1.5 rounded-full transition-all duration-300 cursor-pointer ${
                     idx === activeSlideIndex ? 'w-10 bg-yellow-400 shadow-[0_0_10px_rgba(250,204,21,0.5)]' : 'w-3 bg-white/20 hover:bg-white/40'
                   }`}
                   aria-label={`Go to slide ${idx + 1}`}

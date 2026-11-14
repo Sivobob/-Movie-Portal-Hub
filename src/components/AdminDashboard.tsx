@@ -60,6 +60,11 @@ import {
 import { loginWithGoogle } from '../services/authService';
 import { buildApiUrl } from '../utils/apiConfig';
 import { upgradePosterUrl } from '../utils/posterUrl';
+import {
+  searchWikipediaFilmSuggestions,
+  mergeImdbAndWikiResults,
+  fetchWikipediaFilmDetail,
+} from '../utils/wikipediaMetadata';
 import { normalizeQualityBadge, getVisibleQualityBadge, QualityBadgeValue } from '../utils/qualityBadge';
 import {
   RemoteUpdateConfig,
@@ -279,64 +284,79 @@ export default function AdminDashboard() {
   };
 
   const fetchClientSideImdbSearch = async (queryToSearch: string) => {
-    try {
-      const clean = queryToSearch
-        .toLowerCase()
-        .trim()
-        .replace(/[^a-z0-9]/g, '_')
-        .replace(/_+/g, '_')
-        .replace(/^_+|_+$/g, '');
+    const clean = queryToSearch
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_+|_+$/g, '');
 
-      if (clean) {
-        const imdbUrl = `https://v3.sg.media-imdb.com/suggestion/x/${encodeURIComponent(clean)}.json`;
-        const imdbRes = await fetch(imdbUrl);
-        if (imdbRes.ok) {
-          const data = await imdbRes.json();
-          if (Array.isArray(data.d)) {
-            const items = data.d
-              .filter((item: any) => item.id && item.id.startsWith('tt'))
-              .map((item: any) => {
-                const poster = upgradePosterUrl(item.i?.imageUrl || '', 1080);
-                return {
+    const [imdbItems, omdbItems, wikiItems] = await Promise.all([
+      (async () => {
+        try {
+          if (!clean) return [];
+          const imdbUrl = `https://v3.sg.media-imdb.com/suggestion/x/${encodeURIComponent(clean)}.json`;
+          const imdbRes = await fetch(imdbUrl);
+          if (imdbRes.ok) {
+            const data = await imdbRes.json();
+            if (Array.isArray(data.d)) {
+              return data.d
+                .filter((item: any) => item.id && item.id.startsWith('tt'))
+                .map((item: any) => ({
                   imdbId: item.id,
                   title: item.l,
                   year: item.y || 'N/A',
                   type: (item.q || '').toLowerCase().includes('series') ? 'series' : 'movie',
-                  posterUrl: poster,
+                  posterUrl: upgradePosterUrl(item.i?.imageUrl || '', 1080),
                   cast: item.s || ''
-                };
-              });
-            if (items.length > 0) return items;
+                }));
+            }
           }
+        } catch (e) {
+          console.warn('Client-side IMDb search fetch error:', e);
         }
-      }
-    } catch (e) {
-      console.warn('Client-side IMDb search fetch error:', e);
-    }
-
-    try {
-      const omdbUrl = `https://www.omdbapi.com/?apikey=trilogy&s=${encodeURIComponent(queryToSearch)}`;
-      const omdbRes = await fetch(omdbUrl);
-      if (omdbRes.ok) {
-        const omdbData = await omdbRes.json();
-        if (omdbData.Response === 'True' && Array.isArray(omdbData.Search)) {
-          return omdbData.Search.map((item: any) => ({
-            imdbId: item.imdbID,
-            title: item.Title,
-            year: item.Year,
-            type: item.Type || 'movie',
-            posterUrl: upgradePosterUrl(item.Poster, 1080),
-          }));
+        return [];
+      })(),
+      (async () => {
+        try {
+          const cleanTitle = queryToSearch.replace(/\(?((?:19|20)\d{2})\)?/g, '').trim() || queryToSearch;
+          const omdbUrl = `https://www.omdbapi.com/?apikey=trilogy&s=${encodeURIComponent(cleanTitle)}`;
+          const omdbRes = await fetch(omdbUrl);
+          if (omdbRes.ok) {
+            const omdbData = await omdbRes.json();
+            if (omdbData.Response === 'True' && Array.isArray(omdbData.Search)) {
+              return omdbData.Search.map((item: any) => ({
+                imdbId: item.imdbID,
+                title: item.Title,
+                year: item.Year,
+                type: item.Type || 'movie',
+                posterUrl: upgradePosterUrl(item.Poster, 1080),
+              }));
+            }
+          }
+        } catch (e) {
+          console.warn('Client-side OMDb search fetch error:', e);
         }
-      }
-    } catch (e) {
-      console.warn('Client-side OMDb search fetch error:', e);
-    }
+        return [];
+      })(),
+      searchWikipediaFilmSuggestions(queryToSearch),
+    ]);
 
-    return [];
+    const seen = new Set<string>();
+    const combined: any[] = [];
+    for (const item of [...imdbItems, ...omdbItems]) {
+      if (item?.imdbId && !seen.has(item.imdbId)) {
+        seen.add(item.imdbId);
+        combined.push(item);
+      }
+    }
+    return mergeImdbAndWikiResults(queryToSearch, combined, wikiItems);
   };
 
   const fetchClientSideImdbDetail = async (imdbIdToFetch: string) => {
+    if (/^wiki-\d+$/i.test(imdbIdToFetch)) {
+      return await fetchWikipediaFilmDetail(imdbIdToFetch);
+    }
     try {
       const url = `https://www.omdbapi.com/?apikey=trilogy&i=${encodeURIComponent(imdbIdToFetch)}&plot=full`;
       const imdbUrl = `https://v3.sg.media-imdb.com/suggestion/x/${encodeURIComponent(imdbIdToFetch)}.json`;
@@ -411,7 +431,7 @@ export default function AdminDashboard() {
 
   const handleFetchByImdbId = async (customId?: string) => {
     const rawId = (customId || imdbId || '').trim();
-    const match = rawId.match(/(tt\d+)/i);
+    const match = rawId.match(/(tt\d+|wiki-\d+)/i);
     if (!match) {
       showNotification('error', 'Please enter a valid IMDb ID (e.g. tt1375666) or IMDb link.');
       return;
@@ -861,13 +881,24 @@ export default function AdminDashboard() {
     if (isTg) {
       setVerifyingStreamUrl(true);
       setStreamNotice(null);
+      setVerifiedTelegramMetadata(null);
       try {
         const res = await authFetch('/api/telegram/verify', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ url: targetUrl }),
         });
+        const contentType = res.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+          throw new Error(`Stream verify API unavailable (HTTP ${res.status})`);
+        }
         const data = await res.json();
+        if (!res.ok || data.valid === false) {
+          const errMsg = data.error || data.message || `Verification failed (HTTP ${res.status})`;
+          setStreamNotice({ type: 'error', message: errMsg });
+          showNotification('error', errMsg);
+          return;
+        }
         if (data.metadata) {
           setVerifiedTelegramMetadata(data.metadata);
           if (data.metadata.durationFormatted && (!runtime || runtime === '')) {
@@ -884,7 +915,9 @@ export default function AdminDashboard() {
           duration: data.duration || data.metadata?.duration || 0
         });
       } catch (err: any) {
-        setStreamNotice({ type: 'success', message: '✅ Stream link ready for preview' });
+        const msg = err?.message || 'Could not verify Telegram link. Opening preview player...';
+        setStreamNotice({ type: 'warning', message: msg });
+        showNotification('error', msg);
         setTestingStream({
           url: targetUrl,
           title: title.trim() || 'Telegram Stream Preview',
@@ -895,6 +928,7 @@ export default function AdminDashboard() {
         setVerifyingStreamUrl(false);
       }
     } else {
+      setVerifiedTelegramMetadata(null);
       setStreamNotice({ type: 'success', message: '✅ Direct video stream verified!' });
       showNotification('success', 'Starting stream test preview...');
       setTestingStream({
