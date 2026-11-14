@@ -8,6 +8,7 @@ import {
   deleteDoc, 
   updateDoc, 
   setDoc,
+  getDocFromServer,
   query
 } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
@@ -63,6 +64,12 @@ import { normalizeQualityBadge, getVisibleQualityBadge, QualityBadgeValue } from
 import {
   RemoteUpdateConfig,
   DEFAULT_REMOTE_UPDATE_CONFIG,
+  CURRENT_VERSION_NAME,
+  CURRENT_VERSION_CODE,
+  APP_UPDATE_COLLECTION,
+  APP_UPDATE_DOC_ID,
+  compareVersions,
+  normalizeRemoteUpdateConfig,
   fetchRemoteUpdateConfig,
   saveRemoteUpdateConfig
 } from '../services/appUpdateConfig';
@@ -147,6 +154,7 @@ export default function AdminDashboard() {
   // Firebase Remote App Update Config State
   const [showUpdateConfigPanel, setShowUpdateConfigPanel] = useState(false);
   const [savingUpdateConfig, setSavingUpdateConfig] = useState(false);
+  const [firebaseUpdateVersion, setFirebaseUpdateVersion] = useState<string | null>(null);
   const [updateConfigForm, setUpdateConfigForm] = useState<RemoteUpdateConfig>(DEFAULT_REMOTE_UPDATE_CONFIG);
 
   // Quality URLs state
@@ -642,6 +650,18 @@ export default function AdminDashboard() {
 
   const loadRemoteUpdateConfig = async () => {
     try {
+      try {
+        const snap = await getDocFromServer(doc(db, APP_UPDATE_COLLECTION, APP_UPDATE_DOC_ID));
+        if (snap.exists()) {
+          const fbCfg = normalizeRemoteUpdateConfig(snap.data());
+          setFirebaseUpdateVersion(fbCfg.minimumRequiredVersion || fbCfg.latestVersion);
+        } else {
+          setFirebaseUpdateVersion(null);
+        }
+      } catch {
+        setFirebaseUpdateVersion(null);
+      }
+
       const cfg = await fetchRemoteUpdateConfig();
       if (cfg) {
         setUpdateConfigForm(cfg);
@@ -657,9 +677,30 @@ export default function AdminDashboard() {
     try {
       const saved = await saveRemoteUpdateConfig(updateConfigForm);
       setUpdateConfigForm(saved);
+      setFirebaseUpdateVersion(saved.minimumRequiredVersion || saved.latestVersion);
       showNotification('success', `✅ Remote Android update config saved (Min Required: v${saved.minimumRequiredVersion}).`);
     } catch (err: any) {
       showNotification('error', `Failed to save remote update config: ${err?.message || 'Permission denied'}`);
+    } finally {
+      setSavingUpdateConfig(false);
+    }
+  };
+
+  const handleQuickPushCurrentRelease = async () => {
+    setSavingUpdateConfig(true);
+    try {
+      const saved = await saveRemoteUpdateConfig({
+        ...updateConfigForm,
+        latestVersion: CURRENT_VERSION_NAME,
+        minimumRequiredVersion: CURRENT_VERSION_NAME,
+        latestVersionCode: CURRENT_VERSION_CODE,
+        minimumRequiredVersionCode: CURRENT_VERSION_CODE,
+      });
+      setUpdateConfigForm(saved);
+      setFirebaseUpdateVersion(saved.minimumRequiredVersion || saved.latestVersion);
+      showNotification('success', `✅ Firebase updated to v${saved.latestVersion} (#${saved.latestVersionCode})! Older APKs will now show the update popup.`);
+    } catch (err: any) {
+      showNotification('error', `Failed to update Firebase: ${err?.message || 'Permission denied'}`);
     } finally {
       setSavingUpdateConfig(false);
     }
@@ -1636,9 +1677,25 @@ export default function AdminDashboard() {
                   Latest: <strong className="text-white">v{updateConfigForm.latestVersion}</strong> (#{updateConfigForm.latestVersionCode})
                 </span>
                 <span>
-                  Min Required: <strong className="text-yellow-400">v{updateConfigForm.minimumRequiredVersion}</strong>
+                  Firebase Live: <strong className="text-yellow-400">v{firebaseUpdateVersion || 'not set'}</strong>
                 </span>
               </div>
+
+              {(!firebaseUpdateVersion || compareVersions(firebaseUpdateVersion, CURRENT_VERSION_NAME) < 0) && (
+                <button
+                  type="button"
+                  disabled={savingUpdateConfig}
+                  onClick={handleQuickPushCurrentRelease}
+                  className="mt-2.5 w-full bg-yellow-400 hover:bg-yellow-300 disabled:opacity-50 text-black font-black text-xs py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                >
+                  <RefreshCw size={13} className={savingUpdateConfig ? 'animate-spin' : ''} />
+                  <span>
+                    {savingUpdateConfig
+                      ? 'Syncing to Firebase...'
+                      : `Push v${CURRENT_VERSION_NAME} Update Popup to All Apps`}
+                  </span>
+                </button>
+              )}
 
               {showUpdateConfigPanel && (
                 <form onSubmit={handleSaveRemoteUpdateConfig} className="mt-3 pt-3 border-t border-neutral-800 space-y-2.5 text-xs">

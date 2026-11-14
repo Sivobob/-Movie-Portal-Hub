@@ -128,6 +128,117 @@ export default function Header() {
     };
   }, []);
 
+  const settingsModal = showSettingsModal ? (
+    <div 
+      className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200"
+      onClick={() => setShowSettingsModal(false)}
+    >
+      <div 
+        className="bg-neutral-900 border border-neutral-800 rounded-3xl max-w-sm w-full p-6 shadow-2xl relative"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Close Button */}
+        <button
+          type="button"
+          onClick={() => setShowSettingsModal(false)}
+          className="absolute top-4 right-4 text-gray-400 hover:text-white p-1.5 rounded-full bg-neutral-800 hover:bg-neutral-700 transition-colors cursor-pointer"
+          aria-label="Close"
+        >
+          <X size={16} />
+        </button>
+
+        <div className="flex items-center gap-3 mb-5">
+          <div className="w-12 h-12 rounded-2xl bg-yellow-400/10 border border-yellow-500/30 flex items-center justify-center text-yellow-400 shadow-md">
+            <KeyRound size={24} />
+          </div>
+          <div>
+            <h3 className="text-base font-black text-white uppercase tracking-tight">App Settings</h3>
+            <p className="text-[11px] text-gray-400">Admin Panel Access</p>
+          </div>
+        </div>
+
+        {isUnlockedSession ? (
+          <div className="space-y-4">
+            <div className="p-3 bg-neutral-950 border border-green-500/30 rounded-2xl flex items-center gap-2.5 text-xs text-green-400 font-medium">
+              <ShieldCheck size={18} className="text-green-400 flex-shrink-0" />
+              <span>Admin mode is currently active.</span>
+            </div>
+
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowSettingsModal(false);
+                  navigate('/admin');
+                }}
+                className="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-black text-xs py-3 px-4 rounded-xl shadow-lg shadow-yellow-400/20 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 uppercase tracking-wider"
+              >
+                <ShieldCheck size={16} />
+                <span>Open Admin Dashboard</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleLockAdminSession}
+                className="w-full bg-neutral-800 hover:bg-neutral-700 text-red-400 font-bold text-xs py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <LogOut size={14} />
+                <span>Lock / Exit Admin Session</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <form onSubmit={handlePasswordSubmit} className="space-y-4">
+            <p className="text-xs text-gray-300 leading-relaxed">
+              Enter the administrator password to access movie management, uploads, and edit settings:
+            </p>
+
+            <div>
+              <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">
+                Admin Password
+              </label>
+              <div className="relative">
+                <input
+                  type={showPasswordText ? 'text' : 'password'}
+                  value={adminPassword}
+                  onChange={(e) => {
+                    setAdminPassword(e.target.value);
+                    setPasswordError('');
+                  }}
+                  placeholder="Enter password..."
+                  autoFocus
+                  className="w-full bg-neutral-950 border border-neutral-700 focus:border-yellow-400 rounded-xl px-3.5 py-3 pr-10 text-xs text-white placeholder-gray-500 focus:outline-none transition-colors"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPasswordText(!showPasswordText)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white p-1"
+                  tabIndex={-1}
+                >
+                  {showPasswordText ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+              {passwordError && (
+                <p className="mt-1.5 text-[11px] text-red-400 font-semibold">{passwordError}</p>
+              )}
+              {isSuccessUnlocked && (
+                <p className="mt-1.5 text-[11px] text-green-400 font-semibold">Password verified! Unlocking admin...</p>
+              )}
+            </div>
+
+            <button
+              type="submit"
+              className="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-black text-xs py-3 px-4 rounded-xl shadow-lg shadow-yellow-400/20 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 uppercase tracking-wider"
+            >
+              <Lock size={15} />
+              <span>Unlock Admin Panel</span>
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
+  ) : null;
+
   if (isAndroid) {
     return (
       <>
@@ -170,7 +281,7 @@ export default function Header() {
             showTopHeader ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0 pointer-events-none'
           } ${
             isOnHome
-              ? 'absolute top-0 left-0 bg-transparent pt-6 sm:pt-4 pb-2 px-4'
+              ? `absolute ${!isInstalled && showTopHeader ? 'top-14' : 'top-0'} left-0 bg-transparent pt-3 sm:pt-4 pb-2 px-4`
               : 'sticky top-0 left-0 bg-black/95 backdrop-blur-md border-b border-neutral-900 pt-6 pb-3 px-4'
           }`}
         >
@@ -192,117 +303,7 @@ export default function Header() {
           </div>
         </header>
 
-        {/* Android App Settings & Admin Password Modal */}
-        {showSettingsModal && (
-          <div 
-            className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200"
-            onClick={() => setShowSettingsModal(false)}
-          >
-            <div 
-              className="bg-neutral-900 border border-neutral-800 rounded-3xl max-w-sm w-full p-6 shadow-2xl relative"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Close Button */}
-              <button
-                type="button"
-                onClick={() => setShowSettingsModal(false)}
-                className="absolute top-4 right-4 text-gray-400 hover:text-white p-1.5 rounded-full bg-neutral-800 hover:bg-neutral-700 transition-colors cursor-pointer"
-                aria-label="Close"
-              >
-                <X size={16} />
-              </button>
-
-              <div className="flex items-center gap-3 mb-5">
-                <div className="w-12 h-12 rounded-2xl bg-yellow-400/10 border border-yellow-500/30 flex items-center justify-center text-yellow-400 shadow-md">
-                  <KeyRound size={24} />
-                </div>
-                <div>
-                  <h3 className="text-base font-black text-white uppercase tracking-tight">App Settings</h3>
-                  <p className="text-[11px] text-gray-400">Admin Panel Access</p>
-                </div>
-              </div>
-
-              {isUnlockedSession ? (
-                <div className="space-y-4">
-                  <div className="p-3 bg-neutral-950 border border-green-500/30 rounded-2xl flex items-center gap-2.5 text-xs text-green-400 font-medium">
-                    <ShieldCheck size={18} className="text-green-400 flex-shrink-0" />
-                    <span>Admin mode is currently active.</span>
-                  </div>
-
-                  <div className="space-y-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowSettingsModal(false);
-                        navigate('/admin');
-                      }}
-                      className="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-black text-xs py-3 px-4 rounded-xl shadow-lg shadow-yellow-400/20 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 uppercase tracking-wider"
-                    >
-                      <ShieldCheck size={16} />
-                      <span>Open Admin Dashboard</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={handleLockAdminSession}
-                      className="w-full bg-neutral-800 hover:bg-neutral-700 text-red-400 font-bold text-xs py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      <LogOut size={14} />
-                      <span>Lock / Exit Admin Session</span>
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <form onSubmit={handlePasswordSubmit} className="space-y-4">
-                  <p className="text-xs text-gray-300 leading-relaxed">
-                    Enter the administrator password to access movie management, uploads, and edit settings:
-                  </p>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">
-                      Admin Password
-                    </label>
-                    <div className="relative">
-                      <input
-                        type={showPasswordText ? 'text' : 'password'}
-                        value={adminPassword}
-                        onChange={(e) => {
-                          setAdminPassword(e.target.value);
-                          setPasswordError('');
-                        }}
-                        placeholder="Enter password..."
-                        autoFocus
-                        className="w-full bg-neutral-950 border border-neutral-700 focus:border-yellow-400 rounded-xl px-3.5 py-3 pr-10 text-xs text-white placeholder-gray-500 focus:outline-none transition-colors"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPasswordText(!showPasswordText)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white p-1"
-                        tabIndex={-1}
-                      >
-                        {showPasswordText ? <EyeOff size={16} /> : <Eye size={16} />}
-                      </button>
-                    </div>
-                    {passwordError && (
-                      <p className="mt-1.5 text-[11px] text-red-400 font-semibold">{passwordError}</p>
-                    )}
-                    {isSuccessUnlocked && (
-                      <p className="mt-1.5 text-[11px] text-green-400 font-semibold">Password verified! Unlocking admin...</p>
-                    )}
-                  </div>
-
-                  <button
-                    type="submit"
-                    className="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-black text-xs py-3 px-4 rounded-xl shadow-lg shadow-yellow-400/20 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 uppercase tracking-wider"
-                  >
-                    <Lock size={15} />
-                    <span>Unlock Admin Panel</span>
-                  </button>
-                </form>
-              )}
-            </div>
-          </div>
-        )}
+        {settingsModal}
       </>
     );
   }
@@ -348,7 +349,7 @@ export default function Header() {
 
       <header className={`w-full z-40 transition-colors ${
         isOnHome
-          ? 'absolute top-0 left-0 bg-transparent pt-4 pb-2 px-4'
+          ? `absolute ${!isInstalled ? 'top-14' : 'top-0'} left-0 bg-transparent pt-3 pb-2 px-4`
           : 'sticky top-0 left-0 bg-black/95 backdrop-blur-md border-b border-neutral-900 py-3 px-4'
       }`}>
         <div className="max-w-7xl mx-auto flex items-center justify-end relative w-full p-2">
@@ -365,6 +366,8 @@ export default function Header() {
           </div>
         </div>
       </header>
+
+      {settingsModal}
     </>
   );
 }
