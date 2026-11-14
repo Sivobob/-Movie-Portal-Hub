@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.205",
-  "minimumRequiredVersion": "3.5.205",
-  "latestVersionCode": 3425,
-  "minimumRequiredVersionCode": 3425,
+  "latestVersion": "3.5.206",
+  "minimumRequiredVersion": "3.5.206",
+  "latestVersionCode": 3426,
+  "minimumRequiredVersionCode": 3426,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Portal v3.5.205 update is ready! Tap UPDATE NOW to fix black screen / frame drop issues during video playback.",
-  "releaseNotes": "Removed premature ExoPlayer 4.5s fallback timeout to allow full buffer loading and seamless hardware video rendering for heavy MKV/HEVC movies."
+  "updateMessage": "Movie Portal v3.5.206 update is ready! Tap UPDATE NOW to fix video visibility and overlay controls during playback.",
+  "releaseNotes": "Corrected transparent WebView DOM hierarchy so React video controls render smoothly on top of native ExoPlayer SurfaceView without black screen."
 }
