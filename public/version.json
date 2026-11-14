@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.195",
-  "minimumRequiredVersion": "3.5.195",
-  "latestVersionCode": 3415,
-  "minimumRequiredVersionCode": 3415,
+  "latestVersion": "3.5.196",
+  "minimumRequiredVersion": "3.5.196",
+  "latestVersionCode": 3416,
+  "minimumRequiredVersionCode": 3416,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Portal v3.5.195 is available with permanent release signing and smoother updates. Please update now to continue.",
+  "updateMessage": "Movie Portal v3.5.196 test update is ready! Tap UPDATE NOW to update in-place without uninstalling.",
   "releaseNotes": "Optimized streaming performance, enhanced stability and updated APK update pipeline."
 }

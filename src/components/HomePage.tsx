@@ -38,14 +38,20 @@ export default function HomePage() {
   const [activeSeasonIndex, setActiveSeasonIndex] = useState(0);
   const [playingMovie, setPlayingMovie] = useState<any | null>(null);
   const [showAdminMenu, setShowAdminMenu] = useState(false);
+  const [isFolderSearchOpen, setIsFolderSearchOpen] = useState(false);
+  const [folderSearchQuery, setFolderSearchQuery] = useState('');
+  const folderSearchInputRef = useRef<HTMLInputElement | null>(null);
   const navigate = useNavigate();
 
   const isMasterAdmin = Boolean(user && isAuthorizedAdminEmail(user.email) && isAdmin);
+  const isFolderSearchSupported =
+    category === 'Bollywood' || category === 'Hollywood' || category === 'Series';
 
   // Synchronized refs to allow hardware back button to read real-time state without stale closures
   const categoryRef = useRef(category);
   const selectedMovieRef = useRef(selectedMovie);
   const playingMovieRef = useRef(playingMovie);
+  const isFolderSearchOpenRef = useRef(isFolderSearchOpen);
 
   useEffect(() => {
     categoryRef.current = category;
@@ -58,6 +64,26 @@ export default function HomePage() {
   useEffect(() => {
     playingMovieRef.current = playingMovie;
   }, [playingMovie]);
+
+  useEffect(() => {
+    isFolderSearchOpenRef.current = isFolderSearchOpen;
+  }, [isFolderSearchOpen]);
+
+  // Reset folder search whenever switching between folders or returning home
+  useEffect(() => {
+    setIsFolderSearchOpen(false);
+    setFolderSearchQuery('');
+  }, [category]);
+
+  // Focus folder search input when opened
+  useEffect(() => {
+    if (isFolderSearchOpen) {
+      const timer = setTimeout(() => {
+        folderSearchInputRef.current?.focus();
+      }, 60);
+      return () => clearTimeout(timer);
+    }
+  }, [isFolderSearchOpen]);
 
   // Method to open category folder and record in history for hardware back navigation
   const openCategory = (cat: string) => {
@@ -73,6 +99,11 @@ export default function HomePage() {
       }
       if (selectedMovieRef.current) {
         setSelectedMovie(null);
+        return;
+      }
+      if (isFolderSearchOpenRef.current) {
+        setIsFolderSearchOpen(false);
+        setFolderSearchQuery('');
         return;
       }
       if (categoryRef.current) {
@@ -98,6 +129,11 @@ export default function HomePage() {
           if (selectedMovieRef.current) {
             setSelectedMovie(null);
             try { window.history.back(); } catch (e) {}
+            return;
+          }
+          if (isFolderSearchOpenRef.current) {
+            setIsFolderSearchOpen(false);
+            setFolderSearchQuery('');
             return;
           }
           if (categoryRef.current) {
@@ -260,6 +296,25 @@ export default function HomePage() {
       })
     : [];
 
+  const trimmedFolderQuery = folderSearchQuery.trim().toLowerCase();
+  const filteredCategoryMovies =
+    isFolderSearchSupported && trimmedFolderQuery
+      ? categoryMovies.filter((m) => {
+          const title = String(m.title || '').toLowerCase();
+          const originalTitle = String(m.originalTitle || '').toLowerCase();
+          const genre = String(m.genre || '').toLowerCase();
+          const year = String(m.releaseYear || '').toLowerCase();
+          const language = String(m.language || '').toLowerCase();
+          return (
+            title.includes(trimmedFolderQuery) ||
+            originalTitle.includes(trimmedFolderQuery) ||
+            genre.includes(trimmedFolderQuery) ||
+            year.includes(trimmedFolderQuery) ||
+            language.includes(trimmedFolderQuery)
+          );
+        })
+      : categoryMovies;
+
   const handleMovieClick = (movie: any) => {
     setSelectedMovie(movie);
     try {
@@ -307,15 +362,68 @@ export default function HomePage() {
   };
 
   return (
-    <div className={`h-full min-h-full w-full bg-black text-white flex flex-col relative pt-0 select-none overflow-x-hidden ${category ? 'pb-20' : 'pb-0 overflow-y-hidden'}`}>
+    <div className={`h-full min-h-full w-full bg-black text-white flex flex-col relative pt-0 select-none overflow-x-hidden ${category ? 'pb-28' : 'pb-0 overflow-y-hidden'}`}>
 
 
       {/* Category Grid View OR Cinematic Main Homepage */}
       {category ? (
         <div className="flex-grow pt-4">
           <div className="flex items-center justify-between px-4 mb-3">
-            <h2 className="text-yellow-400 font-bold text-lg tracking-wide uppercase">{category}</h2>
+            <div className="flex items-baseline gap-2.5">
+              <h2 className="text-yellow-400 font-bold text-lg tracking-wide uppercase">{category}</h2>
+              <span className="text-xs text-gray-400 tabular-nums">
+                {trimmedFolderQuery
+                  ? `${filteredCategoryMovies.length} of ${categoryMovies.length}`
+                  : `${categoryMovies.length} ${category === 'Series' ? 'titles' : 'movies'}`}
+              </span>
+            </div>
           </div>
+
+          {/* Folder-Scoped Search Bar (Only inside Bollywood, Hollywood, Series folders) */}
+          {isFolderSearchSupported && isFolderSearchOpen && (
+            <div className="px-3 sm:px-4 mb-4">
+              <div className="flex items-center gap-2.5 bg-neutral-900 border border-yellow-400/60 focus-within:border-yellow-400 rounded-2xl px-3.5 py-2.5 shadow-lg shadow-black/40">
+                <Search size={18} className="text-yellow-400 shrink-0" />
+                <input
+                  ref={folderSearchInputRef}
+                  type="text"
+                  value={folderSearchQuery}
+                  onChange={(e) => setFolderSearchQuery(e.target.value)}
+                  placeholder={`Search in ${category}...`}
+                  aria-label={`Search in ${category}`}
+                  className="bg-transparent flex-grow min-w-0 text-sm text-white placeholder-gray-400 outline-none"
+                />
+                {folderSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFolderSearchQuery('');
+                      folderSearchInputRef.current?.focus();
+                    }}
+                    className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg text-gray-400 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"
+                    aria-label="Clear search"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsFolderSearchOpen(false);
+                    setFolderSearchQuery('');
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-xs font-bold text-yellow-400 whitespace-nowrap shrink-0 cursor-pointer transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+              {trimmedFolderQuery && (
+                <p className="mt-2 px-1 text-xs text-gray-400 tabular-nums">
+                  {filteredCategoryMovies.length} {filteredCategoryMovies.length === 1 ? 'result' : 'results'} in {category}
+                </p>
+              )}
+            </div>
+          )}
 
           {isLoading ? (
             <div className="py-24 text-center">
@@ -332,9 +440,29 @@ export default function HomePage() {
                 No {category === 'Series' ? 'series' : `${category.toLowerCase()} movies`} have been uploaded yet.
               </p>
             </div>
+          ) : filteredCategoryMovies.length === 0 ? (
+            <div className="py-20 px-4 text-center">
+              <Search className="mx-auto mb-3 text-yellow-400/50" size={40} />
+              <h3 className="text-xl font-black text-yellow-400 tracking-wide uppercase mb-2">
+                No {category === 'Series' ? 'Series' : `${category} Movies`} Match
+              </h3>
+              <p className="text-xs text-gray-400 max-w-xs mx-auto mb-5">
+                Nothing in {category} matched &ldquo;{folderSearchQuery.trim()}&rdquo;.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setFolderSearchQuery('');
+                  folderSearchInputRef.current?.focus();
+                }}
+                className="px-4 py-2 rounded-xl bg-yellow-400 hover:bg-yellow-300 text-black font-bold text-xs uppercase tracking-wider cursor-pointer active:scale-95 transition-all"
+              >
+                Clear Search
+              </button>
+            </div>
           ) : (
-            <div className="grid grid-cols-3 gap-2 px-2">
-              {categoryMovies.map((movie) => (
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2 sm:gap-3 px-2 sm:px-4">
+              {filteredCategoryMovies.map((movie) => (
                 <MovieCard 
                   key={movie.id} 
                   movie={movie} 
@@ -707,6 +835,30 @@ export default function HomePage() {
           }}
 
         />
+      )}
+
+      {/* Floating Bottom-Right Yellow Search Button (ONLY inside Bollywood, Hollywood, and Series folders) */}
+      {isFolderSearchSupported && !selectedMovie && !playingMovie && (
+        <button
+          type="button"
+          onClick={() => {
+            document.getElementById('root')?.scrollTo({ top: 0, behavior: 'smooth' });
+            if (isFolderSearchOpen) {
+              if (folderSearchQuery.trim()) {
+                folderSearchInputRef.current?.focus();
+              } else {
+                setIsFolderSearchOpen(false);
+              }
+            } else {
+              setIsFolderSearchOpen(true);
+            }
+          }}
+          aria-label={`Search in ${category}`}
+          title={`Search ${category}`}
+          className="fixed right-4 sm:right-6 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-40 w-14 h-14 rounded-full bg-yellow-400 hover:bg-yellow-300 text-black border-2 border-yellow-200 shadow-[0_8px_28px_rgba(250,204,21,0.5)] flex items-center justify-center cursor-pointer active:scale-90 transition-transform duration-150 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-yellow-300/60"
+        >
+          <Search size={24} strokeWidth={2.5} />
+        </button>
       )}
 
       {/* Fixed Bottom Navigation with large, beautifully styled category pills for Bollywood, Hollywood, Series */}

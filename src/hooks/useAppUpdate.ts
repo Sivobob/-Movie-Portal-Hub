@@ -9,6 +9,7 @@ import {
   subscribeRemoteUpdateConfig,
   getInstalledAppVersion,
   isAppUpdateRequired,
+  pickHigherRemoteUpdateConfig,
   OFFICIAL_APK_DIRECT_URL,
 } from '../services/appUpdateConfig';
 
@@ -87,11 +88,13 @@ export function useAppUpdate() {
     const unsubscribeSnapshot = subscribeRemoteUpdateConfig(
       async (config) => {
         if (!isMounted) return;
-        setRemoteConfig(config);
+        const effectiveConfig =
+          pickHigherRemoteUpdateConfig(config, remoteConfigRef.current) || config;
+        setRemoteConfig(effectiveConfig);
         const installed = await getInstalledAppVersion();
         if (!isMounted) return;
         setInstalledVersion(installed);
-        evaluateUpdateLock(installed, config);
+        evaluateUpdateLock(installed, effectiveConfig);
       },
       (err) => {
         console.warn('Firestore remote update listener notice:', err);

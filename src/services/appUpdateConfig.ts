@@ -13,8 +13,8 @@ import { buildApiUrl } from '../utils/apiConfig';
 export const APP_UPDATE_COLLECTION = 'admins';
 export const APP_UPDATE_DOC_ID = 'android_update';
 
-export const CURRENT_VERSION_NAME = '3.5.195';
-export const CURRENT_VERSION_CODE = 3415;
+export const CURRENT_VERSION_NAME = '3.5.196';
+export const CURRENT_VERSION_CODE = 3416;
 
 export const OFFICIAL_APK_DIRECT_URL =
   'https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk';
@@ -196,36 +196,68 @@ export function normalizeRemoteUpdateConfig(raw: any): RemoteUpdateConfig {
   };
 }
 
+export function pickHigherRemoteUpdateConfig(
+  a: RemoteUpdateConfig | null,
+  b: RemoteUpdateConfig | null
+): RemoteUpdateConfig | null {
+  if (!a) return b;
+  if (!b) return a;
+  const cmpVersion = compareVersions(
+    a.minimumRequiredVersion || a.latestVersion,
+    b.minimumRequiredVersion || b.latestVersion
+  );
+  if (cmpVersion > 0) return a;
+  if (cmpVersion < 0) return b;
+  const aCode = Number(a.minimumRequiredVersionCode || a.latestVersionCode || 0);
+  const bCode = Number(b.minimumRequiredVersionCode || b.latestVersionCode || 0);
+  return aCode >= bCode ? a : b;
+}
+
 export async function fetchRemoteUpdateConfig(): Promise<RemoteUpdateConfig | null> {
   const ref = doc(db, APP_UPDATE_COLLECTION, APP_UPDATE_DOC_ID);
 
-  // 1. Always try live Firebase Firestore server first so resume re-checks see latest config
-  try {
-    const serverSnap = await getDocFromServer(ref);
-    if (serverSnap.exists()) {
-      return normalizeRemoteUpdateConfig(serverSnap.data());
-    }
-  } catch (serverErr) {
+  const fetchFirestoreConfig = async (): Promise<RemoteUpdateConfig | null> => {
     try {
-      const cachedSnap = await getDoc(ref);
-      if (cachedSnap.exists()) {
-        return normalizeRemoteUpdateConfig(cachedSnap.data());
+      const serverSnap = await getDocFromServer(ref);
+      if (serverSnap.exists()) {
+        return normalizeRemoteUpdateConfig(serverSnap.data());
+      }
+    } catch {
+      try {
+        const cachedSnap = await getDoc(ref);
+        if (cachedSnap.exists()) {
+          return normalizeRemoteUpdateConfig(cachedSnap.data());
+        }
+      } catch {}
+    }
+    return null;
+  };
+
+  const fetchGithubConfig = async (): Promise<RemoteUpdateConfig | null> => {
+    try {
+      const ghRes = await fetch(`${GITHUB_VERSION_JSON_URL}?t=${Date.now()}`, {
+        cache: 'no-store',
+      });
+      if (ghRes.ok) {
+        const data = await ghRes.json();
+        if (data) return normalizeRemoteUpdateConfig(data);
       }
     } catch {}
+    return null;
+  };
+
+  // Query both live Firebase Firestore and GitHub version.json, picking the highest version
+  const [firestoreConfig, githubConfig] = await Promise.all([
+    fetchFirestoreConfig(),
+    fetchGithubConfig(),
+  ]);
+
+  const bestRemote = pickHigherRemoteUpdateConfig(firestoreConfig, githubConfig);
+  if (bestRemote) {
+    return bestRemote;
   }
 
-  // 2. Fallback to GitHub public version.json
-  try {
-    const ghRes = await fetch(`${GITHUB_VERSION_JSON_URL}?t=${Date.now()}`, {
-      cache: 'no-store',
-    });
-    if (ghRes.ok) {
-      const data = await ghRes.json();
-      if (data) return normalizeRemoteUpdateConfig(data);
-    }
-  } catch {}
-
-  // 3. Fallback to backend /version.json
+  // Fallback to backend /version.json
   try {
     const res = await fetch(buildApiUrl(`/version.json?t=${Date.now()}`), {
       cache: 'no-store',
