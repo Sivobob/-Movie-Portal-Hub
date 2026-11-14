@@ -433,7 +433,7 @@ export default function HomePage() {
   };
 
   return (
-    <div className={`h-full min-h-full w-full bg-black text-white flex flex-col relative pt-0 select-none overflow-x-hidden ${category ? 'pb-28' : 'pb-0 overflow-y-hidden'}`}>
+    <div className={`relative flex-1 min-h-0 w-full bg-black text-white flex flex-col select-none overflow-x-hidden ${category ? 'overflow-y-auto pb-28 pt-1' : 'overflow-hidden pb-0'}`}>
 
 
       {/* Category Grid View OR Cinematic Main Homepage */}
@@ -556,9 +556,9 @@ export default function HomePage() {
           </p>
         </div>
       ) : (
-        /* Cinematic Main Homepage Slider - Fixed Full Screen height */
+        /* Cinematic Main Homepage Slider - Auto-fits phone screen height */
         <div 
-          className="relative flex-grow h-screen flex flex-col justify-end overflow-hidden pb-12 touch-none cursor-pointer select-none"
+          className="relative flex-1 min-h-0 w-full flex flex-col justify-end overflow-hidden pb-24 sm:pb-20 touch-none cursor-pointer select-none"
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
@@ -640,7 +640,7 @@ export default function HomePage() {
           {/* Slider Pagination Dots (Center Aligned Bottom) */}
           {featuredMovies.length > 1 && (
             <div 
-              className="relative z-10 flex justify-center gap-2 mt-8 pb-4"
+              className="relative z-10 flex justify-center gap-2 mt-4 pb-2"
               onClick={(e) => e.stopPropagation()}
             >
               {featuredMovies.map((_, idx) => (
@@ -672,7 +672,7 @@ export default function HomePage() {
           onClick={() => setSelectedMovie(null)}
         >
           <div
-            className="bg-neutral-900 rounded-[28px] max-w-[340px] sm:max-w-[360px] w-full overflow-hidden shadow-2xl relative my-auto border border-neutral-800/60"
+            className="bg-neutral-900 rounded-[28px] max-w-[340px] sm:max-w-[360px] w-full max-h-[92dvh] flex flex-col overflow-hidden shadow-2xl relative my-auto border border-neutral-800/60"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Top Close Button (Dismiss Modal) */}
@@ -727,7 +727,7 @@ export default function HomePage() {
             </div>
 
             {/* Movie Info Section */}
-            <div className="bg-white text-black p-6 pt-5 pb-8 rounded-b-[28px]">
+            <div className="bg-white text-black p-5 pt-4 pb-6 sm:p-6 sm:pt-5 sm:pb-8 rounded-b-[28px] overflow-y-auto max-h-[48vh] scrollbar-thin">
               <h3 className="text-xl sm:text-2xl font-black text-gray-900 text-center tracking-tight leading-snug mb-2 font-sans uppercase">
                 {selectedMovie.title}
               </h3>
@@ -968,8 +968,8 @@ export default function HomePage() {
         </button>
       )}
 
-      {/* Fixed Bottom Navigation with large, beautifully styled category pills for Bollywood, Hollywood, Series */}
-      <nav className="bg-black/95 backdrop-blur-xl border-t border-neutral-900 flex items-center justify-around fixed bottom-0 left-0 w-full z-40 py-3 px-4 pb-[env(safe-area-inset-bottom)] shadow-2xl">
+      {/* Fixed Bottom Navigation with responsive category pills for Bollywood, Hollywood, Series */}
+      <nav className="bg-black/95 backdrop-blur-xl border-t border-neutral-900/90 flex items-center justify-around fixed bottom-0 left-0 right-0 w-full z-40 px-2 sm:px-4 py-2 sm:py-2.5 pb-[max(0.6rem,env(safe-area-inset-bottom))] shadow-2xl">
         {(['Bollywood', 'Hollywood', 'Series'] as const).map((cat) => (
           <button
             key={cat}
@@ -980,14 +980,14 @@ export default function HomePage() {
                 openCategory(cat);
               }
             }}
-            className={`flex-1 mx-2 py-3 px-4 rounded-2xl text-center font-black uppercase text-base sm:text-lg tracking-wide transition-all cursor-pointer active:scale-95 shadow-lg flex items-center justify-center gap-2 ${
+            className={`flex-1 mx-1 sm:mx-1.5 py-2.5 sm:py-3 px-1.5 sm:px-3 rounded-xl sm:rounded-2xl text-center font-black uppercase text-xs sm:text-sm md:text-base tracking-wide transition-all cursor-pointer active:scale-95 shadow-lg flex items-center justify-center gap-1.5 ${
               category === cat
-                ? 'bg-yellow-400 text-black border-2 border-yellow-300 shadow-[0_0_25px_rgba(250,204,21,0.5)] scale-105'
+                ? 'bg-yellow-400 text-black border-2 border-yellow-300 shadow-[0_0_20px_rgba(250,204,21,0.5)] scale-[1.02]'
                 : 'bg-neutral-900/90 text-yellow-400 hover:bg-neutral-800 border border-neutral-800'
             }`}
           >
             <span className="truncate">{cat}</span>
-            {category === cat && <span className="w-2.5 h-2.5 rounded-full bg-black"></span>}
+            {category === cat && <span className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-black flex-shrink-0"></span>}
           </button>
         ))}
       </nav>

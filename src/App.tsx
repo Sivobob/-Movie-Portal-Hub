@@ -86,10 +86,10 @@ function AppContent() {
       {showSplash ? (
         <SplashScreen onFinish={() => setShowSplash(false)} />
       ) : (
-        <div className="h-full min-h-full w-full bg-black flex flex-col select-none overscroll-none">
+        <div className="h-full min-h-[100dvh] w-full max-w-full bg-black flex flex-col select-none overflow-x-hidden">
           <Header />
           <UpdateNotification />
-          <main className={`flex-grow ${window.location.pathname === '/' && !new URLSearchParams(window.location.search).get('category') ? 'pb-0' : 'pb-14 sm:pb-0'}`}>
+          <main className="flex-1 min-h-0 w-full flex flex-col">
             <Routes>
               <Route path="/" element={<HomePage />} />
               <Route

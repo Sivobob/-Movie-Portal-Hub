@@ -200,6 +200,14 @@ public class MainActivity extends BridgeActivity {
                 settings.setMediaPlaybackRequiresUserGesture(false);
                 settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
 
+                // Auto-fit to mobile phone display screen size and avoid distortion
+                settings.setUseWideViewPort(true);
+                settings.setLoadWithOverviewMode(true);
+                settings.setSupportZoom(false);
+                settings.setBuiltInZoomControls(false);
+                settings.setDisplayZoomControls(false);
+                settings.setTextZoom(100);
+
                 webView.setWebChromeClient(new BridgeWebChromeClient(getBridge()) {
                     @Override
                     public void onShowCustomView(View view, CustomViewCallback callback) {
@@ -768,11 +776,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.193");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.198");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.193\",\"versionCode\":3413}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.198\",\"versionCode\":3418}";
             }
         }
 
@@ -919,14 +927,19 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void enableImmersiveStickyMode(boolean hideAllSystemBars) {
-        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), !hideAllSystemBars);
         WindowInsetsControllerCompat controller = new WindowInsetsControllerCompat(getWindow(), getWindow().getDecorView());
         if (hideAllSystemBars) {
             controller.hide(WindowInsetsCompat.Type.systemBars());
+            controller.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
         } else {
             controller.hide(WindowInsetsCompat.Type.statusBars());
             controller.show(WindowInsetsCompat.Type.navigationBars());
+            controller.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                getWindow().setNavigationBarColor(Color.BLACK);
+                getWindow().setStatusBarColor(Color.BLACK);
+            }
         }
-        controller.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
     }
 }
