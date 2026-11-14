@@ -16,7 +16,12 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
 import android.view.Gravity;
-import android.view.SurfaceView;
+import android.view.TextureView;
+import android.graphics.SurfaceTexture;
+import android.media.MediaCodecInfo;
+import android.media.MediaCodecList;
+import android.media.MediaFormat;
+import java.util.Locale;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
@@ -118,7 +123,7 @@ public class MainActivity extends BridgeActivity {
 
     // Native Media3 ExoPlayer state (universal phone hardware/software codec playback)
     private FrameLayout exoContainer;
-    private SurfaceView exoSurfaceView;
+    private TextureView exoTextureView;
     private ExoPlayer exoPlayer;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private volatile boolean exoActive = false;
@@ -184,6 +189,11 @@ public class MainActivity extends BridgeActivity {
         super.onResume();
         if (!webViewConfigured || localStreamServer == null) {
             configureWebView();
+        }
+        if (exoPlayer != null && exoActive && exoTextureView != null && exoTextureView.isAvailable()) {
+            try {
+                exoPlayer.setVideoTextureView(exoTextureView);
+            } catch (Exception ignored) {}
         }
         enableImmersiveStickyMode(isPlaybackFullscreen || customView != null);
     }
@@ -307,13 +317,41 @@ public class MainActivity extends BridgeActivity {
             exoContainer.setBackgroundColor(Color.BLACK);
             exoContainer.setVisibility(View.GONE);
 
-            exoSurfaceView = new SurfaceView(this);
+            exoTextureView = new TextureView(this);
+            exoTextureView.setOpaque(true);
+            exoTextureView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
+                @Override
+                public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
+                    if (exoPlayer != null) {
+                        exoPlayer.setVideoTextureView(exoTextureView);
+                    }
+                }
+
+                @Override
+                public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) {
+                    updateExoVideoSurfaceSize();
+                }
+
+                @Override
+                public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
+                    if (exoPlayer != null) {
+                        exoPlayer.setVideoTextureView(null);
+                    }
+                    return true;
+                }
+
+                @Override
+                public void onSurfaceTextureUpdated(SurfaceTexture surface) {
+                    exoFirstFrameRendered = true;
+                }
+            });
+
             FrameLayout.LayoutParams tvParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 Gravity.CENTER
             );
-            exoContainer.addView(exoSurfaceView, tvParams);
+            exoContainer.addView(exoTextureView, tvParams);
             exoContainer.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
                 if ((r - l) != (or - ol) || (b - t) != (ob - ot)) {
                     updateExoVideoSurfaceSize();
@@ -334,7 +372,7 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void updateExoVideoSurfaceSize() {
-        if (exoContainer == null || exoSurfaceView == null) return;
+        if (exoContainer == null || exoTextureView == null) return;
         int cw = exoContainer.getWidth();
         int ch = exoContainer.getHeight();
         if (cw <= 0 || ch <= 0) return;
@@ -356,7 +394,7 @@ public class MainActivity extends BridgeActivity {
             }
         }
 
-        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) exoSurfaceView.getLayoutParams();
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) exoTextureView.getLayoutParams();
         if (lp == null) {
             lp = new FrameLayout.LayoutParams(targetW, targetH, Gravity.CENTER);
         } else {
@@ -364,7 +402,7 @@ public class MainActivity extends BridgeActivity {
             lp.height = targetH;
             lp.gravity = Gravity.CENTER;
         }
-        exoSurfaceView.setLayoutParams(lp);
+        exoTextureView.setLayoutParams(lp);
     }
 
     private void refreshExoStateSnapshot() {
@@ -372,6 +410,7 @@ public class MainActivity extends BridgeActivity {
             JSONObject obj = new JSONObject();
             obj.put("active", exoActive);
             String decoderName = "";
+            int errorCode = 0;
             if (exoPlayer != null) {
                 int state = exoPlayer.getPlaybackState();
                 long posMs = Math.max(0L, exoPlayer.getCurrentPosition());
@@ -384,6 +423,14 @@ public class MainActivity extends BridgeActivity {
                 obj.put("currentTime", posMs / 1000.0);
                 obj.put("duration", (durMs > 0 && durMs != C.TIME_UNSET) ? (durMs / 1000.0) : 0.0);
                 obj.put("bufferedPosition", bufMs / 1000.0);
+
+                PlaybackException err = exoPlayer.getPlayerError();
+                if (err != null) {
+                    errorCode = err.errorCode;
+                    if (exoErrorMessage == null || exoErrorMessage.isEmpty()) {
+                        exoErrorMessage = err.getMessage() != null ? err.getMessage() : err.getErrorCodeName();
+                    }
+                }
 
                 try {
                     for (int i = 0; i < exoPlayer.getCurrentTracks().getGroups().size(); i++) {
@@ -410,7 +457,9 @@ public class MainActivity extends BridgeActivity {
             obj.put("videoHeight", exoVideoHeight);
             obj.put("firstFrameRendered", exoFirstFrameRendered);
             obj.put("error", exoErrorMessage != null ? exoErrorMessage : "");
+            obj.put("errorCode", errorCode);
             obj.put("decoderName", decoderName);
+            obj.put("surfaceType", "TextureView");
             obj.put("surfaceVisible", exoContainer != null && exoContainer.getVisibility() == View.VISIBLE);
             obj.put("audioTracks", new JSONArray(exoAudioTracksJson != null ? exoAudioTracksJson : "[]"));
             obj.put("subtitleTracks", new JSONArray(exoSubtitleTracksJson != null ? exoSubtitleTracksJson : "[]"));
@@ -516,14 +565,14 @@ public class MainActivity extends BridgeActivity {
 
                     @Override
                     public void onPlayerError(PlaybackException error) {
-                        exoErrorMessage = error.getMessage() != null ? error.getMessage() : "ExoPlayer playback error";
+                        exoErrorMessage = error.getMessage() != null ? error.getMessage() : ("ExoPlayer error: " + error.getErrorCodeName());
                         refreshExoStateSnapshot();
                     }
                 });
             }
 
-            if (exoSurfaceView != null) {
-                exoPlayer.setVideoSurfaceView(exoSurfaceView);
+            if (exoTextureView != null) {
+                exoPlayer.setVideoTextureView(exoTextureView);
             }
 
             // Disable text subtitles by default until user selects one
@@ -558,7 +607,7 @@ public class MainActivity extends BridgeActivity {
             try {
                 exoPlayer.stop();
                 exoPlayer.clearMediaItems();
-                exoPlayer.setVideoSurfaceView(null);
+                exoPlayer.setVideoTextureView(null);
             } catch (Exception ignored) {}
         }
         if (exoContainer != null) {
@@ -579,6 +628,7 @@ public class MainActivity extends BridgeActivity {
         mainHandler.removeCallbacks(exoStateTicker);
         if (exoPlayer != null) {
             try {
+                exoPlayer.setVideoTextureView(null);
                 exoPlayer.release();
             } catch (Exception ignored) {}
             exoPlayer = null;
@@ -1158,11 +1208,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.207");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.208");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.207\",\"versionCode\":3427}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.208\",\"versionCode\":3428}";
             }
         }
 
@@ -1286,6 +1336,97 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface
         public boolean isExoSupported() {
             return true;
+        }
+
+        @JavascriptInterface
+        public String getDeviceCapabilities() {
+            try {
+                JSONObject json = new JSONObject();
+                json.put("sdkInt", Build.VERSION.SDK_INT);
+                json.put("manufacturer", Build.MANUFACTURER);
+                json.put("model", Build.MODEL);
+                json.put("hardware", Build.HARDWARE);
+
+                boolean supportsAvc = false;
+                boolean supportsHevc = false;
+                boolean supportsHevc10Bit = false;
+                boolean supportsVp9 = false;
+                boolean supportsAv1 = false;
+                boolean hasHardwareHevc = false;
+                int maxHevcWidth = 0;
+                int maxHevcHeight = 0;
+                JSONArray hardwareDecoders = new JSONArray();
+                JSONArray softwareDecoders = new JSONArray();
+
+                MediaCodecList codecList = new MediaCodecList(MediaCodecList.ALL_CODECS);
+                MediaCodecInfo[] codecInfos = codecList.getCodecInfos();
+
+                for (MediaCodecInfo info : codecInfos) {
+                    if (info.isEncoder()) continue;
+                    String name = info.getName().toLowerCase(Locale.US);
+                    boolean isHardware = true;
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        isHardware = info.isHardwareAccelerated();
+                    } else {
+                        isHardware = !name.startsWith("omx.google.") && !name.startsWith("c2.android.");
+                    }
+
+                    String[] types = info.getSupportedTypes();
+                    for (String type : types) {
+                        String lowerType = type.toLowerCase(Locale.US);
+                        if (lowerType.equals("video/avc")) {
+                            supportsAvc = true;
+                        } else if (lowerType.equals("video/hevc")) {
+                            supportsHevc = true;
+                            if (isHardware) {
+                                hasHardwareHevc = true;
+                                hardwareDecoders.put(info.getName());
+                            } else {
+                                softwareDecoders.put(info.getName());
+                            }
+                            try {
+                                MediaCodecInfo.CodecCapabilities caps = info.getCapabilitiesForType(type);
+                                if (caps != null && caps.profileLevels != null) {
+                                    for (MediaCodecInfo.CodecProfileLevel pl : caps.profileLevels) {
+                                        if (pl.profile == MediaCodecInfo.CodecProfileLevel.HEVCProfileMain10 ||
+                                            pl.profile == MediaCodecInfo.CodecProfileLevel.HEVCProfileMain10HDR10 ||
+                                            pl.profile == MediaCodecInfo.CodecProfileLevel.HEVCProfileMain10HDR10Plus) {
+                                            supportsHevc10Bit = true;
+                                        }
+                                    }
+                                }
+                                if (caps != null && caps.getVideoCapabilities() != null) {
+                                    MediaCodecInfo.VideoCapabilities vc = caps.getVideoCapabilities();
+                                    if (vc.getSupportedWidths() != null && vc.getSupportedHeights() != null) {
+                                        int w = vc.getSupportedWidths().getUpper();
+                                        int h = vc.getSupportedHeights().getUpper();
+                                        if (w > maxHevcWidth) maxHevcWidth = w;
+                                        if (h > maxHevcHeight) maxHevcHeight = h;
+                                    }
+                                }
+                            } catch (Exception ignored) {}
+                        } else if (lowerType.equals("video/x-vnd.on2.vp9")) {
+                            supportsVp9 = true;
+                        } else if (lowerType.equals("video/av01")) {
+                            supportsAv1 = true;
+                        }
+                    }
+                }
+
+                json.put("supportsAvc", supportsAvc);
+                json.put("supportsHevc", supportsHevc);
+                json.put("supportsHevc10Bit", supportsHevc10Bit);
+                json.put("supportsVp9", supportsVp9);
+                json.put("supportsAv1", supportsAv1);
+                json.put("hasHardwareHevc", hasHardwareHevc);
+                json.put("maxHevcWidth", maxHevcWidth);
+                json.put("maxHevcHeight", maxHevcHeight);
+                json.put("hardwareHevcDecoders", hardwareDecoders);
+                json.put("softwareHevcDecoders", softwareDecoders);
+                return json.toString();
+            } catch (Exception e) {
+                return "{\"sdkInt\":" + Build.VERSION.SDK_INT + ",\"supportsAvc\":true,\"supportsHevc\":false,\"supportsHevc10Bit\":false}";
+            }
         }
 
         @JavascriptInterface

@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.207",
-  "minimumRequiredVersion": "3.5.207",
-  "latestVersionCode": 3427,
-  "minimumRequiredVersionCode": 3427,
+  "latestVersion": "3.5.208",
+  "minimumRequiredVersion": "3.5.208",
+  "latestVersionCode": 3428,
+  "minimumRequiredVersionCode": 3428,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Portal v3.5.207 update is ready! Tap UPDATE NOW for verified hardware video acceleration and enhanced playback diagnostics.",
-  "releaseNotes": "Enhanced native ExoPlayer playback diagnostics (decoder info, surface visibility) and verified transparent WebView overlay architecture."
+  "updateMessage": "Movie Portal v3.5.208 update is ready! Tap UPDATE NOW for universal Android phone playback compatibility (TextureView GPU compositing & 10-bit HEVC auto-transcode).",
+  "releaseNotes": "Universal Android playback compatibility: TextureView compositing eliminates black-screen punch-through bugs; runtime MediaCodec detection with automatic H.264 transcode for phones lacking 10-bit HEVC hardware decoding."
 }

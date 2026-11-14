@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import Hls from 'hls.js';
 import TVCastModal from './TVCastModal';
@@ -22,6 +22,7 @@ import {
 import { Capacitor } from '@capacitor/core';
 import { StatusBar } from '@capacitor/status-bar';
 import {
+  LIVE_BACKEND_URL,
   buildApiUrl,
   ensureAndroidStreamBridge,
   forceUseLocalNativeBridge,
@@ -122,6 +123,22 @@ export default function VideoPlayerModal({
   const knownDurationRef = useRef(initialDuration || 0);
   const currentTimeRef = useRef(0);
   const preflightCacheRef = useRef<{ url: string; recommendedMode: 'direct' | 'remux' | 'transcode'; durationSec: number } | null>(null);
+
+  // Runtime Android device and decoder capabilities from native bridge
+  const deviceCapabilities = useMemo(() => {
+    if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
+      try {
+        const bridge = (window as any).AndroidPlayerBridge;
+        if (typeof bridge?.getDeviceCapabilities === 'function') {
+          const raw = bridge.getDeviceCapabilities();
+          if (raw) return JSON.parse(raw);
+        }
+      } catch (e) {
+        console.warn('[VideoPlayer] getDeviceCapabilities notice:', e);
+      }
+    }
+    return null;
+  }, [isOpen]);
 
   // Active series season and episode indices
   const [activeSeasonIdx, setActiveSeasonIdx] = useState(seasonIndex);
@@ -370,11 +387,43 @@ export default function VideoPlayerModal({
                 durationRef.current = info.durationSec;
                 setDuration(info.durationSec);
               }
-              if (
-                !exoCapable &&
-                (info.recommendedMode === 'remux' || info.recommendedMode === 'transcode' || info.recommendedMode === 'direct')
-              ) {
-                chosenMode = info.recommendedMode;
+              if (!exoCapable) {
+                if (
+                  info.recommendedMode === 'remux' ||
+                  info.recommendedMode === 'transcode' ||
+                  info.recommendedMode === 'direct'
+                ) {
+                  chosenMode = info.recommendedMode;
+                }
+              } else {
+                const is10BitStream = Boolean(
+                  info.is10Bit ||
+                  String(info.pixFmt || '').includes('10le') ||
+                  String(info.pixFmt || '').includes('10be') ||
+                  String(info.pixFmt || '').includes('12le')
+                );
+                const isHevcStream =
+                  String(info.videoCodec || '').toLowerCase() === 'hevc' ||
+                  String(info.videoCodec || '').toLowerCase() === 'h265';
+                const is4KStream = (info.width && info.width > 2100) || (info.height && info.height > 1200);
+
+                const deviceSupports10Bit = Boolean(deviceCapabilities?.supportsHevc10Bit);
+                const deviceHasHardwareHevc = Boolean(deviceCapabilities?.hasHardwareHevc);
+
+                if (is10BitStream && !deviceSupports10Bit) {
+                  console.warn('[VideoPlayer] Phone lacks 10-bit HEVC decoder. Auto-routing to universal 1080p H.264 transcode.');
+                  chosenMode = 'transcode';
+                } else if (isHevcStream && !deviceHasHardwareHevc && info.recommendedMode === 'transcode') {
+                  console.warn('[VideoPlayer] Phone lacks hardware HEVC decoder. Routing to universal H.264 transcode.');
+                  chosenMode = 'transcode';
+                } else if (is4KStream && deviceCapabilities?.maxHevcWidth && info.width > deviceCapabilities.maxHevcWidth) {
+                  console.warn('[VideoPlayer] 4K stream exceeds device decoder limit. Routing to 1080p transcode.');
+                  chosenMode = 'transcode';
+                } else if (info.recommendedMode === 'transcode' && (!deviceSupports10Bit || is10BitStream)) {
+                  chosenMode = 'transcode';
+                } else {
+                  chosenMode = 'direct';
+                }
               }
               if (!exoCapable && Array.isArray(info.audioTracks) && info.audioTracks.length > 0) {
                 setRealAudioTracks(info.audioTracks);
@@ -448,7 +497,11 @@ export default function VideoPlayerModal({
       if (streamStartOffset > 1) params += `&start=${Math.floor(streamStartOffset)}`;
       if (selectedAudioIdx > 0) params += `&audioIdx=${selectedAudioIdx}`;
     }
-    setPlayableUrl(buildApiUrl(`/api/stream${params}`));
+    const apiUrl =
+      streamFallbackMode === 'transcode' && isUsingLocalNativeBridge()
+        ? `${LIVE_BACKEND_URL}/api/stream${params}`
+        : buildApiUrl(`/api/stream${params}`);
+    setPlayableUrl(apiUrl);
   }, [isOpen, streamFallbackMode, streamStartOffset, selectedAudioIdx, streamSourceKey, preflightReadyKey]);
 
   useEffect(() => {
@@ -636,10 +689,42 @@ export default function VideoPlayerModal({
         const st = JSON.parse(raw);
 
         if (st.error) {
-          console.warn('[ExoPlayer] Error:', st.error);
+          console.warn('[ExoPlayer] Error reported:', st.error);
           clearInterval(pollTimer);
           bridge.stopExoMedia?.();
-          setExoFailedFallback(true);
+          if (streamFallbackMode !== 'transcode' && /t\.me|telegram\.me/i.test(activeStreamUrl)) {
+            console.warn('[ExoPlayer] Direct mode error (' + st.error + '). Auto-escalating to universal H.264 transcode...');
+            setStreamStartOffset(Math.floor(currentTimeRef.current || resumeSec));
+            setStreamFallbackMode('transcode');
+            setRetryNonce((n) => n + 1);
+            setIsLoading(true);
+            setHasDecodedFrame(false);
+            return;
+          }
+          setError(`Playback error: ${st.error || 'Video decoder failed on this device'}`);
+          setIsLoading(false);
+          return;
+        }
+
+        // Automatic audio-only / black-screen auto-recovery:
+        // If audio is actively playing for > 2.5s with 0 video frames decoded,
+        // the phone hardware decoder failed silently. Auto-escalate to universal H.264 transcode!
+        if (
+          st.currentTime > 2.5 &&
+          st.isPlaying &&
+          !st.firstFrameRendered &&
+          st.videoWidth === 0 &&
+          streamFallbackMode !== 'transcode' &&
+          /t\.me|telegram\.me/i.test(activeStreamUrl)
+        ) {
+          console.warn('[ExoPlayer] Audio-only playback detected (0 video frames rendered). Escalating to universal H.264 transcode...');
+          clearInterval(pollTimer);
+          bridge.stopExoMedia?.();
+          setStreamStartOffset(Math.floor(st.currentTime));
+          setStreamFallbackMode('transcode');
+          setRetryNonce((n) => n + 1);
+          setIsLoading(true);
+          setHasDecodedFrame(false);
           return;
         }
 
@@ -826,7 +911,7 @@ export default function VideoPlayerModal({
         const hasZeroFrames = typeof decodedFrames === 'number' && decodedFrames === 0 && video.currentTime > 1.8;
 
         if (isBlackScreen || hasZeroFrames) {
-          if (!isUsingLocalNativeBridge() && streamFallbackMode !== 'transcode') {
+          if (streamFallbackMode !== 'transcode') {
             console.warn('[VideoPlayer] Black screen / 0 decoded video frames detected. Switching to H.264 transcode...');
             setIsLoading(true);
             setHasDecodedFrame(false);
