@@ -643,13 +643,7 @@ export default function VideoPlayerModal({
           return;
         }
 
-        if (st.isPlaying && st.currentTime > 4.5 && !st.firstFrameRendered && st.videoWidth === 0) {
-          console.warn('[ExoPlayer] Audio-only / 0 video dimensions detected, falling back...');
-          clearInterval(pollTimer);
-          bridge.stopExoMedia?.();
-          setExoFailedFallback(true);
-          return;
-        }
+
 
         if (st.firstFrameRendered || st.videoWidth > 0) {
           setHasDecodedFrame(true);
