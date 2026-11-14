@@ -604,18 +604,20 @@ export async function handleStream(req: Request, res: Response) {
             ffArgs.push('-c:a', 'aac', '-ac', '2', '-b:a', '192k');
           }
         } else {
-          // Universal H.264 Main 8-bit + AAC fragmented MP4 (fixes HEVC/10-bit black screen with audio-only)
+          // Universal H.264 Main 8-bit <=1080p Level 4.0 + AAC fragmented MP4 (100% Android & Chrome compatible)
           ffArgs.push(
+            '-vf', "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p",
             '-c:v', 'libx264',
             '-preset', 'ultrafast',
             '-tune', 'zerolatency',
             '-threads', '0',
             '-pix_fmt', 'yuv420p',
             '-profile:v', 'main',
-            '-level', '4.1',
+            '-level', '4.0',
+            '-vsync', 'cfr',
             '-crf', '23',
-            '-maxrate', '4000k',
-            '-bufsize', '8000k',
+            '-maxrate', '3500k',
+            '-bufsize', '7000k',
             '-g', '48',
             '-keyint_min', '48',
             '-sc_threshold', '0',
@@ -660,13 +662,16 @@ export async function handleStream(req: Request, res: Response) {
           if (!res.writableEnded) res.end();
         });
 
-        req.on('close', () => {
+        const killFf = () => {
           if (!procClosed) {
             try {
               ffProc.kill('SIGKILL');
             } catch {}
           }
-        });
+        };
+        req.on('close', killFf);
+        res.on('close', killFf);
+        res.on('error', killFf);
         return;
       }
     }

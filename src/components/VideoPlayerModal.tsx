@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import Hls from 'hls.js';
 import TVCastModal from './TVCastModal';
 import {
@@ -109,6 +110,7 @@ export default function VideoPlayerModal({
   const [streamStartOffset, setStreamStartOffset] = useState<number>(0);
   const [selectedAudioIdx, setSelectedAudioIdx] = useState<number>(0);
   const [useLocalBridgeFallback, setUseLocalBridgeFallback] = useState(false);
+  const [exoFailedFallback, setExoFailedFallback] = useState(false);
   const [retryNonce, setRetryNonce] = useState(0);
   const [hasDecodedFrame, setHasDecodedFrame] = useState(false);
   const [seekPreviewTime, setSeekPreviewTime] = useState<number | null>(null);
@@ -287,6 +289,7 @@ export default function VideoPlayerModal({
     setStreamStartOffset(0);
     setSelectedAudioIdx(0);
     setUseLocalBridgeFallback(false);
+    setExoFailedFallback(false);
     setHasDecodedFrame(false);
     setSeekPreviewTime(null);
     seekPreviewTimeRef.current = null;
@@ -345,6 +348,13 @@ export default function VideoPlayerModal({
       let probedDuration = knownDurationRef.current;
       let initialStart = 0;
 
+      const bridgeRef = (window as any).AndroidPlayerBridge;
+      const exoCapable =
+        Capacitor.isNativePlatform() &&
+        typeof bridgeRef?.isExoSupported === 'function' &&
+        Boolean(bridgeRef.isExoSupported()) &&
+        !exoFailedFallback;
+
       if (!isUsingLocalNativeBridge()) {
         try {
           const infoUrl = buildApiUrl(`/api/telegram/stream-info?url=${encodeURIComponent(trimmed)}`);
@@ -358,10 +368,13 @@ export default function VideoPlayerModal({
                 durationRef.current = info.durationSec;
                 setDuration(info.durationSec);
               }
-              if (info.recommendedMode === 'remux' || info.recommendedMode === 'transcode' || info.recommendedMode === 'direct') {
+              if (
+                !exoCapable &&
+                (info.recommendedMode === 'remux' || info.recommendedMode === 'transcode' || info.recommendedMode === 'direct')
+              ) {
                 chosenMode = info.recommendedMode;
               }
-              if (Array.isArray(info.audioTracks) && info.audioTracks.length > 0) {
+              if (!exoCapable && Array.isArray(info.audioTracks) && info.audioTracks.length > 0) {
                 setRealAudioTracks(info.audioTracks);
                 const preferredLang = verifiedLanguageRef.current.toLowerCase();
                 const matchIdx = info.audioTracks.findIndex(
@@ -414,7 +427,7 @@ export default function VideoPlayerModal({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, streamSourceKey, useLocalBridgeFallback]);
+  }, [isOpen, streamSourceKey, useLocalBridgeFallback, exoFailedFallback]);
 
   // Step 2: Build playableUrl whenever mode, seek offset, or audio track changes
   useEffect(() => {
@@ -564,12 +577,145 @@ export default function VideoPlayerModal({
     };
   }, []);
 
-  // Video Element & HLS Setup
+  // Video Element & HLS Setup (or Native Android Media3 ExoPlayer)
   const isYouTube = /youtube\.com|youtu\.be/i.test(activeStreamUrl);
+  const canUseNativeExo =
+    typeof window !== 'undefined' &&
+    Capacitor.isNativePlatform() &&
+    typeof (window as any).AndroidPlayerBridge?.isExoSupported === 'function' &&
+    Boolean((window as any).AndroidPlayerBridge.isExoSupported());
+  const exoModeActive = Boolean(isOpen && !isYouTube && canUseNativeExo && !exoFailedFallback && playableUrl);
+
+  // Sync transparent WebView flag for ExoPlayer surface behind controls
+  useEffect(() => {
+    if (exoModeActive) {
+      document.documentElement.setAttribute('data-exo-active', 'true');
+    } else {
+      document.documentElement.removeAttribute('data-exo-active');
+    }
+    return () => {
+      document.documentElement.removeAttribute('data-exo-active');
+    };
+  }, [exoModeActive]);
+
+  // Native Android Media3 ExoPlayer lifecycle & state polling
+  useEffect(() => {
+    if (!exoModeActive) return;
+    const bridge = (window as any).AndroidPlayerBridge;
+    if (!bridge || typeof bridge.playExoMedia !== 'function') return;
+
+    let cancelled = false;
+    let resumeSec = 0;
+    if (episodeResumeKey) {
+      try {
+        const saved = parseFloat(localStorage.getItem(`resume_pos_${episodeResumeKey}`) || '0');
+        const knownDur = durationRef.current || knownDurationRef.current;
+        if (saved > 15 && (!knownDur || saved < knownDur - 45)) {
+          resumeSec = Math.floor(saved);
+        }
+      } catch {}
+    }
+
+    setError(null);
+    setIsLoading(true);
+    setHasDecodedFrame(false);
+    bridge.playExoMedia(playableUrl, resumeSec, playbackSpeed || 1.0);
+
+    let lastAudioJson = '';
+    let lastSubJson = '';
+    let endedHandled = false;
+
+    const pollTimer = setInterval(() => {
+      if (cancelled) return;
+      try {
+        const raw = bridge.getExoState?.();
+        if (!raw) return;
+        const st = JSON.parse(raw);
+
+        if (st.error) {
+          console.warn('[ExoPlayer] Error:', st.error);
+          clearInterval(pollTimer);
+          bridge.stopExoMedia?.();
+          setExoFailedFallback(true);
+          return;
+        }
+
+        if (st.isPlaying && st.currentTime > 4.5 && !st.firstFrameRendered && st.videoWidth === 0) {
+          console.warn('[ExoPlayer] Audio-only / 0 video dimensions detected, falling back...');
+          clearInterval(pollTimer);
+          bridge.stopExoMedia?.();
+          setExoFailedFallback(true);
+          return;
+        }
+
+        if (st.firstFrameRendered || st.videoWidth > 0) {
+          setHasDecodedFrame(true);
+        }
+
+        setIsPlaying(Boolean(st.isPlaying));
+        setIsLoading(Boolean(st.isBuffering || (st.state === 1 && !st.isPlaying && !st.ended)));
+
+        if (!isDraggingSeekRef.current && typeof st.currentTime === 'number') {
+          setCurrentTime(st.currentTime);
+          currentTimeRef.current = st.currentTime;
+        }
+        if (typeof st.bufferedPosition === 'number') {
+          setBufferedTime(st.bufferedPosition);
+        }
+        if (typeof st.duration === 'number' && st.duration > 0 && isFinite(st.duration)) {
+          setDuration(st.duration);
+          durationRef.current = st.duration;
+          knownDurationRef.current = st.duration;
+        }
+
+        if (st.currentTime > 10 && episodeResumeKey) {
+          try {
+            localStorage.setItem(`resume_pos_${episodeResumeKey}`, String(st.currentTime));
+          } catch {}
+        }
+
+        if (Array.isArray(st.audioTracks) && st.audioTracks.length > 0) {
+          const sig = JSON.stringify(st.audioTracks);
+          if (sig !== lastAudioJson) {
+            lastAudioJson = sig;
+            setRealAudioTracks(st.audioTracks);
+            const activeTrk = st.audioTracks.find((t: any) => t.selected) || st.audioTracks[0];
+            if (activeTrk?.label) setSelectedAudio(activeTrk.label);
+          }
+        }
+
+        if (Array.isArray(st.subtitleTracks)) {
+          const sig = JSON.stringify(st.subtitleTracks);
+          if (sig !== lastSubJson) {
+            lastSubJson = sig;
+            setRealSubtitleTracks(st.subtitleTracks);
+          }
+        }
+
+        if (st.ended && !endedHandled) {
+          endedHandled = true;
+          if (episodeResumeKey) {
+            try { localStorage.removeItem(`resume_pos_${episodeResumeKey}`); } catch {}
+          }
+          if (onNextEpisode && hasNext) {
+            onNextEpisode();
+          }
+        }
+      } catch {}
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearInterval(pollTimer);
+      try {
+        bridge.stopExoMedia?.();
+      } catch {}
+    };
+  }, [exoModeActive, playableUrl, retryNonce]);
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || isYouTube || !playableUrl) return;
+    if (!video || isYouTube || !playableUrl || exoModeActive) return;
 
     let cancelled = false;
     let hlsInstance: Hls | null = null;
@@ -676,14 +822,14 @@ export default function VideoPlayerModal({
       // Black Screen & Audio-Only Auto-Recovery Guard:
       // If audio is playing (video.currentTime > 1.5s and not paused), but browser decodes 0 video frames
       // (videoWidth === 0 or totalVideoFrames === 0), auto-escalate straight to clean H.264 MP4.
-      if (video.currentTime > 1.5 && !video.paused && video.readyState >= 2 && /t\.me|telegram\.me/i.test(activeStreamUrl) && !isUsingLocalNativeBridge()) {
+      if (video.currentTime > 1.5 && !video.paused && video.readyState >= 2 && /t\.me|telegram\.me/i.test(activeStreamUrl)) {
         const isBlackScreen = video.videoWidth === 0 || video.videoHeight === 0;
         const quality = typeof video.getVideoPlaybackQuality === 'function' ? video.getVideoPlaybackQuality() : null;
         const decodedFrames = quality ? quality.totalVideoFrames : (video as any).webkitDecodedFrameCount;
         const hasZeroFrames = typeof decodedFrames === 'number' && decodedFrames === 0 && video.currentTime > 1.8;
 
         if (isBlackScreen || hasZeroFrames) {
-          if (streamFallbackMode !== 'transcode') {
+          if (!isUsingLocalNativeBridge() && streamFallbackMode !== 'transcode') {
             console.warn('[VideoPlayer] Black screen / 0 decoded video frames detected. Switching to H.264 transcode...');
             setIsLoading(true);
             setHasDecodedFrame(false);
@@ -941,7 +1087,7 @@ export default function VideoPlayerModal({
       video.removeEventListener('error', onError);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [playableUrl, isYouTube, episodeResumeKey, streamFallbackMode, streamStartOffset, retryNonce]);
+  }, [playableUrl, isYouTube, exoModeActive, episodeResumeKey, streamFallbackMode, streamStartOffset, retryNonce]);
 
   // Keyboard shortcut listener (Space = play/pause, Left/Right = skip, Escape = close)
   useEffect(() => {
@@ -973,8 +1119,20 @@ export default function VideoPlayerModal({
 
   // Real Play / Pause Control
   const togglePlay = () => {
-    if (!videoRef.current) return;
     resetAutoHideTimer();
+    if (exoModeActive) {
+      const bridge = (window as any).AndroidPlayerBridge;
+      if (isPlayingRef.current) {
+        bridge?.exoPause?.();
+        setIsPlaying(false);
+      } else {
+        bridge?.exoPlay?.();
+        setIsPlaying(true);
+      }
+      return;
+    }
+
+    if (!videoRef.current) return;
     ensureUnmutedOnInteraction();
     if (!videoRef.current.paused) {
       videoRef.current.pause();
@@ -994,16 +1152,24 @@ export default function VideoPlayerModal({
     }
   };
 
-  // Helper: commit seek to targetTime (handles both direct HTTP Range & remux/transcode buffered vs unbuffered seeks)
+  // Helper: commit seek to targetTime (handles ExoPlayer, direct HTTP Range, & FFmpeg seek)
   const commitSeek = (targetTime: number) => {
-    const vid = videoRef.current;
-    if (!vid) return;
     const maxDur = durationRef.current || knownDurationRef.current || 0;
     const clamped = maxDur > 0 ? Math.max(0, Math.min(maxDur, targetTime)) : Math.max(0, targetTime);
 
     setSeekPreviewTime(null);
     seekPreviewTimeRef.current = null;
     isDraggingSeekRef.current = false;
+
+    if (exoModeActive) {
+      (window as any).AndroidPlayerBridge?.exoSeek?.(clamped);
+      setCurrentTime(clamped);
+      currentTimeRef.current = clamped;
+      return;
+    }
+
+    const vid = videoRef.current;
+    if (!vid) return;
 
     if (streamFallbackMode === 'direct') {
       vid.currentTime = clamped;
@@ -1035,7 +1201,7 @@ export default function VideoPlayerModal({
 
   // Real 10-Second Skip Control
   const handleSkip = (seconds: number) => {
-    if (!videoRef.current) return;
+    if (!exoModeActive && !videoRef.current) return;
     resetAutoHideTimer();
     ensureUnmutedOnInteraction();
     const baseTime = currentTimeRef.current || currentTime;
@@ -1051,7 +1217,7 @@ export default function VideoPlayerModal({
     resetAutoHideTimer();
     ensureUnmutedOnInteraction();
     const time = Number(e.target.value);
-    if (streamFallbackMode === 'direct') {
+    if (exoModeActive || streamFallbackMode === 'direct') {
       commitSeek(time);
       return;
     }
@@ -1158,11 +1324,16 @@ export default function VideoPlayerModal({
     }
   };
 
-  // Real Audio Selection (supports HLS, HTML5 audioTracks, and server-side multi-audio Telegram switching)
+  // Real Audio Selection (supports ExoPlayer, HLS, HTML5 audioTracks, and server-side multi-audio Telegram switching)
   const handleSelectAudio = (track: { id: number | string; label: string }) => {
     setSelectedAudio(track.label);
     setShowAudioMenu(false);
     resetAutoHideTimer();
+
+    if (exoModeActive && typeof track.id === 'string' && track.id.includes(':')) {
+      (window as any).AndroidPlayerBridge?.exoSelectAudioTrack?.(track.id);
+      return;
+    }
 
     // HLS multi-audio switch
     if (hlsRef.current && typeof track.id === 'number') {
@@ -1187,6 +1358,18 @@ export default function VideoPlayerModal({
     setSelectedSubtitle(label);
     setShowSubtitlesMenu(false);
     resetAutoHideTimer();
+
+    if (exoModeActive) {
+      if (label === 'Off') {
+        (window as any).AndroidPlayerBridge?.exoSelectSubtitleTrack?.('off');
+      } else {
+        const matched = realSubtitleTracks.find((s) => s.label === label);
+        if (matched) {
+          (window as any).AndroidPlayerBridge?.exoSelectSubtitleTrack?.(String(matched.id));
+        }
+      }
+      return;
+    }
 
     if (label === 'Off') {
       if (hlsRef.current) hlsRef.current.subtitleTrack = -1;
@@ -1255,11 +1438,11 @@ export default function VideoPlayerModal({
     return `${mins.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  return (
-    <div className="fixed inset-0 z-[100] bg-black flex flex-col justify-between select-none overflow-hidden">
+  const modalMarkup = (
+    <div className={`fixed inset-0 z-[100] ${exoModeActive ? 'bg-transparent' : 'bg-black'} flex flex-col justify-between select-none overflow-hidden`}>
       <div
         ref={containerRef}
-        className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden"
+        className={`relative w-full h-full ${exoModeActive ? 'bg-transparent' : 'bg-black'} flex items-center justify-center overflow-hidden`}
       >
         {/* TV Cast Modal */}
         <TVCastModal
@@ -1270,7 +1453,9 @@ export default function VideoPlayerModal({
           poster={posterUrl || movie?.posterUrl || ''}
           currentTime={currentTime}
           onCastConnected={() => {
-            if (videoRef.current && !videoRef.current.paused) {
+            if (exoModeActive) {
+              (window as any).AndroidPlayerBridge?.exoPause?.();
+            } else if (videoRef.current && !videoRef.current.paused) {
               videoRef.current.pause();
             }
           }}
@@ -1278,22 +1463,24 @@ export default function VideoPlayerModal({
 
         {/* Video Screen Viewport */}
         <div
-          className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden cursor-pointer"
+          className={`relative w-full h-full ${exoModeActive ? 'bg-transparent' : 'bg-black'} flex items-center justify-center overflow-hidden cursor-pointer`}
           onClick={handleViewportTap}
         >
           {!isYouTube ? (
             <>
-              <video
-                key={`${playableUrl}|${retryNonce}`}
-                ref={videoRef}
-                src={playableUrl || undefined}
-                poster={!hasDecodedFrame && posterUrl ? posterUrl : undefined}
-                playsInline
-                preload="auto"
-                controlsList="nodownload"
-                disablePictureInPicture
-                className="w-full h-full object-contain pointer-events-none bg-black"
-              />
+              {!exoModeActive && (
+                <video
+                  key={`${playableUrl}|${retryNonce}`}
+                  ref={videoRef}
+                  src={playableUrl || undefined}
+                  poster={!hasDecodedFrame && currentTime < 1.2 && posterUrl ? posterUrl : undefined}
+                  playsInline
+                  preload="auto"
+                  controlsList="nodownload"
+                  disablePictureInPicture
+                  className="w-full h-full object-contain pointer-events-none bg-black"
+                />
+              )}
 
               {/* Loading Indicator */}
               {isLoading && (
@@ -1363,17 +1550,17 @@ export default function VideoPlayerModal({
 
         {/* TOP BAR OVERLAY */}
         <div
-          className={`absolute top-0 left-0 w-full bg-gradient-to-b from-black/90 via-black/50 to-transparent p-4 sm:p-6 flex items-center justify-between z-40 transition-opacity duration-300 pointer-events-none ${
+          className={`absolute top-0 left-0 w-full bg-gradient-to-b from-black/90 via-black/50 to-transparent p-3 sm:p-6 pt-[max(0.75rem,env(safe-area-inset-top))] flex items-center justify-between gap-2 z-40 transition-opacity duration-300 pointer-events-none ${
             showControls ? 'opacity-100' : 'opacity-0'
           }`}
         >
-          {/* Top-Left: Back Arrow, Title, Subtitle, and Season/Episode Selectors on the SAME horizontal row */}
+          {/* Top-Left: Back Arrow, Title, Subtitle, and Season/Episode Selectors */}
           <div
             onClick={(e) => { e.stopPropagation(); resetAutoHideTimer(); }}
             onPointerDown={handleControlInteractionStart}
             onPointerUp={handleControlInteractionEnd}
             onPointerCancel={handleControlInteractionEnd}
-            className={`flex items-center gap-2.5 sm:gap-4 max-w-[70%] sm:max-w-[75%] min-w-0 ${
+            className={`flex items-center gap-2 sm:gap-4 max-w-[78%] sm:max-w-[80%] min-w-0 ${
               showControls ? 'pointer-events-auto' : 'pointer-events-none'
             }`}
           >
@@ -1383,12 +1570,12 @@ export default function VideoPlayerModal({
               title="Back"
               className="p-1.5 sm:p-2 text-white hover:text-yellow-400 rounded-full hover:bg-white/10 transition-colors flex-shrink-0 cursor-pointer"
             >
-              <ArrowLeft size={24} className="sm:w-7 sm:h-7 stroke-[2.5]" />
+              <ArrowLeft size={22} className="sm:w-7 sm:h-7 stroke-[2.5]" />
             </button>
 
             <div className="flex items-center gap-2 sm:gap-3 flex-wrap min-w-0">
               <div className="min-w-0">
-                <h3 className="text-base sm:text-xl font-bold text-white tracking-wide truncate max-w-[150px] sm:max-w-xs drop-shadow-md">
+                <h3 className="text-sm sm:text-xl font-bold text-white tracking-wide truncate max-w-[140px] sm:max-w-xs drop-shadow-md">
                   {seriesOrMovieTitle}
                 </h3>
                 <p className="text-[11px] sm:text-xs text-neutral-300 font-medium truncate">
@@ -1568,7 +1755,7 @@ export default function VideoPlayerModal({
           onPointerDown={handleControlInteractionStart}
           onPointerUp={handleControlInteractionEnd}
           onPointerCancel={handleControlInteractionEnd}
-          className={`absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/95 via-black/70 to-transparent p-4 sm:p-6 pb-6 sm:pb-8 space-y-3 sm:space-y-4 z-40 transition-opacity duration-300 ${
+          className={`absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/95 via-black/75 to-transparent p-3 sm:p-6 pb-[max(1rem,env(safe-area-inset-bottom))] space-y-2.5 sm:space-y-4 z-40 transition-opacity duration-300 ${
             showControls ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
           }`}
         >
@@ -1580,12 +1767,12 @@ export default function VideoPlayerModal({
             const bufferedPct = displayMax > 0 ? Math.min(100, (bufferedTime / displayMax) * 100) : 0;
 
             return (
-              <div className="flex items-center gap-3 sm:gap-4">
-                <span className="text-xs sm:text-sm font-semibold text-white w-14 sm:w-16 text-right tabular-nums select-none">
+              <div className="flex items-center gap-2 sm:gap-4">
+                <span className="text-[11px] sm:text-sm font-semibold text-white min-w-[3.2rem] sm:min-w-[4rem] text-right tabular-nums whitespace-nowrap select-none">
                   {formatTime(displayCurrent)}
                 </span>
 
-                <div className="relative flex-grow h-1.5 sm:h-2 bg-neutral-700/80 rounded-full group cursor-pointer">
+                <div className="relative flex-grow min-w-0 h-1.5 sm:h-2 bg-neutral-700/80 rounded-full group cursor-pointer">
                   <input
                     type="range"
                     min="0"
@@ -1628,7 +1815,7 @@ export default function VideoPlayerModal({
                   />
                 </div>
 
-                <span className="text-xs sm:text-sm font-semibold text-white w-14 sm:w-16 tabular-nums select-none">
+                <span className="text-[11px] sm:text-sm font-semibold text-white min-w-[3.2rem] sm:min-w-[4rem] tabular-nums whitespace-nowrap select-none">
                   {formatTime(duration)}
                 </span>
               </div>
@@ -1636,9 +1823,9 @@ export default function VideoPlayerModal({
           })()}
 
           {/* Bottom Action Controls: Speed (left), Audio, Subtitles, Fullscreen (right) */}
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center justify-between gap-1.5 sm:gap-3 w-full">
             {/* Playback Speed Pill */}
-            <div className="relative">
+            <div className="relative flex-shrink-0">
               <button
                 type="button"
                 onClick={() => {
@@ -1648,16 +1835,16 @@ export default function VideoPlayerModal({
                   setShowSettingsMenu(false);
                   resetAutoHideTimer();
                 }}
-                className="bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-700/70 rounded-full px-3.5 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-white flex items-center gap-1.5 sm:gap-2 shadow-lg backdrop-blur-md cursor-pointer transition-colors"
+                className="bg-neutral-900/85 hover:bg-neutral-800 border border-neutral-700/70 rounded-full px-2.5 py-1.5 sm:px-4 sm:py-2 text-[11px] sm:text-sm font-medium text-white flex items-center gap-1 sm:gap-2 shadow-lg backdrop-blur-md cursor-pointer transition-colors"
               >
-                <Gauge size={16} className="text-neutral-300" />
+                <Gauge size={14} className="sm:w-4 sm:h-4 text-neutral-300 flex-shrink-0" />
                 <span>{playbackSpeed}x</span>
-                <ChevronDown size={14} className={`text-neutral-400 transition-transform ${showSpeedMenu ? 'rotate-180 text-yellow-400' : ''}`} />
+                <ChevronDown size={12} className={`text-neutral-400 transition-transform flex-shrink-0 ${showSpeedMenu ? 'rotate-180 text-yellow-400' : ''}`} />
               </button>
 
               {/* Speed Popover Menu */}
               {showSpeedMenu && (
-                <div className="absolute bottom-full left-0 mb-2 bg-neutral-900/95 border border-neutral-700 rounded-xl shadow-2xl py-1 min-w-[120px] backdrop-blur-lg z-50">
+                <div className="absolute bottom-full left-0 mb-2 bg-neutral-900/95 border border-neutral-700 rounded-xl shadow-2xl py-1 min-w-[120px] max-w-[85vw] backdrop-blur-lg z-50">
                   <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800">
                     Playback Speed
                   </div>
@@ -1667,7 +1854,11 @@ export default function VideoPlayerModal({
                       type="button"
                       onClick={() => {
                         setPlaybackSpeed(spd);
-                        if (videoRef.current) videoRef.current.playbackRate = spd;
+                        if (exoModeActive) {
+                          (window as any).AndroidPlayerBridge?.exoSetSpeed?.(spd);
+                        } else if (videoRef.current) {
+                          videoRef.current.playbackRate = spd;
+                        }
                         setShowSpeedMenu(false);
                         resetAutoHideTimer();
                       }}
@@ -1684,9 +1875,9 @@ export default function VideoPlayerModal({
             </div>
 
             {/* Right Controls: Audio, Subtitles, Fullscreen */}
-            <div className="flex items-center gap-2 sm:gap-3">
+            <div className="flex items-center gap-1.5 sm:gap-3 min-w-0">
               {/* Audio Language Pill */}
-              <div className="relative">
+              <div className="relative min-w-0">
                 <button
                   type="button"
                   onClick={() => {
@@ -1696,31 +1887,33 @@ export default function VideoPlayerModal({
                     setShowSettingsMenu(false);
                     resetAutoHideTimer();
                   }}
-                  className="bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-700/70 rounded-full px-3.5 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-white flex items-center gap-1.5 sm:gap-2 shadow-lg backdrop-blur-md cursor-pointer transition-colors"
+                  className="bg-neutral-900/85 hover:bg-neutral-800 border border-neutral-700/70 rounded-full px-2.5 py-1.5 sm:px-4 sm:py-2 text-[11px] sm:text-sm font-medium text-white flex items-center gap-1 sm:gap-2 shadow-lg backdrop-blur-md cursor-pointer transition-colors max-w-full"
                 >
-                  <Volume2 size={16} className="text-neutral-300" />
-                  <span>Audio: {selectedAudio || 'Hindi'}</span>
-                  <ChevronDown size={14} className={`text-neutral-400 transition-transform ${showAudioMenu ? 'rotate-180 text-yellow-400' : ''}`} />
+                  <Volume2 size={14} className="sm:w-4 sm:h-4 text-neutral-300 flex-shrink-0" />
+                  <span className="truncate max-w-[64px] sm:max-w-[140px]">
+                    <span className="hidden sm:inline">Audio: </span>{selectedAudio || 'Hindi'}
+                  </span>
+                  <ChevronDown size={12} className={`text-neutral-400 transition-transform flex-shrink-0 ${showAudioMenu ? 'rotate-180 text-yellow-400' : ''}`} />
                 </button>
 
                 {/* Audio Tracks Popover */}
                 {showAudioMenu && (
-                  <div className="absolute bottom-full right-0 mb-2 bg-neutral-900/95 border border-neutral-700 rounded-xl shadow-2xl py-1 min-w-[170px] backdrop-blur-lg z-50">
+                  <div className="absolute bottom-full right-0 mb-2 bg-neutral-900/95 border border-neutral-700 rounded-xl shadow-2xl py-1 min-w-[160px] max-w-[85vw] backdrop-blur-lg z-50">
                     <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800">
                       Audio Tracks
                     </div>
                     {realAudioTracks.length > 0 ? (
                       realAudioTracks.map((trk) => (
                         <button
-                          key={trk.label}
+                          key={`${trk.id}-${trk.label}`}
                           type="button"
                           onClick={() => handleSelectAudio(trk)}
-                          className={`w-full text-left px-3 py-2 text-xs hover:bg-yellow-400 hover:text-black transition-colors flex items-center justify-between cursor-pointer ${
+                          className={`w-full text-left px-3 py-2 text-xs hover:bg-yellow-400 hover:text-black transition-colors flex items-center justify-between gap-2 cursor-pointer ${
                             selectedAudio === trk.label ? 'text-yellow-400 font-bold bg-white/5' : 'text-white'
                           }`}
                         >
-                          <span>{trk.label}</span>
-                          {selectedAudio === trk.label && <Check size={14} className="stroke-[3]" />}
+                          <span className="truncate">{trk.label}</span>
+                          {selectedAudio === trk.label && <Check size={14} className="stroke-[3] flex-shrink-0" />}
                         </button>
                       ))
                     ) : (
@@ -1733,7 +1926,7 @@ export default function VideoPlayerModal({
               </div>
 
               {/* Subtitles Language Pill */}
-              <div className="relative">
+              <div className="relative min-w-0">
                 <button
                   type="button"
                   onClick={() => {
@@ -1743,16 +1936,18 @@ export default function VideoPlayerModal({
                     setShowSettingsMenu(false);
                     resetAutoHideTimer();
                   }}
-                  className="bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-700/70 rounded-full px-3.5 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-white flex items-center gap-1.5 sm:gap-2 shadow-lg backdrop-blur-md cursor-pointer transition-colors"
+                  className="bg-neutral-900/85 hover:bg-neutral-800 border border-neutral-700/70 rounded-full px-2.5 py-1.5 sm:px-4 sm:py-2 text-[11px] sm:text-sm font-medium text-white flex items-center gap-1 sm:gap-2 shadow-lg backdrop-blur-md cursor-pointer transition-colors max-w-full"
                 >
-                  <Captions size={16} className="text-neutral-300" />
-                  <span>Subtitles: {selectedSubtitle}</span>
-                  <ChevronDown size={14} className={`text-neutral-400 transition-transform ${showSubtitlesMenu ? 'rotate-180 text-yellow-400' : ''}`} />
+                  <Captions size={14} className="sm:w-4 sm:h-4 text-neutral-300 flex-shrink-0" />
+                  <span className="truncate max-w-[46px] sm:max-w-[110px]">
+                    <span className="hidden sm:inline">Subtitles: </span>{selectedSubtitle}
+                  </span>
+                  <ChevronDown size={12} className={`text-neutral-400 transition-transform flex-shrink-0 ${showSubtitlesMenu ? 'rotate-180 text-yellow-400' : ''}`} />
                 </button>
 
                 {/* Subtitles Popover */}
                 {showSubtitlesMenu && (
-                  <div className="absolute bottom-full right-0 mb-2 bg-neutral-900/95 border border-neutral-700 rounded-xl shadow-2xl py-1 min-w-[190px] backdrop-blur-lg z-50">
+                  <div className="absolute bottom-full right-0 mb-2 bg-neutral-900/95 border border-neutral-700 rounded-xl shadow-2xl py-1 min-w-[170px] max-w-[85vw] backdrop-blur-lg z-50">
                     <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800">
                       Subtitles (CC)
                     </div>
@@ -1805,11 +2000,11 @@ export default function VideoPlayerModal({
                     resetAutoHideTimer();
                   }}
                   title="Settings"
-                  className={`bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-700/70 text-white hover:text-yellow-400 p-2 sm:px-3 sm:py-2 rounded-xl text-xs sm:text-sm flex items-center justify-center shadow-lg backdrop-blur-md cursor-pointer transition-colors ${
+                  className={`bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-700/70 text-white hover:text-yellow-400 p-1.5 sm:px-3 sm:py-2 rounded-xl text-xs sm:text-sm flex items-center justify-center shadow-lg backdrop-blur-md cursor-pointer transition-colors flex-shrink-0 ${
                     showSettingsMenu ? 'text-yellow-400' : ''
                   }`}
                 >
-                  <Settings size={18} />
+                  <Settings size={16} className="sm:w-[18px] sm:h-[18px]" />
                 </button>
 
                 {/* Settings Popover Menu */}
@@ -1845,9 +2040,9 @@ export default function VideoPlayerModal({
                 type="button"
                 onClick={toggleFullscreen}
                 title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
-                className="bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-700/70 text-white hover:text-yellow-400 p-2 sm:px-3 sm:py-2 rounded-xl text-xs sm:text-sm flex items-center justify-center shadow-lg backdrop-blur-md cursor-pointer transition-colors"
+                className="bg-neutral-900/80 hover:bg-neutral-800 border border-neutral-700/70 text-white hover:text-yellow-400 p-1.5 sm:px-3 sm:py-2 rounded-xl text-xs sm:text-sm flex items-center justify-center shadow-lg backdrop-blur-md cursor-pointer transition-colors flex-shrink-0"
               >
-                {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
+                {isFullscreen ? <Minimize size={16} className="sm:w-[18px] sm:h-[18px]" /> : <Maximize size={16} className="sm:w-[18px] sm:h-[18px]" />}
               </button>
             </div>
           </div>
@@ -1855,4 +2050,6 @@ export default function VideoPlayerModal({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalMarkup, document.body) : modalMarkup;
 }

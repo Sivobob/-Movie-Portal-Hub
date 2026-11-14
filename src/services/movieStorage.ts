@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { collection, getDocs, doc, setDoc, deleteDoc, query, orderBy } from 'firebase/firestore';
+import { collection, getDocs, getDocsFromServer, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { normalizeMoviePosters } from '../utils/posterUrl';
 
 export interface MovieData {
@@ -40,19 +40,54 @@ export interface MovieData {
 
 const COLLECTION_NAME = 'movies';
 
+export function getTimestampMs(val: any): number {
+  if (!val) return 0;
+  if (typeof val === 'number') return val;
+  if (typeof val === 'string') {
+    const parsed = Date.parse(val);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  if (typeof val?.toMillis === 'function') {
+    try {
+      return val.toMillis();
+    } catch {
+      return 0;
+    }
+  }
+  if (typeof val?.seconds === 'number') {
+    return val.seconds * 1000;
+  }
+  return 0;
+}
+
+export function sortMoviesList<T extends Partial<MovieData>>(list: T[]): T[] {
+  return [...list].sort((a, b) => {
+    const aTime = getTimestampMs(a.createdAt) || getTimestampMs(a.updatedAt);
+    const bTime = getTimestampMs(b.createdAt) || getTimestampMs(b.updatedAt);
+    if (bTime !== aTime) return bTime - aTime;
+    const yearDiff = (Number(b.releaseYear) || 0) - (Number(a.releaseYear) || 0);
+    if (yearDiff !== 0) return yearDiff;
+    return String(a.title || '').localeCompare(String(b.title || ''));
+  });
+}
+
 export async function fetchMoviesFromFirestore(): Promise<MovieData[]> {
   try {
-    const snapshot = await getDocs(collection(db, COLLECTION_NAME));
-    const movies = snapshot.docs.map(doc => normalizeMoviePosters({ id: doc.id, ...doc.data() } as MovieData));
-    movies.sort((a, b) => (Number(b.releaseYear) || 0) - (Number(a.releaseYear) || 0));
-    if (movies.length > 0) {
-      saveLocalMovies(movies);
+    let snapshot;
+    try {
+      snapshot = await getDocsFromServer(collection(db, COLLECTION_NAME));
+    } catch {
+      snapshot = await getDocs(collection(db, COLLECTION_NAME));
     }
+    const rawMovies: MovieData[] = snapshot.docs.map(
+      (d) => normalizeMoviePosters({ id: d.id, ...d.data() } as MovieData) as MovieData
+    );
+    const movies = sortMoviesList<MovieData>(rawMovies);
+    saveLocalMovies(movies);
     return movies;
   } catch (e) {
     console.error('Error fetching movies from Firestore', e);
-    // On error, return local cache instead of empty array
-    return getLocalMovies();
+    return sortMoviesList(getLocalMovies());
   }
 }
 
@@ -60,7 +95,7 @@ export async function saveMovieToFirestore(movie: MovieData): Promise<void> {
   try {
     const normalized = normalizeMoviePosters(movie);
     await setDoc(doc(db, COLLECTION_NAME, normalized.id), normalized);
-    saveMovieLocally(normalized); // Sync local cache immediately
+    saveMovieLocally(normalized);
   } catch (e) {
     console.error('Error saving movie to Firestore', e);
     throw e;
@@ -70,13 +105,12 @@ export async function saveMovieToFirestore(movie: MovieData): Promise<void> {
 export async function deleteMovieFromFirestore(id: string): Promise<void> {
   try {
     await deleteDoc(doc(db, COLLECTION_NAME, id));
-    deleteMovieLocally(id); // Sync local cache immediately
+    deleteMovieLocally(id);
   } catch (e) {
     console.error('Error deleting movie from Firestore', e);
     throw e;
   }
 }
-
 
 const STORAGE_KEY = 'movie_portal_movies_v2';
 
@@ -91,10 +125,12 @@ export function getLocalMovies(): MovieData[] {
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      return parsed.filter((m: any) => m && m.id).map((m: any) => normalizeMoviePosters(m));
+      return sortMoviesList(
+        parsed.filter((m: any) => m && m.id).map((m: any) => normalizeMoviePosters(m))
+      );
     }
     return [];
-  } catch (e) {
+  } catch {
     return [];
   }
 }
@@ -102,9 +138,21 @@ export function getLocalMovies(): MovieData[] {
 export function saveLocalMovies(movies: MovieData[]): void {
   try {
     if (typeof window === 'undefined') return;
-    // Safety: Don't overwrite with null/undefined
-    if (!movies) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(movies));
+    if (!Array.isArray(movies)) return;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(movies));
+    } catch {
+      // QuotaExceededError safety: store compact metadata without long descriptions so NO movies are dropped
+      try {
+        const compacted = movies.map((m) => ({
+          ...m,
+          description: m.description ? String(m.description).slice(0, 180) : '',
+        }));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(compacted));
+      } catch (innerErr) {
+        console.warn('Failed to save compacted movies to localStorage', innerErr);
+      }
+    }
   } catch (e) {
     console.warn('Failed to save movies to localStorage', e);
   }
@@ -112,7 +160,7 @@ export function saveLocalMovies(movies: MovieData[]): void {
 
 export function saveMovieLocally(movie: MovieData): MovieData[] {
   const current = getLocalMovies();
-  const existingIdx = current.findIndex(m => m.id === movie.id);
+  const existingIdx = current.findIndex((m) => m.id === movie.id);
   let updated: MovieData[];
   if (existingIdx >= 0) {
     updated = [...current];
@@ -120,27 +168,28 @@ export function saveMovieLocally(movie: MovieData): MovieData[] {
   } else {
     updated = [movie, ...current];
   }
-  saveLocalMovies(updated);
-  return updated;
+  const sorted = sortMoviesList(updated);
+  saveLocalMovies(sorted);
+  return sorted;
 }
 
 export function deleteMovieLocally(id: string): MovieData[] {
   const current = getLocalMovies();
-  const updated = current.filter(m => m.id !== id);
+  const updated = current.filter((m) => m.id !== id);
   saveLocalMovies(updated);
   return updated;
 }
 
 export function togglePublishLocally(id: string): MovieData[] {
   const current = getLocalMovies();
-  const updated = current.map(m => m.id === id ? { ...m, published: !m.published } : m);
+  const updated = current.map((m) => (m.id === id ? { ...m, published: !m.published } : m));
   saveLocalMovies(updated);
   return updated;
 }
 
 export function toggleFeaturedLocally(id: string): MovieData[] {
   const current = getLocalMovies();
-  const updated = current.map(m => m.id === id ? { ...m, featured: !m.featured } : m);
+  const updated = current.map((m) => (m.id === id ? { ...m, featured: !m.featured } : m));
   saveLocalMovies(updated);
   return updated;
 }
@@ -155,4 +204,3 @@ export function clearAllMoviesLocally(): void {
     console.warn('Failed to clear movies from localStorage', e);
   }
 }
-

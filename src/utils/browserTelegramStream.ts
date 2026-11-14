@@ -292,8 +292,16 @@ async function resolveTelegramDocument(telegramUrl: string, allowRetry = true): 
 
   const rawMime = (document.mimeType || '').toLowerCase();
   const lowerName = fileName.toLowerCase();
+  const isMkv = lowerName.endsWith('.mkv') || rawMime.includes('matroska') || rawMime.includes('mkv');
   const isWebm = lowerName.endsWith('.webm') || rawMime.includes('webm');
-  const mimeType = isWebm ? 'video/webm' : 'video/mp4';
+  const isAvi = lowerName.endsWith('.avi') || rawMime.includes('x-msvideo');
+  const mimeType = isMkv
+    ? 'video/x-matroska'
+    : isWebm
+      ? 'video/webm'
+      : isAvi
+        ? 'video/x-msvideo'
+        : 'video/mp4';
 
   const entry: CachedBrowserMedia = {
     document,

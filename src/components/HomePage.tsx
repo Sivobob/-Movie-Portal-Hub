@@ -1,18 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
-import { collection, query, where, onSnapshot, getDocs } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import { collection, query, where, onSnapshot, getDocsFromServer } from 'firebase/firestore';
+import { db } from '../firebase';
 import MovieCard from './MovieCard';
-import { Search, Play, X, Star, Calendar, Globe, Film, ShieldCheck, LogIn, LogOut, Smartphone, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, Play, X, Film, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import VideoPlayerModal from './VideoPlayerModal';
-import { useAuth, isAuthorizedAdminEmail } from '../context/AuthContext';
-import { loginWithGoogle } from '../services/authService';
+import { useAuth } from '../context/AuthContext';
 
-import { fetchMoviesFromFirestore, getLocalMovies, saveLocalMovies } from '../services/movieStorage';
-import { isNativeAndroid, isInstalledPhoneApp, downloadOfficialApk } from '../utils/platform';
-import AndroidBottomNav from './AndroidBottomNav';
+import { getLocalMovies, saveLocalMovies, sortMoviesList } from '../services/movieStorage';
+import { isNativeAndroid } from '../utils/platform';
 import { upgradePosterUrl, normalizeMoviePosters } from '../utils/posterUrl';
 import { getVisibleQualityBadge } from '../utils/qualityBadge';
 
@@ -34,13 +32,14 @@ const slideVariants = {
 };
 
 export default function HomePage() {
-  const isAndroid = isNativeAndroid();
-  const { user, isAdmin, handleLogout, signInWithEmail } = useAuth();
-  const [movies, setMovies] = useState<any[]>(getLocalMovies());
-  const [featuredMovies, setFeaturedMovies] = useState<any[]>(getLocalMovies());
+  useAuth();
+  const initialLocal = sortMoviesList(getLocalMovies().filter((m: any) => m.published !== false));
+  const initialFeatured = initialLocal.filter((m: any) => m.featured);
+  const [movies, setMovies] = useState<any[]>(initialLocal);
+  const [featuredMovies, setFeaturedMovies] = useState<any[]>(initialFeatured.length > 0 ? initialFeatured : initialLocal);
   const [searchParams, setSearchParams] = useSearchParams();
   const category = searchParams.get('category');
-  
+
   const setCategory = (cat: string | null) => {
     if (cat) {
       setSearchParams({ category: cat });
@@ -54,13 +53,11 @@ export default function HomePage() {
   const [selectedMovie, setSelectedMovie] = useState<any | null>(null);
   const [activeSeasonIndex, setActiveSeasonIndex] = useState(0);
   const [playingMovie, setPlayingMovie] = useState<any | null>(null);
-  const [showAdminMenu, setShowAdminMenu] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isFolderSearchOpen, setIsFolderSearchOpen] = useState(false);
   const [folderSearchQuery, setFolderSearchQuery] = useState('');
   const folderSearchInputRef = useRef<HTMLInputElement | null>(null);
-  const navigate = useNavigate();
 
-  const isMasterAdmin = Boolean(user && isAuthorizedAdminEmail(user.email) && isAdmin);
   const isFolderSearchSupported =
     category === 'Bollywood' || category === 'Hollywood' || category === 'Series';
 
@@ -185,34 +182,79 @@ export default function HomePage() {
     }
   }, []);
 
-  // Load and sync published movies in real-time
+  // Load and sync published movies in real-time with server reconciliation
   useEffect(() => {
     let isMounted = true;
     const q = query(collection(db, 'movies'), where('published', '==', true));
 
+    const applyMovieList = (rawDocs: any[], fromCache: boolean) => {
+      if (!isMounted) return;
+      const list = sortMoviesList(
+        rawDocs.map((d) => normalizeMoviePosters({ id: d.id, ...d.data() })) as any[]
+      );
+      if (fromCache && list.length === 0 && getLocalMovies().length > 0) {
+        return;
+      }
+      setIsLoading(false);
+      setMovies(list);
+      const featuredOnly = list.filter((m) => m.featured);
+      setFeaturedMovies(featuredOnly.length > 0 ? featuredOnly : list);
+      saveLocalMovies(list);
+    };
+
+    const syncFromServer = async () => {
+      try {
+        const snap = await getDocsFromServer(q);
+        applyMovieList(snap.docs, false);
+      } catch {
+        // Offline / fallback handled by snapshot listener
+      }
+    };
+
     const unsubscribe = onSnapshot(
       q,
+      { includeMetadataChanges: true },
       (snapshot) => {
-        if (!isMounted) return;
-        const list = snapshot.docs.map((d) => normalizeMoviePosters({ id: d.id, ...d.data() })) as any[];
-        console.log(`[Sync] Real-time update: Received ${list.length} published movies`);
-        
-        setIsLoading(false);
-        setMovies(list);
-        setFeaturedMovies(list.filter(m => m.featured));
-        saveLocalMovies(list);
+        applyMovieList(snapshot.docs, snapshot.metadata.fromCache);
       },
       (err) => {
         console.error('Real-time sync error:', err);
         if (isMounted) setIsLoading(false);
       }
     );
-    
+
+    syncFromServer();
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        syncFromServer();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
     return () => {
       isMounted = false;
       unsubscribe();
+      document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, []);
+
+  // Clamp activeSlideIndex whenever featuredMovies list updates
+  useEffect(() => {
+    if (featuredMovies.length > 0 && activeSlideIndex >= featuredMovies.length) {
+      setActiveSlideIndex(0);
+    }
+  }, [featuredMovies.length, activeSlideIndex]);
+
+  useEffect(() => {
+    setActiveSeasonIndex(0);
+  }, [selectedMovie?.id]);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage((prev) => (prev === msg ? null : prev));
+    }, 3000);
+  };
 
 
 
@@ -427,19 +469,19 @@ export default function HomePage() {
 
 
 
-  const handleDownloadAPK = (e: React.MouseEvent) => {
-    e.preventDefault();
-    downloadOfficialApk();
-  };
-
   return (
-    <div className={`relative flex-1 min-h-0 w-full bg-black text-white flex flex-col select-none overflow-x-hidden ${category ? 'overflow-y-auto pb-28 pt-1' : 'overflow-hidden pb-0'}`}>
+    <div className={`relative flex-1 min-h-0 w-full max-w-full bg-black text-white flex flex-col select-none overflow-x-hidden ${category ? 'overflow-y-auto pb-[calc(5.75rem+env(safe-area-inset-bottom))] pt-1' : 'overflow-hidden pb-0'}`}>
 
+      {toastMessage && (
+        <div className="fixed top-[max(4.25rem,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-[120] bg-neutral-900/95 border border-yellow-400/50 text-white text-xs font-bold px-4 py-2.5 rounded-full shadow-2xl backdrop-blur-md max-w-[90vw] truncate">
+          {toastMessage}
+        </div>
+      )}
 
       {/* Category Grid View OR Cinematic Main Homepage */}
       {category ? (
-        <div className="flex-grow pt-4">
-          <div className="flex items-center justify-between px-4 mb-3">
+        <div className="flex-grow pt-3">
+          <div className="flex items-center justify-between px-3 sm:px-4 mb-3">
             <div className="flex items-baseline gap-2.5">
               <h2 className="text-yellow-400 font-bold text-lg tracking-wide uppercase">{category}</h2>
               <span className="text-xs text-gray-400 tabular-nums">
@@ -544,7 +586,7 @@ export default function HomePage() {
           )}
           </div>
       ) : !currentFeatured ? (
-        <div className="relative flex-grow min-h-[calc(100vh-64px)] flex flex-col items-center justify-center p-6 text-center">
+        <div className="relative flex-1 min-h-0 flex flex-col items-center justify-center p-6 pb-[calc(5rem+env(safe-area-inset-bottom))] text-center">
           <div className="w-16 h-16 rounded-2xl bg-neutral-900 border border-neutral-800 flex items-center justify-center text-yellow-400 mb-4 shadow-2xl">
             <Film size={32} />
           </div>
@@ -556,9 +598,9 @@ export default function HomePage() {
           </p>
         </div>
       ) : (
-        /* Cinematic Main Homepage Slider - Auto-fits phone screen height */
-        <div 
-          className="relative flex-1 min-h-0 w-full flex flex-col justify-end overflow-hidden pb-24 sm:pb-20 touch-none cursor-pointer select-none"
+        /* Cinematic Main Homepage Slider - Auto-fits every phone screen height */
+        <div
+          className="relative flex-1 min-h-0 w-full flex flex-col justify-end overflow-hidden pb-[calc(5.25rem+env(safe-area-inset-bottom))] sm:pb-24 touch-none cursor-pointer select-none"
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
@@ -637,60 +679,77 @@ export default function HomePage() {
             </>
           )}
 
-          {/* Slider Pagination Dots (Center Aligned Bottom) */}
-          {featuredMovies.length > 1 && (
-            <div 
-              className="relative z-10 flex justify-center gap-2 mt-4 pb-2"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {featuredMovies.map((_, idx) => (
-                <button
-                  key={idx}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (idx === activeSlideIndex) return;
-                    setSlideDirection(idx > activeSlideIndex ? 1 : -1);
-                    setActiveSlideIndex(idx);
-                    handleInteractionStart();
-                    handleInteractionEnd();
-                  }}
-                  className={`h-1.5 rounded-full transition-all duration-300 cursor-pointer ${
-                    idx === activeSlideIndex ? 'w-10 bg-yellow-400 shadow-[0_0_10px_rgba(250,204,21,0.5)]' : 'w-3 bg-white/20 hover:bg-white/40'
-                  }`}
-                  aria-label={`Go to slide ${idx + 1}`}
-                />
-              ))}
-            </div>
-          )}
+          {/* Slider Pagination Dots (Windowed so unlimited movies never overflow narrow phones) */}
+          {featuredMovies.length > 1 && (() => {
+            const total = featuredMovies.length;
+            const maxDots = 7;
+            const half = Math.floor(maxDots / 2);
+            let start = Math.max(0, activeSlideIndex - half);
+            if (start + maxDots > total) start = Math.max(0, total - maxDots);
+            const end = Math.min(total, start + maxDots);
+            const visibleIndices = Array.from({ length: end - start }, (_, i) => start + i);
+
+            return (
+              <div
+                className="relative z-10 flex items-center justify-center gap-1.5 sm:gap-2 mt-3 px-4 pb-1"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {visibleIndices.map((idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (idx === activeSlideIndex) return;
+                      setSlideDirection(idx > activeSlideIndex ? 1 : -1);
+                      setActiveSlideIndex(idx);
+                      handleInteractionStart();
+                      handleInteractionEnd();
+                    }}
+                    className={`h-1.5 rounded-full transition-all duration-300 cursor-pointer ${
+                      idx === activeSlideIndex ? 'w-8 sm:w-10 bg-yellow-400 shadow-[0_0_10px_rgba(250,204,21,0.5)]' : 'w-2.5 sm:w-3 bg-white/25 hover:bg-white/45'
+                    }`}
+                    aria-label={`Go to slide ${idx + 1}`}
+                  />
+                ))}
+                {total > maxDots && (
+                  <span className="ml-1.5 text-[10px] font-black text-yellow-400/90 bg-black/70 border border-white/15 px-2 py-0.5 rounded-full tabular-nums">
+                    {activeSlideIndex + 1}/{total}
+                  </span>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
 
-      {/* Movie Details Modal — Exact Poster Popup UI Redesign */}
+      {/* Movie Details Modal — Responsive across all phone screen sizes */}
       {selectedMovie && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200"
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200"
           onClick={() => setSelectedMovie(null)}
         >
           <div
-            className="bg-neutral-900 rounded-[28px] max-w-[340px] sm:max-w-[360px] w-full max-h-[92dvh] flex flex-col overflow-hidden shadow-2xl relative my-auto border border-neutral-800/60"
+            className="bg-neutral-900 rounded-[24px] sm:rounded-[28px] max-w-[min(92vw,370px)] w-full max-h-[88dvh] flex flex-col overflow-hidden shadow-2xl relative border border-neutral-800/60"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Top Close Button (Dismiss Modal) */}
             <button
+              type="button"
               onClick={() => setSelectedMovie(null)}
-              className="absolute top-3.5 right-3.5 z-30 bg-black/80 hover:bg-black text-white p-2 rounded-full backdrop-blur-md border border-white/20 shadow-lg cursor-pointer transition-transform hover:scale-110"
+              className="absolute top-3 right-3 z-30 bg-black/80 hover:bg-black text-white p-2 rounded-full backdrop-blur-md border border-white/20 shadow-lg cursor-pointer transition-transform hover:scale-110"
               aria-label="Close"
             >
               <X size={18} />
             </button>
 
-            {/* Poster Section (Click to Play) */}
-            <div 
+            {/* Poster Section (Constrained height so details & episodes fit inside short phones) */}
+            <div
               onClick={() => {
                 handleWatchNow(selectedMovie);
                 setSelectedMovie(null);
               }}
-              className="relative w-full aspect-[3/4] bg-neutral-950 overflow-hidden cursor-pointer group"
+              className="relative w-full aspect-[3/4] max-h-[40dvh] bg-neutral-950 overflow-hidden cursor-pointer group flex-shrink-0"
             >
               <img
                 src={upgradePosterUrl(selectedMovie.posterUrl || selectedMovie.backdropUrl, 1080) || selectedMovie.posterUrl || selectedMovie.backdropUrl || undefined}
@@ -726,41 +785,40 @@ export default function HomePage() {
               </div>
             </div>
 
-            {/* Movie Info Section */}
-            <div className="bg-white text-black p-5 pt-4 pb-6 sm:p-6 sm:pt-5 sm:pb-8 rounded-b-[28px] overflow-y-auto max-h-[48vh] scrollbar-thin">
-              <h3 className="text-xl sm:text-2xl font-black text-gray-900 text-center tracking-tight leading-snug mb-2 font-sans uppercase">
+            {/* Movie Info & Seasons/Episodes Section (Single unified scrollable card body) */}
+            <div className="bg-white text-black p-4 sm:p-5 pb-5 rounded-b-[24px] sm:rounded-b-[28px] overflow-y-auto overscroll-contain flex-1 min-h-0 scrollbar-thin">
+              <h3 className="text-lg sm:text-xl font-black text-gray-900 text-center tracking-tight leading-snug mb-1.5 font-sans uppercase">
                 {selectedMovie.title}
               </h3>
 
-              <p className="text-xs sm:text-sm font-semibold text-gray-500 text-center leading-normal mb-4">
+              <p className="text-xs sm:text-sm font-semibold text-gray-500 text-center leading-normal mb-3">
                 {selectedMovie.genre || selectedMovie.displayCategory || 'Movie'}
               </p>
 
               {selectedMovie.description ? (
-                <div className="text-xs text-gray-600 text-center leading-relaxed max-h-32 overflow-y-auto px-2 mb-4 scrollbar-thin">
+                <div className="text-xs text-gray-600 text-center leading-relaxed max-h-28 overflow-y-auto px-1 mb-3 scrollbar-thin">
                   {selectedMovie.description}
                 </div>
               ) : (
-                <p className="text-xs text-gray-400 text-center italic mb-4">No description available for this title.</p>
+                <p className="text-xs text-gray-400 text-center italic mb-3">No description available for this title.</p>
               )}
 
               <div className="flex flex-col items-center gap-1">
-                <div className="h-0.5 w-12 bg-yellow-400 mb-2 rounded-full opacity-50" />
+                <div className="h-0.5 w-12 bg-yellow-400 mb-1.5 rounded-full opacity-50" />
                 <p className="text-[9px] font-black text-yellow-600 uppercase tracking-[0.2em] animate-pulse">Tap Poster to Watch</p>
               </div>
-            </div>
 
-
-              {/* Preserved Series Season & Episode Selection */}
+              {/* Preserved Series Season & Episode Selection inside white card body */}
               {selectedMovie.seasons && selectedMovie.seasons.length > 0 && (
-                <div className="mt-4 pt-4 border-t border-gray-200 space-y-3">
+                <div className="mt-4 pt-3.5 border-t border-gray-200 space-y-2.5">
                   {/* Season Selector Tabs */}
-                  <div className="flex items-center justify-center gap-1.5 overflow-x-auto pb-1">
+                  <div className="flex items-center justify-start sm:justify-center gap-1.5 overflow-x-auto pb-1">
                     {selectedMovie.seasons.map((season: any, sIdx: number) => (
                       <button
                         key={sIdx}
+                        type="button"
                         onClick={() => setActiveSeasonIndex(sIdx)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex-shrink-0 ${
                           activeSeasonIndex === sIdx
                             ? 'bg-black text-white shadow'
                             : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
@@ -772,16 +830,16 @@ export default function HomePage() {
                   </div>
 
                   {/* Episodes List */}
-                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                  <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
                     {selectedMovie.seasons[activeSeasonIndex]?.episodes?.map((ep: any, eIdx: number) => (
                       <div
                         key={eIdx}
                         className="flex items-center gap-2 bg-gray-50 hover:bg-gray-100 border border-gray-200 p-2 rounded-lg transition-colors group"
                       >
-                        <div 
+                        <div
                           onClick={() => {
                             if (!ep.streamUrl) {
-                              alert('Streaming link for this episode is not available yet.');
+                              showToast('Streaming link for this episode is not available yet.');
                               return;
                             }
                             setPlayingMovie({
@@ -805,12 +863,10 @@ export default function HomePage() {
                           </div>
                         </div>
 
-
-
-                        <div 
+                        <div
                           onClick={() => {
                             if (!ep.streamUrl) {
-                              alert('Streaming link for this episode is not available yet.');
+                              showToast('Streaming link for this episode is not available yet.');
                               return;
                             }
                             setPlayingMovie({
@@ -835,6 +891,7 @@ export default function HomePage() {
                   </div>
                 </div>
               )}
+            </div>
           </div>
         </div>
       )}

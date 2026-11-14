@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Search, Mic, ArrowLeft, Film, Play, Star } from 'lucide-react';
+import { Search, X, ArrowLeft, Film } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { collection, query, where, getDocs, limit } from 'firebase/firestore';
+import { collection, getDocs, getDocsFromServer } from 'firebase/firestore';
 import { db } from '../firebase';
 import VideoPlayerModal from './VideoPlayerModal';
 import MovieCard from './MovieCard';
-import { fetchMoviesFromFirestore } from '../services/movieStorage';
+import { fetchMoviesFromFirestore, sortMoviesList } from '../services/movieStorage';
 import { normalizeMoviePosters } from '../utils/posterUrl';
 
 const GENRES = [
@@ -24,14 +24,14 @@ export default function SearchPage() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (searchQuery.trim().length < 2) {
+    if (searchQuery.trim().length < 2 && selectedGenres.length === 0) {
       setResults([]);
       return;
     }
 
     const delayDebounceFn = setTimeout(() => {
       handleSearch();
-    }, 500);
+    }, 350);
 
     return () => clearTimeout(delayDebounceFn);
   }, [searchQuery, selectedGenres]);
@@ -41,27 +41,35 @@ export default function SearchPage() {
     try {
       let list: any[] = [];
       try {
-        const q = query(collection(db, 'movies'), limit(100));
-        const snapshot = await getDocs(q);
-        list = snapshot.docs.map(doc => normalizeMoviePosters({ id: doc.id, ...doc.data() })).filter((m: any) => m.published !== false && !m.id?.startsWith('sample-'));
+        let snapshot;
+        try {
+          snapshot = await getDocsFromServer(collection(db, 'movies'));
+        } catch {
+          snapshot = await getDocs(collection(db, 'movies'));
+        }
+        list = sortMoviesList(
+          snapshot.docs
+            .map((d) => normalizeMoviePosters({ id: d.id, ...d.data() }))
+            .filter((m: any) => m.published !== false && !m.id?.startsWith('sample-'))
+        );
       } catch (e: any) {
         console.warn('Search falling back to storage service:', e?.message || e);
-        list = await fetchMoviesFromFirestore();
+        list = (await fetchMoviesFromFirestore()).filter((m: any) => m.published !== false);
       }
 
-      // Filter by title
-      if (searchQuery) {
-        const lowerQuery = searchQuery.toLowerCase();
-        list = list.filter((m: any) => 
-          m.title.toLowerCase().includes(lowerQuery) || 
-          m.originalTitle?.toLowerCase().includes(lowerQuery)
+      if (searchQuery.trim()) {
+        const lowerQuery = searchQuery.trim().toLowerCase();
+        list = list.filter((m: any) =>
+          String(m.title || '').toLowerCase().includes(lowerQuery) ||
+          String(m.originalTitle || '').toLowerCase().includes(lowerQuery) ||
+          String(m.genre || '').toLowerCase().includes(lowerQuery) ||
+          String(m.language || '').toLowerCase().includes(lowerQuery)
         );
       }
 
-      // Filter by genres
       if (selectedGenres.length > 0) {
-        list = list.filter((m: any) => 
-          selectedGenres.some(g => m.genre?.includes(g))
+        list = list.filter((m: any) =>
+          selectedGenres.some((g) => String(m.genre || '').toLowerCase().includes(g.toLowerCase()))
         );
       }
 
@@ -75,39 +83,52 @@ export default function SearchPage() {
   };
 
   const toggleGenre = (genre: string) => {
-    setSelectedGenres(prev => 
-      prev.includes(genre) ? prev.filter(g => g !== genre) : [...prev, genre]
+    setSelectedGenres((prev) =>
+      prev.includes(genre) ? prev.filter((g) => g !== genre) : [...prev, genre]
     );
   };
 
   return (
-    <div className="min-h-screen bg-black text-white p-4 pb-24 select-none">
-      <div className="flex items-center gap-4 bg-neutral-900 border border-neutral-800 p-3 rounded-xl mb-6 shadow-lg sticky top-0 z-20">
-        <ArrowLeft onClick={() => navigate(-1)} className="text-yellow-400 cursor-pointer hover:scale-110 transition-transform" />
-        <Search className="text-gray-500" size={20} />
-        <input 
-          type="text" 
+    <div className="min-h-[100dvh] w-full max-w-full overflow-x-hidden bg-black text-white px-3 sm:px-4 pt-3 pb-[calc(5.5rem+env(safe-area-inset-bottom))] select-none">
+      <div className="flex items-center gap-2.5 sm:gap-3 bg-neutral-900 border border-neutral-800 px-3 py-2.5 rounded-xl mb-5 shadow-lg sticky top-2 z-20 min-w-0">
+        <button
+          type="button"
+          onClick={() => navigate(-1)}
+          className="text-yellow-400 cursor-pointer p-1 hover:scale-110 transition-transform flex-shrink-0"
+          aria-label="Back"
+        >
+          <ArrowLeft size={20} />
+        </button>
+        <Search className="text-gray-500 flex-shrink-0" size={18} />
+        <input
+          type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search movies, series, anime..." 
-          className="bg-transparent flex-grow outline-none text-sm placeholder-gray-600" 
+          placeholder="Search movies, series, anime..."
+          className="bg-transparent flex-grow min-w-0 outline-none text-sm text-white placeholder-gray-500"
         />
         {searchQuery && (
-          <button onClick={() => setSearchQuery('')} className="text-gray-500 hover:text-white">
-            <Mic size={20} className="text-yellow-400" />
+          <button
+            type="button"
+            onClick={() => setSearchQuery('')}
+            className="text-gray-400 hover:text-white p-1 flex-shrink-0 cursor-pointer"
+            aria-label="Clear search"
+          >
+            <X size={18} className="text-yellow-400" />
           </button>
         )}
       </div>
 
       {/* Genre Chips */}
-      <div className="flex flex-wrap gap-2 mb-8 max-h-32 overflow-y-auto pr-2 custom-scrollbar">
-        {GENRES.map(genre => (
-          <button 
+      <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-6 max-h-32 overflow-y-auto pr-1">
+        {GENRES.map((genre) => (
+          <button
             key={genre}
+            type="button"
             onClick={() => toggleGenre(genre)}
-            className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all border ${
-              selectedGenres.includes(genre) 
-                ? 'bg-yellow-400 text-black border-yellow-400 shadow-lg shadow-yellow-400/20' 
+            className={`px-2.5 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all border cursor-pointer ${
+              selectedGenres.includes(genre)
+                ? 'bg-yellow-400 text-black border-yellow-400 shadow-lg shadow-yellow-400/20'
                 : 'bg-neutral-900 text-gray-400 border-neutral-800 hover:border-gray-600'
             }`}
           >
@@ -118,17 +139,28 @@ export default function SearchPage() {
 
       {/* Search Results */}
       <div className="space-y-4">
-        <h3 className="text-xs font-black text-gray-500 uppercase tracking-widest flex items-center gap-2">
-          {isLoading ? 'Searching...' : results.length > 0 ? `Results (${results.length})` : searchQuery.length >= 2 ? 'No results found' : 'Type to search'}
+        <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest flex items-center gap-2">
+          {isLoading
+            ? 'Searching...'
+            : results.length > 0
+            ? `Results (${results.length})`
+            : searchQuery.trim().length >= 2 || selectedGenres.length > 0
+            ? 'No results found'
+            : 'Type or pick genre to search'}
         </h3>
 
-        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2 sm:gap-3">
           {results.map((movie) => (
-            <MovieCard 
-              key={movie.id} 
-              movie={movie} 
+            <MovieCard
+              key={movie.id}
+              movie={movie}
               onClick={() => {
-                if (movie.seasons && movie.seasons.length > 0 && movie.seasons[0].episodes?.length > 0 && movie.seasons[0].episodes[0].streamUrl) {
+                if (
+                  movie.seasons &&
+                  movie.seasons.length > 0 &&
+                  movie.seasons[0].episodes?.length > 0 &&
+                  movie.seasons[0].episodes[0].streamUrl
+                ) {
                   const ep = movie.seasons[0].episodes[0];
                   setPlayingMovie({
                     title: `${movie.title} - S01E01: ${ep.title}`,
@@ -153,29 +185,37 @@ export default function SearchPage() {
                 } else {
                   setPlayingMovie(movie);
                 }
-              }} 
+              }}
             />
           ))}
         </div>
 
-        {!isLoading && results.length === 0 && searchQuery.length < 2 && (
-          <div className="py-20 text-center text-neutral-800 flex flex-col items-center">
-            <Film size={64} className="mb-4 opacity-20" />
-            <p className="text-sm font-bold uppercase tracking-widest opacity-30">Find your next favorite</p>
+        {!isLoading && results.length === 0 && searchQuery.trim().length < 2 && selectedGenres.length === 0 && (
+          <div className="py-16 text-center text-neutral-800 flex flex-col items-center">
+            <Film size={56} className="mb-4 opacity-20" />
+            <p className="text-xs sm:text-sm font-bold uppercase tracking-widest opacity-40">
+              Find your next favorite
+            </p>
           </div>
         )}
       </div>
 
       {/* Filter Actions */}
-      <div className="fixed bottom-0 left-0 w-full p-4 bg-black/80 backdrop-blur-md flex gap-3 border-t border-neutral-900">
-        <button 
-          className="flex-1 bg-neutral-900 text-gray-400 py-3 rounded-xl text-xs font-bold uppercase border border-neutral-800 hover:bg-neutral-800 transition-colors" 
-          onClick={() => { setSelectedGenres([]); setSearchQuery(''); setResults([]); }}
+      <div className="fixed bottom-0 left-0 right-0 w-full px-3 sm:px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-black/90 backdrop-blur-md flex gap-2.5 border-t border-neutral-900 z-30">
+        <button
+          type="button"
+          className="flex-1 bg-neutral-900 text-gray-300 py-3 rounded-xl text-xs font-bold uppercase border border-neutral-800 hover:bg-neutral-800 transition-colors cursor-pointer"
+          onClick={() => {
+            setSelectedGenres([]);
+            setSearchQuery('');
+            setResults([]);
+          }}
         >
           Reset All
         </button>
-        <button 
-          className="flex-1 bg-yellow-400 text-black py-3 rounded-xl text-xs font-black uppercase shadow-lg shadow-yellow-400/20 active:scale-95 transition-all"
+        <button
+          type="button"
+          className="flex-1 bg-yellow-400 text-black py-3 rounded-xl text-xs font-black uppercase shadow-lg shadow-yellow-400/20 active:scale-95 transition-all cursor-pointer"
           onClick={handleSearch}
         >
           Apply Filters
@@ -191,7 +231,9 @@ export default function SearchPage() {
           videoQualities={playingMovie.videoQualities}
           category={playingMovie.displayCategory}
           posterUrl={playingMovie.posterUrl}
-          movie={playingMovie}
+          movie={playingMovie.movie || playingMovie}
+          seasonIndex={playingMovie.seasonIndex ?? 0}
+          episodeIndex={playingMovie.episodeIndex ?? 0}
           language={playingMovie.language}
         />
       )}

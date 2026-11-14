@@ -12,7 +12,11 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
+import android.view.Gravity;
+import android.view.TextureView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
@@ -28,6 +32,17 @@ import androidx.core.content.FileProvider;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
+import androidx.media3.common.C;
+import androidx.media3.common.Format;
+import androidx.media3.common.MediaItem;
+import androidx.media3.common.PlaybackException;
+import androidx.media3.common.Player;
+import androidx.media3.common.TrackSelectionOverride;
+import androidx.media3.common.TrackSelectionParameters;
+import androidx.media3.common.Tracks;
+import androidx.media3.common.VideoSize;
+import androidx.media3.exoplayer.DefaultLoadControl;
+import androidx.media3.exoplayer.ExoPlayer;
 import androidx.mediarouter.media.MediaRouter;
 import androidx.mediarouter.media.MediaRouteSelector;
 import com.getcapacitor.BridgeActivity;
@@ -98,6 +113,30 @@ public class MainActivity extends BridgeActivity {
     private String pendingCastPoster = null;
     private long pendingCastCurrentTimeSec = 0;
 
+    // Native Media3 ExoPlayer state (universal phone hardware/software codec playback)
+    private FrameLayout exoContainer;
+    private TextureView exoTextureView;
+    private ExoPlayer exoPlayer;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private volatile boolean exoActive = false;
+    private volatile int exoVideoWidth = 0;
+    private volatile int exoVideoHeight = 0;
+    private volatile boolean exoFirstFrameRendered = false;
+    private volatile String exoErrorMessage = "";
+    private volatile String exoAudioTracksJson = "[]";
+    private volatile String exoSubtitleTracksJson = "[]";
+    private volatile String cachedExoStateJson = "{\"active\":false,\"state\":1,\"isPlaying\":false,\"isBuffering\":false,\"ended\":false,\"currentTime\":0,\"duration\":0,\"bufferedPosition\":0,\"videoWidth\":0,\"videoHeight\":0,\"firstFrameRendered\":false,\"error\":\"\",\"audioTracks\":[],\"subtitleTracks\":[]}";
+
+    private final Runnable exoStateTicker = new Runnable() {
+        @Override
+        public void run() {
+            refreshExoStateSnapshot();
+            if (exoActive && exoPlayer != null) {
+                mainHandler.postDelayed(this, 250);
+            }
+        }
+    };
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -147,7 +186,21 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
+    public void onPause() {
+        super.onPause();
+        if (exoPlayer != null && exoActive) {
+            try {
+                if (exoPlayer.isPlaying()) {
+                    exoPlayer.pause();
+                }
+                refreshExoStateSnapshot();
+            } catch (Exception ignored) {}
+        }
+    }
+
+    @Override
     public void onDestroy() {
+        releaseExoPlayerInternal();
         stopCastDiscoveryNative();
         disconnectCastNative();
         if (sessionManager != null && castSessionListener != null) {
@@ -230,6 +283,7 @@ public class MainActivity extends BridgeActivity {
                     localStreamServer = new LocalStreamServer(webView);
                     webView.addJavascriptInterface(localStreamServer.createJsInterface(), "AndroidStreamBridge");
                 }
+                setupExoSurfaceContainer(webView);
                 if (!webViewConfigured) {
                     webView.addJavascriptInterface(new PlayerBridge(), "AndroidPlayerBridge");
                     webViewConfigured = true;
@@ -238,6 +292,300 @@ public class MainActivity extends BridgeActivity {
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    private void setupExoSurfaceContainer(WebView webView) {
+        if (exoContainer != null || webView == null) return;
+        try {
+            ViewGroup parent = (ViewGroup) webView.getParent();
+            if (parent == null) return;
+
+            exoContainer = new FrameLayout(this);
+            exoContainer.setBackgroundColor(Color.BLACK);
+            exoContainer.setVisibility(View.GONE);
+
+            exoTextureView = new TextureView(this);
+            FrameLayout.LayoutParams tvParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER
+            );
+            exoContainer.addView(exoTextureView, tvParams);
+            exoContainer.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+                if ((r - l) != (or - ol) || (b - t) != (ob - ot)) {
+                    updateExoVideoSurfaceSize();
+                }
+            });
+
+            parent.addView(
+                exoContainer,
+                0,
+                new ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            );
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void updateExoVideoSurfaceSize() {
+        if (exoContainer == null || exoTextureView == null) return;
+        int cw = exoContainer.getWidth();
+        int ch = exoContainer.getHeight();
+        if (cw <= 0 || ch <= 0) return;
+
+        int vw = exoVideoWidth;
+        int vh = exoVideoHeight;
+        int targetW = cw;
+        int targetH = ch;
+
+        if (vw > 0 && vh > 0) {
+            float videoRatio = (float) vw / (float) vh;
+            float containerRatio = (float) cw / (float) ch;
+            if (videoRatio > containerRatio) {
+                targetW = cw;
+                targetH = Math.max(1, Math.round(cw / videoRatio));
+            } else {
+                targetH = ch;
+                targetW = Math.max(1, Math.round(ch * videoRatio));
+            }
+        }
+
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) exoTextureView.getLayoutParams();
+        if (lp == null) {
+            lp = new FrameLayout.LayoutParams(targetW, targetH, Gravity.CENTER);
+        } else {
+            lp.width = targetW;
+            lp.height = targetH;
+            lp.gravity = Gravity.CENTER;
+        }
+        exoTextureView.setLayoutParams(lp);
+    }
+
+    private void refreshExoStateSnapshot() {
+        try {
+            JSONObject obj = new JSONObject();
+            obj.put("active", exoActive);
+            if (exoPlayer != null) {
+                int state = exoPlayer.getPlaybackState();
+                long posMs = Math.max(0L, exoPlayer.getCurrentPosition());
+                long durMs = exoPlayer.getDuration();
+                long bufMs = Math.max(0L, exoPlayer.getBufferedPosition());
+                obj.put("state", state);
+                obj.put("isPlaying", exoPlayer.isPlaying());
+                obj.put("isBuffering", state == Player.STATE_BUFFERING);
+                obj.put("ended", state == Player.STATE_ENDED);
+                obj.put("currentTime", posMs / 1000.0);
+                obj.put("duration", (durMs > 0 && durMs != C.TIME_UNSET) ? (durMs / 1000.0) : 0.0);
+                obj.put("bufferedPosition", bufMs / 1000.0);
+            } else {
+                obj.put("state", Player.STATE_IDLE);
+                obj.put("isPlaying", false);
+                obj.put("isBuffering", false);
+                obj.put("ended", false);
+                obj.put("currentTime", 0.0);
+                obj.put("duration", 0.0);
+                obj.put("bufferedPosition", 0.0);
+            }
+            obj.put("videoWidth", exoVideoWidth);
+            obj.put("videoHeight", exoVideoHeight);
+            obj.put("firstFrameRendered", exoFirstFrameRendered);
+            obj.put("error", exoErrorMessage != null ? exoErrorMessage : "");
+            obj.put("audioTracks", new JSONArray(exoAudioTracksJson != null ? exoAudioTracksJson : "[]"));
+            obj.put("subtitleTracks", new JSONArray(exoSubtitleTracksJson != null ? exoSubtitleTracksJson : "[]"));
+            cachedExoStateJson = obj.toString();
+        } catch (Exception ignored) {}
+    }
+
+    private void startExoPlaybackNative(final String url, final double startSec, final double speed) {
+        try {
+            if (getBridge() != null && getBridge().getWebView() != null) {
+                WebView webView = getBridge().getWebView();
+                setupExoSurfaceContainer(webView);
+                webView.setBackgroundColor(Color.TRANSPARENT);
+            }
+            if (exoContainer != null) {
+                exoContainer.setVisibility(View.VISIBLE);
+            }
+
+            exoActive = true;
+            exoVideoWidth = 0;
+            exoVideoHeight = 0;
+            exoFirstFrameRendered = false;
+            exoErrorMessage = "";
+            exoAudioTracksJson = "[]";
+            exoSubtitleTracksJson = "[]";
+
+            if (exoPlayer == null) {
+                DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(15000, 60000, 1500, 3000)
+                    .build();
+                exoPlayer = new ExoPlayer.Builder(this)
+                    .setLoadControl(loadControl)
+                    .build();
+                exoPlayer.addListener(new Player.Listener() {
+                    @Override
+                    public void onVideoSizeChanged(VideoSize videoSize) {
+                        exoVideoWidth = videoSize.width;
+                        exoVideoHeight = videoSize.height;
+                        updateExoVideoSurfaceSize();
+                        refreshExoStateSnapshot();
+                    }
+
+                    @Override
+                    public void onRenderedFirstFrame() {
+                        exoFirstFrameRendered = true;
+                        refreshExoStateSnapshot();
+                    }
+
+                    @Override
+                    public void onTracksChanged(Tracks tracks) {
+                        try {
+                            List<JSONObject> audioList = new ArrayList<>();
+                            List<JSONObject> textList = new ArrayList<>();
+                            for (int g = 0; g < tracks.getGroups().size(); g++) {
+                                Tracks.Group group = tracks.getGroups().get(g);
+                                int type = group.getType();
+                                if (type != C.TRACK_TYPE_AUDIO && type != C.TRACK_TYPE_TEXT) continue;
+                                for (int t = 0; t < group.length; t++) {
+                                    if (!group.isTrackSupported(t)) continue;
+                                    Format fmt = group.getTrackFormat(t);
+                                    String lang = fmt.language != null ? fmt.language : "";
+                                    String label = (fmt.label != null && !fmt.label.trim().isEmpty())
+                                        ? fmt.label.trim()
+                                        : (!lang.isEmpty()
+                                            ? lang.toUpperCase(java.util.Locale.US)
+                                            : (type == C.TRACK_TYPE_AUDIO ? "Track " + (audioList.size() + 1) : "Subtitle " + (textList.size() + 1)));
+                                    JSONObject item = new JSONObject();
+                                    item.put("id", g + ":" + t);
+                                    item.put("label", label);
+                                    item.put("lang", lang);
+                                    item.put("selected", group.isTrackSelected(t));
+                                    if (type == C.TRACK_TYPE_AUDIO) {
+                                        audioList.add(item);
+                                    } else {
+                                        textList.add(item);
+                                    }
+                                }
+                            }
+                            exoAudioTracksJson = new JSONArray(audioList).toString();
+                            exoSubtitleTracksJson = new JSONArray(textList).toString();
+                            refreshExoStateSnapshot();
+                        } catch (Exception ignored) {}
+                    }
+
+                    @Override
+                    public void onPlaybackStateChanged(int playbackState) {
+                        refreshExoStateSnapshot();
+                    }
+
+                    @Override
+                    public void onIsPlayingChanged(boolean isPlaying) {
+                        refreshExoStateSnapshot();
+                    }
+
+                    @Override
+                    public void onPlayerError(PlaybackException error) {
+                        exoErrorMessage = error.getMessage() != null ? error.getMessage() : "ExoPlayer playback error";
+                        refreshExoStateSnapshot();
+                    }
+                });
+            }
+
+            if (exoTextureView != null) {
+                exoPlayer.setVideoTextureView(exoTextureView);
+            }
+
+            // Disable text subtitles by default until user selects one
+            exoPlayer.setTrackSelectionParameters(
+                exoPlayer.getTrackSelectionParameters()
+                    .buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                    .build()
+            );
+
+            MediaItem mediaItem = MediaItem.fromUri(Uri.parse(url));
+            exoPlayer.setMediaItem(mediaItem);
+            if (startSec > 0.5) {
+                exoPlayer.seekTo((long) (startSec * 1000.0));
+            }
+            exoPlayer.setPlaybackSpeed(speed > 0 ? (float) speed : 1.0f);
+            exoPlayer.prepare();
+            exoPlayer.setPlayWhenReady(true);
+
+            mainHandler.removeCallbacks(exoStateTicker);
+            mainHandler.post(exoStateTicker);
+        } catch (Throwable t) {
+            exoErrorMessage = t.getMessage() != null ? t.getMessage() : "Native player init failed";
+            refreshExoStateSnapshot();
+        }
+    }
+
+    private void stopExoPlaybackNative() {
+        exoActive = false;
+        mainHandler.removeCallbacks(exoStateTicker);
+        if (exoPlayer != null) {
+            try {
+                exoPlayer.stop();
+                exoPlayer.clearMediaItems();
+                exoPlayer.setVideoTextureView(null);
+            } catch (Exception ignored) {}
+        }
+        if (exoContainer != null) {
+            exoContainer.setVisibility(View.GONE);
+        }
+        if (getBridge() != null && getBridge().getWebView() != null) {
+            getBridge().getWebView().setBackgroundColor(Color.BLACK);
+        }
+        exoVideoWidth = 0;
+        exoVideoHeight = 0;
+        exoFirstFrameRendered = false;
+        exoErrorMessage = "";
+        refreshExoStateSnapshot();
+    }
+
+    private void releaseExoPlayerInternal() {
+        exoActive = false;
+        mainHandler.removeCallbacks(exoStateTicker);
+        if (exoPlayer != null) {
+            try {
+                exoPlayer.release();
+            } catch (Exception ignored) {}
+            exoPlayer = null;
+        }
+    }
+
+    private void selectExoTrackNative(final int trackType, final String trackId) {
+        if (exoPlayer == null) return;
+        try {
+            TrackSelectionParameters.Builder builder = exoPlayer.getTrackSelectionParameters().buildUpon();
+            builder.clearOverridesOfType(trackType);
+
+            if (trackId == null || trackId.trim().isEmpty() || "off".equalsIgnoreCase(trackId.trim())) {
+                if (trackType == C.TRACK_TYPE_TEXT) {
+                    builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true);
+                }
+                exoPlayer.setTrackSelectionParameters(builder.build());
+                return;
+            }
+
+            builder.setTrackTypeDisabled(trackType, false);
+            String[] parts = trackId.trim().split(":");
+            if (parts.length == 2) {
+                int groupIdx = Integer.parseInt(parts[0]);
+                int trackIdx = Integer.parseInt(parts[1]);
+                Tracks currentTracks = exoPlayer.getCurrentTracks();
+                if (groupIdx >= 0 && groupIdx < currentTracks.getGroups().size()) {
+                    Tracks.Group group = currentTracks.getGroups().get(groupIdx);
+                    if (group.getType() == trackType && trackIdx >= 0 && trackIdx < group.length) {
+                        builder.addOverride(new TrackSelectionOverride(group.getMediaTrackGroup(), trackIdx));
+                    }
+                }
+            }
+            exoPlayer.setTrackSelectionParameters(builder.build());
+        } catch (Exception ignored) {}
     }
 
     private void showCustomFullscreenView(View view, WebChromeClient.CustomViewCallback callback) {
@@ -782,11 +1130,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.199");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.202");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.199\",\"versionCode\":3419}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.202\",\"versionCode\":3422}";
             }
         }
 
@@ -904,6 +1252,80 @@ public class MainActivity extends BridgeActivity {
                     } catch (Exception ignored) {}
                 }
             });
+        }
+
+        // --- NATIVE MEDIA3 EXOPLAYER BRIDGE METHODS ---
+        @JavascriptInterface
+        public boolean isExoSupported() {
+            return true;
+        }
+
+        @JavascriptInterface
+        public void playExoMedia(final String url, final double startSec, final double speed) {
+            if (url == null || url.trim().isEmpty()) return;
+            runOnUiThread(() -> startExoPlaybackNative(url.trim(), startSec, speed));
+        }
+
+        @JavascriptInterface
+        public void stopExoMedia() {
+            runOnUiThread(MainActivity.this::stopExoPlaybackNative);
+        }
+
+        @JavascriptInterface
+        public void exoPlay() {
+            runOnUiThread(() -> {
+                if (exoPlayer != null) {
+                    exoPlayer.setPlayWhenReady(true);
+                    exoPlayer.play();
+                    refreshExoStateSnapshot();
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void exoPause() {
+            runOnUiThread(() -> {
+                if (exoPlayer != null) {
+                    exoPlayer.pause();
+                    refreshExoStateSnapshot();
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void exoSeek(final double seconds) {
+            runOnUiThread(() -> {
+                if (exoPlayer != null) {
+                    long targetMs = Math.max(0L, (long) (seconds * 1000.0));
+                    exoPlayer.seekTo(targetMs);
+                    refreshExoStateSnapshot();
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void exoSetSpeed(final double speed) {
+            runOnUiThread(() -> {
+                if (exoPlayer != null && speed > 0) {
+                    exoPlayer.setPlaybackSpeed((float) speed);
+                    refreshExoStateSnapshot();
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void exoSelectAudioTrack(final String trackId) {
+            runOnUiThread(() -> selectExoTrackNative(C.TRACK_TYPE_AUDIO, trackId));
+        }
+
+        @JavascriptInterface
+        public void exoSelectSubtitleTrack(final String trackId) {
+            runOnUiThread(() -> selectExoTrackNative(C.TRACK_TYPE_TEXT, trackId));
+        }
+
+        @JavascriptInterface
+        public String getExoState() {
+            return cachedExoStateJson != null ? cachedExoStateJson : "{}";
         }
 
         @JavascriptInterface

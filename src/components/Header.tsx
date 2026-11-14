@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth, isAuthorizedAdminEmail } from '../context/AuthContext';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
-import { ShieldCheck, Settings, ArrowLeft, Lock, Eye, EyeOff, X, KeyRound, LogOut, Search, Download, Smartphone } from 'lucide-react';
+import { ShieldCheck, Settings, Lock, Eye, EyeOff, X, KeyRound, LogOut, Download, Smartphone } from 'lucide-react';
 import { isNativeAndroid, isInstalledPhoneApp, downloadOfficialApk, OFFICIAL_APK_DOWNLOAD_URL } from '../utils/platform';
 import { CURRENT_VERSION_NAME } from '../services/appUpdateConfig';
 
@@ -11,16 +11,16 @@ export const MoviePortal3DLogo = React.memo(function MoviePortal3DLogo() {
       <span
         style={{
           fontFamily: "'Bangers', cursive, system-ui",
-          color: '#FFD700', // Gold/Yellow fill
+          color: '#FFD700',
           letterSpacing: '0.02em',
-          WebkitTextStroke: '2.5px #E60000', // Thick red outline
+          WebkitTextStroke: '2.5px #E60000',
           textShadow: `
             3px 3px 0 #800000,
             0px 0px 15px rgba(255, 215, 0, 0.3)
           `,
-          transform: 'scale(1.1) rotate(-1deg)', // Bold presence
+          transform: 'scale(1.06) rotate(-1deg)',
         }}
-        className="text-4xl sm:text-5xl font-normal uppercase tracking-tight active:scale-95 transition-transform duration-150 drop-shadow-2xl"
+        className="text-3xl sm:text-5xl font-normal uppercase tracking-tight active:scale-95 transition-transform duration-150 drop-shadow-2xl"
       >
         MOVIE PORTAL
       </span>
@@ -29,14 +29,7 @@ export const MoviePortal3DLogo = React.memo(function MoviePortal3DLogo() {
 });
 
 export default function Header() {
-  const { 
-    user, 
-    isAdmin, 
-    loading, 
-    signInWithEmail,
-    handleLogout 
-  } = useAuth();
-  
+  const { user, handleLogout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -50,22 +43,7 @@ export default function Header() {
 
   const activeCategory = searchParams.get('category');
   const isUnlockedSession = typeof window !== 'undefined' && localStorage.getItem('admin_unlocked_session') === '20180020511';
-  const isAuthorizedAdmin = isAuthorizedAdminEmail(user?.email) || isUnlockedSession;
-  const canAccessAdmin = (isAuthorizedAdmin && isAdmin) || isUnlockedSession;
-  const isOnAdmin = location.pathname.startsWith('/admin');
-  const isOnSearch = location.pathname.startsWith('/search');
   const isOnHome = location.pathname === '/' && !activeCategory;
-
-  const handleAdminClick = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    navigate('/admin');
-  };
-
-  const handleHomeClick = (e: React.MouseEvent) => {
-    e.preventDefault();
-    navigate('/');
-  };
 
   const handleSettingsClick = () => {
     setPasswordError('');
@@ -99,18 +77,15 @@ export default function Header() {
   };
 
   const [isInstalled, setIsInstalled] = useState(false);
-
   useEffect(() => {
     setIsInstalled(isInstalledPhoneApp());
   }, []);
 
-  // -------------------------------------------------------------
-  // NATIVE ANDROID APP HEADER
-  // -------------------------------------------------------------
   const [showTopHeader, setShowTopHeader] = useState(true);
   const hideTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
+    if (!isAndroid) return;
     const handleScroll = () => {
       setShowTopHeader(true);
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
@@ -126,18 +101,17 @@ export default function Header() {
       window.removeEventListener('scroll', handleScroll);
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     };
-  }, []);
+  }, [isAndroid]);
 
   const settingsModal = showSettingsModal ? (
-    <div 
+    <div
       className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200"
       onClick={() => setShowSettingsModal(false)}
     >
-      <div 
-        className="bg-neutral-900 border border-neutral-800 rounded-3xl max-w-sm w-full p-6 shadow-2xl relative"
+      <div
+        className="bg-neutral-900 border border-neutral-800 rounded-3xl max-w-sm w-full p-5 sm:p-6 shadow-2xl relative"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Close Button */}
         <button
           type="button"
           onClick={() => setShowSettingsModal(false)}
@@ -147,13 +121,13 @@ export default function Header() {
           <X size={16} />
         </button>
 
-        <div className="flex items-center gap-3 mb-5">
-          <div className="w-12 h-12 rounded-2xl bg-yellow-400/10 border border-yellow-500/30 flex items-center justify-center text-yellow-400 shadow-md">
-            <KeyRound size={24} />
+        <div className="flex items-center gap-3 mb-5 pr-8">
+          <div className="w-11 h-11 rounded-2xl bg-yellow-400/10 border border-yellow-500/30 flex items-center justify-center text-yellow-400 shadow-md flex-shrink-0">
+            <KeyRound size={22} />
           </div>
-          <div>
+          <div className="min-w-0">
             <h3 className="text-base font-black text-white uppercase tracking-tight">App Settings</h3>
-            <p className="text-[11px] text-gray-400">Admin Panel Access</p>
+            <p className="text-[11px] text-gray-400 truncate">Admin Panel Access</p>
           </div>
         </div>
 
@@ -239,136 +213,96 @@ export default function Header() {
     </div>
   ) : null;
 
-  if (isAndroid) {
+  const showPromoBar = !isInstalled && isOnHome && (!isAndroid || showTopHeader);
+  const showSettingsGear = !isAndroid || !isInstalled;
+
+  if (isOnHome) {
     return (
       <>
-        {/* Prominent Top Bar in Chrome/Browser */}
-        {!isInstalled && isOnHome && showTopHeader && (
-          <div className="w-full bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 text-black px-3 py-2 flex items-center justify-between shadow-lg sticky top-0 z-50 transition-all duration-300">
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="w-7 h-7 rounded-lg bg-black text-yellow-400 flex items-center justify-center flex-shrink-0 shadow">
-                <Smartphone size={15} />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-black uppercase tracking-tight text-black truncate">
-                    Movie Portal Official App
-                  </span>
-                  <span className="bg-black/20 text-black text-[9px] font-extrabold px-1.5 py-0.2 rounded uppercase">
-                    Android APK
-                  </span>
-                </div>
-                <p className="text-[10px] font-semibold text-neutral-900 truncate">
-                  High-speed streaming directly on your phone!
-                </p>
-              </div>
-            </div>
-            <a
-              href={OFFICIAL_APK_DOWNLOAD_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={downloadOfficialApk}
-              className="ml-2 flex-shrink-0 bg-black hover:bg-neutral-900 active:scale-95 text-yellow-400 font-black text-xs px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 shadow transition-all cursor-pointer uppercase tracking-wider no-underline"
-            >
-              <Download size={13} className="stroke-[2.5]" />
-              <span>Download App</span>
-            </a>
-          </div>
-        )}
-
-        <header
-          className={`w-full z-40 transition-all duration-300 ${
-            showTopHeader ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0 pointer-events-none'
-          } ${
-            isOnHome
-              ? `absolute ${!isInstalled && showTopHeader ? 'top-14' : 'top-0'} left-0 bg-transparent pt-3 sm:pt-4 pb-2 px-4`
-              : 'sticky top-0 left-0 bg-black/95 backdrop-blur-md border-b border-neutral-900 pt-6 pb-3 px-4'
+        <div
+          className={`fixed top-0 left-0 right-0 z-40 pointer-events-none transition-all duration-300 ${
+            isAndroid && !showTopHeader ? '-translate-y-full opacity-0' : 'translate-y-0 opacity-100'
           }`}
         >
-          <div className="max-w-7xl mx-auto flex items-center justify-end relative">
-            {/* ONLY Settings Button on Top Right */}
-            {!isInstalledPhoneApp() && (
-              <div className="flex items-center z-10 mt-2.5">
-                <button
-                  type="button"
-                  onClick={handleSettingsClick}
-                  className="p-2.5 rounded-full bg-yellow-400 text-black border border-yellow-500 shadow-[0_0_15px_rgba(250,204,21,0.5)] cursor-pointer active:scale-90 transition-all hover:bg-yellow-300"
-                  aria-label="Settings"
-                  title="Settings"
-                >
-                  <Settings size={18} className="transition-transform hover:rotate-90 duration-300" />
-                </button>
+          {showPromoBar && (
+            <div className="pointer-events-auto w-full bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 text-black px-2.5 sm:px-4 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] flex items-center justify-between gap-2 shadow-lg">
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <div className="w-7 h-7 rounded-lg bg-black text-yellow-400 flex items-center justify-center flex-shrink-0 shadow">
+                  <Smartphone size={15} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-[11px] sm:text-sm font-black uppercase tracking-tight text-black truncate">
+                      Movie Portal App
+                    </span>
+                    <span className="hidden xs:inline-block sm:inline-block bg-black/20 text-black text-[9px] sm:text-[10px] font-extrabold px-1.5 py-0.5 rounded uppercase flex-shrink-0">
+                      v{CURRENT_VERSION_NAME}
+                    </span>
+                  </div>
+                  <p className="text-[10px] sm:text-[11px] font-semibold text-neutral-900 truncate">
+                    High-speed streaming on Android!
+                  </p>
+                </div>
               </div>
-            )}
-          </div>
-        </header>
+              <a
+                href={OFFICIAL_APK_DOWNLOAD_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={downloadOfficialApk}
+                className="flex-shrink-0 bg-black hover:bg-neutral-900 active:scale-95 text-yellow-400 font-black text-[11px] sm:text-xs px-2.5 sm:px-4 py-1.5 rounded-xl flex items-center gap-1.5 shadow transition-all cursor-pointer uppercase tracking-wider no-underline whitespace-nowrap"
+              >
+                <Download size={13} className="stroke-[2.5]" />
+                <span>Get App</span>
+              </a>
+            </div>
+          )}
 
+          {showSettingsGear && (
+            <div
+              className={`max-w-7xl mx-auto flex items-center justify-end px-3 sm:px-4 ${
+                showPromoBar ? 'pt-2.5' : 'pt-[max(0.75rem,env(safe-area-inset-top))]'
+              }`}
+            >
+              <button
+                type="button"
+                onClick={handleSettingsClick}
+                className="pointer-events-auto p-2.5 rounded-full bg-yellow-400 text-black border border-yellow-500 shadow-[0_0_15px_rgba(250,204,21,0.5)] cursor-pointer active:scale-90 transition-all hover:bg-yellow-300"
+                aria-label="Settings"
+                title="Settings"
+              >
+                <Settings size={18} className="transition-transform hover:rotate-90 duration-300" />
+              </button>
+            </div>
+          )}
+        </div>
         {settingsModal}
       </>
     );
   }
 
-  // -------------------------------------------------------------
-  // CHROME / BROWSER WEB VERSION
-  // -------------------------------------------------------------
   return (
     <>
-      {/* Prominent Top Bar in Chrome/Browser: Only visible when opened in browser, hidden inside installed app */}
-      {!isInstalled && isOnHome && (
-        <div className="w-full bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 text-black px-4 py-2 flex items-center justify-between shadow-lg sticky top-0 z-50">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-7 h-7 rounded-lg bg-black text-yellow-400 flex items-center justify-center flex-shrink-0 shadow">
-              <Smartphone size={16} />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-xs sm:text-sm font-black uppercase tracking-tight text-black truncate">
-                  Movie Portal Official Android App
-                </span>
-                <span className="bg-black/20 text-black text-[10px] font-extrabold px-1.5 py-0.2 rounded uppercase">
-                  v{CURRENT_VERSION_NAME} APK (180MB)
-                </span>
-              </div>
-              <p className="text-[11px] font-semibold text-neutral-900 truncate">
-                Download app for high-speed streaming on your phone!
-              </p>
-            </div>
-          </div>
-          <a
-            href={OFFICIAL_APK_DOWNLOAD_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={downloadOfficialApk}
-            className="ml-3 flex-shrink-0 bg-black hover:bg-neutral-900 active:scale-95 text-yellow-400 font-black text-xs px-4 py-1.5 rounded-xl flex items-center gap-1.5 shadow-md transition-all cursor-pointer uppercase tracking-wider no-underline"
-          >
-            <Download size={14} className="stroke-[2.5]" />
-            <span>Download App</span>
-          </a>
-        </div>
-      )}
-
-      <header className={`w-full z-40 transition-colors ${
-        isOnHome
-          ? `absolute ${!isInstalled ? 'top-14' : 'top-0'} left-0 bg-transparent pt-3 pb-2 px-4`
-          : 'sticky top-0 left-0 bg-black/95 backdrop-blur-md border-b border-neutral-900 py-3 px-4'
-      }`}>
-        <div className="max-w-7xl mx-auto flex items-center justify-end relative w-full p-2">
-          <div className="flex items-center gap-2 z-10">
+      <header
+        className={`w-full z-40 sticky top-0 left-0 bg-black/95 backdrop-blur-md border-b border-neutral-900 px-3 sm:px-4 py-2.5 pt-[max(0.65rem,env(safe-area-inset-top))] transition-all duration-300 ${
+          isAndroid && !showTopHeader ? '-translate-y-full opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'
+        }`}
+      >
+        <div className="max-w-7xl mx-auto flex items-center justify-between w-full">
+          <div className="min-w-0" />
+          {showSettingsGear && (
             <button
               type="button"
               onClick={handleSettingsClick}
-              className="p-2.5 rounded-full bg-yellow-400 text-black border border-yellow-500 shadow-[0_0_15px_rgba(250,204,21,0.5)] cursor-pointer active:scale-90 transition-all hover:bg-yellow-300"
+              className="p-2 rounded-full bg-yellow-400 text-black border border-yellow-500 shadow-[0_0_15px_rgba(250,204,21,0.5)] cursor-pointer active:scale-90 transition-all hover:bg-yellow-300"
               aria-label="Settings"
               title="Settings"
             >
               <Settings size={18} className="transition-transform hover:rotate-90 duration-300" />
             </button>
-          </div>
+          )}
         </div>
       </header>
-
       {settingsModal}
     </>
   );
 }
-

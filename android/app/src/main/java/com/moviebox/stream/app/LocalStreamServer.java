@@ -195,7 +195,7 @@ public class LocalStreamServer {
             try {
                 Socket client = serverSocket.accept();
                 client.setTcpNoDelay(true);
-                client.setSoTimeout(30000);
+                client.setSoTimeout(60000);
                 executor.execute(() -> handleClient(client));
             } catch (IOException e) {
                 if (running) {
@@ -310,7 +310,7 @@ public class LocalStreamServer {
                 + "Access-Control-Allow-Methods: GET, POST, HEAD, OPTIONS\r\n"
                 + "Access-Control-Allow-Headers: *\r\n"
                 + "Access-Control-Allow-Private-Network: true\r\n"
-                + "Access-Control-Expose-Headers: Content-Range, Accept-Ranges, Content-Length, X-Video-Duration, Content-Type\r\n";
+                + "Access-Control-Expose-Headers: Content-Range, Accept-Ranges, Content-Length, X-Video-Duration, X-Stream-Mode, Content-Type\r\n";
     }
 
     private void sendSimpleResponse(OutputStream out, int code, String statusText, String contentType, byte[] body) throws IOException {

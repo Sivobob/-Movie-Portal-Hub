@@ -9,6 +9,7 @@ import {
   updateDoc, 
   setDoc,
   getDocFromServer,
+  onSnapshot,
   query
 } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
@@ -55,11 +56,12 @@ import {
   togglePublishLocally,
   toggleFeaturedLocally,
   clearAllMoviesLocally,
+  sortMoviesList,
   MovieData
 } from '../services/movieStorage';
 import { loginWithGoogle } from '../services/authService';
 import { buildApiUrl } from '../utils/apiConfig';
-import { upgradePosterUrl } from '../utils/posterUrl';
+import { upgradePosterUrl, normalizeMoviePosters } from '../utils/posterUrl';
 import {
   searchWikipediaFilmSuggestions,
   mergeImdbAndWikiResults,
@@ -151,7 +153,7 @@ export default function AdminDashboard() {
   const [imdbId, setImdbId] = useState('');
   const [trailerUrl, setTrailerUrl] = useState('');
   const [streamingUrl, setStreamingUrl] = useState('');
-  const [featured, setFeatured] = useState(false);
+  const [featured, setFeatured] = useState(true);
   const [published, setPublished] = useState(true);
   const [qualityBadge, setQualityBadge] = useState<QualityBadgeValue>('HD');
   const [editingMovie, setEditingMovie] = useState<MovieData | null>(null);
@@ -230,31 +232,28 @@ export default function AdminDashboard() {
 
   const handleRemoveEpisode = (seasonIndex: number, epIndex: number) => {
     const epTitle = seasons[seasonIndex]?.episodes[epIndex]?.title || `Episode ${epIndex + 1}`;
-    if (!window.confirm(`Are you sure you want to remove "${epTitle}" from Season ${seasonIndex + 1}?`)) {
-      return;
-    }
     setSeasons((prev) => {
-      const updated = [...prev];
-      updated[seasonIndex].episodes.splice(epIndex, 1);
-      updated[seasonIndex].episodes.forEach((ep, i) => {
-        ep.episodeNumber = i + 1;
-      });
+      const updated = prev.map((s, idx) =>
+        idx === seasonIndex
+          ? {
+              ...s,
+              episodes: s.episodes
+                .filter((_, i) => i !== epIndex)
+                .map((ep, i) => ({ ...ep, episodeNumber: i + 1 })),
+            }
+          : s
+      );
       return updated;
     });
     showNotification('success', `Removed "${epTitle}".`);
   };
 
   const handleRemoveSeason = (seasonIndex: number) => {
-    if (!window.confirm(`Are you sure you want to remove Season ${seasonIndex + 1} and all its episodes?`)) {
-      return;
-    }
-    setSeasons((prev) => {
-      const updated = prev.filter((_, i) => i !== seasonIndex);
-      updated.forEach((s, i) => {
-        s.seasonNumber = i + 1;
-      });
-      return updated;
-    });
+    setSeasons((prev) =>
+      prev
+        .filter((_, i) => i !== seasonIndex)
+        .map((s, i) => ({ ...s, seasonNumber: i + 1 }))
+    );
     showNotification('success', `Removed Season ${seasonIndex + 1}.`);
   };
 
@@ -454,6 +453,10 @@ export default function AdminDashboard() {
       }
 
       if (d) {
+        const fetchedImdbId = (d.imdbId || idToFetch || '').trim().toLowerCase();
+        if (editingMovie && editingMovie.imdbId && fetchedImdbId && editingMovie.imdbId.trim().toLowerCase() !== fetchedImdbId) {
+          setEditingMovie(null);
+        }
         const bestPoster = upgradePosterUrl(d.posterUrl, 1080) || d.posterUrl || '';
         const bestBackdrop = upgradePosterUrl(d.backdropUrl || d.posterUrl, 1280) || bestPoster;
         setTitle(d.title || '');
@@ -727,12 +730,33 @@ export default function AdminDashboard() {
   };
 
   useEffect(() => {
-    if ((user && (isAdmin || isAuthorizedEmail)) || isUnlockedSession) {
-      fetchMovies();
-      checkApiStatus();
-      fetchTelegramStatus();
-      loadRemoteUpdateConfig();
-    }
+    if (!((user && (isAdmin || isAuthorizedEmail)) || isUnlockedSession)) return;
+
+    fetchMovies();
+    checkApiStatus();
+    fetchTelegramStatus();
+    loadRemoteUpdateConfig();
+
+    const unsubscribe = onSnapshot(
+      collection(db, 'movies'),
+      { includeMetadataChanges: true },
+      (snapshot) => {
+        const rawList = snapshot.docs.map((d) =>
+          normalizeMoviePosters({ id: d.id, ...d.data() } as MovieData)
+        );
+        if (snapshot.metadata.fromCache && rawList.length === 0 && getLocalMovies().length > 0) {
+          return;
+        }
+        const sorted = sortMoviesList(rawList);
+        setMovies(sorted);
+        saveLocalMovies(sorted);
+      },
+      (err) => {
+        console.warn('Admin real-time movies listener warning:', err);
+      }
+    );
+
+    return () => unsubscribe();
   }, [user, isAdmin, isAuthorizedEmail, isUnlockedSession]);
 
   // Search IMDb / Metadata
@@ -801,6 +825,16 @@ export default function AdminDashboard() {
   const handleSelectResult = async (item: MetadataSearchResult) => {
     setSearchingMetadata(true);
     setSearchResults([]); // close results dropdown immediately
+
+    // Prevent overwriting an edited movie when admin searches/picks a different title
+    if (
+      editingMovie &&
+      (!editingMovie.imdbId ||
+        !item.imdbId ||
+        editingMovie.imdbId.trim().toLowerCase() !== item.imdbId.trim().toLowerCase())
+    ) {
+      setEditingMovie(null);
+    }
 
     // Immediate auto-fill from search results (basic info)
     const initialPoster = upgradePosterUrl(item.posterUrl, 1080) || item.posterUrl || '';
@@ -962,7 +996,7 @@ export default function AdminDashboard() {
     setUrl720p('');
     setUrl1080p('');
     setUrl4k('');
-    setFeatured(false);
+    setFeatured(true);
     setPublished(true);
     setQualityBadge('HD');
     setAutoTranscode(false);
@@ -1533,9 +1567,9 @@ export default function AdminDashboard() {
       });
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-white pb-24">
+    <div className="min-h-[100dvh] w-full max-w-full overflow-x-hidden bg-neutral-950 text-white pb-[calc(6rem+env(safe-area-inset-bottom))]">
       {/* Top Banner / Actions */}
-      <div className="bg-neutral-900 border-b border-neutral-800 px-4 py-4 sm:px-8">
+      <div className="bg-neutral-900 border-b border-neutral-800 px-3 sm:px-8 py-4">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
@@ -1733,7 +1767,7 @@ export default function AdminDashboard() {
 
               {showUpdateConfigPanel && (
                 <form onSubmit={handleSaveRemoteUpdateConfig} className="mt-3 pt-3 border-t border-neutral-800 space-y-2.5 text-xs">
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <div>
                       <label className="block text-gray-400 text-[10px] font-semibold mb-1">Latest Version</label>
                       <input
@@ -2203,7 +2237,7 @@ export default function AdminDashboard() {
                 </div>
 
                 {/* Poster & Backdrop Preview */}
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div>
                     <label className="block text-gray-300 mb-1 font-semibold">Poster URL *</label>
                     <input
@@ -2260,7 +2294,7 @@ export default function AdminDashboard() {
                 )}
 
                 {/* Release Year, Runtime & Language */}
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div>
                     <label className="block text-gray-300 mb-1 font-semibold">Release Year</label>
                     <input
@@ -2293,7 +2327,7 @@ export default function AdminDashboard() {
                 </div>
 
                 {/* Genre, Director & Cast */}
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div>
                     <label className="block text-gray-300 mb-1 font-semibold">Genre</label>
                     <input
@@ -2358,7 +2392,7 @@ export default function AdminDashboard() {
                 </div>
 
                 {/* Director & Cast */}
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div>
                     <label className="block text-gray-300 mb-1 font-semibold">Director</label>
                     <input
@@ -2717,7 +2751,7 @@ export default function AdminDashboard() {
                 </div>
 
                 {/* Filter Tabs & Select All Toggle */}
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {filteredMovies.length > 0 && (
                     <button
                       type="button"
@@ -2772,7 +2806,7 @@ export default function AdminDashboard() {
                     return (
                       <div
                         key={movie.id}
-                        className={`flex items-center gap-3 p-2.5 rounded-lg border transition-all ${
+                        className={`flex flex-wrap sm:flex-nowrap items-center gap-2.5 sm:gap-3 p-2.5 rounded-lg border transition-all ${
                           isSelected
                             ? 'bg-red-950/20 border-red-800/80'
                             : 'bg-neutral-950 border-neutral-800/80 hover:border-neutral-700'
@@ -2847,7 +2881,7 @@ export default function AdminDashboard() {
                         </div>
 
                         {/* Controls */}
-                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <div className="flex items-center gap-1 flex-shrink-0 w-full sm:w-auto justify-end pt-1 sm:pt-0 border-t border-neutral-900 sm:border-0">
                           {/* Edit Movie & Quality Badge button */}
                           <button
                             type="button"

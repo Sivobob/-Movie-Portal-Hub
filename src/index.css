@@ -3,10 +3,11 @@
 /* -------------------------------------------------------------
    NATIVE ANDROID APP STRICT FRAMEWORK LOCK
    Locks viewport to 100% height, prevents browser elasticity, 
-   pull-to-refresh bounce, and unwanted sliding.
+   pull-to-refresh bounce, and unwanted horizontal overflow.
    ------------------------------------------------------------- */
 html {
   width: 100%;
+  max-width: 100%;
   height: 100%;
   height: 100dvh;
   margin: 0;
@@ -18,6 +19,7 @@ html {
 
 body {
   width: 100%;
+  max-width: 100%;
   height: 100%;
   height: 100dvh;
   margin: 0;
@@ -38,9 +40,9 @@ body {
 
 #root {
   width: 100%;
+  max-width: 100%;
   height: 100%;
   height: 100dvh;
-  max-width: 100vw;
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: none !important;
@@ -50,8 +52,22 @@ body {
   position: relative;
 }
 
-/* Prevent text selection and image drag across app */
+/* Native ExoPlayer transparent overlay pass-through */
+html[data-exo-active="true"],
+html[data-exo-active="true"] body {
+  background-color: transparent !important;
+  background: transparent !important;
+}
+html[data-exo-active="true"] #root {
+  visibility: hidden !important;
+  pointer-events: none !important;
+  background-color: transparent !important;
+  background: transparent !important;
+}
+
+/* Prevent text selection, horizontal box bleed, and image drag across app */
 *, *::before, *::after {
+  box-sizing: border-box;
   -webkit-user-select: none;
   -moz-user-select: none;
   -ms-user-select: none;
@@ -61,7 +77,7 @@ body {
   overscroll-behavior: none !important;
 }
 
-input, textarea, [contenteditable="true"] {
+input, textarea, select, [contenteditable="true"] {
   -webkit-user-select: text !important;
   -moz-user-select: text !important;
   user-select: text !important;

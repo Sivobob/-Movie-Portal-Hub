@@ -328,27 +328,29 @@ function fallbackProbeFromMetadata(docInfo: TelegramDocInfo): ProbeMediaResult {
   const isWebm = lowerName.endsWith('.webm') || rawMime.includes('webm');
   const isMkv = !isWebm && (lowerName.endsWith('.mkv') || rawMime.includes('matroska') || rawMime.includes('mkv'));
   const isAvi = lowerName.endsWith('.avi') || rawMime.includes('avi');
-  const isHevc = /(^|[^a-z0-9])(hevc|x265|h\.?265|10bit|10-bit)([^a-z0-9]|$)/i.test(lowerName);
+  const isMp4 = lowerName.endsWith('.mp4') || lowerName.endsWith('.m4v') || rawMime.includes('mp4');
+  const isRiskyCodec = /(^|[^a-z0-9])(hevc|x265|h\.?265|10bit|10-bit|hi10p|av1|xvid|divx|2160p|4k|uhd)([^a-z0-9]|$)/i.test(lowerName);
 
-  const recommendedMode: 'direct' | 'remux' | 'transcode' = isHevc
-    ? 'transcode'
-    : (isMkv || isAvi)
-      ? 'remux'
+  // If ffprobe could not inspect the file, never blindly copy/remux MKV/AVI/unknown containers
+  // because unlabelled HEVC/10-bit inside MKV causes audio-only black screens on mobile devices.
+  const recommendedMode: 'direct' | 'remux' | 'transcode' =
+    isRiskyCodec || isMkv || isAvi || (!isMp4 && !isWebm)
+      ? 'transcode'
       : 'direct';
 
   return {
     durationSec: docInfo.durationSec || 0,
     container: isWebm ? 'webm' : isMkv ? 'matroska' : 'mp4',
-    videoCodec: isHevc ? 'hevc' : 'h264',
-    pixFmt: isHevc ? 'yuv420p10le' : 'yuv420p',
-    is10Bit: isHevc,
+    videoCodec: isRiskyCodec ? 'hevc' : 'h264',
+    pixFmt: isRiskyCodec ? 'yuv420p10le' : 'yuv420p',
+    is10Bit: isRiskyCodec,
     width: 0,
     height: 0,
     audioCodec: 'aac',
     audioTracks: [],
     subtitleTracks: [],
     recommendedMode,
-    needsAudioTranscode: isMkv || isAvi,
+    needsAudioTranscode: recommendedMode !== 'direct',
     probedByFfprobe: false,
   };
 }
@@ -371,8 +373,8 @@ export async function probeTelegramMedia(
       '-print_format', 'json',
       '-show_format',
       '-show_streams',
-      '-probesize', '1500000',
-      '-analyzeduration', '1500000',
+      '-probesize', '3000000',
+      '-analyzeduration', '2500000',
       localRawUrl,
     ];
 
@@ -386,10 +388,10 @@ export async function probeTelegramMedia(
         try {
           proc.kill('SIGKILL');
         } catch {}
-        console.warn('[Probe] ffprobe timed out, falling back to filename metadata');
+        console.warn('[Probe] ffprobe timed out, falling back to safe metadata heuristic');
         resolve(fallbackProbeFromMetadata(docInfo));
       }
-    }, 7000);
+    }, 11000);
 
     proc.stdout.on('data', (chunk: Buffer) => {
       stdout += chunk.toString('utf-8');
@@ -434,6 +436,8 @@ export async function probeTelegramMedia(
         const videoCodec = String(videoStream?.codec_name || '').toLowerCase();
         const pixFmt = String(videoStream?.pix_fmt || '').toLowerCase();
         const profile = String(videoStream?.profile || '').toLowerCase();
+        const fieldOrder = String(videoStream?.field_order || '').toLowerCase();
+        const level = Number(videoStream?.level || 0);
         const width = Number(videoStream?.width || 0);
         const height = Number(videoStream?.height || 0);
 
@@ -476,14 +480,27 @@ export async function probeTelegramMedia(
           container.includes('m4a') ||
           container.includes('3gp');
 
-        // Determine native browser / Android WebView compatibility
+        // Determine strict universal mobile hardware / Android WebView / Chrome compatibility:
+        // High@L5+, >1080p (4K), 10-bit, Hi422P/444P, interlaced, HEVC, AV1, or MPEG4 -> transcode to 1080p H.264 Main@L4.0
+        const isResolutionSafe = (width === 0 || width <= 1920) && (height === 0 || height <= 1080);
+        const isLevelSafe = level === 0 || level <= 42;
+        const isProgressive = !fieldOrder || fieldOrder === 'progressive' || fieldOrder === 'unknown';
+        const isProfileSafe =
+          !profile.includes('high 10') &&
+          !profile.includes('4:2:2') &&
+          !profile.includes('4:4:4');
+
         const isBrowserSafeH264 =
           videoCodec === 'h264' &&
           !is10Bit &&
+          isProfileSafe &&
+          isResolutionSafe &&
+          isLevelSafe &&
+          isProgressive &&
           (pixFmt === '' || pixFmt === 'yuv420p' || pixFmt === 'yuvj420p' || pixFmt === 'nv12');
 
         const isBrowserSafeWebmVideo =
-          isWebm && (videoCodec === 'vp8' || videoCodec === 'vp9') && !is10Bit;
+          isWebm && (videoCodec === 'vp8' || videoCodec === 'vp9') && !is10Bit && isResolutionSafe;
 
         const isBrowserSafeAudio =
           primaryAudioCodec === '' ||
@@ -502,10 +519,10 @@ export async function probeTelegramMedia(
         if (isBrowserSafeWebmVideo && isBrowserSafeWebmAudio) {
           recommendedMode = 'direct';
         } else if (!isBrowserSafeH264) {
-          // HEVC / H.265 / 10-bit H.264 / MPEG4 / etc. -> black screen on Chrome/WebView -> transcode!
+          // HEVC / H.265 / 10-bit / 4K / High@L5+ / MPEG4 -> black screen on mobile phones -> transcode!
           recommendedMode = 'transcode';
         } else if (!isMp4Container || !isBrowserSafeAudio) {
-          // Video is clean H.264 8-bit, only container (MKV/AVI) or audio (AC3/EAC3/DTS) needs remux!
+          // Video is clean 8-bit <=1080p H.264 L4.2, only container (MKV/AVI) or audio (AC3/EAC3/DTS) needs remux!
           recommendedMode = 'remux';
         } else {
           recommendedMode = 'direct';
