@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.199",
-  "minimumRequiredVersion": "3.5.199",
-  "latestVersionCode": 3419,
-  "minimumRequiredVersionCode": 3419,
+  "latestVersion": "3.5.200",
+  "minimumRequiredVersion": "3.5.200",
+  "latestVersionCode": 3420,
+  "minimumRequiredVersionCode": 3420,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Portal v3.5.199 update is ready! Tap UPDATE NOW to fix black screen during playback and enjoy crystal-clear movies and series with audio.",
-  "releaseNotes": "Fix video black screen during movie/series playback, auto-convert MKV/HEVC to universal H.264, and Android hardware acceleration surface fix."
+  "updateMessage": "Movie Portal v3.5.200 update is ready! Tap UPDATE NOW for perfect full-screen fitting across all phone models and zero black screen during playback.",
+  "releaseNotes": "Perfect responsive mobile screen fitting across all Android phone models, absolute zero black-screen protection with automatic H.264 video decoding, and instant 3s slider."
 }
