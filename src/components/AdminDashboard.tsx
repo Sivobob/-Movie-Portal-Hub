@@ -1749,21 +1749,21 @@ export default function AdminDashboard() {
                 </span>
               </div>
 
-              {(!firebaseUpdateVersion || compareVersions(firebaseUpdateVersion, CURRENT_VERSION_NAME) < 0) && (
-                <button
-                  type="button"
-                  disabled={savingUpdateConfig}
-                  onClick={handleQuickPushCurrentRelease}
-                  className="mt-2.5 w-full bg-yellow-400 hover:bg-yellow-300 disabled:opacity-50 text-black font-black text-xs py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95"
-                >
-                  <RefreshCw size={13} className={savingUpdateConfig ? 'animate-spin' : ''} />
-                  <span>
-                    {savingUpdateConfig
-                      ? 'Syncing to Firebase...'
-                      : `Push v${CURRENT_VERSION_NAME} Update Popup to All Apps`}
-                  </span>
-                </button>
-              )}
+              <button
+                type="button"
+                disabled={savingUpdateConfig}
+                onClick={handleQuickPushCurrentRelease}
+                className="mt-2.5 w-full bg-yellow-400 hover:bg-yellow-300 disabled:opacity-50 text-black font-black text-xs py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95"
+              >
+                <RefreshCw size={13} className={savingUpdateConfig ? 'animate-spin' : ''} />
+                <span>
+                  {savingUpdateConfig
+                    ? 'Syncing to Firebase...'
+                    : (!firebaseUpdateVersion || compareVersions(firebaseUpdateVersion, CURRENT_VERSION_NAME) < 0)
+                      ? `Push v${CURRENT_VERSION_NAME} Update Popup to All Apps`
+                      : `Re-Push v${CURRENT_VERSION_NAME} Update Popup to All Apps`}
+                </span>
+              </button>
 
               {showUpdateConfigPanel && (
                 <form onSubmit={handleSaveRemoteUpdateConfig} className="mt-3 pt-3 border-t border-neutral-800 space-y-2.5 text-xs">
