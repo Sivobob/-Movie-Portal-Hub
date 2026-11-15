@@ -68,6 +68,18 @@
         "apkDownloadUrl",
         "updateMessage"
       ]
+    },
+    "appStats": {
+      "title": "App Download Stats",
+      "description": "Live APK download clicks, unique web downloaders, and installed phone counters",
+      "type": "object",
+      "properties": {
+        "totalApkClicks": { "type": "number" },
+        "uniqueDownloadUsers": { "type": "number" },
+        "installedAppUsers": { "type": "number" },
+        "inAppUpdateDownloads": { "type": "number" },
+        "lastInstalledVersion": { "type": "string" }
+      }
     }
   },
   "firestore": {

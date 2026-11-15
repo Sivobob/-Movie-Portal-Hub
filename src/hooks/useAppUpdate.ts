@@ -12,6 +12,7 @@ import {
   pickHigherRemoteUpdateConfig,
   OFFICIAL_APK_DIRECT_URL,
 } from '../services/appUpdateConfig';
+import { recordApkDownloadClick } from '../services/appStatsService';
 
 export interface ApkInstallStatus {
   state: 'idle' | 'downloading' | 'permission_required' | 'installing' | 'error';
@@ -178,6 +179,7 @@ export function useAppUpdate() {
     const rawUrl = (remoteConfigRef.current?.apkDownloadUrl || OFFICIAL_APK_DIRECT_URL).trim();
     const url = rawUrl || OFFICIAL_APK_DIRECT_URL;
     console.log('[AppUpdate] Starting update download with URL:', url);
+    recordApkDownloadClick('in_app_update').catch(() => {});
 
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       setInstallStatus({

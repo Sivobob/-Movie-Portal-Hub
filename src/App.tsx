@@ -112,6 +112,8 @@ function AppContent() {
 
 import { StatusBar } from '@capacitor/status-bar';
 import { ensureAndroidStreamBridge } from './utils/apiConfig';
+import { recordInstalledApkDevice } from './services/appStatsService';
+import { CURRENT_VERSION_NAME } from './services/appUpdateConfig';
 
 export default function App() {
   useEffect(() => {
@@ -120,6 +122,7 @@ export default function App() {
     // Hide top status bar by default for immersive app experience
     if (Capacitor.isNativePlatform()) {
       ensureAndroidStreamBridge().catch(() => {});
+      recordInstalledApkDevice(CURRENT_VERSION_NAME).catch(() => {});
       try {
         StatusBar.hide().catch(() => {});
         StatusBar.setOverlaysWebView({ overlay: true }).catch(() => {});

@@ -1,4 +1,5 @@
 import { Capacitor } from '@capacitor/core';
+import { recordApkDownloadClick } from '../services/appStatsService';
 
 /**
  * Detects whether the app is running as the ALREADY INSTALLED phone application
@@ -79,6 +80,7 @@ export const downloadOfficialApk = (e?: any) => {
   if (e && typeof e.preventDefault === 'function') {
     e.preventDefault();
   }
+  recordApkDownloadClick('web_promo').catch(() => {});
   if (typeof window !== 'undefined') {
     try {
       const a = document.createElement('a');

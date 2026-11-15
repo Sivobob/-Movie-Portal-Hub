@@ -98,6 +98,73 @@ downloadCastRouter.get('/download/latest-info', async (_req: Request, res: Respo
   });
 });
 
+let cachedDownloadStats = {
+  totalGitHubDownloads: 0,
+  latestReleaseTag: '',
+  latestReleaseDownloads: 0,
+  releaseCount: 0,
+  lastChecked: 0,
+};
+
+downloadCastRouter.get('/download/stats', async (_req: Request, res: Response) => {
+  const now = Date.now();
+  if (now - cachedDownloadStats.lastChecked < 120000 && cachedDownloadStats.releaseCount > 0) {
+    return res.json(cachedDownloadStats);
+  }
+
+  try {
+    const headers: Record<string, string> = {
+      'User-Agent': 'MoviePortal-App/3.5',
+      Accept: 'application/vnd.github.v3+json',
+    };
+    const token = (process.env.GITHUB_TOKEN || '').trim();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(
+      'https://api.github.com/repos/Sivobob/-Movie-Portal-Hub/releases?per_page=100',
+      { headers }
+    );
+
+    if (response.ok) {
+      const releases: any[] = await response.json();
+      if (Array.isArray(releases)) {
+        let totalGitHubDownloads = 0;
+        let latestReleaseTag = '';
+        let latestReleaseDownloads = 0;
+
+        for (const rel of releases) {
+          if (rel?.draft) continue;
+          let relSum = 0;
+          for (const asset of rel?.assets || []) {
+            if (typeof asset?.name === 'string' && asset.name.endsWith('.apk')) {
+              relSum += Number(asset.download_count || 0);
+            }
+          }
+          if (!latestReleaseTag) {
+            latestReleaseTag = String(rel?.tag_name || '');
+            latestReleaseDownloads = relSum;
+          }
+          totalGitHubDownloads += relSum;
+        }
+
+        cachedDownloadStats = {
+          totalGitHubDownloads,
+          latestReleaseTag,
+          latestReleaseDownloads,
+          releaseCount: releases.length,
+          lastChecked: now,
+        };
+      }
+    }
+  } catch (err: any) {
+    console.warn('[GitHub Releases] Could not fetch download stats:', err?.message || err);
+  }
+
+  return res.json(cachedDownloadStats);
+});
+
 // Route 2: TV Casting Media Proxy Endpoint
 // Proxies media streams to TV receivers (Chromecast, DLNA, Smart TVs) with HTTP Range support, redirects & CORS
 function proxyCastStream(targetUrlStr: string, req: Request, res: Response, redirectsLeft = 5) {

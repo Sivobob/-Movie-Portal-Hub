@@ -42,7 +42,8 @@ import {
   Lock,
   Pencil,
   Smartphone,
-  Save
+  Save,
+  Download
 } from 'lucide-react';
 import VideoPlayerModal from './VideoPlayerModal';
 import { 
@@ -80,6 +81,12 @@ import {
   fetchRemoteUpdateConfig,
   saveRemoteUpdateConfig
 } from '../services/appUpdateConfig';
+import {
+  FirestoreAppStats,
+  GitHubApkStats,
+  fetchGitHubApkDownloadStats,
+  subscribeAppDownloadStats,
+} from '../services/appStatsService';
 
 interface MetadataSearchResult {
   imdbId: string;
@@ -163,6 +170,13 @@ export default function AdminDashboard() {
   const [savingUpdateConfig, setSavingUpdateConfig] = useState(false);
   const [firebaseUpdateVersion, setFirebaseUpdateVersion] = useState<string | null>(null);
   const [updateConfigForm, setUpdateConfigForm] = useState<RemoteUpdateConfig>(DEFAULT_REMOTE_UPDATE_CONFIG);
+  const [firestoreAppStats, setFirestoreAppStats] = useState<FirestoreAppStats>({
+    totalApkClicks: 0,
+    uniqueDownloadUsers: 0,
+    installedAppUsers: 0,
+    inAppUpdateDownloads: 0,
+  });
+  const [githubApkStats, setGithubApkStats] = useState<GitHubApkStats | null>(null);
 
   // Quality URLs state
   const [url480p, setUrl480p] = useState('');
@@ -736,6 +750,13 @@ export default function AdminDashboard() {
     checkApiStatus();
     fetchTelegramStatus();
     loadRemoteUpdateConfig();
+    fetchGitHubApkDownloadStats().then((stats) => {
+      if (stats) setGithubApkStats(stats);
+    }).catch(() => {});
+
+    const unsubscribeStats = subscribeAppDownloadStats((stats) => {
+      setFirestoreAppStats(stats);
+    });
 
     const unsubscribe = onSnapshot(
       collection(db, 'movies'),
@@ -756,7 +777,10 @@ export default function AdminDashboard() {
       }
     );
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      unsubscribeStats();
+    };
   }, [user, isAdmin, isAuthorizedEmail, isUnlockedSession]);
 
   // Search IMDb / Metadata
@@ -1637,7 +1661,7 @@ export default function AdminDashboard() {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-8 mt-6">
         {/* Statistics Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-8">
           <div className="bg-neutral-900 border border-neutral-800 p-3.5 rounded-lg">
             <span className="text-[11px] text-gray-400 block uppercase font-medium">Total Content</span>
             <span className="text-2xl font-black text-white mt-1 block">{movies.length}</span>
@@ -1658,6 +1682,22 @@ export default function AdminDashboard() {
             <span className="text-[11px] text-purple-400 block uppercase font-medium">Series & Anime</span>
             <span className="text-2xl font-black text-white mt-1 block">
               {movies.filter((m: any) => m.displayCategory === 'Series' || m.displayCategory === 'Anime' || m.contentType === 'anime').length}
+            </span>
+          </div>
+          <div className="col-span-2 sm:col-span-1 bg-neutral-900 border border-emerald-800/60 p-3.5 rounded-lg">
+            <span className="text-[11px] text-emerald-400 flex items-center gap-1 uppercase font-bold">
+              <Download size={12} /> App Downloads
+            </span>
+            <span className="text-2xl font-black text-white mt-1 block">
+              {(githubApkStats?.totalGitHubDownloads ?? 0) > 0
+                ? githubApkStats!.totalGitHubDownloads.toLocaleString()
+                : firestoreAppStats.uniqueDownloadUsers.toLocaleString()}
+            </span>
+            <span className="text-[10px] text-gray-400 block mt-0.5 truncate">
+              {githubApkStats?.latestReleaseTag
+                ? `${githubApkStats.latestReleaseTag}: ${githubApkStats.latestReleaseDownloads}`
+                : `Clicks: ${firestoreAppStats.totalApkClicks}`}{' '}
+              • Active App: {firestoreAppStats.installedAppUsers}
             </span>
           </div>
         </div>
@@ -1747,6 +1787,26 @@ export default function AdminDashboard() {
                 <span>
                   Firebase Live: <strong className="text-yellow-400">v{firebaseUpdateVersion || 'not set'}</strong>
                 </span>
+              </div>
+              <div className="mt-1.5 grid grid-cols-3 gap-1.5 text-[10px] text-center">
+                <div className="bg-neutral-950 border border-neutral-800/80 rounded-lg px-2 py-1.5">
+                  <span className="text-gray-500 block">APK Downloads</span>
+                  <strong className="text-emerald-400 font-black">
+                    {(githubApkStats?.totalGitHubDownloads ?? firestoreAppStats.totalApkClicks).toLocaleString()}
+                  </strong>
+                </div>
+                <div className="bg-neutral-950 border border-neutral-800/80 rounded-lg px-2 py-1.5">
+                  <span className="text-gray-500 block">Web Users</span>
+                  <strong className="text-white font-black">
+                    {firestoreAppStats.uniqueDownloadUsers.toLocaleString()}
+                  </strong>
+                </div>
+                <div className="bg-neutral-950 border border-neutral-800/80 rounded-lg px-2 py-1.5">
+                  <span className="text-gray-500 block">Installed Phones</span>
+                  <strong className="text-yellow-400 font-black">
+                    {firestoreAppStats.installedAppUsers.toLocaleString()}
+                  </strong>
+                </div>
               </div>
 
               <button
