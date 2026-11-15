@@ -323,9 +323,8 @@ export default function HomePage() {
     const diffX = clientX - touchStartPosRef.current.x;
     const diffY = clientY - touchStartPosRef.current.y;
 
-    if (Math.abs(diffX) > 8 && Math.abs(diffX) > Math.abs(diffY)) {
+    if (Math.abs(diffX) > 10 || Math.abs(diffY) > 10) {
       isSwipingRef.current = true;
-      setIsSwiping(true);
     }
   };
 

@@ -646,7 +646,7 @@ public class MainActivity extends BridgeActivity {
             .setReadTimeoutMs(45000)
             .setAllowCrossProtocolRedirects(true)
             .setKeepPostFor302Redirects(true)
-            .setUserAgent("MoviePortal/3.5.217 AndroidExoPlayer");
+            .setUserAgent("MoviePortal/3.5.218 AndroidExoPlayer");
 
         DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
             .setBufferDurationsMs(
@@ -1799,11 +1799,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.217");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.218");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.217\",\"versionCode\":3437}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.218\",\"versionCode\":3438}";
             }
         }
 
