@@ -16,7 +16,7 @@ const MovieCard = memo(({
 
   return (
     <motion.div 
-      className="relative rounded-xl overflow-hidden aspect-[2/3] cursor-pointer group shadow-lg border border-neutral-800/80 bg-neutral-950"
+      className="relative rounded-xl overflow-hidden aspect-[2/3] cursor-pointer group shadow-lg border border-neutral-800/80 bg-neutral-950 touch-pan-y"
       whileHover={{ scale: 1.04 }}
       onClick={onClick}
     >
@@ -26,6 +26,7 @@ const MovieCard = memo(({
         alt={movie.title} 
         loading="lazy"
         decoding="async"
+        draggable={false}
         className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" 
         onError={(e: any) => {
           const img = e.currentTarget;

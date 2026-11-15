@@ -74,7 +74,7 @@ export default function Header() {
       setShowTopHeader(true);
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
       hideTimerRef.current = setTimeout(() => {
-        const scrollTop = rootEl ? rootEl.scrollTop : window.scrollY;
+        const scrollTop = window.scrollY || document.documentElement.scrollTop || (rootEl ? rootEl.scrollTop : 0);
         if (scrollTop > 50) {
           setShowTopHeader(false);
         }

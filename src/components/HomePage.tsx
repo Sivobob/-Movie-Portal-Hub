@@ -98,6 +98,10 @@ export default function HomePage() {
   useEffect(() => {
     setIsFolderSearchOpen(false);
     setFolderSearchQuery('');
+    try {
+      window.scrollTo({ top: 0, behavior: 'auto' });
+      document.getElementById('root')?.scrollTo({ top: 0, behavior: 'auto' });
+    } catch {}
   }, [category]);
 
   useEffect(() => {
@@ -347,6 +351,9 @@ export default function HomePage() {
         } else {
           handleManualSwipe('right');
         }
+      } else if (Math.abs(diffY) > 10 || Math.abs(diffX) > 10) {
+        isSwipingRef.current = true;
+        setIsSwiping(true);
       }
     }
     touchStartPosRef.current = null;
@@ -532,7 +539,7 @@ export default function HomePage() {
   });
 
   return (
-    <div className={`relative flex-1 w-full max-w-full bg-black text-white flex flex-col select-none ${category ? 'pb-[calc(5.75rem+env(safe-area-inset-bottom))] pt-2' : 'pb-[calc(5.75rem+env(safe-area-inset-bottom))] pt-0'}`}>
+    <div className={`relative flex-1 w-full max-w-full bg-black text-white flex flex-col select-none touch-pan-y ${category ? 'pb-[calc(5.75rem+env(safe-area-inset-bottom))] pt-0' : 'pb-[calc(5.75rem+env(safe-area-inset-bottom))] pt-0'}`}>
 
       {toastMessage && (
         <div className="fixed top-[max(4.25rem,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-[120] bg-neutral-900/95 border border-red-600/50 text-white text-xs font-bold px-4 py-2.5 rounded-full shadow-2xl backdrop-blur-md max-w-[90vw] truncate">
@@ -541,14 +548,17 @@ export default function HomePage() {
       )}
 
       {category ? (
-        <div className="flex-grow pt-[max(3.75rem,calc(env(safe-area-inset-top)+3rem))]">
-          <div className="flex items-center justify-between px-3 sm:px-4 mb-3">
-            <div className="flex items-baseline gap-2.5">
-              <h2 className="text-red-500 font-black text-lg tracking-wide uppercase">{category}</h2>
-              <span className="text-xs text-gray-400 tabular-nums">
+        <div className="flex-grow pt-[max(4.75rem,calc(env(safe-area-inset-top)+4rem))] touch-pan-y">
+          <div className="flex items-center justify-between gap-2 px-3 sm:px-4 mb-4">
+            <h2 className="text-red-500 font-black text-lg sm:text-xl tracking-wide uppercase truncate">
+              {category}
+            </h2>
+            <div className="flex items-center gap-1.5 bg-neutral-900/95 border border-red-600/40 px-3 py-1.5 rounded-xl shadow-md shrink-0">
+              <Film size={13} className="text-red-500 shrink-0" />
+              <span className="text-xs font-extrabold text-white tabular-nums whitespace-nowrap">
                 {trimmedFolderQuery
-                  ? `${filteredCategoryMovies.length} of ${categoryMovies.length}`
-                  : `${categoryMovies.length} ${category === 'Series' ? 'titles' : 'movies'}`}
+                  ? `${filteredCategoryMovies.length} / ${categoryMovies.length} Uploaded`
+                  : `Total Uploaded: ${categoryMovies.length} ${category === 'Series' ? 'Series' : 'Movies'}`}
               </span>
             </div>
           </div>
@@ -662,7 +672,7 @@ export default function HomePage() {
                   x: { type: 'tween', ease: [0.22, 1, 0.36, 1], duration: 0.35 },
                   opacity: { duration: 0.25 },
                 }}
-                className="absolute inset-0 will-change-transform cursor-pointer"
+                className="absolute inset-0 will-change-transform cursor-pointer touch-pan-y"
                 onClick={() => {
                   if (!isSwiping && !isSwipingRef.current) {
                     handleMovieClick(currentFeatured);
@@ -672,6 +682,7 @@ export default function HomePage() {
                 <img
                   src={upgradePosterUrl(currentFeatured.posterUrl || currentFeatured.backdropUrl, 1200) || currentFeatured.posterUrl || currentFeatured.backdropUrl}
                   alt={currentFeatured.title}
+                  draggable={false}
                   className="absolute inset-0 w-full h-full object-cover object-center"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black via-black/35 to-black/45" />
@@ -752,7 +763,7 @@ export default function HomePage() {
               <h3 className="text-base sm:text-lg font-bold text-white tracking-wide mb-3">
                 Recently Watched
               </h3>
-              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none">
+              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
                 {recentlyWatched.map((item) => {
                   const movie = item.movieData || item;
                   return (
@@ -816,7 +827,7 @@ export default function HomePage() {
               <h3 className="text-base sm:text-lg font-bold text-white tracking-wide mb-3">
                 Suspenseful Movies
               </h3>
-              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none">
+              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
                 {suspenseMovies.map((movie) => (
                   <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
@@ -843,7 +854,7 @@ export default function HomePage() {
               <h3 className="text-base sm:text-lg font-bold text-white tracking-wide mb-3">
                 Blockbuster Action & Adventure Movies
               </h3>
-              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none">
+              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
                 {actionMovies.map((movie) => (
                   <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
@@ -870,7 +881,7 @@ export default function HomePage() {
               <h3 className="text-base sm:text-lg font-bold text-white tracking-wide mb-3">
                 Top 10 Series
               </h3>
-              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none">
+              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
                 {topSeries.slice(0, 10).map((movie, index) => (
                   <div
                     key={movie.id}
@@ -904,7 +915,7 @@ export default function HomePage() {
               <h3 className="text-base sm:text-lg font-bold text-white tracking-wide mb-3">
                 Comedy Movies
               </h3>
-              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none">
+              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
                 {comedyMovies.map((movie) => (
                   <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
@@ -927,7 +938,7 @@ export default function HomePage() {
               <h3 className="text-base sm:text-lg font-bold text-white tracking-wide mb-3">
                 Romantic Movies
               </h3>
-              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none">
+              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
                 {romanceMovies.map((movie) => (
                   <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
@@ -950,7 +961,7 @@ export default function HomePage() {
               <h3 className="text-base sm:text-lg font-bold text-white tracking-wide mb-3">
                 Thriller & Horror Movies
               </h3>
-              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none">
+              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
                 {[...thrillerMovies, ...horrorMovies].map((movie) => (
                   <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
@@ -973,7 +984,7 @@ export default function HomePage() {
               <h3 className="text-base sm:text-lg font-bold text-white tracking-wide mb-3">
                 Drama Movies
               </h3>
-              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none">
+              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
                 {dramaMovies.map((movie) => (
                   <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">

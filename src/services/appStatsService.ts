@@ -95,7 +95,7 @@ export async function registerActiveDeviceInstall(versionName?: string): Promise
       {
         deviceId,
         platform,
-        versionName: versionName || '3.5.214',
+        versionName: versionName || '3.5.215',
         lastActiveAt: serverTimestamp(),
         userAgent,
         updatedAt: Date.now(),
@@ -107,7 +107,7 @@ export async function registerActiveDeviceInstall(versionName?: string): Promise
     await setDoc(
       doc(db, APP_STATS_COLLECTION, APP_STATS_DOC_ID),
       {
-        lastInstalledVersion: versionName || '3.5.214',
+        lastInstalledVersion: versionName || '3.5.215',
         lastActiveAt: serverTimestamp(),
       },
       { merge: true }

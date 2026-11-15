@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.214",
-  "minimumRequiredVersion": "3.5.214",
-  "latestVersionCode": 3434,
-  "minimumRequiredVersionCode": 3434,
+  "latestVersion": "3.5.215",
+  "minimumRequiredVersion": "3.5.215",
+  "latestVersionCode": 3435,
+  "minimumRequiredVersionCode": 3435,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Portal v3.5.214 update is ready! Search icon now exclusively in Bollywood, Hollywood & Series at bottom-right, plus smooth Home scrolling & Movie Details page.",
-  "releaseNotes": "v3.5.214: Bottom-right floating Search icon strictly for Bollywood/Hollywood/Series, smooth Home vertical scrolling, Netflix-style Details page, and reliable update checks."
+  "updateMessage": "Movie Portal v3.5.215 update is ready! Smooth vertical scrolling from anywhere on Home, Bollywood, Hollywood & Series, plus Total Uploaded movies/series count at the top.",
+  "releaseNotes": "v3.5.215: Smooth vertical scrolling everywhere on Home, Bollywood, Hollywood & Series, prominent Total Uploaded count header, and bottom-right category Search icon."
 }
