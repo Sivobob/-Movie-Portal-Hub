@@ -1824,7 +1824,19 @@ public class MainActivity extends BridgeActivity {
                 apkUpdateMessage = "Official APK download URL is missing.";
                 return;
             }
-            startApkDownloadManager(apkUrl.trim());
+            final String targetUrl = apkUrl.trim();
+            runOnUiThread(() -> {
+                try {
+                    apkUpdateState = "installing";
+                    apkUpdateProgress = 100;
+                    apkUpdateMessage = "Opening official APK download in browser...";
+                    Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl));
+                    browserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(browserIntent);
+                } catch (Exception e) {
+                    startApkDownloadManager(targetUrl);
+                }
+            });
         }
 
         @JavascriptInterface
