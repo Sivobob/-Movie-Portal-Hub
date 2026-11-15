@@ -106,6 +106,8 @@ export default function VideoPlayerModal({
   const [duration, setDuration] = useState(initialDuration);
   const [bufferedTime, setBufferedTime] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const isFullscreenRef = useRef(false);
+  isFullscreenRef.current = isFullscreen;
   const [isLoading, setIsLoading] = useState(true);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [error, setError] = useState<string | null>(null);
@@ -652,6 +654,16 @@ export default function VideoPlayerModal({
         } catch {}
         return;
       }
+      if (Capacitor.isNativePlatform() && isFullscreenRef.current) {
+        setIsFullscreen(false);
+        try {
+          (window as any).AndroidPlayerBridge?.setPlaybackFullscreen?.(false);
+        } catch {}
+        try {
+          window.history.pushState({ playerModalOpen: true }, '');
+        } catch {}
+        return;
+      }
       onCloseRef.current();
     };
 
@@ -688,8 +700,10 @@ export default function VideoPlayerModal({
         }
       } catch {}
 
+      setIsFullscreen(false);
       if (Capacitor.isNativePlatform()) {
         try {
+          (window as any).AndroidPlayerBridge?.setPlaybackFullscreen?.(false);
           (window as any).AndroidPlayerBridge?.setPlaybackActive?.(false);
         } catch {}
       } else {
@@ -1578,6 +1592,20 @@ export default function VideoPlayerModal({
   const toggleFullscreen = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     resetAutoHideTimer();
+
+    // Native Android Media3 ExoPlayer renders in a native Surface behind WebView.
+    // Calling DOM requestFullscreen() triggers Android WebView's opaque black CustomView overlay on top of ExoPlayer.
+    // Instead, rotate and toggle immersive fullscreen natively while keeping WebView transparent over ExoPlayer.
+    if (canUseNativeExo && !isYouTube) {
+      const nextFs = !isFullscreen;
+      setIsFullscreen(nextFs);
+      try {
+        (window as any).AndroidPlayerBridge?.setPlaybackFullscreen?.(nextFs);
+        StatusBar.hide().catch(() => {});
+      } catch {}
+      return;
+    }
+
     const target = containerRef.current;
     if (!target) return;
 

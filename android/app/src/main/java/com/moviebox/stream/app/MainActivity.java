@@ -7,6 +7,7 @@ import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.database.Cursor;
 import android.graphics.Color;
 import android.net.Uri;
@@ -218,6 +219,25 @@ public class MainActivity extends BridgeActivity {
             } catch (Exception ignored) {}
         }
         enableImmersiveStickyMode(isPlaybackFullscreen || customView != null);
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        enableImmersiveStickyMode(isPlaybackFullscreen || customView != null);
+        if (exoActive) {
+            if (getBridge() != null && getBridge().getWebView() != null) {
+                WebView webView = getBridge().getWebView();
+                webView.setLayerType(View.LAYER_TYPE_NONE, null);
+                webView.setBackgroundColor(Color.TRANSPARENT);
+            }
+            if (exoContainer != null) {
+                exoContainer.setVisibility(View.VISIBLE);
+                exoContainer.requestLayout();
+            }
+            mainHandler.post(this::updateExoVideoSurfaceSize);
+            mainHandler.postDelayed(this::updateExoVideoSurfaceSize, 120);
+        }
     }
 
     @Override
@@ -445,7 +465,7 @@ public class MainActivity extends BridgeActivity {
             ));
             exoContainer.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
                 if ((r - l) != (or - ol) || (b - t) != (ob - ot)) {
-                    updateExoVideoSurfaceSize();
+                    v.post(this::updateExoVideoSurfaceSize);
                 }
             });
 
@@ -488,14 +508,21 @@ public class MainActivity extends BridgeActivity {
         }
 
         FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) targetView.getLayoutParams();
+        boolean changed = false;
         if (lp == null) {
             lp = new FrameLayout.LayoutParams(targetW, targetH, Gravity.CENTER);
-        } else {
+            changed = true;
+        } else if (lp.width != targetW || lp.height != targetH || lp.gravity != Gravity.CENTER) {
             lp.width = targetW;
             lp.height = targetH;
             lp.gravity = Gravity.CENTER;
+            changed = true;
         }
-        targetView.setLayoutParams(lp);
+        if (changed) {
+            targetView.setLayoutParams(lp);
+            targetView.requestLayout();
+        }
+        targetView.invalidate();
     }
 
     private void refreshExoStateSnapshot() {
@@ -604,7 +631,7 @@ public class MainActivity extends BridgeActivity {
             .setReadTimeoutMs(45000)
             .setAllowCrossProtocolRedirects(true)
             .setKeepPostFor302Redirects(true)
-            .setUserAgent("MoviePortal/3.5.209 AndroidExoPlayer");
+            .setUserAgent("MoviePortal/3.5.210 AndroidExoPlayer");
 
         DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
             .setBufferDurationsMs(
@@ -937,6 +964,21 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void showCustomFullscreenView(View view, WebChromeClient.CustomViewCallback callback) {
+        // When native Media3 ExoPlayer is active, never place Chromium's opaque CustomView overlay above exoContainer
+        if (exoActive) {
+            isPlaybackFullscreen = true;
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+            enableImmersiveStickyMode(true);
+            if (callback != null) {
+                mainHandler.post(() -> {
+                    try { callback.onCustomViewHidden(); } catch (Exception ignored) {}
+                });
+            }
+            mainHandler.post(this::updateExoVideoSurfaceSize);
+            mainHandler.postDelayed(this::updateExoVideoSurfaceSize, 120);
+            return;
+        }
         if (view == null) {
             if (callback != null) {
                 try { callback.onCustomViewHidden(); } catch (Exception ignored) {}
@@ -972,7 +1014,7 @@ public class MainActivity extends BridgeActivity {
                 fullscreenBackCallback.setEnabled(true);
             }
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
             enableImmersiveStickyMode(true);
         } catch (Exception e) {
             e.printStackTrace();
@@ -1453,7 +1495,7 @@ public class MainActivity extends BridgeActivity {
                 isPlaybackFullscreen = fullscreen;
                 if (fullscreen) {
                     getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-                    setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+                    setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
                     enableImmersiveStickyMode(true);
                 } else {
                     if (customView != null) {
@@ -1465,6 +1507,19 @@ public class MainActivity extends BridgeActivity {
                             : ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                     );
                     enableImmersiveStickyMode(false);
+                }
+                if (exoActive) {
+                    if (getBridge() != null && getBridge().getWebView() != null) {
+                        WebView webView = getBridge().getWebView();
+                        webView.setLayerType(View.LAYER_TYPE_NONE, null);
+                        webView.setBackgroundColor(Color.TRANSPARENT);
+                    }
+                    if (exoContainer != null) {
+                        exoContainer.setVisibility(View.VISIBLE);
+                        exoContainer.requestLayout();
+                    }
+                    mainHandler.post(MainActivity.this::updateExoVideoSurfaceSize);
+                    mainHandler.postDelayed(MainActivity.this::updateExoVideoSurfaceSize, 140);
                 }
             });
         }
@@ -1478,11 +1533,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.209");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.210");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.209\",\"versionCode\":3429}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.210\",\"versionCode\":3430}";
             }
         }
 

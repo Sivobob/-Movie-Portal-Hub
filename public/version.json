@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.209",
-  "minimumRequiredVersion": "3.5.209",
-  "latestVersionCode": 3429,
-  "minimumRequiredVersionCode": 3429,
+  "latestVersion": "3.5.210",
+  "minimumRequiredVersion": "3.5.210",
+  "latestVersionCode": 3430,
+  "minimumRequiredVersionCode": 3430,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Portal v3.5.209 update is ready! Permanent Android playback parity release (WebView surface fix, multi-stage SW/SurfaceView/FFmpeg codec recovery, and zero-stall streaming).",
-  "releaseNotes": "Eliminates black-screen WebView overlay occlusion, synchronizes Media3 surface lifecycle across episode/fallback transitions, adds full runtime audio/video codec capability detection, and implements 4-level playback recovery."
+  "updateMessage": "Movie Portal v3.5.210 update is ready! Fixes landscape fullscreen rotation black screen on Android APK.",
+  "releaseNotes": "Fixes black screen when rotating to landscape/fullscreen by keeping native Media3 ExoPlayer surface visible without WebView CustomView black overlay and syncing orientation surface resizing."
 }

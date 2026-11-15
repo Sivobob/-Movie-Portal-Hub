@@ -13,8 +13,8 @@ import { buildApiUrl } from '../utils/apiConfig';
 export const APP_UPDATE_COLLECTION = 'admins';
 export const APP_UPDATE_DOC_ID = 'android_update';
 
-export const CURRENT_VERSION_NAME = '3.5.209';
-export const CURRENT_VERSION_CODE = 3429;
+export const CURRENT_VERSION_NAME = '3.5.210';
+export const CURRENT_VERSION_CODE = 3430;
 
 export const OFFICIAL_APK_DIRECT_URL =
   'https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk';
