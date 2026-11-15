@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.219",
-  "minimumRequiredVersion": "3.5.219",
-  "latestVersionCode": 3439,
-  "minimumRequiredVersionCode": 3439,
+  "latestVersion": "3.5.220",
+  "minimumRequiredVersion": "3.5.220",
+  "latestVersionCode": 3440,
+  "minimumRequiredVersionCode": 3440,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Portal v3.5.219 update is ready! Accurate real durations for all Movies & Series episodes, real Matroska/MKV & Telegram duration probing, and synced player timeline.",
-  "releaseNotes": "v3.5.219: Removed hardcoded fallback durations, added clean formatting & background Telegram/MKV duration probing, fixed player duration sync across episode switches & remux playback, and added Admin episode duration controls."
+  "updateMessage": "Movie Portal v3.5.220 update is ready! Removed movie/series upload count badges from folder headers and added auto-resume stall recovery.",
+  "releaseNotes": "v3.5.220: Completely removed total movie/series upload count from Bollywood, Hollywood and Series folder headers; improved smooth playback and updated in-app updater."
 }
