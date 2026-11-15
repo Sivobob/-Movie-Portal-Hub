@@ -99,21 +99,8 @@ downloadCastRouter.get('/download/latest-info', async (_req: Request, res: Respo
 });
 
 // Route 2: TV Casting Media Proxy Endpoint
-// Proxies media streams to TV receivers (Chromecast, DLNA, Smart TVs) with HTTP Range support & CORS
-downloadCastRouter.get('/cast/proxy', (req: Request, res: Response) => {
-  const targetUrlStr = req.query.url as string;
-
-  if (!targetUrlStr) {
-    res.status(400).json({ error: 'Missing target stream url parameter' });
-    return;
-  }
-
-  // Set permissive CORS headers for TV receivers
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Range');
-  res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges, Content-Type');
-
-  // Handle local proxy stream or external URL
+// Proxies media streams to TV receivers (Chromecast, DLNA, Smart TVs) with HTTP Range support, redirects & CORS
+function proxyCastStream(targetUrlStr: string, req: Request, res: Response, redirectsLeft = 5) {
   let fullUrl = targetUrlStr;
   if (targetUrlStr.startsWith('/')) {
     const host = req.headers.host || 'localhost:3000';
@@ -132,15 +119,31 @@ downloadCastRouter.get('/cast/proxy', (req: Request, res: Response) => {
       requestHeaders['Range'] = req.headers.range as string;
     }
 
-    const proxyReq = client.get(
+    const proxyReq = client.request(
       fullUrl,
-      { headers: requestHeaders },
+      { method: req.method === 'HEAD' ? 'HEAD' : 'GET', headers: requestHeaders },
       (proxyRes) => {
         const statusCode = proxyRes.statusCode || 200;
+        if (
+          (statusCode === 301 || statusCode === 302 || statusCode === 303 || statusCode === 307 || statusCode === 308) &&
+          proxyRes.headers.location &&
+          redirectsLeft > 0
+        ) {
+          proxyRes.resume();
+          const nextUrl = new URL(proxyRes.headers.location, fullUrl).toString();
+          proxyCastStream(nextUrl, req, res, redirectsLeft - 1);
+          return;
+        }
+
+        const rawCt = String(proxyRes.headers['content-type'] || '').toLowerCase();
+        const contentType = (!rawCt || rawCt.includes('octet-stream')) ? 'video/mp4' : proxyRes.headers['content-type']!;
         const responseHeaders: Record<string, string | string[] | undefined> = {
-          'Content-Type': proxyRes.headers['content-type'] || 'video/mp4',
+          'Content-Type': contentType,
           'Accept-Ranges': proxyRes.headers['accept-ranges'] || 'bytes',
           'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+          'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Range',
+          'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges, Content-Type',
         };
 
         if (proxyRes.headers['content-length']) {
@@ -151,7 +154,12 @@ downloadCastRouter.get('/cast/proxy', (req: Request, res: Response) => {
         }
 
         res.writeHead(statusCode, responseHeaders);
-        proxyRes.pipe(res);
+        if (req.method === 'HEAD') {
+          proxyRes.resume();
+          res.end();
+        } else {
+          proxyRes.pipe(res);
+        }
       }
     );
 
@@ -165,12 +173,40 @@ downloadCastRouter.get('/cast/proxy', (req: Request, res: Response) => {
     req.on('close', () => {
       proxyReq.destroy();
     });
+    proxyReq.end();
   } catch (err: any) {
     console.error('[Cast Proxy Invalid URL]', err?.message);
     if (!res.headersSent) {
       res.status(400).json({ error: 'Invalid media URL' });
     }
   }
+}
+
+downloadCastRouter.options('/cast/proxy', (_req: Request, res: Response) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Range');
+  res.status(204).end();
+});
+
+downloadCastRouter.head('/cast/proxy', (req: Request, res: Response) => {
+  const targetUrlStr = req.query.url as string;
+  if (!targetUrlStr) {
+    res.status(400).json({ error: 'Missing target stream url parameter' });
+    return;
+  }
+  proxyCastStream(targetUrlStr, req, res);
+});
+
+downloadCastRouter.get('/cast/proxy', (req: Request, res: Response) => {
+  const targetUrlStr = req.query.url as string;
+
+  if (!targetUrlStr) {
+    res.status(400).json({ error: 'Missing target stream url parameter' });
+    return;
+  }
+
+  proxyCastStream(targetUrlStr, req, res);
 });
 
 // Route 3: Direct Download Endpoint with Attachment Content-Disposition

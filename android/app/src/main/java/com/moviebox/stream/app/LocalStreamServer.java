@@ -1,5 +1,12 @@
 package com.moviebox.stream.app;
 
+import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.LinkAddress;
+import android.net.LinkProperties;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.os.Build;
 import android.util.Base64;
 import android.util.Log;
 import android.webkit.JavascriptInterface;
@@ -12,11 +19,15 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.Inet4Address;
 import java.net.InetAddress;
+import java.net.NetworkInterface;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -46,6 +57,9 @@ public class LocalStreamServer {
     private final WebView webView;
     private final ServerSocket serverSocket;
     private final int port;
+    private ServerSocket lanServerSocket;
+    private int lanPort = -1;
+    private final String castToken = UUID.randomUUID().toString().replace("-", "");
     private final ExecutorService executor = Executors.newCachedThreadPool();
     private volatile boolean running = true;
 
@@ -94,6 +108,126 @@ public class LocalStreamServer {
 
     public String getBaseUrl() {
         return "http://127.0.0.1:" + port;
+    }
+
+    private synchronized boolean ensureLanServerStarted() {
+        if (!running) return false;
+        if (lanServerSocket != null && !lanServerSocket.isClosed() && lanPort > 0) {
+            return true;
+        }
+        try {
+            lanServerSocket = new ServerSocket(0, 32, InetAddress.getByName("0.0.0.0"));
+            lanPort = lanServerSocket.getLocalPort();
+            Thread lanAcceptThread = new Thread(this::lanAcceptLoop, "LanCastAccept");
+            lanAcceptThread.setDaemon(true);
+            lanAcceptThread.start();
+            Log.i(TAG, "LAN Cast server listening on port " + lanPort);
+            return true;
+        } catch (IOException e) {
+            Log.w(TAG, "Failed to start LAN Cast server: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private String getWifiLanIpv4Address() {
+        try {
+            Context ctx = webView != null ? webView.getContext().getApplicationContext() : null;
+            if (ctx != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                ConnectivityManager cm = (ConnectivityManager) ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
+                if (cm != null) {
+                    Network activeNet = cm.getActiveNetwork();
+                    if (activeNet != null) {
+                        NetworkCapabilities caps = cm.getNetworkCapabilities(activeNet);
+                        if (caps != null && (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+                                || caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))) {
+                            LinkProperties lp = cm.getLinkProperties(activeNet);
+                            if (lp != null) {
+                                for (LinkAddress la : lp.getLinkAddresses()) {
+                                    InetAddress addr = la.getAddress();
+                                    if (addr instanceof Inet4Address && !addr.isLoopbackAddress()) {
+                                        return addr.getHostAddress();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+
+        try {
+            String fallbackSiteLocal = null;
+            for (NetworkInterface nif : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                if (nif == null || !nif.isUp() || nif.isLoopback()) continue;
+                String ifName = nif.getName() != null ? nif.getName().toLowerCase(Locale.US) : "";
+                boolean isWifiOrEth = ifName.startsWith("wlan") || ifName.startsWith("eth") || ifName.startsWith("ap");
+                for (InetAddress addr : Collections.list(nif.getInetAddresses())) {
+                    if (addr instanceof Inet4Address && !addr.isLoopbackAddress()) {
+                        String ip = addr.getHostAddress();
+                        if (ip == null || ip.startsWith("127.")) continue;
+                        if (isWifiOrEth) {
+                            return ip;
+                        }
+                        if (addr.isSiteLocalAddress() && fallbackSiteLocal == null) {
+                            fallbackSiteLocal = ip;
+                        }
+                    }
+                }
+            }
+            if (fallbackSiteLocal != null) {
+                return fallbackSiteLocal;
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    public String resolveCastUrl(String sourceUrl) {
+        if (sourceUrl == null) return "";
+        String trimmed = sourceUrl.trim();
+        if (trimmed.isEmpty()) return "";
+
+        String extractedStreamUrl = trimmed;
+        boolean isLocalOrRelative = trimmed.startsWith("/")
+                || trimmed.contains("127.0.0.1")
+                || trimmed.contains("localhost");
+
+        if (isLocalOrRelative) {
+            int qIdx = trimmed.indexOf('?');
+            if (qIdx >= 0) {
+                Map<String, String> q = new HashMap<>();
+                parseQuery(trimmed.substring(qIdx + 1), q);
+                String u = q.get("url");
+                if (u != null && !u.trim().isEmpty()) {
+                    extractedStreamUrl = u.trim();
+                } else {
+                    return "";
+                }
+            } else {
+                return "";
+            }
+        }
+
+        // Direct remote non-Telegram HTTP(S) URLs can be loaded directly by Chromecast TV
+        if ((extractedStreamUrl.startsWith("https://") || extractedStreamUrl.startsWith("http://"))
+                && !extractedStreamUrl.contains("t.me")
+                && !extractedStreamUrl.contains("telegram.me")
+                && !extractedStreamUrl.contains("127.0.0.1")
+                && !extractedStreamUrl.contains("localhost")) {
+            return extractedStreamUrl;
+        }
+
+        if (!ensureLanServerStarted()) return "";
+        String lanIp = getWifiLanIpv4Address();
+        if (lanIp == null || lanIp.isEmpty()) return "";
+
+        try {
+            return "http://" + lanIp + ":" + lanPort
+                    + "/api/cast/stream?token=" + URLEncoder.encode(castToken, "UTF-8")
+                    + "&url=" + URLEncoder.encode(extractedStreamUrl, "UTF-8")
+                    + "&ext=.mp4";
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     private void completeMeta(String id, String jsonBody) {
@@ -208,6 +342,11 @@ public class LocalStreamServer {
         try {
             serverSocket.close();
         } catch (IOException ignored) {}
+        if (lanServerSocket != null) {
+            try {
+                lanServerSocket.close();
+            } catch (IOException ignored) {}
+        }
         executor.shutdownNow();
     }
 
@@ -217,10 +356,25 @@ public class LocalStreamServer {
                 Socket client = serverSocket.accept();
                 client.setTcpNoDelay(true);
                 client.setSoTimeout(60000);
-                executor.execute(() -> handleClient(client));
+                executor.execute(() -> handleClient(client, false));
             } catch (IOException e) {
                 if (running) {
                     Log.w(TAG, "Accept error: " + e.getMessage());
+                }
+            }
+        }
+    }
+
+    private void lanAcceptLoop() {
+        while (running && lanServerSocket != null && !lanServerSocket.isClosed()) {
+            try {
+                Socket client = lanServerSocket.accept();
+                client.setTcpNoDelay(true);
+                client.setSoTimeout(60000);
+                executor.execute(() -> handleClient(client, true));
+            } catch (IOException e) {
+                if (running) {
+                    Log.w(TAG, "LAN Cast accept error: " + e.getMessage());
                 }
             }
         }
@@ -346,7 +500,7 @@ public class LocalStreamServer {
         out.flush();
     }
 
-    private void handleClient(Socket client) {
+    private void handleClient(Socket client, boolean isLanClient) {
         try (Socket s = client) {
             InputStream in = s.getInputStream();
             OutputStream out = s.getOutputStream();
@@ -363,6 +517,20 @@ public class LocalStreamServer {
                     out.flush();
                     if (clientWantsClose) return;
                     continue;
+                }
+
+                if (isLanClient) {
+                    if ("/api/cast/stream".equals(req.path) && ("GET".equals(req.method) || "HEAD".equals(req.method))) {
+                        String tokenParam = req.query.get("token");
+                        if (tokenParam == null || !castToken.equals(tokenParam)) {
+                            sendSimpleResponse(out, 403, "Forbidden", "application/json", "{\"error\":\"Invalid Cast token\"}".getBytes(StandardCharsets.UTF_8), false);
+                            return;
+                        }
+                        handleStreamRequest(req, out, true);
+                        return;
+                    }
+                    sendSimpleResponse(out, 403, "Forbidden", "application/json", "{\"error\":\"LAN access restricted to Cast stream\"}".getBytes(StandardCharsets.UTF_8), false);
+                    return;
                 }
 
                 if ("/api/health".equals(req.path)) {
@@ -408,7 +576,7 @@ public class LocalStreamServer {
 
                 if (("/api/stream".equals(req.path) || "/api/telegram/stream".equals(req.path))
                         && ("GET".equals(req.method) || "HEAD".equals(req.method))) {
-                    handleStreamRequest(req, out);
+                    handleStreamRequest(req, out, false);
                     return;
                 }
 
@@ -488,7 +656,7 @@ public class LocalStreamServer {
         }
     }
 
-    private void handleStreamRequest(HttpRequestData req, OutputStream out) throws IOException {
+    private void handleStreamRequest(HttpRequestData req, OutputStream out, boolean isCastRequest) throws IOException {
         String telegramUrl = req.query.get("url");
         if (telegramUrl == null || telegramUrl.trim().isEmpty()) {
             sendSimpleResponse(out, 400, "Bad Request", "application/json", "{\"error\":\"URL required\"}".getBytes(StandardCharsets.UTF_8), false);
@@ -509,11 +677,18 @@ public class LocalStreamServer {
             return;
         }
 
+        String responseMimeType = meta.mimeType;
+        if (isCastRequest) {
+            if (responseMimeType == null || responseMimeType.isEmpty() || "application/octet-stream".equalsIgnoreCase(responseMimeType)) {
+                responseMimeType = "video/mp4";
+            }
+        }
+
         String durationHeader = String.valueOf((long) Math.floor(meta.durationSec));
         if ("HEAD".equals(req.method)) {
             String hdr = "HTTP/1.1 200 OK\r\n"
                     + corsHeaders()
-                    + "Content-Type: " + meta.mimeType + "\r\n"
+                    + "Content-Type: " + responseMimeType + "\r\n"
                     + "Content-Length: " + meta.fileSize + "\r\n"
                     + "Accept-Ranges: bytes\r\n"
                     + "X-Video-Duration: " + durationHeader + "\r\n"
@@ -560,7 +735,7 @@ public class LocalStreamServer {
         StringBuilder hdr = new StringBuilder();
         hdr.append(hasRange ? "HTTP/1.1 206 Partial Content\r\n" : "HTTP/1.1 200 OK\r\n");
         hdr.append(corsHeaders());
-        hdr.append("Content-Type: ").append(meta.mimeType).append("\r\n");
+        hdr.append("Content-Type: ").append(responseMimeType).append("\r\n");
         hdr.append("Content-Length: ").append(contentLength).append("\r\n");
         if (hasRange) {
             hdr.append("Content-Range: bytes ").append(start).append("-").append(end).append("/").append(meta.fileSize).append("\r\n");

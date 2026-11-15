@@ -68,6 +68,7 @@ import com.google.android.gms.cast.MediaInfo;
 import com.google.android.gms.cast.MediaLoadRequestData;
 import com.google.android.gms.cast.MediaMetadata;
 import com.google.android.gms.cast.MediaSeekOptions;
+import com.google.android.gms.cast.MediaStatus;
 import com.google.android.gms.cast.framework.CastContext;
 import com.google.android.gms.cast.framework.CastSession;
 import com.google.android.gms.cast.framework.SessionManager;
@@ -116,18 +117,31 @@ public class MainActivity extends BridgeActivity {
     private RemoteMediaClient.Callback remoteMediaCallback;
 
     private volatile String castSessionState = "idle";
+    private volatile String castPlayerState = "idle";
+    private volatile boolean castSessionConnected = false;
     private volatile String castConnectedDeviceName = "";
     private volatile int castCurrentTimeSec = 0;
     private volatile int castDurationSec = 0;
     private volatile boolean castIsPlaying = false;
     private volatile String castErrorMessage = "";
     private volatile String discoveredDevicesJson = "[]";
+    private volatile String cachedCastStatusJson = "{\"state\":\"idle\",\"playerState\":\"idle\",\"connected\":false,\"deviceName\":\"\",\"isPlaying\":false,\"currentTime\":0,\"duration\":0,\"errorMessage\":\"\"}";
     private final Object castLock = new Object();
 
     private String pendingCastMediaUrl = null;
     private String pendingCastTitle = null;
     private String pendingCastPoster = null;
     private long pendingCastCurrentTimeSec = 0;
+
+    private final Runnable castStatusTicker = new Runnable() {
+        @Override
+        public void run() {
+            syncCastRemoteMediaStatus();
+            if (castSessionConnected && currentCastSession != null) {
+                mainHandler.postDelayed(this, 1000);
+            }
+        }
+    };
 
     // Native Media3 ExoPlayer state (universal phone hardware/software codec playback)
     private FrameLayout exoContainer;
@@ -256,6 +270,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onDestroy() {
         releaseExoPlayerInternal();
+        mainHandler.removeCallbacks(castStatusTicker);
         stopCastDiscoveryNative();
         disconnectCastNative();
         if (sessionManager != null && castSessionListener != null) {
@@ -1199,6 +1214,83 @@ public class MainActivity extends BridgeActivity {
         }).start();
     }
 
+    private void refreshCastStatusSnapshot() {
+        try {
+            JSONObject json = new JSONObject();
+            json.put("state", castSessionState);
+            json.put("playerState", castPlayerState);
+            json.put("connected", castSessionConnected && ("connected".equals(castSessionState) || "error".equals(castSessionState)));
+            json.put("deviceName", castConnectedDeviceName != null ? castConnectedDeviceName : "");
+            json.put("isPlaying", castIsPlaying);
+            json.put("currentTime", castCurrentTimeSec);
+            json.put("duration", castDurationSec);
+            json.put("errorMessage", castErrorMessage != null ? castErrorMessage : "");
+            cachedCastStatusJson = json.toString();
+        } catch (Exception ignored) {}
+    }
+
+    private void syncCastRemoteMediaStatus() {
+        if (currentCastSession != null) {
+            try {
+                castSessionConnected = currentCastSession.isConnected();
+            } catch (Exception ignored) {}
+        } else {
+            castSessionConnected = false;
+        }
+
+        if (remoteMediaClient == null) {
+            refreshCastStatusSnapshot();
+            return;
+        }
+        MediaStatus ms = remoteMediaClient.getMediaStatus();
+        long streamPos = remoteMediaClient.getApproximateStreamPosition();
+        long streamDur = remoteMediaClient.getStreamDuration();
+        if (streamPos >= 0) castCurrentTimeSec = (int) (streamPos / 1000L);
+        if (streamDur >= 0) castDurationSec = (int) (streamDur / 1000L);
+
+        if (ms == null) {
+            refreshCastStatusSnapshot();
+            return;
+        }
+
+        int playerState = ms.getPlayerState();
+        int idleReason = ms.getIdleReason();
+
+        if (playerState == MediaStatus.PLAYER_STATE_PLAYING) {
+            castPlayerState = "playing";
+            castIsPlaying = true;
+            castErrorMessage = "";
+            castSessionState = "connected";
+        } else if (playerState == MediaStatus.PLAYER_STATE_PAUSED) {
+            castPlayerState = "paused";
+            castIsPlaying = false;
+            castSessionState = "connected";
+        } else if (playerState == MediaStatus.PLAYER_STATE_BUFFERING) {
+            castPlayerState = "buffering";
+            castIsPlaying = false;
+            castSessionState = "connected";
+        } else if (playerState == MediaStatus.PLAYER_STATE_LOADING) {
+            castPlayerState = "loading";
+            castIsPlaying = false;
+            castSessionState = "connected";
+        } else if (playerState == MediaStatus.PLAYER_STATE_IDLE) {
+            castIsPlaying = false;
+            if (idleReason == MediaStatus.IDLE_REASON_ERROR) {
+                castPlayerState = "error";
+                castSessionState = "error";
+                if (castErrorMessage == null || castErrorMessage.isEmpty()) {
+                    castErrorMessage = "TV receiver failed to decode or reach the video stream. Check Wi-Fi and video format.";
+                }
+            } else if (idleReason == MediaStatus.IDLE_REASON_FINISHED) {
+                castPlayerState = "ended";
+                castSessionState = "connected";
+            } else if (idleReason == MediaStatus.IDLE_REASON_CANCELED) {
+                castPlayerState = "idle";
+            }
+        }
+        refreshCastStatusSnapshot();
+    }
+
     private void initCastFramework() {
         try {
             if (castContext == null) {
@@ -1211,26 +1303,47 @@ public class MainActivity extends BridgeActivity {
                         @Override
                         public void onSessionStarting(CastSession session) {
                             castSessionState = "connecting";
+                            castPlayerState = "connecting";
+                            castSessionConnected = false;
+                            castIsPlaying = false;
+                            castErrorMessage = "";
+                            refreshCastStatusSnapshot();
                         }
 
                         @Override
                         public void onSessionStarted(CastSession session, String sessionId) {
                             currentCastSession = session;
                             remoteMediaClient = session.getRemoteMediaClient();
+                            castSessionConnected = session.isConnected();
                             castSessionState = "connected";
+                            if ((castConnectedDeviceName == null || castConnectedDeviceName.isEmpty())
+                                    && session.getCastDevice() != null
+                                    && session.getCastDevice().getFriendlyName() != null) {
+                                castConnectedDeviceName = session.getCastDevice().getFriendlyName();
+                            }
                             setupRemoteMediaClientCallbacks();
+                            mainHandler.removeCallbacks(castStatusTicker);
+                            mainHandler.post(castStatusTicker);
                             if (pendingCastMediaUrl != null && !pendingCastMediaUrl.isEmpty()) {
-                                executeLoadMedia(pendingCastMediaUrl, pendingCastTitle, pendingCastPoster, pendingCastCurrentTimeSec);
+                                String urlToLoad = pendingCastMediaUrl;
                                 pendingCastMediaUrl = null;
+                                executeLoadMedia(urlToLoad, pendingCastTitle, pendingCastPoster, pendingCastCurrentTimeSec);
+                            } else {
+                                syncCastRemoteMediaStatus();
                             }
                         }
 
                         @Override
                         public void onSessionStartFailed(CastSession session, int error) {
                             castSessionState = "error";
-                            castErrorMessage = "Failed to establish Cast connection (Error " + error + ")";
+                            castPlayerState = "error";
+                            castSessionConnected = false;
+                            castIsPlaying = false;
+                            castErrorMessage = "Failed to start Cast session (Error " + error + ")";
                             currentCastSession = null;
                             remoteMediaClient = null;
+                            mainHandler.removeCallbacks(castStatusTicker);
+                            refreshCastStatusSnapshot();
                         }
 
                         @Override
@@ -1239,35 +1352,81 @@ public class MainActivity extends BridgeActivity {
                         @Override
                         public void onSessionEnded(CastSession session, int error) {
                             castSessionState = "idle";
+                            castPlayerState = "idle";
+                            castSessionConnected = false;
+                            castIsPlaying = false;
+                            castCurrentTimeSec = 0;
+                            castDurationSec = 0;
                             currentCastSession = null;
                             remoteMediaClient = null;
                             castConnectedDeviceName = "";
+                            mainHandler.removeCallbacks(castStatusTicker);
+                            refreshCastStatusSnapshot();
                         }
 
                         @Override
                         public void onSessionResuming(CastSession session, String sessionId) {
                             castSessionState = "connecting";
+                            castPlayerState = "connecting";
+                            castSessionConnected = false;
+                            refreshCastStatusSnapshot();
                         }
 
                         @Override
                         public void onSessionResumed(CastSession session, boolean wasSuspended) {
                             currentCastSession = session;
                             remoteMediaClient = session.getRemoteMediaClient();
+                            castSessionConnected = session.isConnected();
                             castSessionState = "connected";
+                            if (session.getCastDevice() != null && session.getCastDevice().getFriendlyName() != null) {
+                                castConnectedDeviceName = session.getCastDevice().getFriendlyName();
+                            }
                             setupRemoteMediaClientCallbacks();
+                            mainHandler.removeCallbacks(castStatusTicker);
+                            mainHandler.post(castStatusTicker);
+                            if (pendingCastMediaUrl != null && !pendingCastMediaUrl.isEmpty()) {
+                                String urlToLoad = pendingCastMediaUrl;
+                                pendingCastMediaUrl = null;
+                                executeLoadMedia(urlToLoad, pendingCastTitle, pendingCastPoster, pendingCastCurrentTimeSec);
+                            } else {
+                                syncCastRemoteMediaStatus();
+                            }
                         }
 
                         @Override
                         public void onSessionResumeFailed(CastSession session, int error) {
                             castSessionState = "error";
+                            castPlayerState = "error";
+                            castSessionConnected = false;
+                            castIsPlaying = false;
+                            castErrorMessage = "Failed to resume Cast session (Error " + error + ")";
                             currentCastSession = null;
                             remoteMediaClient = null;
+                            mainHandler.removeCallbacks(castStatusTicker);
+                            refreshCastStatusSnapshot();
                         }
 
                         @Override
                         public void onSessionSuspended(CastSession session, int reason) {}
                     };
                     sessionManager.addSessionManagerListener(castSessionListener, CastSession.class);
+                }
+            }
+
+            if (sessionManager != null) {
+                CastSession existing = sessionManager.getCurrentCastSession();
+                if (existing != null && existing.isConnected()) {
+                    currentCastSession = existing;
+                    remoteMediaClient = existing.getRemoteMediaClient();
+                    castSessionConnected = true;
+                    castSessionState = "connected";
+                    if (existing.getCastDevice() != null && existing.getCastDevice().getFriendlyName() != null) {
+                        castConnectedDeviceName = existing.getCastDevice().getFriendlyName();
+                    }
+                    setupRemoteMediaClientCallbacks();
+                    mainHandler.removeCallbacks(castStatusTicker);
+                    mainHandler.post(castStatusTicker);
+                    syncCastRemoteMediaStatus();
                 }
             }
         } catch (Throwable t) {
@@ -1283,33 +1442,80 @@ public class MainActivity extends BridgeActivity {
         remoteMediaCallback = new RemoteMediaClient.Callback() {
             @Override
             public void onStatusUpdated() {
-                if (remoteMediaClient != null) {
-                    castIsPlaying = remoteMediaClient.isPlaying();
-                    long streamPos = remoteMediaClient.getApproximateStreamPosition();
-                    long streamDur = remoteMediaClient.getStreamDuration();
-                    if (streamPos >= 0) castCurrentTimeSec = (int)(streamPos / 1000L);
-                    if (streamDur >= 0) castDurationSec = (int)(streamDur / 1000L);
-                }
+                syncCastRemoteMediaStatus();
+            }
+
+            @Override
+            public void onMetadataUpdated() {
+                syncCastRemoteMediaStatus();
             }
         };
         remoteMediaClient.registerCallback(remoteMediaCallback);
     }
 
+    private String resolveCastMediaUrlNative(String rawUrl) {
+        if (rawUrl == null) return "";
+        String trimmed = rawUrl.trim();
+        if (trimmed.isEmpty()) return "";
+        if (trimmed.contains("127.0.0.1") || trimmed.contains("localhost") || trimmed.startsWith("/")) {
+            if (localStreamServer != null) {
+                return localStreamServer.resolveCastUrl(trimmed);
+            }
+            return "";
+        }
+        if (trimmed.contains("t.me") || trimmed.contains("telegram.me")) {
+            if (localStreamServer != null) {
+                return localStreamServer.resolveCastUrl(trimmed);
+            }
+            return "";
+        }
+        return trimmed;
+    }
+
     private void executeLoadMedia(String mediaUrl, String title, String posterUrl, long currentTimeSec) {
-        if (remoteMediaClient == null) return;
+        if (remoteMediaClient == null) {
+            castSessionState = "error";
+            castPlayerState = "error";
+            castIsPlaying = false;
+            castErrorMessage = "Cast media client is not ready yet. Please reconnect to your TV.";
+            refreshCastStatusSnapshot();
+            return;
+        }
         try {
+            String resolvedUrl = resolveCastMediaUrlNative(mediaUrl);
+            if (resolvedUrl == null || resolvedUrl.isEmpty() || resolvedUrl.contains("127.0.0.1") || resolvedUrl.contains("localhost")) {
+                castSessionState = "error";
+                castPlayerState = "error";
+                castIsPlaying = false;
+                castErrorMessage = "Cannot send a phone-local URL to TV. Connect phone and TV to the same Wi-Fi network.";
+                refreshCastStatusSnapshot();
+                return;
+            }
+
             MediaMetadata metadata = new MediaMetadata(MediaMetadata.MEDIA_TYPE_MOVIE);
             metadata.putString(MediaMetadata.KEY_TITLE, (title != null && !title.isEmpty()) ? title : "Movie Portal");
-            if (posterUrl != null && !posterUrl.trim().isEmpty()) {
-                try {
-                    metadata.addImage(new WebImage(Uri.parse(posterUrl.trim())));
-                } catch (Exception ignored) {}
+            if (posterUrl != null) {
+                String cleanPoster = posterUrl.trim();
+                if (cleanPoster.startsWith("https://") || cleanPoster.startsWith("http://")) {
+                    try {
+                        metadata.addImage(new WebImage(Uri.parse(cleanPoster)));
+                    } catch (Exception ignored) {}
+                }
             }
+
+            String lowerUrl = resolvedUrl.toLowerCase(Locale.US);
             String mime = "video/mp4";
-            if (mediaUrl.contains(".m3u8")) {
+            if (lowerUrl.contains(".m3u8")) {
                 mime = "application/x-mpegurl";
+            } else if (lowerUrl.contains(".mpd")) {
+                mime = "application/dash+xml";
+            } else if (lowerUrl.contains(".webm")) {
+                mime = "video/webm";
+            } else if (lowerUrl.contains(".mkv") && !lowerUrl.contains("remux=1") && !lowerUrl.contains("transcode=1") && !lowerUrl.contains("cast=1")) {
+                mime = "video/x-matroska";
             }
-            MediaInfo mediaInfo = new MediaInfo.Builder(mediaUrl)
+
+            MediaInfo mediaInfo = new MediaInfo.Builder(resolvedUrl)
                 .setStreamType(MediaInfo.STREAM_TYPE_BUFFERED)
                 .setContentType(mime)
                 .setMetadata(metadata)
@@ -1318,13 +1524,36 @@ public class MainActivity extends BridgeActivity {
             MediaLoadRequestData loadData = new MediaLoadRequestData.Builder()
                 .setMediaInfo(mediaInfo)
                 .setAutoplay(true)
-                .setCurrentTime(Math.max(0, currentTimeSec * 1000L))
+                .setCurrentTime(Math.max(0L, currentTimeSec * 1000L))
                 .build();
 
-            remoteMediaClient.load(loadData);
+            castPlayerState = "loading";
+            castIsPlaying = false;
+            castErrorMessage = "";
+            refreshCastStatusSnapshot();
+
+            remoteMediaClient.load(loadData).setResultCallback(result -> {
+                if (result == null || !result.getStatus().isSuccess()) {
+                    int code = result != null ? result.getStatus().getStatusCode() : -1;
+                    String msg = (result != null && result.getStatus().getStatusMessage() != null)
+                        ? result.getStatus().getStatusMessage()
+                        : ("Load rejected (code " + code + ")");
+                    castPlayerState = "error";
+                    castSessionState = "error";
+                    castIsPlaying = false;
+                    castErrorMessage = "TV could not play this stream: " + msg;
+                    refreshCastStatusSnapshot();
+                } else {
+                    syncCastRemoteMediaStatus();
+                }
+            });
         } catch (Exception e) {
             e.printStackTrace();
+            castPlayerState = "error";
+            castSessionState = "error";
+            castIsPlaying = false;
             castErrorMessage = "Error loading media on Cast receiver: " + e.getMessage();
+            refreshCastStatusSnapshot();
         }
     }
 
@@ -1408,6 +1637,7 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void connectToCastRouteNative(final String routeId, final String videoUrl, final String title, final String posterUrl, final long currentTimeSec) {
+        initCastFramework();
         if (mediaRouter == null) return;
         MediaRouter.RouteInfo targetRoute = null;
         for (MediaRouter.RouteInfo r : mediaRouter.getRoutes()) {
@@ -1417,29 +1647,57 @@ public class MainActivity extends BridgeActivity {
             }
         }
         if (targetRoute != null) {
-            castSessionState = "connecting";
+            String resolved = resolveCastMediaUrlNative(videoUrl);
+            if (resolved == null || resolved.isEmpty() || resolved.contains("127.0.0.1") || resolved.contains("localhost")) {
+                castSessionState = "error";
+                castPlayerState = "error";
+                castSessionConnected = false;
+                castIsPlaying = false;
+                castErrorMessage = "Phone must be on the same Wi-Fi network as your TV (or have a public streaming backend) to cast.";
+                refreshCastStatusSnapshot();
+                return;
+            }
+
+            boolean sameSelectedRoute = targetRoute.isSelected()
+                    && currentCastSession != null
+                    && currentCastSession.isConnected();
+
             castConnectedDeviceName = targetRoute.getName();
             castErrorMessage = "";
-            pendingCastMediaUrl = videoUrl;
+            pendingCastMediaUrl = resolved;
             pendingCastTitle = title;
             pendingCastPoster = posterUrl;
             pendingCastCurrentTimeSec = currentTimeSec;
 
-            mediaRouter.selectRoute(targetRoute);
-
-            if (currentCastSession != null && currentCastSession.isConnected()) {
+            if (sameSelectedRoute) {
+                castSessionConnected = true;
                 castSessionState = "connected";
+                remoteMediaClient = currentCastSession.getRemoteMediaClient();
                 setupRemoteMediaClientCallbacks();
-                executeLoadMedia(videoUrl, title, posterUrl, currentTimeSec);
+                mainHandler.removeCallbacks(castStatusTicker);
+                mainHandler.post(castStatusTicker);
                 pendingCastMediaUrl = null;
+                executeLoadMedia(resolved, title, posterUrl, currentTimeSec);
+            } else {
+                castSessionConnected = false;
+                castSessionState = "connecting";
+                castPlayerState = "connecting";
+                castIsPlaying = false;
+                refreshCastStatusSnapshot();
+                mediaRouter.selectRoute(targetRoute);
             }
         } else {
             castSessionState = "error";
+            castPlayerState = "error";
+            castSessionConnected = false;
+            castIsPlaying = false;
             castErrorMessage = "Target Cast device not found or went offline.";
+            refreshCastStatusSnapshot();
         }
     }
 
     private void disconnectCastNative() {
+        mainHandler.removeCallbacks(castStatusTicker);
         try {
             if (sessionManager != null) {
                 sessionManager.endCurrentSession(true);
@@ -1449,9 +1707,17 @@ public class MainActivity extends BridgeActivity {
             }
         } catch (Exception ignored) {}
         castSessionState = "idle";
+        castPlayerState = "idle";
+        castSessionConnected = false;
+        castIsPlaying = false;
+        castCurrentTimeSec = 0;
+        castDurationSec = 0;
+        castErrorMessage = "";
         castConnectedDeviceName = "";
+        pendingCastMediaUrl = null;
         currentCastSession = null;
         remoteMediaClient = null;
+        refreshCastStatusSnapshot();
     }
 
     private void stopCastDiscoveryNative() {
@@ -1616,6 +1882,11 @@ public class MainActivity extends BridgeActivity {
         }
 
         @JavascriptInterface
+        public String getCastStreamUrl(final String sourceUrl) {
+            return resolveCastMediaUrlNative(sourceUrl);
+        }
+
+        @JavascriptInterface
         public void connectToCastDevice(final String routeId, final String videoUrl, final String title, final String posterUrl, final double currentTimeSec) {
             runOnUiThread(() -> connectToCastRouteNative(routeId, videoUrl, title, posterUrl, (long) currentTimeSec));
         }
@@ -1629,8 +1900,7 @@ public class MainActivity extends BridgeActivity {
         public void castPlay() {
             runOnUiThread(() -> {
                 if (remoteMediaClient != null) {
-                    remoteMediaClient.play();
-                    castIsPlaying = true;
+                    remoteMediaClient.play().setResultCallback(res -> syncCastRemoteMediaStatus());
                 }
             });
         }
@@ -1639,8 +1909,7 @@ public class MainActivity extends BridgeActivity {
         public void castPause() {
             runOnUiThread(() -> {
                 if (remoteMediaClient != null) {
-                    remoteMediaClient.pause();
-                    castIsPlaying = false;
+                    remoteMediaClient.pause().setResultCallback(res -> syncCastRemoteMediaStatus());
                 }
             });
         }
@@ -1650,8 +1919,8 @@ public class MainActivity extends BridgeActivity {
             runOnUiThread(() -> {
                 if (remoteMediaClient != null) {
                     try {
-                        remoteMediaClient.seek(new MediaSeekOptions.Builder().setPosition((long)(seconds * 1000.0)).build());
-                        castCurrentTimeSec = (int) seconds;
+                        remoteMediaClient.seek(new MediaSeekOptions.Builder().setPosition((long)(seconds * 1000.0)).build())
+                            .setResultCallback(res -> syncCastRemoteMediaStatus());
                     } catch (Exception ignored) {}
                 }
             });
@@ -1910,19 +2179,9 @@ public class MainActivity extends BridgeActivity {
 
         @JavascriptInterface
         public String getCastSessionStatus() {
-            try {
-                JSONObject json = new JSONObject();
-                json.put("state", castSessionState);
-                json.put("connected", "connected".equals(castSessionState) && currentCastSession != null);
-                json.put("deviceName", castConnectedDeviceName);
-                json.put("isPlaying", castIsPlaying);
-                json.put("currentTime", castCurrentTimeSec);
-                json.put("duration", castDurationSec);
-                json.put("errorMessage", castErrorMessage);
-                return json.toString();
-            } catch (Exception e) {
-                return "{\"state\":\"idle\",\"connected\":false,\"deviceName\":\"\",\"isPlaying\":false,\"currentTime\":0,\"duration\":0,\"errorMessage\":\"\"}";
-            }
+            return cachedCastStatusJson != null
+                ? cachedCastStatusJson
+                : "{\"state\":\"idle\",\"playerState\":\"idle\",\"connected\":false,\"deviceName\":\"\",\"isPlaying\":false,\"currentTime\":0,\"duration\":0,\"errorMessage\":\"\"}";
         }
     }
 

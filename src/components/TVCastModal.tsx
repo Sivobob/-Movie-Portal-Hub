@@ -30,32 +30,64 @@ export default function TVCastModal({
   // PresentationConnection reference for browser-based Cast
   const connectionRef = useRef<any>(null);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [isRemotePlaying, setIsRemotePlaying] = useState(true);
+  const [castPlayerState, setCastPlayerState] = useState<'idle' | 'connecting' | 'loading' | 'buffering' | 'playing' | 'paused' | 'ended' | 'error'>('idle');
+  const [isRemotePlaying, setIsRemotePlaying] = useState(false);
   const [, setRemoteCurrentTime] = useState(0);
   const [, setRemoteDuration] = useState(0);
+  const notifiedCastStartedRef = useRef(false);
+  const activeRouteIdRef = useRef<string | null>(null);
+  const lastLoadedSourceRef = useRef<string>('');
 
-  // Helper to resolve a public HTTPS video stream URL for TV receivers
+  // Helper to resolve a TV-accessible stream URL (never 127.0.0.1 or localhost)
   const getCastTargetUrl = (sourceUrl: string): string => {
     if (!sourceUrl) return '';
     const target = sourceUrl.trim();
-    if (target.startsWith('/') || target.includes('127.0.0.1') || target.includes('localhost')) {
-      const queryIdx = target.indexOf('?');
-      const query = queryIdx >= 0 ? target.substring(queryIdx) : '';
+    const isLocalOrRelative =
+      target.startsWith('/') ||
+      /\/\/(127\.0\.0\.1|localhost)(:\d+)?\b/i.test(target);
+    const isTelegramDirect = /t\.me|telegram\.me/i.test(target);
+
+    if (isLocalOrRelative || isTelegramDirect) {
+      let query = '';
+      if (isTelegramDirect && !isLocalOrRelative) {
+        query = `?url=${encodeURIComponent(target)}&ext=.mp4&cast=1`;
+      } else {
+        const queryIdx = target.indexOf('?');
+        const rawQuery = queryIdx >= 0 ? target.substring(queryIdx) : '';
+        query = rawQuery
+          ? (/[?&]cast=1\b/i.test(rawQuery) ? rawQuery : `${rawQuery}&cast=1`)
+          : '';
+      }
+
       const activeBase = getApiBaseUrl();
       const remoteBase =
         getRemoteTranscodeBackendUrl() ||
         (activeBase && !/127\.0\.0\.1|localhost/i.test(activeBase) ? activeBase : '');
-      if (remoteBase) {
+      if (remoteBase && query) {
         return `${remoteBase}/api/stream${query}`;
       }
+
       if (
         typeof window !== 'undefined' &&
         /^https?:\/\//i.test(window.location.origin) &&
-        !/localhost|127\.0\.0\.1/i.test(window.location.hostname)
+        !/localhost|127\.0\.0\.1/i.test(window.location.hostname) &&
+        query
       ) {
         return `${window.location.origin}/api/stream${query}`;
       }
+
+      const bridge = typeof window !== 'undefined' ? (window as any).AndroidPlayerBridge : null;
+      if (bridge && typeof bridge.getCastStreamUrl === 'function') {
+        try {
+          const lanUrl = String(bridge.getCastStreamUrl(target) || '').trim();
+          if (lanUrl && !/\/\/(127\.0\.0\.1|localhost)(:\d+)?\b/i.test(lanUrl)) {
+            return lanUrl;
+          }
+        } catch {}
+      }
+      return '';
     }
+
     return target;
   };
 
@@ -80,6 +112,11 @@ export default function TVCastModal({
 
       setCastConnected(false);
       setConnectedDevice(null);
+      setCastPlayerState('idle');
+      setIsRemotePlaying(false);
+      notifiedCastStartedRef.current = false;
+      activeRouteIdRef.current = null;
+      lastLoadedSourceRef.current = '';
       setDiscoveredDevices([]);
       setIsSearching(false);
       setErrorMessage(null);
@@ -94,6 +131,28 @@ export default function TVCastModal({
       }
     };
   }, [isOpen]);
+
+  // If user switches to next episode while TV is already connected, load the new episode onto the TV
+  useEffect(() => {
+    if (!isOpen || !castConnected || !videoUrl || !activeRouteIdRef.current) return;
+    if (lastLoadedSourceRef.current === videoUrl) return;
+    const targetUrl = getCastTargetUrl(videoUrl);
+    const bridge = (window as any).AndroidPlayerBridge;
+    if (targetUrl && bridge && typeof bridge.connectToCastDevice === 'function') {
+      lastLoadedSourceRef.current = videoUrl;
+      setCastPlayerState('loading');
+      setErrorMessage(null);
+      try {
+        bridge.connectToCastDevice(
+          activeRouteIdRef.current,
+          targetUrl,
+          title || 'Movie Portal',
+          poster || '',
+          currentTime || 0
+        );
+      } catch {}
+    }
+  }, [isOpen, castConnected, videoUrl]);
 
   const startDeviceDiscovery = async () => {
     setIsSearching(true);
@@ -130,16 +189,42 @@ export default function TVCastModal({
             const rawStatus = bridge.getCastSessionStatus();
             if (rawStatus) {
               const status = JSON.parse(rawStatus);
+              const receiverPlayerState = (status.playerState || status.state || 'idle') as any;
+
               if (status.connected) {
                 setCastConnected(true);
                 setConnectedDevice(status.deviceName || 'Chromecast');
-                setIsRemotePlaying(status.isPlaying !== false);
+                setCastPlayerState(receiverPlayerState);
+                setIsRemotePlaying(Boolean(status.isPlaying));
+                setIsSearching(false);
                 if (typeof status.currentTime === 'number') setRemoteCurrentTime(status.currentTime);
                 if (typeof status.duration === 'number') setRemoteDuration(status.duration);
-                if (onCastConnected) onCastConnected();
-              } else if (status.state === 'error' && status.errorMessage) {
-                setErrorMessage(status.errorMessage);
+
+                if (status.state === 'error' || receiverPlayerState === 'error') {
+                  setErrorMessage(status.errorMessage || 'TV receiver could not play this video stream.');
+                } else {
+                  setErrorMessage(null);
+                  if (
+                    !notifiedCastStartedRef.current &&
+                    (receiverPlayerState === 'playing' || receiverPlayerState === 'loading' || receiverPlayerState === 'buffering')
+                  ) {
+                    notifiedCastStartedRef.current = true;
+                    if (onCastConnected) onCastConnected();
+                  }
+                }
+              } else if (status.state === 'error' || receiverPlayerState === 'error') {
+                setCastConnected(false);
+                setCastPlayerState('error');
+                setIsRemotePlaying(false);
+                setErrorMessage(status.errorMessage || 'Failed to start playback on TV.');
                 setIsSearching(false);
+              } else if (status.state === 'connecting') {
+                setCastPlayerState('connecting');
+              } else if (status.state === 'idle') {
+                setCastConnected(false);
+                setCastPlayerState('idle');
+                setIsRemotePlaying(false);
+                notifiedCastStartedRef.current = false;
               }
             }
           }
@@ -201,11 +286,21 @@ export default function TVCastModal({
     setErrorMessage(null);
 
     const targetUrl = getCastTargetUrl(videoUrl);
+    if (!targetUrl || /\/\/(127\.0\.0\.1|localhost)(:\d+)?\b/i.test(targetUrl)) {
+      setErrorMessage('Cannot cast a phone-local URL. Connect your phone and TV to the same Wi-Fi network or configure a public streaming backend.');
+      setIsSearching(false);
+      return;
+    }
+
     const bridge = (window as any).AndroidPlayerBridge;
 
     // 1. Native Android Google Cast SDK connection
     if (bridge && typeof bridge.connectToCastDevice === 'function') {
       try {
+        activeRouteIdRef.current = device.id;
+        lastLoadedSourceRef.current = videoUrl;
+        notifiedCastStartedRef.current = false;
+        setCastPlayerState('connecting');
         bridge.connectToCastDevice(
           device.id,
           targetUrl,
@@ -268,6 +363,11 @@ export default function TVCastModal({
     }
     setCastConnected(false);
     setConnectedDevice(null);
+    setCastPlayerState('idle');
+    setIsRemotePlaying(false);
+    notifiedCastStartedRef.current = false;
+    activeRouteIdRef.current = null;
+    lastLoadedSourceRef.current = '';
   };
 
   const handleRemotePlayPause = () => {
@@ -346,14 +446,36 @@ export default function TVCastModal({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-green-400 font-bold text-sm">
                 <CheckCircle2 size={20} className="text-green-400" />
-                <span>Playing on {connectedDevice}</span>
+                <span>
+                  {castPlayerState === 'error'
+                    ? `Cast error on ${connectedDevice}`
+                    : castPlayerState === 'playing'
+                      ? `Playing on ${connectedDevice}`
+                      : castPlayerState === 'paused'
+                        ? `Paused on ${connectedDevice}`
+                        : castPlayerState === 'buffering'
+                          ? `Buffering on ${connectedDevice}...`
+                          : castPlayerState === 'ended'
+                            ? `Finished on ${connectedDevice}`
+                            : `Loading on ${connectedDevice}...`}
+                </span>
               </div>
               <span className="text-[10px] bg-green-950 text-green-300 px-2 py-0.5 rounded border border-green-800 font-mono">1080p Direct</span>
             </div>
 
-            <p className="text-xs text-gray-400 leading-relaxed">
-              Your video is streaming securely to the connected TV. Control playback from your phone below.
-            </p>
+            {errorMessage ? (
+              <div className="p-2.5 bg-amber-950/40 border border-amber-800/60 rounded-xl text-[11px] text-amber-300 leading-relaxed">
+                {errorMessage}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-400 leading-relaxed">
+                {castPlayerState === 'playing'
+                  ? 'Your video is streaming securely to the connected TV. Control playback from your phone below.'
+                  : castPlayerState === 'paused'
+                    ? 'Playback is paused on the TV. Tap Play below to resume.'
+                    : 'Sending stream to the TV receiver and waiting for playback confirmation...'}
+              </p>
+            )}
 
             {/* Remote Playback Controls */}
             <div className="flex items-center justify-center gap-4 pt-2">

@@ -508,6 +508,7 @@ export async function handleStream(req: Request, res: Response) {
   const urlParam = (req.query.url as string || '').trim();
   const isRemuxParam = req.query.remux === '1';
   const isTranscodeParam = req.query.transcode === '1';
+  const isCastParam = req.query.cast === '1';
   const isRawParam = req.query.raw === '1';
   const startSecParam = req.query.start ? Math.max(0, parseFloat(req.query.start as string) || 0) : 0;
   const audioIdxParam = req.query.audioIdx !== undefined ? Math.max(0, parseInt(req.query.audioIdx as string, 10) || 0) : 0;
@@ -553,9 +554,28 @@ export async function handleStream(req: Request, res: Response) {
         effectiveMode = 'transcode';
       } else if (isRemuxParam) {
         effectiveMode = probe.recommendedMode === 'transcode' ? 'transcode' : 'remux';
+      } else if (isCastParam) {
+        const vc = (probe.videoCodec || '').toLowerCase();
+        const ac = (probe.audioCodec || '').toLowerCase();
+        const cont = (probe.container || '').toLowerCase();
+        const castDirectVideoOk = !probe.is10Bit && (vc === 'h264' || vc === 'avc' || vc === 'vp8' || vc === 'vp9');
+        const castDirectAudioOk = !ac || ac === 'aac' || ac === 'mp3' || ac === 'opus' || ac === 'vorbis';
+        const castDirectContainerOk = cont === 'mp4' || cont === 'mov' || cont === 'm4v' || cont === 'webm';
+        if (castDirectVideoOk && castDirectAudioOk && castDirectContainerOk) {
+          effectiveMode = 'direct';
+        } else if (castDirectVideoOk && cont === 'mkv') {
+          effectiveMode = 'remux';
+        } else {
+          effectiveMode = 'transcode';
+        }
       } else if (audioIdxParam > 0 && effectiveMode === 'direct') {
         effectiveMode = 'remux';
       }
+
+      const effectiveMimeType =
+        isCastParam && (!mimeType || mimeType === 'application/octet-stream')
+          ? 'video/mp4'
+          : mimeType;
 
       const commonHeaders: Record<string, string> = {
         'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length, X-Video-Duration, X-Stream-Mode, Content-Type',
@@ -570,7 +590,7 @@ export async function handleStream(req: Request, res: Response) {
         res.writeHead(200, {
           ...commonHeaders,
           ...(effectiveMode === 'direct' ? { 'Accept-Ranges': 'bytes', 'Content-Length': fileSize.toString() } : {}),
-          'Content-Type': effectiveMode === 'direct' ? mimeType : 'video/mp4',
+          'Content-Type': effectiveMode === 'direct' ? effectiveMimeType : 'video/mp4',
         });
         return res.end();
       }
@@ -791,7 +811,7 @@ export async function handleStream(req: Request, res: Response) {
       'Accept-Ranges': 'bytes',
       'Cache-Control': 'no-cache, no-store, must-revalidate',
       'Connection': 'keep-alive',
-      'Content-Type': mimeType,
+      'Content-Type': (isCastParam && (!mimeType || mimeType === 'application/octet-stream')) ? 'video/mp4' : mimeType,
       'Content-Length': chunkSize.toString(),
     };
 
