@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.212",
-  "minimumRequiredVersion": "3.5.212",
-  "latestVersionCode": 3432,
-  "minimumRequiredVersionCode": 3432,
+  "latestVersion": "3.5.213",
+  "minimumRequiredVersion": "3.5.213",
+  "latestVersionCode": 3433,
+  "minimumRequiredVersionCode": 3433,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Portal v3.5.212 update is ready! Fixes Chromecast receiver video decoding, 3-4 min playback buffering, and admin update control visibility.",
-  "releaseNotes": "Fixes Chromecast Wi-Fi LAN streaming, ExoPlayer buffering, active device tracking, and auto-hiding update control once pushed."
+  "updateMessage": "Movie Portal v3.5.213 update is ready! Includes new Netflix-style Movie/Series Details page, smooth Home vertical scrolling, accurate video duration, and seamless seek.",
+  "releaseNotes": "v3.5.213: New Movie & Series Details page, removed Download button for Watch Now flow, accurate hh:mm:ss duration, direct seeking without restart, and smooth Home vertical scrolling."
 }
