@@ -1,5 +1,6 @@
 package com.moviebox.stream.app;
 
+import android.app.ActivityManager;
 import android.app.DownloadManager;
 import android.content.Context;
 import android.content.Intent;
@@ -16,6 +17,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
 import android.view.Gravity;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
 import android.view.TextureView;
 import android.graphics.SurfaceTexture;
 import android.media.MediaCodecInfo;
@@ -47,10 +50,14 @@ import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.Tracks;
 import androidx.media3.common.VideoSize;
 import androidx.media3.datasource.DefaultHttpDataSource;
+import androidx.media3.exoplayer.DecoderCounters;
 import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.analytics.AnalyticsListener;
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy;
 import androidx.mediarouter.media.MediaRouter;
 import androidx.mediarouter.media.MediaRouteSelector;
 import com.getcapacitor.BridgeActivity;
@@ -124,16 +131,26 @@ public class MainActivity extends BridgeActivity {
     // Native Media3 ExoPlayer state (universal phone hardware/software codec playback)
     private FrameLayout exoContainer;
     private TextureView exoTextureView;
+    private SurfaceView exoSurfaceView;
+    private volatile boolean textureSurfaceAvailable = false;
+    private volatile boolean surfaceHolderAvailable = false;
+    private volatile String currentSurfaceMode = "texture";
+    private volatile boolean currentPreferSoftware = false;
     private ExoPlayer exoPlayer;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private long exoSessionId = 0L;
+    private Runnable pendingStartRunnable = null;
+    private Runnable pendingHideContainerRunnable = null;
     private volatile boolean exoActive = false;
     private volatile int exoVideoWidth = 0;
     private volatile int exoVideoHeight = 0;
     private volatile boolean exoFirstFrameRendered = false;
     private volatile String exoErrorMessage = "";
+    private volatile String exoActiveDecoderName = "";
+    private volatile boolean exoActiveDecoderIsSoftware = false;
     private volatile String exoAudioTracksJson = "[]";
     private volatile String exoSubtitleTracksJson = "[]";
-    private volatile String cachedExoStateJson = "{\"active\":false,\"state\":1,\"isPlaying\":false,\"isBuffering\":false,\"ended\":false,\"currentTime\":0,\"duration\":0,\"bufferedPosition\":0,\"videoWidth\":0,\"videoHeight\":0,\"firstFrameRendered\":false,\"error\":\"\",\"audioTracks\":[],\"subtitleTracks\":[]}";
+    private volatile String cachedExoStateJson = "{\"active\":false,\"state\":1,\"isPlaying\":false,\"isBuffering\":false,\"ended\":false,\"seekable\":false,\"currentTime\":0,\"duration\":0,\"bufferedPosition\":0,\"videoWidth\":0,\"videoHeight\":0,\"firstFrameRendered\":false,\"renderedFrames\":0,\"droppedFrames\":0,\"preferSoftware\":false,\"isSoftwareDecoder\":false,\"decoderName\":\"\",\"surfaceMode\":\"texture\",\"error\":\"\",\"audioTracks\":[],\"subtitleTracks\":[]}";
 
     private final Runnable exoStateTicker = new Runnable() {
         @Override
@@ -190,9 +207,14 @@ public class MainActivity extends BridgeActivity {
         if (!webViewConfigured || localStreamServer == null) {
             configureWebView();
         }
-        if (exoPlayer != null && exoActive && exoTextureView != null && exoTextureView.isAvailable()) {
+        if (exoPlayer != null && exoActive) {
             try {
-                exoPlayer.setVideoTextureView(exoTextureView);
+                if ("surface".equals(currentSurfaceMode) && exoSurfaceView != null && surfaceHolderAvailable) {
+                    exoPlayer.setVideoSurfaceView(exoSurfaceView);
+                } else if (exoTextureView != null && (textureSurfaceAvailable || exoTextureView.isAvailable())) {
+                    exoPlayer.setVideoTextureView(exoTextureView);
+                }
+                updateExoVideoSurfaceSize();
             } catch (Exception ignored) {}
         }
         enableImmersiveStickyMode(isPlaybackFullscreen || customView != null);
@@ -307,6 +329,28 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
+    private long getTotalRamMb() {
+        try {
+            ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+            if (am != null) {
+                ActivityManager.MemoryInfo memInfo = new ActivityManager.MemoryInfo();
+                am.getMemoryInfo(memInfo);
+                return memInfo.totalMem / (1024L * 1024L);
+            }
+        } catch (Exception ignored) {}
+        return 4096L;
+    }
+
+    private boolean isLowRamDeviceCompat() {
+        try {
+            ActivityManager am = (ActivityManager) getSystemService(Context.ACTIVITY_SERVICE);
+            if (am != null && am.isLowRamDevice()) {
+                return true;
+            }
+        } catch (Exception ignored) {}
+        return getTotalRamMb() <= 3072L;
+    }
+
     private void setupExoSurfaceContainer(WebView webView) {
         if (exoContainer != null || webView == null) return;
         try {
@@ -322,8 +366,16 @@ public class MainActivity extends BridgeActivity {
             exoTextureView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
                 @Override
                 public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
-                    if (exoPlayer != null) {
-                        exoPlayer.setVideoTextureView(exoTextureView);
+                    textureSurfaceAvailable = true;
+                    if (exoActive && "texture".equals(currentSurfaceMode)) {
+                        if (exoPlayer != null) {
+                            exoPlayer.setVideoTextureView(exoTextureView);
+                        }
+                        if (pendingStartRunnable != null) {
+                            Runnable r = pendingStartRunnable;
+                            pendingStartRunnable = null;
+                            r.run();
+                        }
                     }
                 }
 
@@ -334,7 +386,8 @@ public class MainActivity extends BridgeActivity {
 
                 @Override
                 public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
-                    if (exoPlayer != null) {
+                    textureSurfaceAvailable = false;
+                    if (exoPlayer != null && "texture".equals(currentSurfaceMode)) {
                         exoPlayer.setVideoTextureView(null);
                     }
                     return true;
@@ -346,12 +399,50 @@ public class MainActivity extends BridgeActivity {
                 }
             });
 
+            exoSurfaceView = new SurfaceView(this);
+            exoSurfaceView.setZOrderMediaOverlay(false);
+            exoSurfaceView.setVisibility(View.GONE);
+            exoSurfaceView.getHolder().addCallback(new SurfaceHolder.Callback() {
+                @Override
+                public void surfaceCreated(SurfaceHolder holder) {
+                    surfaceHolderAvailable = true;
+                    if (exoActive && "surface".equals(currentSurfaceMode)) {
+                        if (exoPlayer != null) {
+                            exoPlayer.setVideoSurfaceView(exoSurfaceView);
+                        }
+                        if (pendingStartRunnable != null) {
+                            Runnable r = pendingStartRunnable;
+                            pendingStartRunnable = null;
+                            r.run();
+                        }
+                    }
+                }
+
+                @Override
+                public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+                    updateExoVideoSurfaceSize();
+                }
+
+                @Override
+                public void surfaceDestroyed(SurfaceHolder holder) {
+                    surfaceHolderAvailable = false;
+                    if (exoPlayer != null && "surface".equals(currentSurfaceMode)) {
+                        exoPlayer.setVideoSurfaceView(null);
+                    }
+                }
+            });
+
             FrameLayout.LayoutParams tvParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 Gravity.CENTER
             );
             exoContainer.addView(exoTextureView, tvParams);
+            exoContainer.addView(exoSurfaceView, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER
+            ));
             exoContainer.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
                 if ((r - l) != (or - ol) || (b - t) != (ob - ot)) {
                     updateExoVideoSurfaceSize();
@@ -372,7 +463,9 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void updateExoVideoSurfaceSize() {
-        if (exoContainer == null || exoTextureView == null) return;
+        if (exoContainer == null) return;
+        View targetView = "surface".equals(currentSurfaceMode) ? exoSurfaceView : exoTextureView;
+        if (targetView == null) return;
         int cw = exoContainer.getWidth();
         int ch = exoContainer.getHeight();
         if (cw <= 0 || ch <= 0) return;
@@ -394,7 +487,7 @@ public class MainActivity extends BridgeActivity {
             }
         }
 
-        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) exoTextureView.getLayoutParams();
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) targetView.getLayoutParams();
         if (lp == null) {
             lp = new FrameLayout.LayoutParams(targetW, targetH, Gravity.CENTER);
         } else {
@@ -402,27 +495,45 @@ public class MainActivity extends BridgeActivity {
             lp.height = targetH;
             lp.gravity = Gravity.CENTER;
         }
-        exoTextureView.setLayoutParams(lp);
+        targetView.setLayoutParams(lp);
     }
 
     private void refreshExoStateSnapshot() {
         try {
             JSONObject obj = new JSONObject();
             obj.put("active", exoActive);
-            String decoderName = "";
+            String decoderName = exoActiveDecoderName != null ? exoActiveDecoderName : "";
             int errorCode = 0;
+            int renderedFrames = 0;
+            int droppedFrames = 0;
+            boolean isSeekable = false;
+
             if (exoPlayer != null) {
                 int state = exoPlayer.getPlaybackState();
                 long posMs = Math.max(0L, exoPlayer.getCurrentPosition());
                 long durMs = exoPlayer.getDuration();
                 long bufMs = Math.max(0L, exoPlayer.getBufferedPosition());
+                isSeekable = exoPlayer.isCurrentMediaItemSeekable();
+
                 obj.put("state", state);
                 obj.put("isPlaying", exoPlayer.isPlaying());
                 obj.put("isBuffering", state == Player.STATE_BUFFERING);
                 obj.put("ended", state == Player.STATE_ENDED);
+                obj.put("seekable", isSeekable);
                 obj.put("currentTime", posMs / 1000.0);
                 obj.put("duration", (durMs > 0 && durMs != C.TIME_UNSET) ? (durMs / 1000.0) : 0.0);
                 obj.put("bufferedPosition", bufMs / 1000.0);
+
+                try {
+                    DecoderCounters counters = exoPlayer.getVideoDecoderCounters();
+                    if (counters != null) {
+                        renderedFrames = Math.max(0, counters.renderedOutputBufferCount);
+                        droppedFrames = Math.max(0, counters.droppedBufferCount);
+                        if (renderedFrames > 0) {
+                            exoFirstFrameRendered = true;
+                        }
+                    }
+                } catch (Exception ignored) {}
 
                 PlaybackException err = exoPlayer.getPlayerError();
                 if (err != null) {
@@ -432,23 +543,26 @@ public class MainActivity extends BridgeActivity {
                     }
                 }
 
-                try {
-                    for (int i = 0; i < exoPlayer.getCurrentTracks().getGroups().size(); i++) {
-                        Tracks.Group g = exoPlayer.getCurrentTracks().getGroups().get(i);
-                        if (g.getType() == C.TRACK_TYPE_VIDEO && g.isSelected()) {
-                            Format fmt = g.getTrackFormat(0);
-                            if (fmt.sampleMimeType != null) {
-                                decoderName = fmt.sampleMimeType;
+                if (decoderName.isEmpty()) {
+                    try {
+                        for (int i = 0; i < exoPlayer.getCurrentTracks().getGroups().size(); i++) {
+                            Tracks.Group g = exoPlayer.getCurrentTracks().getGroups().get(i);
+                            if (g.getType() == C.TRACK_TYPE_VIDEO && g.isSelected()) {
+                                Format fmt = g.getTrackFormat(0);
+                                if (fmt.sampleMimeType != null) {
+                                    decoderName = fmt.sampleMimeType;
+                                }
+                                break;
                             }
-                            break;
                         }
-                    }
-                } catch (Exception ignored) {}
+                    } catch (Exception ignored) {}
+                }
             } else {
                 obj.put("state", Player.STATE_IDLE);
                 obj.put("isPlaying", false);
                 obj.put("isBuffering", false);
                 obj.put("ended", false);
+                obj.put("seekable", false);
                 obj.put("currentTime", 0.0);
                 obj.put("duration", 0.0);
                 obj.put("bufferedPosition", 0.0);
@@ -456,10 +570,15 @@ public class MainActivity extends BridgeActivity {
             obj.put("videoWidth", exoVideoWidth);
             obj.put("videoHeight", exoVideoHeight);
             obj.put("firstFrameRendered", exoFirstFrameRendered);
+            obj.put("renderedFrames", renderedFrames);
+            obj.put("droppedFrames", droppedFrames);
+            obj.put("preferSoftware", currentPreferSoftware);
+            obj.put("isSoftwareDecoder", exoActiveDecoderIsSoftware);
+            obj.put("surfaceMode", currentSurfaceMode);
+            obj.put("surfaceType", "surface".equals(currentSurfaceMode) ? "SurfaceView" : "TextureView");
             obj.put("error", exoErrorMessage != null ? exoErrorMessage : "");
             obj.put("errorCode", errorCode);
             obj.put("decoderName", decoderName);
-            obj.put("surfaceType", "TextureView");
             obj.put("surfaceVisible", exoContainer != null && exoContainer.getVisibility() == View.VISIBLE);
             obj.put("audioTracks", new JSONArray(exoAudioTracksJson != null ? exoAudioTracksJson : "[]"));
             obj.put("subtitleTracks", new JSONArray(exoSubtitleTracksJson != null ? exoSubtitleTracksJson : "[]"));
@@ -467,15 +586,183 @@ public class MainActivity extends BridgeActivity {
         } catch (Exception ignored) {}
     }
 
+    private void ensureExoPlayer(final boolean preferSoftware) {
+        if (exoPlayer != null && currentPreferSoftware != preferSoftware) {
+            try {
+                exoPlayer.setVideoTextureView(null);
+                exoPlayer.setVideoSurfaceView(null);
+                exoPlayer.release();
+            } catch (Exception ignored) {}
+            exoPlayer = null;
+        }
+        currentPreferSoftware = preferSoftware;
+        if (exoPlayer != null) return;
+
+        boolean lowRam = isLowRamDeviceCompat();
+        DefaultHttpDataSource.Factory httpFactory = new DefaultHttpDataSource.Factory()
+            .setConnectTimeoutMs(30000)
+            .setReadTimeoutMs(45000)
+            .setAllowCrossProtocolRedirects(true)
+            .setKeepPostFor302Redirects(true)
+            .setUserAgent("MoviePortal/3.5.209 AndroidExoPlayer");
+
+        DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                lowRam ? 10000 : 15000,
+                lowRam ? 40000 : 75000,
+                1000,
+                lowRam ? 2000 : 2500
+            )
+            .build();
+
+        DefaultRenderersFactory renderersFactory = new DefaultRenderersFactory(this)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
+            .setEnableDecoderFallback(true);
+
+        if (preferSoftware) {
+            MediaCodecSelector swFirstSelector = (mimeType, requiresSecureDecoder, requiresTunnelingDecoder) -> {
+                List<androidx.media3.exoplayer.mediacodec.MediaCodecInfo> base =
+                    MediaCodecSelector.DEFAULT.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder);
+                if (base == null || base.size() <= 1) return base;
+                List<androidx.media3.exoplayer.mediacodec.MediaCodecInfo> sw = new ArrayList<>();
+                List<androidx.media3.exoplayer.mediacodec.MediaCodecInfo> hw = new ArrayList<>();
+                for (androidx.media3.exoplayer.mediacodec.MediaCodecInfo codec : base) {
+                    String n = codec.name != null ? codec.name.toLowerCase(Locale.US) : "";
+                    boolean isSw = n.startsWith("c2.android.") || n.startsWith("omx.google.") || !codec.hardwareAccelerated;
+                    if (isSw) {
+                        sw.add(codec);
+                    } else {
+                        hw.add(codec);
+                    }
+                }
+                sw.addAll(hw);
+                return sw;
+            };
+            renderersFactory.setMediaCodecSelector(swFirstSelector);
+        }
+
+        exoPlayer = new ExoPlayer.Builder(this, renderersFactory)
+            .setMediaSourceFactory(
+                new DefaultMediaSourceFactory(this)
+                    .setDataSourceFactory(httpFactory)
+                    .setLoadErrorHandlingPolicy(new DefaultLoadErrorHandlingPolicy(4))
+            )
+            .setLoadControl(loadControl)
+            .build();
+
+        exoPlayer.addAnalyticsListener(new AnalyticsListener() {
+            @Override
+            public void onVideoDecoderInitialized(EventTime eventTime, String decoderName, long initializedTimestampMs, long initializationDurationMs) {
+                exoActiveDecoderName = decoderName != null ? decoderName : "";
+                String lower = exoActiveDecoderName.toLowerCase(Locale.US);
+                exoActiveDecoderIsSoftware = lower.startsWith("c2.android.") || lower.startsWith("omx.google.") || lower.contains(".sw.");
+                refreshExoStateSnapshot();
+            }
+
+            @Override
+            public void onRenderedFirstFrame(EventTime eventTime, Object output, long renderTimeMs) {
+                exoFirstFrameRendered = true;
+                refreshExoStateSnapshot();
+            }
+        });
+
+        exoPlayer.addListener(new Player.Listener() {
+            @Override
+            public void onVideoSizeChanged(VideoSize videoSize) {
+                exoVideoWidth = videoSize.width;
+                exoVideoHeight = videoSize.height;
+                updateExoVideoSurfaceSize();
+                refreshExoStateSnapshot();
+            }
+
+            @Override
+            public void onRenderedFirstFrame() {
+                exoFirstFrameRendered = true;
+                refreshExoStateSnapshot();
+            }
+
+            @Override
+            public void onTracksChanged(Tracks tracks) {
+                try {
+                    List<JSONObject> audioList = new ArrayList<>();
+                    List<JSONObject> textList = new ArrayList<>();
+                    for (int g = 0; g < tracks.getGroups().size(); g++) {
+                        Tracks.Group group = tracks.getGroups().get(g);
+                        int type = group.getType();
+                        if (type != C.TRACK_TYPE_AUDIO && type != C.TRACK_TYPE_TEXT) continue;
+                        for (int t = 0; t < group.length; t++) {
+                            if (!group.isTrackSupported(t)) continue;
+                            Format fmt = group.getTrackFormat(t);
+                            String lang = fmt.language != null ? fmt.language : "";
+                            String label = (fmt.label != null && !fmt.label.trim().isEmpty())
+                                ? fmt.label.trim()
+                                : (!lang.isEmpty()
+                                    ? lang.toUpperCase(java.util.Locale.US)
+                                    : (type == C.TRACK_TYPE_AUDIO ? "Track " + (audioList.size() + 1) : "Subtitle " + (textList.size() + 1)));
+                            JSONObject item = new JSONObject();
+                            item.put("id", g + ":" + t);
+                            item.put("label", label);
+                            item.put("lang", lang);
+                            item.put("selected", group.isTrackSelected(t));
+                            if (type == C.TRACK_TYPE_AUDIO) {
+                                audioList.add(item);
+                            } else {
+                                textList.add(item);
+                            }
+                        }
+                    }
+                    exoAudioTracksJson = new JSONArray(audioList).toString();
+                    exoSubtitleTracksJson = new JSONArray(textList).toString();
+                    refreshExoStateSnapshot();
+                } catch (Exception ignored) {}
+            }
+
+            @Override
+            public void onPlaybackStateChanged(int playbackState) {
+                refreshExoStateSnapshot();
+            }
+
+            @Override
+            public void onIsPlayingChanged(boolean isPlaying) {
+                refreshExoStateSnapshot();
+            }
+
+            @Override
+            public void onPlayerError(PlaybackException error) {
+                exoErrorMessage = error.getMessage() != null ? error.getMessage() : ("ExoPlayer error: " + error.getErrorCodeName());
+                refreshExoStateSnapshot();
+            }
+        });
+    }
+
     private void startExoPlaybackNative(final String url, final double startSec, final double speed) {
+        startExoPlaybackNative(url, startSec, speed, false, "texture");
+    }
+
+    private void startExoPlaybackNative(final String url, final double startSec, final double speed, final boolean preferSoftware, final String surfaceMode) {
         try {
+            if (pendingHideContainerRunnable != null) {
+                mainHandler.removeCallbacks(pendingHideContainerRunnable);
+                pendingHideContainerRunnable = null;
+            }
+            final long sessionId = ++this.exoSessionId;
+            final String targetSurface = "surface".equalsIgnoreCase(surfaceMode) ? "surface" : "texture";
+            currentSurfaceMode = targetSurface;
+
             if (getBridge() != null && getBridge().getWebView() != null) {
                 WebView webView = getBridge().getWebView();
                 setupExoSurfaceContainer(webView);
+                webView.setLayerType(View.LAYER_TYPE_NONE, null);
                 webView.setBackgroundColor(Color.TRANSPARENT);
             }
             if (exoContainer != null) {
                 exoContainer.setVisibility(View.VISIBLE);
+            }
+            if (exoTextureView != null) {
+                exoTextureView.setVisibility("texture".equals(targetSurface) ? View.VISIBLE : View.GONE);
+            }
+            if (exoSurfaceView != null) {
+                exoSurfaceView.setVisibility("surface".equals(targetSurface) ? View.VISIBLE : View.GONE);
             }
 
             exoActive = true;
@@ -483,117 +770,71 @@ public class MainActivity extends BridgeActivity {
             exoVideoHeight = 0;
             exoFirstFrameRendered = false;
             exoErrorMessage = "";
+            exoActiveDecoderName = "";
+            exoActiveDecoderIsSoftware = false;
             exoAudioTracksJson = "[]";
             exoSubtitleTracksJson = "[]";
 
-            if (exoPlayer == null) {
-                DefaultHttpDataSource.Factory httpFactory = new DefaultHttpDataSource.Factory()
-                    .setConnectTimeoutMs(30000)
-                    .setReadTimeoutMs(45000)
-                    .setAllowCrossProtocolRedirects(true)
-                    .setUserAgent("MoviePortal/3.5 AndroidExoPlayer");
-                DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
-                    .setBufferDurationsMs(15000, 90000, 1000, 2500)
-                    .build();
-                DefaultRenderersFactory renderersFactory = new DefaultRenderersFactory(this)
-                    .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
-                    .setEnableDecoderFallback(true);
-                exoPlayer = new ExoPlayer.Builder(this, renderersFactory)
-                    .setMediaSourceFactory(new DefaultMediaSourceFactory(this).setDataSourceFactory(httpFactory))
-                    .setLoadControl(loadControl)
-                    .build();
-                exoPlayer.addListener(new Player.Listener() {
-                    @Override
-                    public void onVideoSizeChanged(VideoSize videoSize) {
-                        exoVideoWidth = videoSize.width;
-                        exoVideoHeight = videoSize.height;
-                        updateExoVideoSurfaceSize();
-                        refreshExoStateSnapshot();
+            ensureExoPlayer(preferSoftware);
+
+            Runnable prepareRunnable = () -> {
+                if (!exoActive || exoSessionId != sessionId || exoPlayer == null) return;
+                try {
+                    if ("surface".equals(targetSurface)) {
+                        if (exoTextureView != null) exoPlayer.setVideoTextureView(null);
+                        if (exoSurfaceView != null) exoPlayer.setVideoSurfaceView(exoSurfaceView);
+                    } else {
+                        if (exoSurfaceView != null) exoPlayer.setVideoSurfaceView(null);
+                        if (exoTextureView != null) exoPlayer.setVideoTextureView(exoTextureView);
                     }
 
-                    @Override
-                    public void onRenderedFirstFrame() {
-                        exoFirstFrameRendered = true;
-                        refreshExoStateSnapshot();
-                    }
+                    // Disable text subtitles by default until user selects one
+                    exoPlayer.setTrackSelectionParameters(
+                        exoPlayer.getTrackSelectionParameters()
+                            .buildUpon()
+                            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                            .build()
+                    );
 
-                    @Override
-                    public void onTracksChanged(Tracks tracks) {
-                        try {
-                            List<JSONObject> audioList = new ArrayList<>();
-                            List<JSONObject> textList = new ArrayList<>();
-                            for (int g = 0; g < tracks.getGroups().size(); g++) {
-                                Tracks.Group group = tracks.getGroups().get(g);
-                                int type = group.getType();
-                                if (type != C.TRACK_TYPE_AUDIO && type != C.TRACK_TYPE_TEXT) continue;
-                                for (int t = 0; t < group.length; t++) {
-                                    if (!group.isTrackSupported(t)) continue;
-                                    Format fmt = group.getTrackFormat(t);
-                                    String lang = fmt.language != null ? fmt.language : "";
-                                    String label = (fmt.label != null && !fmt.label.trim().isEmpty())
-                                        ? fmt.label.trim()
-                                        : (!lang.isEmpty()
-                                            ? lang.toUpperCase(java.util.Locale.US)
-                                            : (type == C.TRACK_TYPE_AUDIO ? "Track " + (audioList.size() + 1) : "Subtitle " + (textList.size() + 1)));
-                                    JSONObject item = new JSONObject();
-                                    item.put("id", g + ":" + t);
-                                    item.put("label", label);
-                                    item.put("lang", lang);
-                                    item.put("selected", group.isTrackSelected(t));
-                                    if (type == C.TRACK_TYPE_AUDIO) {
-                                        audioList.add(item);
-                                    } else {
-                                        textList.add(item);
-                                    }
-                                }
-                            }
-                            exoAudioTracksJson = new JSONArray(audioList).toString();
-                            exoSubtitleTracksJson = new JSONArray(textList).toString();
-                            refreshExoStateSnapshot();
-                        } catch (Exception ignored) {}
+                    MediaItem mediaItem = MediaItem.fromUri(Uri.parse(url));
+                    exoPlayer.setMediaItem(mediaItem);
+                    if (startSec > 0.5) {
+                        exoPlayer.seekTo((long) (startSec * 1000.0));
                     }
+                    exoPlayer.setPlaybackSpeed(speed > 0 ? (float) speed : 1.0f);
+                    exoPlayer.prepare();
+                    exoPlayer.setPlayWhenReady(true);
 
-                    @Override
-                    public void onPlaybackStateChanged(int playbackState) {
-                        refreshExoStateSnapshot();
-                    }
+                    mainHandler.removeCallbacks(exoStateTicker);
+                    mainHandler.post(exoStateTicker);
+                    refreshExoStateSnapshot();
+                } catch (Throwable t) {
+                    exoErrorMessage = t.getMessage() != null ? t.getMessage() : "Native player init failed";
+                    refreshExoStateSnapshot();
+                }
+            };
 
-                    @Override
-                    public void onIsPlayingChanged(boolean isPlaying) {
-                        refreshExoStateSnapshot();
-                    }
+            boolean surfaceReady = ("surface".equals(targetSurface) && surfaceHolderAvailable)
+                || ("texture".equals(targetSurface) && exoTextureView != null && (textureSurfaceAvailable || exoTextureView.isAvailable()));
 
-                    @Override
-                    public void onPlayerError(PlaybackException error) {
-                        exoErrorMessage = error.getMessage() != null ? error.getMessage() : ("ExoPlayer error: " + error.getErrorCodeName());
-                        refreshExoStateSnapshot();
+            if (surfaceReady) {
+                pendingStartRunnable = null;
+                prepareRunnable.run();
+            } else {
+                pendingStartRunnable = prepareRunnable;
+                if (exoContainer != null) {
+                    exoContainer.requestLayout();
+                }
+                refreshExoStateSnapshot();
+                // Safety fallback if OEM delays SurfaceTextureListener callback
+                mainHandler.postDelayed(() -> {
+                    if (exoActive && exoSessionId == sessionId && pendingStartRunnable != null) {
+                        Runnable r = pendingStartRunnable;
+                        pendingStartRunnable = null;
+                        r.run();
                     }
-                });
+                }, 1200);
             }
-
-            if (exoTextureView != null) {
-                exoPlayer.setVideoTextureView(exoTextureView);
-            }
-
-            // Disable text subtitles by default until user selects one
-            exoPlayer.setTrackSelectionParameters(
-                exoPlayer.getTrackSelectionParameters()
-                    .buildUpon()
-                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                    .build()
-            );
-
-            MediaItem mediaItem = MediaItem.fromUri(Uri.parse(url));
-            exoPlayer.setMediaItem(mediaItem);
-            if (startSec > 0.5) {
-                exoPlayer.seekTo((long) (startSec * 1000.0));
-            }
-            exoPlayer.setPlaybackSpeed(speed > 0 ? (float) speed : 1.0f);
-            exoPlayer.prepare();
-            exoPlayer.setPlayWhenReady(true);
-
-            mainHandler.removeCallbacks(exoStateTicker);
-            mainHandler.post(exoStateTicker);
         } catch (Throwable t) {
             exoErrorMessage = t.getMessage() != null ? t.getMessage() : "Native player init failed";
             refreshExoStateSnapshot();
@@ -602,33 +843,62 @@ public class MainActivity extends BridgeActivity {
 
     private void stopExoPlaybackNative() {
         exoActive = false;
+        exoSessionId++;
+        pendingStartRunnable = null;
         mainHandler.removeCallbacks(exoStateTicker);
         if (exoPlayer != null) {
             try {
                 exoPlayer.stop();
                 exoPlayer.clearMediaItems();
-                exoPlayer.setVideoTextureView(null);
             } catch (Exception ignored) {}
-        }
-        if (exoContainer != null) {
-            exoContainer.setVisibility(View.GONE);
         }
         if (getBridge() != null && getBridge().getWebView() != null) {
             getBridge().getWebView().setBackgroundColor(Color.BLACK);
         }
+        // Delay hiding container briefly so consecutive episode switches or fallback retries keep SurfaceTexture alive
+        if (pendingHideContainerRunnable != null) {
+            mainHandler.removeCallbacks(pendingHideContainerRunnable);
+        }
+        pendingHideContainerRunnable = () -> {
+            pendingHideContainerRunnable = null;
+            if (!exoActive) {
+                if (exoPlayer != null) {
+                    try {
+                        exoPlayer.setVideoTextureView(null);
+                        exoPlayer.setVideoSurfaceView(null);
+                    } catch (Exception ignored) {}
+                }
+                if (exoContainer != null) {
+                    exoContainer.setVisibility(View.GONE);
+                }
+            }
+        };
+        mainHandler.postDelayed(pendingHideContainerRunnable, 140);
+
         exoVideoWidth = 0;
         exoVideoHeight = 0;
         exoFirstFrameRendered = false;
         exoErrorMessage = "";
+        exoActiveDecoderName = "";
+        exoActiveDecoderIsSoftware = false;
+        exoAudioTracksJson = "[]";
+        exoSubtitleTracksJson = "[]";
         refreshExoStateSnapshot();
     }
 
     private void releaseExoPlayerInternal() {
         exoActive = false;
+        exoSessionId++;
+        pendingStartRunnable = null;
+        if (pendingHideContainerRunnable != null) {
+            mainHandler.removeCallbacks(pendingHideContainerRunnable);
+            pendingHideContainerRunnable = null;
+        }
         mainHandler.removeCallbacks(exoStateTicker);
         if (exoPlayer != null) {
             try {
                 exoPlayer.setVideoTextureView(null);
+                exoPlayer.setVideoSurfaceView(null);
                 exoPlayer.release();
             } catch (Exception ignored) {}
             exoPlayer = null;
@@ -1208,11 +1478,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.208");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.209");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.208\",\"versionCode\":3428}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.209\",\"versionCode\":3429}";
             }
         }
 
@@ -1346,15 +1616,45 @@ public class MainActivity extends BridgeActivity {
                 json.put("manufacturer", Build.MANUFACTURER);
                 json.put("model", Build.MODEL);
                 json.put("hardware", Build.HARDWARE);
+                json.put("totalRamMb", getTotalRamMb());
+                json.put("isLowRamDevice", isLowRamDeviceCompat());
+
+                String webViewVer = "";
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        PackageInfo wvPkg = WebView.getCurrentWebViewPackage();
+                        if (wvPkg != null && wvPkg.versionName != null) {
+                            webViewVer = wvPkg.versionName;
+                        }
+                    }
+                } catch (Exception ignored) {}
+                json.put("webViewVersion", webViewVer);
 
                 boolean supportsAvc = false;
+                boolean hasHardwareAvc = false;
                 boolean supportsHevc = false;
                 boolean supportsHevc10Bit = false;
+                boolean supportsHevc10BitHw = false;
                 boolean supportsVp9 = false;
+                boolean hasHardwareVp9 = false;
                 boolean supportsAv1 = false;
+                boolean hasHardwareAv1 = false;
                 boolean hasHardwareHevc = false;
+                boolean hasSoftwareHevc = false;
+                int maxAvcWidth = 0;
+                int maxAvcHeight = 0;
                 int maxHevcWidth = 0;
                 int maxHevcHeight = 0;
+
+                boolean supportsAac = false;
+                boolean supportsMp3 = false;
+                boolean supportsAc3 = false;
+                boolean supportsEac3 = false;
+                boolean supportsDts = false;
+                boolean supportsOpus = false;
+                boolean supportsVorbis = false;
+                boolean supportsFlac = false;
+
                 JSONArray hardwareDecoders = new JSONArray();
                 JSONArray softwareDecoders = new JSONArray();
 
@@ -1364,7 +1664,7 @@ public class MainActivity extends BridgeActivity {
                 for (MediaCodecInfo info : codecInfos) {
                     if (info.isEncoder()) continue;
                     String name = info.getName().toLowerCase(Locale.US);
-                    boolean isHardware = true;
+                    boolean isHardware;
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                         isHardware = info.isHardwareAccelerated();
                     } else {
@@ -1376,12 +1676,26 @@ public class MainActivity extends BridgeActivity {
                         String lowerType = type.toLowerCase(Locale.US);
                         if (lowerType.equals("video/avc")) {
                             supportsAvc = true;
+                            if (isHardware) hasHardwareAvc = true;
+                            try {
+                                MediaCodecInfo.CodecCapabilities caps = info.getCapabilitiesForType(type);
+                                if (caps != null && caps.getVideoCapabilities() != null) {
+                                    MediaCodecInfo.VideoCapabilities vc = caps.getVideoCapabilities();
+                                    if (vc.getSupportedWidths() != null && vc.getSupportedHeights() != null) {
+                                        int w = vc.getSupportedWidths().getUpper();
+                                        int h = vc.getSupportedHeights().getUpper();
+                                        if (w > maxAvcWidth) maxAvcWidth = w;
+                                        if (h > maxAvcHeight) maxAvcHeight = h;
+                                    }
+                                }
+                            } catch (Exception ignored) {}
                         } else if (lowerType.equals("video/hevc")) {
                             supportsHevc = true;
                             if (isHardware) {
                                 hasHardwareHevc = true;
                                 hardwareDecoders.put(info.getName());
                             } else {
+                                hasSoftwareHevc = true;
                                 softwareDecoders.put(info.getName());
                             }
                             try {
@@ -1392,6 +1706,9 @@ public class MainActivity extends BridgeActivity {
                                             pl.profile == MediaCodecInfo.CodecProfileLevel.HEVCProfileMain10HDR10 ||
                                             pl.profile == MediaCodecInfo.CodecProfileLevel.HEVCProfileMain10HDR10Plus) {
                                             supportsHevc10Bit = true;
+                                            if (isHardware) {
+                                                supportsHevc10BitHw = true;
+                                            }
                                         }
                                     }
                                 }
@@ -1407,32 +1724,71 @@ public class MainActivity extends BridgeActivity {
                             } catch (Exception ignored) {}
                         } else if (lowerType.equals("video/x-vnd.on2.vp9")) {
                             supportsVp9 = true;
+                            if (isHardware) hasHardwareVp9 = true;
                         } else if (lowerType.equals("video/av01")) {
                             supportsAv1 = true;
+                            if (isHardware) hasHardwareAv1 = true;
+                        } else if (lowerType.equals("audio/mp4a-latm")) {
+                            supportsAac = true;
+                        } else if (lowerType.equals("audio/mpeg")) {
+                            supportsMp3 = true;
+                        } else if (lowerType.equals("audio/ac3")) {
+                            supportsAc3 = true;
+                        } else if (lowerType.equals("audio/eac3") || lowerType.equals("audio/eac3-joc")) {
+                            supportsEac3 = true;
+                        } else if (lowerType.equals("audio/vnd.dts") || lowerType.equals("audio/vnd.dts.hd")) {
+                            supportsDts = true;
+                        } else if (lowerType.equals("audio/opus")) {
+                            supportsOpus = true;
+                        } else if (lowerType.equals("audio/vorbis")) {
+                            supportsVorbis = true;
+                        } else if (lowerType.equals("audio/flac")) {
+                            supportsFlac = true;
                         }
                     }
                 }
 
                 json.put("supportsAvc", supportsAvc);
+                json.put("hasHardwareAvc", hasHardwareAvc);
+                json.put("maxAvcWidth", maxAvcWidth);
+                json.put("maxAvcHeight", maxAvcHeight);
                 json.put("supportsHevc", supportsHevc);
                 json.put("supportsHevc10Bit", supportsHevc10Bit);
+                json.put("supportsHevc10BitHw", supportsHevc10BitHw);
                 json.put("supportsVp9", supportsVp9);
+                json.put("hasHardwareVp9", hasHardwareVp9);
                 json.put("supportsAv1", supportsAv1);
+                json.put("hasHardwareAv1", hasHardwareAv1);
                 json.put("hasHardwareHevc", hasHardwareHevc);
+                json.put("hasSoftwareHevc", hasSoftwareHevc);
                 json.put("maxHevcWidth", maxHevcWidth);
                 json.put("maxHevcHeight", maxHevcHeight);
+                json.put("supportsAac", supportsAac);
+                json.put("supportsMp3", supportsMp3);
+                json.put("supportsAc3", supportsAc3);
+                json.put("supportsEac3", supportsEac3);
+                json.put("supportsDts", supportsDts);
+                json.put("supportsOpus", supportsOpus);
+                json.put("supportsVorbis", supportsVorbis);
+                json.put("supportsFlac", supportsFlac);
                 json.put("hardwareHevcDecoders", hardwareDecoders);
                 json.put("softwareHevcDecoders", softwareDecoders);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"sdkInt\":" + Build.VERSION.SDK_INT + ",\"supportsAvc\":true,\"supportsHevc\":false,\"supportsHevc10Bit\":false}";
+                return "{\"sdkInt\":" + Build.VERSION.SDK_INT + ",\"supportsAvc\":true,\"hasHardwareAvc\":true,\"supportsHevc\":false,\"supportsHevc10Bit\":false,\"supportsAac\":true}";
             }
         }
 
         @JavascriptInterface
         public void playExoMedia(final String url, final double startSec, final double speed) {
             if (url == null || url.trim().isEmpty()) return;
-            runOnUiThread(() -> startExoPlaybackNative(url.trim(), startSec, speed));
+            runOnUiThread(() -> startExoPlaybackNative(url.trim(), startSec, speed, false, "texture"));
+        }
+
+        @JavascriptInterface
+        public void playExoMediaWithOptions(final String url, final double startSec, final double speed, final boolean preferSoftware, final String surfaceMode) {
+            if (url == null || url.trim().isEmpty()) return;
+            runOnUiThread(() -> startExoPlaybackNative(url.trim(), startSec, speed, preferSoftware, surfaceMode));
         }
 
         @JavascriptInterface

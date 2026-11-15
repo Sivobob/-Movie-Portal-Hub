@@ -38,8 +38,8 @@ import java.util.regex.Pattern;
  */
 public class LocalStreamServer {
     private static final String TAG = "LocalStreamServer";
-    private static final long MAX_RANGE_CHUNK = 4L * 1024L * 1024L; // 4 MB per open-ended range
-    private static final long META_CACHE_TTL_MS = 5L * 60L * 1000L;
+    private static final long MAX_RANGE_CHUNK = 12L * 1024L * 1024L; // 12 MB per open-ended range
+    private static final long META_CACHE_TTL_MS = 10L * 60L * 1000L;
     private static final byte[] END_SENTINEL = new byte[0];
     private static final Pattern RANGE_PATTERN = Pattern.compile("bytes=(\\d+)-(\\d*)");
 
@@ -55,20 +55,22 @@ public class LocalStreamServer {
         final double durationSec;
         final String mimeType;
         final String error;
+        final String rawJson;
         final long cachedAt;
 
-        MetaResult(boolean ok, long fileSize, double durationSec, String mimeType, String error) {
+        MetaResult(boolean ok, long fileSize, double durationSec, String mimeType, String error, String rawJson) {
             this.ok = ok;
             this.fileSize = fileSize;
             this.durationSec = durationSec;
             this.mimeType = mimeType != null && !mimeType.isEmpty() ? mimeType : "video/mp4";
             this.error = error;
+            this.rawJson = rawJson != null ? rawJson : "{}";
             this.cachedAt = System.currentTimeMillis();
         }
     }
 
     private static class StreamSession {
-        final BlockingQueue<byte[]> queue = new LinkedBlockingQueue<>(32);
+        final BlockingQueue<byte[]> queue = new LinkedBlockingQueue<>(48);
         volatile boolean aborted = false;
         volatile boolean ended = false;
         volatile String error = null;
@@ -97,18 +99,20 @@ public class LocalStreamServer {
     private void completeMeta(String id, String jsonBody) {
         CompletableFuture<MetaResult> fut = id != null ? pendingMetaById.remove(id) : null;
         if (fut == null) return;
+        String safeBody = jsonBody != null ? jsonBody : "{}";
         try {
-            JSONObject json = new JSONObject(jsonBody != null ? jsonBody : "{}");
+            JSONObject json = new JSONObject(safeBody);
             MetaResult res = new MetaResult(
                     json.optBoolean("ok", false),
                     json.optLong("fileSize", 0L),
                     json.optDouble("durationSec", 0.0),
                     json.optString("mimeType", "video/mp4"),
-                    json.optString("error", "")
+                    json.optString("error", ""),
+                    safeBody
             );
             fut.complete(res);
         } catch (Exception e) {
-            fut.complete(new MetaResult(false, 0, 0, "video/mp4", e.getMessage()));
+            fut.complete(new MetaResult(false, 0, 0, "video/mp4", e.getMessage(), safeBody));
         }
     }
 
@@ -176,10 +180,27 @@ public class LocalStreamServer {
         public void postEnd(String id, String error) {
             completeStreamEnd(id, error);
         }
+
+        @JavascriptInterface
+        public void abortAllStreams() {
+            LocalStreamServer.this.abortAllStreams();
+        }
     }
 
     public JsBridge createJsInterface() {
         return new JsBridge(getBaseUrl());
+    }
+
+    public void abortAllStreams() {
+        for (Map.Entry<String, StreamSession> entry : activeStreams.entrySet()) {
+            StreamSession sess = entry.getValue();
+            if (sess != null) {
+                sess.aborted = true;
+                sess.queue.clear();
+                sess.queue.offer(END_SENTINEL);
+            }
+        }
+        activeStreams.clear();
     }
 
     public void stopServer() {
@@ -313,13 +334,13 @@ public class LocalStreamServer {
                 + "Access-Control-Expose-Headers: Content-Range, Accept-Ranges, Content-Length, X-Video-Duration, X-Stream-Mode, Content-Type\r\n";
     }
 
-    private void sendSimpleResponse(OutputStream out, int code, String statusText, String contentType, byte[] body) throws IOException {
+    private void sendSimpleResponse(OutputStream out, int code, String statusText, String contentType, byte[] body, boolean keepAlive) throws IOException {
         StringBuilder sb = new StringBuilder();
         sb.append("HTTP/1.1 ").append(code).append(" ").append(statusText).append("\r\n");
         sb.append(corsHeaders());
         sb.append("Content-Type: ").append(contentType).append("\r\n");
         sb.append("Content-Length: ").append(body.length).append("\r\n");
-        sb.append("Connection: close\r\n\r\n");
+        sb.append("Connection: ").append(keepAlive ? "keep-alive" : "close").append("\r\n\r\n");
         out.write(sb.toString().getBytes(StandardCharsets.ISO_8859_1));
         if (body.length > 0) out.write(body);
         out.flush();
@@ -329,57 +350,105 @@ public class LocalStreamServer {
         try (Socket s = client) {
             InputStream in = s.getInputStream();
             OutputStream out = s.getOutputStream();
-            HttpRequestData req = readHttpRequest(in);
-            if (req == null) return;
+            while (running && !s.isClosed()) {
+                HttpRequestData req = readHttpRequest(in);
+                if (req == null) return;
 
-            if ("OPTIONS".equals(req.method)) {
-                String hdr = "HTTP/1.1 204 No Content\r\n" + corsHeaders() + "Connection: close\r\n\r\n";
-                out.write(hdr.getBytes(StandardCharsets.ISO_8859_1));
-                out.flush();
-                return;
-            }
+                String connHeader = req.headers.get("connection");
+                boolean clientWantsClose = connHeader != null && connHeader.toLowerCase(Locale.US).contains("close");
 
-            if ("/api/health".equals(req.path)) {
-                byte[] okJson = "{\"status\":\"ok\",\"mode\":\"android_local_bridge\"}".getBytes(StandardCharsets.UTF_8);
-                sendSimpleResponse(out, 200, "OK", "application/json", okJson);
-                return;
-            }
-
-            if ("POST".equals(req.method) && "/__bridge/meta".equals(req.path)) {
-                String id = req.query.get("id");
-                completeMeta(id, new String(req.body, StandardCharsets.UTF_8));
-                sendSimpleResponse(out, 200, "OK", "text/plain", new byte[0]);
-                return;
-            }
-
-            if ("POST".equals(req.method) && "/__bridge/chunk".equals(req.path)) {
-                String id = req.query.get("id");
-                int status = enqueueChunk(id, req.body);
-                if (status == 499) {
-                    sendSimpleResponse(out, 499, "Client Closed Request", "text/plain", new byte[0]);
-                } else {
-                    sendSimpleResponse(out, 200, "OK", "text/plain", new byte[0]);
+                if ("OPTIONS".equals(req.method)) {
+                    String hdr = "HTTP/1.1 204 No Content\r\n" + corsHeaders() + "Content-Length: 0\r\nConnection: keep-alive\r\n\r\n";
+                    out.write(hdr.getBytes(StandardCharsets.ISO_8859_1));
+                    out.flush();
+                    if (clientWantsClose) return;
+                    continue;
                 }
+
+                if ("/api/health".equals(req.path)) {
+                    byte[] okJson = "{\"status\":\"ok\",\"mode\":\"android_local_bridge\",\"ffmpegAvailable\":false,\"ffprobeAvailable\":false,\"transcodeSupported\":false}".getBytes(StandardCharsets.UTF_8);
+                    sendSimpleResponse(out, 200, "OK", "application/json", okJson, !clientWantsClose);
+                    if (clientWantsClose) return;
+                    continue;
+                }
+
+                if ("POST".equals(req.method) && "/__bridge/meta".equals(req.path)) {
+                    String id = req.query.get("id");
+                    completeMeta(id, new String(req.body, StandardCharsets.UTF_8));
+                    sendSimpleResponse(out, 200, "OK", "text/plain", new byte[0], !clientWantsClose);
+                    if (clientWantsClose) return;
+                    continue;
+                }
+
+                if ("POST".equals(req.method) && "/__bridge/chunk".equals(req.path)) {
+                    String id = req.query.get("id");
+                    int status = enqueueChunk(id, req.body);
+                    if (status == 499) {
+                        sendSimpleResponse(out, 499, "Client Closed Request", "text/plain", new byte[0], false);
+                        return;
+                    } else {
+                        sendSimpleResponse(out, 200, "OK", "text/plain", new byte[0], !clientWantsClose);
+                        if (clientWantsClose) return;
+                        continue;
+                    }
+                }
+
+                if ("POST".equals(req.method) && "/__bridge/end".equals(req.path)) {
+                    String id = req.query.get("id");
+                    completeStreamEnd(id, req.query.get("error"));
+                    sendSimpleResponse(out, 200, "OK", "text/plain", new byte[0], !clientWantsClose);
+                    if (clientWantsClose) return;
+                    continue;
+                }
+
+                if ("/api/telegram/stream-info".equals(req.path) && "GET".equals(req.method)) {
+                    handleStreamInfoRequest(req, out);
+                    return;
+                }
+
+                if (("/api/stream".equals(req.path) || "/api/telegram/stream".equals(req.path))
+                        && ("GET".equals(req.method) || "HEAD".equals(req.method))) {
+                    handleStreamRequest(req, out);
+                    return;
+                }
+
+                byte[] notFound = "{\"error\":\"Not found\"}".getBytes(StandardCharsets.UTF_8);
+                sendSimpleResponse(out, 404, "Not Found", "application/json", notFound, false);
                 return;
             }
-
-            if ("POST".equals(req.method) && "/__bridge/end".equals(req.path)) {
-                String id = req.query.get("id");
-                completeStreamEnd(id, req.query.get("error"));
-                sendSimpleResponse(out, 200, "OK", "text/plain", new byte[0]);
-                return;
-            }
-
-            if (("/api/stream".equals(req.path) || "/api/telegram/stream".equals(req.path))
-                    && ("GET".equals(req.method) || "HEAD".equals(req.method))) {
-                handleStreamRequest(req, out);
-                return;
-            }
-
-            byte[] notFound = "{\"error\":\"Not found\"}".getBytes(StandardCharsets.UTF_8);
-            sendSimpleResponse(out, 404, "Not Found", "application/json", notFound);
         } catch (Exception e) {
             Log.w(TAG, "Client handler error: " + e.getMessage());
+        }
+    }
+
+    private void handleStreamInfoRequest(HttpRequestData req, OutputStream out) throws IOException {
+        String telegramUrl = req.query.get("url");
+        if (telegramUrl == null || telegramUrl.trim().isEmpty()) {
+            sendSimpleResponse(out, 400, "Bad Request", "application/json", "{\"error\":\"URL required\"}".getBytes(StandardCharsets.UTF_8), false);
+            return;
+        }
+        String trimmedUrl = telegramUrl.trim();
+        String reqId = UUID.randomUUID().toString();
+        CompletableFuture<MetaResult> fut = new CompletableFuture<>();
+        pendingMetaById.put(reqId, fut);
+        try {
+            String js = "window.__tgStreamBridge && window.__tgStreamBridge.resolveStreamInfo("
+                    + JSONObject.quote(reqId) + "," + JSONObject.quote(trimmedUrl) + ");";
+            webView.post(() -> webView.evaluateJavascript(js, null));
+            MetaResult res = fut.get(35, TimeUnit.SECONDS);
+            if (res.ok && res.rawJson != null) {
+                if (res.fileSize > 0) {
+                    metaCache.put(trimmedUrl, res);
+                }
+                sendSimpleResponse(out, 200, "OK", "application/json", res.rawJson.getBytes(StandardCharsets.UTF_8), false);
+            } else {
+                String msg = "{\"error\":" + JSONObject.quote(res.error != null ? res.error : "Stream info failed") + "}";
+                sendSimpleResponse(out, 502, "Bad Gateway", "application/json", msg.getBytes(StandardCharsets.UTF_8), false);
+            }
+        } catch (Exception e) {
+            sendSimpleResponse(out, 504, "Gateway Timeout", "application/json", "{\"error\":\"Stream info timeout\"}".getBytes(StandardCharsets.UTF_8), false);
+        } finally {
+            pendingMetaById.remove(reqId);
         }
     }
 
@@ -422,7 +491,7 @@ public class LocalStreamServer {
     private void handleStreamRequest(HttpRequestData req, OutputStream out) throws IOException {
         String telegramUrl = req.query.get("url");
         if (telegramUrl == null || telegramUrl.trim().isEmpty()) {
-            sendSimpleResponse(out, 400, "Bad Request", "application/json", "{\"error\":\"URL required\"}".getBytes(StandardCharsets.UTF_8));
+            sendSimpleResponse(out, 400, "Bad Request", "application/json", "{\"error\":\"URL required\"}".getBytes(StandardCharsets.UTF_8), false);
             return;
         }
 
@@ -430,13 +499,13 @@ public class LocalStreamServer {
         try {
             meta = resolveMetadata(telegramUrl.trim());
         } catch (Exception e) {
-            sendSimpleResponse(out, 502, "Bad Gateway", "application/json", "{\"error\":\"Stream metadata timeout\"}".getBytes(StandardCharsets.UTF_8));
+            sendSimpleResponse(out, 502, "Bad Gateway", "application/json", "{\"error\":\"Stream metadata timeout\"}".getBytes(StandardCharsets.UTF_8), false);
             return;
         }
 
         if (!meta.ok || meta.fileSize <= 0) {
             String msg = "{\"error\":" + JSONObject.quote(meta.error != null ? meta.error : "Stream unavailable") + "}";
-            sendSimpleResponse(out, 404, "Not Found", "application/json", msg.getBytes(StandardCharsets.UTF_8));
+            sendSimpleResponse(out, 404, "Not Found", "application/json", msg.getBytes(StandardCharsets.UTF_8), false);
             return;
         }
 

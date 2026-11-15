@@ -22,11 +22,13 @@ import {
 import { Capacitor } from '@capacitor/core';
 import { StatusBar } from '@capacitor/status-bar';
 import {
-  LIVE_BACKEND_URL,
+  abortLocalBridgeStreams,
   buildApiUrl,
   ensureAndroidStreamBridge,
   forceUseLocalNativeBridge,
   getNativeLocalBridgeUrl,
+  getRemoteTranscodeBackendUrl,
+  hasRemoteTranscodeBackend,
   isUsingLocalNativeBridge,
   probeWorkingBackendUrl,
 } from '../utils/apiConfig';
@@ -107,12 +109,15 @@ export default function VideoPlayerModal({
   const [isLoading, setIsLoading] = useState(true);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  const [fallbackStage, setFallbackStage] = useState<'level1_hw' | 'level2_sw' | 'level2_surface' | 'level2_remux' | 'level3_transcode' | 'level4_error'>('level1_hw');
+  const [preferSoftwareDecoder, setPreferSoftwareDecoder] = useState<boolean>(false);
+  const [surfaceMode, setSurfaceMode] = useState<'texture' | 'surface'>('texture');
   const [streamFallbackMode, setStreamFallbackMode] = useState<'direct' | 'remux' | 'transcode'>('direct');
   const [streamStartOffset, setStreamStartOffset] = useState<number>(0);
   const [selectedAudioIdx, setSelectedAudioIdx] = useState<number>(0);
   const [useLocalBridgeFallback, setUseLocalBridgeFallback] = useState(false);
-  const [exoFailedFallback, setExoFailedFallback] = useState(false);
-  const [retryNonce, setRetryNonce] = useState(0);
+  const [manualRetryNonce, setManualRetryNonce] = useState(0);
   const [hasDecodedFrame, setHasDecodedFrame] = useState(false);
   const [seekPreviewTime, setSeekPreviewTime] = useState<number | null>(null);
   const isDraggingSeekRef = useRef(false);
@@ -122,6 +127,17 @@ export default function VideoPlayerModal({
   const durationRef = useRef(initialDuration || 0);
   const knownDurationRef = useRef(initialDuration || 0);
   const currentTimeRef = useRef(0);
+  const resumeOffsetRef = useRef(0);
+  const fallbackStageRef = useRef(fallbackStage);
+  fallbackStageRef.current = fallbackStage;
+  const streamFallbackModeRef = useRef(streamFallbackMode);
+  streamFallbackModeRef.current = streamFallbackMode;
+  const preferSoftwareRef = useRef(preferSoftwareDecoder);
+  preferSoftwareRef.current = preferSoftwareDecoder;
+  const surfaceModeRef = useRef(surfaceMode);
+  surfaceModeRef.current = surfaceMode;
+  const streamStartOffsetRef = useRef(streamStartOffset);
+  streamStartOffsetRef.current = streamStartOffset;
   const preflightCacheRef = useRef<{ url: string; recommendedMode: 'direct' | 'remux' | 'transcode'; durationSec: number } | null>(null);
 
   // Runtime Android device and decoder capabilities from native bridge
@@ -290,26 +306,51 @@ export default function VideoPlayerModal({
     }
   };
 
-  // Resolve playable stream URL & preflight metadata (once per movie/episode)
+  // Resolve playable stream URL & preflight metadata (once per movie/episode or manual Retry)
   const [playableUrl, setPlayableUrl] = useState<string>('');
   const [streamSourceKey, setStreamSourceKey] = useState<string>('');
   const [preflightReadyKey, setPreflightReadyKey] = useState<number>(0);
 
-  // Reset playback state ONLY when opening or switching movies/episodes
+  // Sync late initialDuration only when no probed duration is known yet
   useEffect(() => {
+    if (initialDuration && initialDuration > 0 && knownDurationRef.current === 0) {
+      setDuration(initialDuration);
+      durationRef.current = initialDuration;
+      knownDurationRef.current = initialDuration;
+    }
+  }, [initialDuration]);
+
+  // Reset playback state ONLY when opening, switching movies/episodes, or clicking Retry
+  useEffect(() => {
+    abortLocalBridgeStreams();
     if (!isOpen) {
       setPlayableUrl('');
       setStreamSourceKey('');
+      setError(null);
+      setErrorDetail(null);
       return;
     }
     preflightCacheRef.current = null;
     setPreflightReadyKey(0);
+    setFallbackStage('level1_hw');
+    fallbackStageRef.current = 'level1_hw';
+    setPreferSoftwareDecoder(false);
+    preferSoftwareRef.current = false;
+    setSurfaceMode('texture');
+    surfaceModeRef.current = 'texture';
     setStreamFallbackMode('direct');
+    streamFallbackModeRef.current = 'direct';
     setStreamStartOffset(0);
+    streamStartOffsetRef.current = 0;
+    resumeOffsetRef.current = 0;
     setSelectedAudioIdx(0);
     setUseLocalBridgeFallback(false);
-    setExoFailedFallback(false);
+    setRealAudioTracks([]);
+    setRealSubtitleTracks([]);
+    setSelectedSubtitle('Off');
     setHasDecodedFrame(false);
+    setError(null);
+    setErrorDetail(null);
     setSeekPreviewTime(null);
     seekPreviewTimeRef.current = null;
     isDraggingSeekRef.current = false;
@@ -321,8 +362,8 @@ export default function VideoPlayerModal({
     durationRef.current = resetDur;
     knownDurationRef.current = resetDur;
     setPlayableUrl('');
-    setStreamSourceKey(`${activeStreamUrl}|${retryNonce}`);
-  }, [isOpen, activeStreamUrl, initialDuration, retryNonce]);
+    setStreamSourceKey(`${activeStreamUrl}|${manualRetryNonce}`);
+  }, [isOpen, activeStreamUrl, manualRetryNonce]);
 
   // Step 1: Run pre-flight stream inspection once per stream source to get real duration, codec mode & audio tracks
   useEffect(() => {
@@ -330,6 +371,7 @@ export default function VideoPlayerModal({
 
     let cancelled = false;
     setError(null);
+    setErrorDetail(null);
     setIsLoading(true);
 
     const initStream = async () => {
@@ -355,7 +397,7 @@ export default function VideoPlayerModal({
           await ensureAndroidStreamBridge().catch(() => '');
           forceUseLocalNativeBridge();
         } else {
-          await probeWorkingBackendUrl(retryNonce > 0).catch(() => null);
+          await probeWorkingBackendUrl(manualRetryNonce > 0).catch(() => null);
           if (isUsingLocalNativeBridge()) {
             await ensureAndroidStreamBridge().catch(() => '');
           }
@@ -364,6 +406,8 @@ export default function VideoPlayerModal({
       if (cancelled) return;
 
       let chosenMode: 'direct' | 'remux' | 'transcode' = 'direct';
+      let chosenStage: 'level1_hw' | 'level2_sw' | 'level2_surface' | 'level2_remux' | 'level3_transcode' = 'level1_hw';
+      let initialPreferSw = false;
       let probedDuration = knownDurationRef.current;
       let initialStart = 0;
 
@@ -371,92 +415,140 @@ export default function VideoPlayerModal({
       const exoCapable =
         Capacitor.isNativePlatform() &&
         typeof bridgeRef?.isExoSupported === 'function' &&
-        Boolean(bridgeRef.isExoSupported()) &&
-        !exoFailedFallback;
+        Boolean(bridgeRef.isExoSupported());
+      const remoteTranscodeAvailable = !Capacitor.isNativePlatform() || hasRemoteTranscodeBackend();
 
-      if (!isUsingLocalNativeBridge()) {
-        try {
-          const infoUrl = buildApiUrl(`/api/telegram/stream-info?url=${encodeURIComponent(trimmed)}`);
-          const res = await fetch(infoUrl, { cache: 'no-store' });
-          if (res.ok) {
-            const info = await res.json();
-            if (!cancelled && info && info.status === 'ok') {
-              if (info.durationSec > 0) {
-                probedDuration = info.durationSec;
-                knownDurationRef.current = info.durationSec;
-                durationRef.current = info.durationSec;
-                setDuration(info.durationSec);
+      try {
+        const infoUrl = buildApiUrl(`/api/telegram/stream-info?url=${encodeURIComponent(trimmed)}`);
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), isUsingLocalNativeBridge() ? 4500 : 12000);
+        const res = await fetch(infoUrl, { cache: 'no-store', signal: controller.signal }).finally(() => clearTimeout(timer));
+        if (res.ok) {
+          const info = await res.json();
+          if (!cancelled && info && info.status === 'ok') {
+            if (info.durationSec > 0) {
+              probedDuration = info.durationSec;
+              knownDurationRef.current = info.durationSec;
+              durationRef.current = info.durationSec;
+              setDuration(info.durationSec);
+            }
+
+            if (!exoCapable) {
+              // Chrome / Mobile Web HTML5 playback evaluation
+              if (
+                info.recommendedMode === 'remux' ||
+                info.recommendedMode === 'transcode' ||
+                info.recommendedMode === 'direct'
+              ) {
+                chosenMode = info.recommendedMode;
+                chosenStage =
+                  chosenMode === 'transcode'
+                    ? 'level3_transcode'
+                    : chosenMode === 'remux'
+                      ? 'level2_remux'
+                      : 'level1_hw';
               }
-              if (!exoCapable) {
-                if (
-                  info.recommendedMode === 'remux' ||
-                  info.recommendedMode === 'transcode' ||
-                  info.recommendedMode === 'direct'
-                ) {
-                  chosenMode = info.recommendedMode;
-                }
-              } else {
-                const is10BitStream = Boolean(
-                  info.is10Bit ||
-                  String(info.pixFmt || '').includes('10le') ||
-                  String(info.pixFmt || '').includes('10be') ||
-                  String(info.pixFmt || '').includes('12le')
-                );
-                const isHevcStream =
-                  String(info.videoCodec || '').toLowerCase() === 'hevc' ||
-                  String(info.videoCodec || '').toLowerCase() === 'h265';
-                const is4KStream = (info.width && info.width > 2100) || (info.height && info.height > 1200);
+            } else {
+              // Native Android Media3 ExoPlayer intelligent codec + audio + resolution evaluation
+              const is10BitStream = Boolean(
+                info.is10Bit ||
+                String(info.pixFmt || '').includes('10le') ||
+                String(info.pixFmt || '').includes('10be') ||
+                String(info.pixFmt || '').includes('12le')
+              );
+              const vCodec = String(info.videoCodec || '').toLowerCase();
+              const aCodec = String(info.audioCodec || '').toLowerCase();
+              const isHevcStream = vCodec === 'hevc' || vCodec === 'h265';
+              const isVp9Stream = vCodec === 'vp9';
+              const isAv1Stream = vCodec === 'av1' || vCodec === 'av01';
+              const is4KStream = (info.width && info.width > 2100) || (info.height && info.height > 1200);
 
-                const deviceSupports10Bit = Boolean(deviceCapabilities?.supportsHevc10Bit);
-                const deviceHasHardwareHevc = Boolean(deviceCapabilities?.hasHardwareHevc);
+              const caps = deviceCapabilities || {};
+              const deviceSupports10Bit = Boolean(caps.supportsHevc10Bit);
+              const deviceSupports10BitHw = Boolean(caps.supportsHevc10BitHw);
+              const deviceHasHardwareHevc = Boolean(caps.hasHardwareHevc);
+              const deviceHasSoftwareHevc = Boolean(caps.hasSoftwareHevc || caps.supportsHevc);
+              const deviceSupportsVp9 = caps.supportsVp9 !== false;
+              const deviceSupportsAv1 = Boolean(caps.supportsAv1);
 
-                if (is10BitStream && !deviceSupports10Bit) {
-                  console.warn('[VideoPlayer] Phone lacks 10-bit HEVC decoder. Auto-routing to universal 1080p H.264 transcode.');
+              const ac3Unsupported = aCodec === 'ac3' && caps.supportsAc3 === false;
+              const eac3Unsupported = (aCodec === 'eac3' || aCodec === 'ec-3') && caps.supportsEac3 === false;
+              const dtsUnsupported = aCodec.includes('dts') && caps.supportsDts === false;
+              const genericUnsupportedAudio = Boolean(info.hasUnsupportedAudio) && caps.supportsAc3 === false && caps.supportsEac3 === false && caps.supportsDts === false;
+              const audioIncompatible = ac3Unsupported || eac3Unsupported || dtsUnsupported || genericUnsupportedAudio;
+
+              const exceedsMaxHevc = isHevcStream && is4KStream && caps.maxHevcWidth && info.width > caps.maxHevcWidth;
+              const exceedsMaxAvc = (vCodec === 'h264' || vCodec === 'avc') && is4KStream && caps.maxAvcWidth && info.width > caps.maxAvcWidth;
+
+              if (audioIncompatible && remoteTranscodeAvailable) {
+                chosenMode = 'transcode';
+                chosenStage = 'level3_transcode';
+              } else if (is10BitStream && !deviceSupports10Bit && remoteTranscodeAvailable) {
+                chosenMode = 'transcode';
+                chosenStage = 'level3_transcode';
+              } else if (is10BitStream && !deviceSupports10BitHw && deviceHasSoftwareHevc) {
+                if (remoteTranscodeAvailable && is4KStream) {
                   chosenMode = 'transcode';
-                } else if (isHevcStream && !deviceHasHardwareHevc && info.recommendedMode === 'transcode') {
-                  console.warn('[VideoPlayer] Phone lacks hardware HEVC decoder. Routing to universal H.264 transcode.');
-                  chosenMode = 'transcode';
-                } else if (is4KStream && deviceCapabilities?.maxHevcWidth && info.width > deviceCapabilities.maxHevcWidth) {
-                  console.warn('[VideoPlayer] 4K stream exceeds device decoder limit. Routing to 1080p transcode.');
-                  chosenMode = 'transcode';
-                } else if (info.recommendedMode === 'transcode' && (!deviceSupports10Bit || is10BitStream)) {
-                  chosenMode = 'transcode';
+                  chosenStage = 'level3_transcode';
                 } else {
                   chosenMode = 'direct';
+                  chosenStage = 'level2_sw';
+                  initialPreferSw = true;
                 }
+              } else if (isHevcStream && !deviceHasHardwareHevc) {
+                if (remoteTranscodeAvailable && (!deviceHasSoftwareHevc || is4KStream || (info.height && info.height > 1088))) {
+                  chosenMode = 'transcode';
+                  chosenStage = 'level3_transcode';
+                } else if (deviceHasSoftwareHevc) {
+                  chosenMode = 'direct';
+                  chosenStage = 'level2_sw';
+                  initialPreferSw = true;
+                }
+              } else if ((exceedsMaxHevc || exceedsMaxAvc || (isVp9Stream && !deviceSupportsVp9) || (isAv1Stream && !deviceSupportsAv1)) && remoteTranscodeAvailable) {
+                chosenMode = 'transcode';
+                chosenStage = 'level3_transcode';
+              } else {
+                chosenMode = 'direct';
+                chosenStage = 'level1_hw';
               }
-              if (!exoCapable && Array.isArray(info.audioTracks) && info.audioTracks.length > 0) {
-                setRealAudioTracks(info.audioTracks);
-                const preferredLang = verifiedLanguageRef.current.toLowerCase();
-                const matchIdx = info.audioTracks.findIndex(
-                  (t: any) =>
-                    String(t.lang || '').toLowerCase().includes(preferredLang) ||
-                    String(t.label || '').toLowerCase().includes(preferredLang)
-                );
-                const chosenTrack = matchIdx >= 0 ? info.audioTracks[matchIdx] : info.audioTracks[0];
-                setSelectedAudio(chosenTrack.label);
-                if (typeof chosenTrack.id === 'number') {
-                  setSelectedAudioIdx(chosenTrack.id);
-                  if (chosenTrack.id > 0 && chosenMode === 'direct') {
-                    chosenMode = 'remux';
-                  }
+            }
+
+            if (!exoCapable && Array.isArray(info.audioTracks) && info.audioTracks.length > 0) {
+              setRealAudioTracks(info.audioTracks);
+              const preferredLang = verifiedLanguageRef.current.toLowerCase();
+              const matchIdx = info.audioTracks.findIndex(
+                (t: any) =>
+                  String(t.lang || '').toLowerCase().includes(preferredLang) ||
+                  String(t.label || '').toLowerCase().includes(preferredLang)
+              );
+              const chosenTrack = matchIdx >= 0 ? info.audioTracks[matchIdx] : info.audioTracks[0];
+              setSelectedAudio(chosenTrack.label);
+              if (typeof chosenTrack.id === 'number') {
+                setSelectedAudioIdx(chosenTrack.id);
+                if (chosenTrack.id > 0 && chosenMode === 'direct' && remoteTranscodeAvailable) {
+                  chosenMode = 'remux';
+                  chosenStage = 'level2_remux';
                 }
               }
             }
           }
-        } catch (err) {
-          console.warn('[VideoPlayer] stream-info preflight notice:', err);
         }
+      } catch (err) {
+        console.warn('[VideoPlayer] stream-info preflight notice:', err);
       }
 
       if (cancelled) return;
 
-      // Apply saved resume position upfront for remux/transcode so user resumes instantly
-      if (chosenMode !== 'direct' && episodeResumeKey) {
+      // Apply saved resume position upfront when opening in remux/transcode or native direct
+      if (episodeResumeKey) {
         try {
           const savedPos = parseFloat(localStorage.getItem(`resume_pos_${episodeResumeKey}`) || '0');
           if (savedPos > 15 && (!probedDuration || savedPos < probedDuration - 45)) {
-            initialStart = Math.floor(savedPos);
+            if (chosenMode !== 'direct') {
+              initialStart = Math.floor(savedPos);
+            } else {
+              resumeOffsetRef.current = Math.floor(savedPos);
+            }
           }
         } catch {}
       }
@@ -466,8 +558,16 @@ export default function VideoPlayerModal({
         recommendedMode: chosenMode,
         durationSec: probedDuration,
       };
+      setFallbackStage(chosenStage);
+      fallbackStageRef.current = chosenStage;
+      setPreferSoftwareDecoder(initialPreferSw);
+      preferSoftwareRef.current = initialPreferSw;
+      setSurfaceMode('texture');
+      surfaceModeRef.current = 'texture';
       setStreamFallbackMode(chosenMode);
+      streamFallbackModeRef.current = chosenMode;
       setStreamStartOffset(initialStart);
+      streamStartOffsetRef.current = initialStart;
       if (initialStart > 0) {
         setCurrentTime(initialStart);
         currentTimeRef.current = initialStart;
@@ -479,7 +579,7 @@ export default function VideoPlayerModal({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, streamSourceKey, useLocalBridgeFallback, exoFailedFallback]);
+  }, [isOpen, streamSourceKey, useLocalBridgeFallback, deviceCapabilities]);
 
   // Step 2: Build playableUrl whenever mode, seek offset, or audio track changes
   useEffect(() => {
@@ -488,6 +588,7 @@ export default function VideoPlayerModal({
     if (!/t\.me|telegram\.me/i.test(trimmed)) return;
 
     let params = `?url=${encodeURIComponent(trimmed)}&ext=.mp4`;
+    const isServerPipe = streamFallbackMode === 'remux' || streamFallbackMode === 'transcode';
     if (streamFallbackMode === 'remux') {
       params += `&remux=1`;
       if (streamStartOffset > 1) params += `&start=${Math.floor(streamStartOffset)}`;
@@ -497,10 +598,20 @@ export default function VideoPlayerModal({
       if (streamStartOffset > 1) params += `&start=${Math.floor(streamStartOffset)}`;
       if (selectedAudioIdx > 0) params += `&audioIdx=${selectedAudioIdx}`;
     }
-    const apiUrl =
-      streamFallbackMode === 'transcode' && isUsingLocalNativeBridge()
-        ? `${LIVE_BACKEND_URL}/api/stream${params}`
-        : buildApiUrl(`/api/stream${params}`);
+
+    let apiUrl: string;
+    if (Capacitor.isNativePlatform() && isServerPipe) {
+      const remoteBase = getRemoteTranscodeBackendUrl();
+      if (!remoteBase) {
+        setError('Transcoding server unavailable');
+        setErrorDetail('This video requires server-side codec conversion, but no transcoding backend URL is reachable right now.');
+        setIsLoading(false);
+        return;
+      }
+      apiUrl = `${remoteBase}/api/stream${params}`;
+    } else {
+      apiUrl = buildApiUrl(`/api/stream${params}`);
+    }
     setPlayableUrl(apiUrl);
   }, [isOpen, streamFallbackMode, streamStartOffset, selectedAudioIdx, streamSourceKey, preflightReadyKey]);
 
@@ -640,11 +751,11 @@ export default function VideoPlayerModal({
     Capacitor.isNativePlatform() &&
     typeof (window as any).AndroidPlayerBridge?.isExoSupported === 'function' &&
     Boolean((window as any).AndroidPlayerBridge.isExoSupported());
-  const exoModeActive = Boolean(isOpen && !isYouTube && canUseNativeExo && !exoFailedFallback && playableUrl);
+  const exoModeActive = Boolean(isOpen && !isYouTube && canUseNativeExo && playableUrl && fallbackStage !== 'level4_error');
 
   // Sync transparent WebView flag for ExoPlayer surface behind controls
   useEffect(() => {
-    if (exoModeActive) {
+    if (exoModeActive && !error) {
       document.documentElement.setAttribute('data-exo-active', 'true');
     } else {
       document.documentElement.removeAttribute('data-exo-active');
@@ -652,17 +763,19 @@ export default function VideoPlayerModal({
     return () => {
       document.documentElement.removeAttribute('data-exo-active');
     };
-  }, [exoModeActive]);
+  }, [exoModeActive, error]);
 
-  // Native Android Media3 ExoPlayer lifecycle & state polling
+  // Native Android Media3 ExoPlayer lifecycle, 4-level fallback ladder & watchdogs
   useEffect(() => {
     if (!exoModeActive) return;
     const bridge = (window as any).AndroidPlayerBridge;
-    if (!bridge || typeof bridge.playExoMedia !== 'function') return;
+    if (!bridge || (typeof bridge.playExoMediaWithOptions !== 'function' && typeof bridge.playExoMedia !== 'function')) return;
 
     let cancelled = false;
-    let resumeSec = 0;
-    if (episodeResumeKey) {
+    let resumeSec = resumeOffsetRef.current || 0;
+    resumeOffsetRef.current = 0;
+
+    if (resumeSec <= 0 && streamFallbackModeRef.current === 'direct' && episodeResumeKey) {
       try {
         const saved = parseFloat(localStorage.getItem(`resume_pos_${episodeResumeKey}`) || '0');
         const knownDur = durationRef.current || knownDurationRef.current;
@@ -672,14 +785,124 @@ export default function VideoPlayerModal({
       } catch {}
     }
 
+    const exoStartOffset = streamFallbackModeRef.current === 'direct' ? resumeSec : 0;
+
     setError(null);
+    setErrorDetail(null);
     setIsLoading(true);
     setHasDecodedFrame(false);
-    bridge.playExoMedia(playableUrl, resumeSec, playbackSpeed || 1.0);
+
+    if (typeof bridge.playExoMediaWithOptions === 'function') {
+      bridge.playExoMediaWithOptions(
+        playableUrl,
+        exoStartOffset,
+        playbackSpeed || 1.0,
+        Boolean(preferSoftwareRef.current),
+        surfaceModeRef.current
+      );
+    } else {
+      bridge.playExoMedia(playableUrl, exoStartOffset, playbackSpeed || 1.0);
+    }
 
     let lastAudioJson = '';
     let lastSubJson = '';
     let endedHandled = false;
+    let escalated = false;
+
+    let lastRenderedFrames = 0;
+    let lastFrameAdvanceMs = Date.now();
+    let lastVideoPlayingPos = 0;
+
+    let bufferingStallStartMs = 0;
+    let bufferingLastProgressMetric = -1;
+
+    const escalateExoPlayback = (reason: string, preservePosSec: number) => {
+      if (escalated || cancelled) return;
+      escalated = true;
+      clearInterval(pollTimer);
+      bridge.stopExoMedia?.();
+      abortLocalBridgeStreams();
+
+      const safePos = Math.max(0, Math.floor(preservePosSec || currentTimeRef.current || resumeSec));
+      const stage = fallbackStageRef.current;
+      const isTg = /t\.me|telegram\.me/i.test(activeStreamUrl);
+      const canTranscodeRemote = isTg && hasRemoteTranscodeBackend();
+
+      console.warn(`[ExoPlayer] Fallback escalation triggered from ${stage} (${reason}) at ${safePos}s`);
+
+      if (stage === 'level1_hw') {
+        resumeOffsetRef.current = safePos;
+        setFallbackStage('level2_sw');
+        fallbackStageRef.current = 'level2_sw';
+        setPreferSoftwareDecoder(true);
+        preferSoftwareRef.current = true;
+        setSurfaceMode('texture');
+        surfaceModeRef.current = 'texture';
+        setIsLoading(true);
+        setHasDecodedFrame(false);
+        return;
+      }
+
+      if (stage === 'level2_sw') {
+        resumeOffsetRef.current = safePos;
+        setFallbackStage('level2_surface');
+        fallbackStageRef.current = 'level2_surface';
+        setPreferSoftwareDecoder(true);
+        preferSoftwareRef.current = true;
+        setSurfaceMode('surface');
+        surfaceModeRef.current = 'surface';
+        setIsLoading(true);
+        setHasDecodedFrame(false);
+        return;
+      }
+
+      if (stage === 'level2_surface' || stage === 'level2_remux') {
+        if (canTranscodeRemote && streamFallbackModeRef.current !== 'transcode') {
+          setStreamStartOffset(safePos);
+          streamStartOffsetRef.current = safePos;
+          setFallbackStage('level3_transcode');
+          fallbackStageRef.current = 'level3_transcode';
+          setPreferSoftwareDecoder(false);
+          preferSoftwareRef.current = false;
+          setSurfaceMode('texture');
+          surfaceModeRef.current = 'texture';
+          setStreamFallbackMode('transcode');
+          streamFallbackModeRef.current = 'transcode';
+          setIsLoading(true);
+          setHasDecodedFrame(false);
+          return;
+        }
+        if (isTg && !useLocalBridgeFallback && !isUsingLocalNativeBridge() && getNativeLocalBridgeUrl()) {
+          resumeOffsetRef.current = safePos;
+          setFallbackStage('level1_hw');
+          fallbackStageRef.current = 'level1_hw';
+          setPreferSoftwareDecoder(false);
+          preferSoftwareRef.current = false;
+          setSurfaceMode('texture');
+          surfaceModeRef.current = 'texture';
+          setStreamFallbackMode('direct');
+          streamFallbackModeRef.current = 'direct';
+          setStreamStartOffset(0);
+          streamStartOffsetRef.current = 0;
+          setUseLocalBridgeFallback(true);
+          setIsLoading(true);
+          setHasDecodedFrame(false);
+          return;
+        }
+      }
+
+      // Level 4: Honest terminal failure message (never silently fall back to incompatible <video>)
+      setFallbackStage('level4_error');
+      fallbackStageRef.current = 'level4_error';
+      setIsPlaying(false);
+      setIsLoading(false);
+      setError('stream_error');
+      setErrorDetail(
+        !canTranscodeRemote && isTg && (reason.includes('black_screen') || reason.includes('codec') || reason.includes('decoder'))
+          ? 'Your phone could not decode this video format natively, and no server transcoding backend is currently connected.'
+          : `Playback stopped: ${reason}. Tap Retry to reconnect.`
+      );
+    };
 
     const pollTimer = setInterval(() => {
       if (cancelled) return;
@@ -688,49 +911,60 @@ export default function VideoPlayerModal({
         if (!raw) return;
         const st = JSON.parse(raw);
 
+        const baseOffset = streamFallbackModeRef.current !== 'direct' ? streamStartOffsetRef.current : 0;
+        const rawPos = typeof st.currentTime === 'number' ? st.currentTime : 0;
+        const effectiveTime = baseOffset + rawPos;
+        const rawBuffered = typeof st.bufferedPosition === 'number' ? st.bufferedPosition : 0;
+        const effectiveBuffered = baseOffset + rawBuffered;
+        const renderedCount = typeof st.renderedFrames === 'number' ? st.renderedFrames : 0;
+
         if (st.error) {
-          console.warn('[ExoPlayer] Error reported:', st.error);
-          clearInterval(pollTimer);
-          bridge.stopExoMedia?.();
-          if (streamFallbackMode !== 'transcode' && /t\.me|telegram\.me/i.test(activeStreamUrl)) {
-            console.warn('[ExoPlayer] Direct mode error (' + st.error + '). Auto-escalating to universal H.264 transcode...');
-            setStreamStartOffset(Math.floor(currentTimeRef.current || resumeSec));
-            setStreamFallbackMode('transcode');
-            setRetryNonce((n) => n + 1);
-            setIsLoading(true);
-            setHasDecodedFrame(false);
+          escalateExoPlayback(st.error, effectiveTime);
+          return;
+        }
+
+        // Level 1 -> Level 2 -> Level 3 Black-screen guard:
+        // If playing > 3.2s with 0 rendered output frames (even if videoWidth > 0 from headers)
+        if (
+          st.isPlaying &&
+          !st.isBuffering &&
+          rawPos > 3.2 &&
+          !st.firstFrameRendered &&
+          renderedCount === 0
+        ) {
+          escalateExoPlayback('black_screen_zero_frames', effectiveTime);
+          return;
+        }
+
+        // Frozen video guard: audio/position advances while renderedFrames stays frozen for > 5.5s
+        if (renderedCount > lastRenderedFrames) {
+          lastRenderedFrames = renderedCount;
+          lastFrameAdvanceMs = Date.now();
+          lastVideoPlayingPos = rawPos;
+        } else if (st.firstFrameRendered && st.isPlaying && !st.isBuffering) {
+          if (rawPos > lastVideoPlayingPos + 0.8 && Date.now() - lastFrameAdvanceMs > 5500) {
+            escalateExoPlayback('frozen_video_decoder_stall', effectiveTime);
             return;
           }
-          setError(`Playback error: ${st.error || 'Video decoder failed on this device'}`);
-          setIsLoading(false);
-          return;
+        } else {
+          lastFrameAdvanceMs = Date.now();
         }
 
-        // Automatic audio-only / black-screen auto-recovery:
-        // If audio is actively playing for > 2.5s with 0 video frames decoded,
-        // the phone hardware decoder failed silently. Auto-escalate to universal H.264 transcode!
-        if (
-          st.currentTime > 2.5 &&
-          st.isPlaying &&
-          !st.firstFrameRendered &&
-          st.videoWidth === 0 &&
-          streamFallbackMode !== 'transcode' &&
-          /t\.me|telegram\.me/i.test(activeStreamUrl)
-        ) {
-          console.warn('[ExoPlayer] Audio-only playback detected (0 video frames rendered). Escalating to universal H.264 transcode...');
-          clearInterval(pollTimer);
-          bridge.stopExoMedia?.();
-          setStreamStartOffset(Math.floor(st.currentTime));
-          setStreamFallbackMode('transcode');
-          setRetryNonce((n) => n + 1);
-          setIsLoading(true);
-          setHasDecodedFrame(false);
-          return;
+        // Infinite buffering stall guard (22s stuck buffering with zero buffered growth)
+        if (st.state === 2) {
+          const metric = rawBuffered + rawPos;
+          if (bufferingStallStartMs === 0 || Math.abs(metric - bufferingLastProgressMetric) > 0.15) {
+            bufferingStallStartMs = Date.now();
+            bufferingLastProgressMetric = metric;
+          } else if (Date.now() - bufferingStallStartMs > 22000) {
+            escalateExoPlayback('buffering_timeout', effectiveTime);
+            return;
+          }
+        } else {
+          bufferingStallStartMs = 0;
         }
 
-
-
-        if (st.firstFrameRendered || st.videoWidth > 0) {
+        if (st.firstFrameRendered || renderedCount > 0) {
           setHasDecodedFrame(true);
         }
 
@@ -738,21 +972,21 @@ export default function VideoPlayerModal({
         setIsLoading(Boolean(st.isBuffering || (st.state === 1 && !st.isPlaying && !st.ended)));
 
         if (!isDraggingSeekRef.current && typeof st.currentTime === 'number') {
-          setCurrentTime(st.currentTime);
-          currentTimeRef.current = st.currentTime;
+          setCurrentTime(effectiveTime);
+          currentTimeRef.current = effectiveTime;
         }
         if (typeof st.bufferedPosition === 'number') {
-          setBufferedTime(st.bufferedPosition);
+          setBufferedTime(effectiveBuffered);
         }
-        if (typeof st.duration === 'number' && st.duration > 0 && isFinite(st.duration)) {
+        if (streamFallbackModeRef.current === 'direct' && typeof st.duration === 'number' && st.duration > 0 && isFinite(st.duration)) {
           setDuration(st.duration);
           durationRef.current = st.duration;
           knownDurationRef.current = st.duration;
         }
 
-        if (st.currentTime > 10 && episodeResumeKey) {
+        if (effectiveTime > 10 && episodeResumeKey) {
           try {
-            localStorage.setItem(`resume_pos_${episodeResumeKey}`, String(st.currentTime));
+            localStorage.setItem(`resume_pos_${episodeResumeKey}`, String(effectiveTime));
           } catch {}
         }
 
@@ -793,11 +1027,11 @@ export default function VideoPlayerModal({
         bridge.stopExoMedia?.();
       } catch {}
     };
-  }, [exoModeActive, playableUrl, retryNonce]);
+  }, [exoModeActive, playableUrl, preferSoftwareDecoder, surfaceMode, manualRetryNonce]);
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || isYouTube || !playableUrl || exoModeActive) return;
+    if (!video || isYouTube || !playableUrl || canUseNativeExo) return;
 
     let cancelled = false;
     let hlsInstance: Hls | null = null;
@@ -1169,7 +1403,7 @@ export default function VideoPlayerModal({
       video.removeEventListener('error', onError);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [playableUrl, isYouTube, exoModeActive, episodeResumeKey, streamFallbackMode, streamStartOffset, retryNonce]);
+  }, [playableUrl, isYouTube, exoModeActive, episodeResumeKey, streamFallbackMode, streamStartOffset, manualRetryNonce]);
 
   // Keyboard shortcut listener (Space = play/pause, Left/Right = skip, Escape = close)
   useEffect(() => {
@@ -1244,9 +1478,28 @@ export default function VideoPlayerModal({
     isDraggingSeekRef.current = false;
 
     if (exoModeActive) {
-      (window as any).AndroidPlayerBridge?.exoSeek?.(clamped);
+      if (streamFallbackMode === 'direct') {
+        (window as any).AndroidPlayerBridge?.exoSeek?.(clamped);
+        setCurrentTime(clamped);
+        currentTimeRef.current = clamped;
+        return;
+      }
+
+      const localTarget = clamped - streamStartOffset;
+      const localBufferedEnd = Math.max(0, bufferedTime - streamStartOffset);
+      if (localTarget >= 0 && localTarget <= localBufferedEnd - 1.0) {
+        (window as any).AndroidPlayerBridge?.exoSeek?.(localTarget);
+        setCurrentTime(clamped);
+        currentTimeRef.current = clamped;
+        return;
+      }
+
+      // Restart remux/transcode stream cleanly from new server-side timestamp
+      setIsLoading(true);
+      setHasDecodedFrame(false);
       setCurrentTime(clamped);
       currentTimeRef.current = clamped;
+      setStreamStartOffset(Math.floor(clamped));
       return;
     }
 
@@ -1550,9 +1803,9 @@ export default function VideoPlayerModal({
         >
           {!isYouTube ? (
             <>
-              {!exoModeActive && (
+              {!canUseNativeExo && (
                 <video
-                  key={`${playableUrl}|${retryNonce}`}
+                  key={`${playableUrl}|${manualRetryNonce}`}
                   ref={videoRef}
                   src={playableUrl || undefined}
                   poster={!hasDecodedFrame && currentTime < 1.2 && posterUrl ? posterUrl : undefined}
@@ -1599,7 +1852,7 @@ export default function VideoPlayerModal({
               </h3>
 
               <p className="text-xs text-gray-300 mb-5 leading-relaxed">
-                Could not load this video stream right now. Please check your internet connection and try again.
+                {errorDetail || 'Could not load this video stream right now. Please check your internet connection and try again.'}
               </p>
 
               <div className="space-y-2.5">
@@ -1607,11 +1860,18 @@ export default function VideoPlayerModal({
                   type="button"
                   onClick={() => {
                     setError(null);
+                    setErrorDetail(null);
                     setIsLoading(true);
-                    setExoFailedFallback(false);
+                    setFallbackStage('level1_hw');
+                    fallbackStageRef.current = 'level1_hw';
+                    setPreferSoftwareDecoder(false);
+                    preferSoftwareRef.current = false;
+                    setSurfaceMode('texture');
+                    surfaceModeRef.current = 'texture';
                     setStreamFallbackMode('direct');
+                    streamFallbackModeRef.current = 'direct';
                     setUseLocalBridgeFallback(false);
-                    setRetryNonce((n) => n + 1);
+                    setManualRetryNonce((n) => n + 1);
                   }}
                   className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-black text-xs py-3 px-4 rounded-xl shadow-lg shadow-yellow-400/20 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 uppercase tracking-wider"
                 >

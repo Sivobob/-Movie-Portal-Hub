@@ -35,6 +35,8 @@ export interface ProbeMediaResult {
   durationSec: number;
   container: string;
   videoCodec: string;
+  videoProfile: string;
+  videoLevel: number;
   pixFmt: string;
   is10Bit: boolean;
   width: number;
@@ -342,6 +344,8 @@ function fallbackProbeFromMetadata(docInfo: TelegramDocInfo): ProbeMediaResult {
     durationSec: docInfo.durationSec || 0,
     container: isWebm ? 'webm' : isMkv ? 'matroska' : 'mp4',
     videoCodec: isRiskyCodec ? 'hevc' : 'h264',
+    videoProfile: isRiskyCodec ? 'main 10' : 'high',
+    videoLevel: 40,
     pixFmt: isRiskyCodec ? 'yuv420p10le' : 'yuv420p',
     is10Bit: isRiskyCodec,
     width: 0,
@@ -391,7 +395,7 @@ export async function probeTelegramMedia(
         console.warn('[Probe] ffprobe timed out, falling back to safe metadata heuristic');
         resolve(fallbackProbeFromMetadata(docInfo));
       }
-    }, 11000);
+    }, 14000);
 
     proc.stdout.on('data', (chunk: Buffer) => {
       stdout += chunk.toString('utf-8');
@@ -532,6 +536,8 @@ export async function probeTelegramMedia(
           durationSec,
           container,
           videoCodec,
+          videoProfile: profile,
+          videoLevel: level,
           pixFmt,
           is10Bit,
           width,

@@ -478,7 +478,11 @@ router.get('/stream-info', async (req: Request, res: Response) => {
       fileSize: entry.docInfo.fileSize,
       durationSec: probe.durationSec || entry.docInfo.durationSec || 0,
       recommendedMode: probe.recommendedMode,
+      container: probe.container,
       videoCodec: probe.videoCodec,
+      videoProfile: probe.videoProfile,
+      videoLevel: probe.videoLevel,
+      is10Bit: probe.is10Bit,
       pixFmt: probe.pixFmt,
       width: probe.width,
       height: probe.height,
@@ -492,6 +496,9 @@ router.get('/stream-info', async (req: Request, res: Response) => {
     return res.status(500).json({ error: err?.message || 'Failed to inspect media stream' });
   }
 });
+
+const MAX_CONCURRENT_FFMPEG = Math.max(1, Number(process.env.MAX_CONCURRENT_FFMPEG) || 4);
+const activeFfmpegProcs = new Set<ReturnType<typeof spawn>>();
 
 /**
  * GET/HEAD /api/telegram/stream & /api/stream
@@ -569,13 +576,18 @@ export async function handleStream(req: Request, res: Response) {
       }
 
       if (effectiveMode === 'remux' || effectiveMode === 'transcode') {
+        if (activeFfmpegProcs.size >= MAX_CONCURRENT_FFMPEG) {
+          console.warn(`[Stream] Active FFmpeg limit reached (${activeFfmpegProcs.size}/${MAX_CONCURRENT_FFMPEG})`);
+          return res.status(503).json({ error: 'Transcoding server is busy. Please retry in a moment.' });
+        }
+
         const localPort = process.env.INTERNAL_APP_PORT || process.env.APP_PORT || '3000';
         const localSourceUrl = `http://127.0.0.1:${localPort}/api/stream?url=${encodeURIComponent(urlParam)}&raw=1`;
 
         const ffArgs: string[] = [
-          '-probesize', '500000',
-          '-analyzeduration', '1000000',
-          '-fflags', '+genpts',
+          '-probesize', '2000000',
+          '-analyzeduration', '2000000',
+          '-fflags', '+genpts+discardcorrupt',
           '-reconnect', '1',
           '-reconnect_streamed', '1',
           '-reconnect_delay_max', '2',
@@ -594,19 +606,21 @@ export async function handleStream(req: Request, res: Response) {
 
         const selectedAudioTrack = probe.audioTracks[audioIdxParam] || probe.audioTracks[0];
         const selectedAudioCodec = selectedAudioTrack?.codec || probe.audioCodec || '';
-        const canCopyAudio = selectedAudioCodec === 'aac' || selectedAudioCodec === 'mp3';
+        const selectedChannels = selectedAudioTrack?.channels || 2;
+        const canCopyAudio =
+          (selectedAudioCodec === 'aac' || selectedAudioCodec === 'mp3') && selectedChannels <= 2;
 
         if (effectiveMode === 'remux') {
           ffArgs.push('-c:v', 'copy');
           if (canCopyAudio) {
             ffArgs.push('-c:a', 'copy');
           } else {
-            ffArgs.push('-c:a', 'aac', '-ac', '2', '-b:a', '192k');
+            ffArgs.push('-c:a', 'aac', '-ac', '2', '-ar', '48000', '-b:a', '192k');
           }
         } else {
-          // Universal H.264 Main 8-bit <=1080p Level 4.0 + AAC fragmented MP4 (100% Android & Chrome compatible)
+          // Universal H.264 Main 8-bit <=1080p Level 4.0 + AAC stereo fragmented MP4 (100% Android & Chrome compatible)
           ffArgs.push(
-            '-vf', "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p",
+            '-vf', "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
             '-c:v', 'libx264',
             '-preset', 'ultrafast',
             '-tune', 'zerolatency',
@@ -614,6 +628,9 @@ export async function handleStream(req: Request, res: Response) {
             '-pix_fmt', 'yuv420p',
             '-profile:v', 'main',
             '-level', '4.0',
+            '-color_primaries', 'bt709',
+            '-color_trc', 'bt709',
+            '-colorspace', 'bt709',
             '-vsync', 'cfr',
             '-crf', '23',
             '-maxrate', '3500k',
@@ -623,6 +640,7 @@ export async function handleStream(req: Request, res: Response) {
             '-sc_threshold', '0',
             '-c:a', 'aac',
             '-ac', '2',
+            '-ar', '48000',
             '-b:a', '160k'
           );
         }
@@ -635,40 +653,92 @@ export async function handleStream(req: Request, res: Response) {
           'pipe:1'
         );
 
-        res.writeHead(200, {
-          ...commonHeaders,
-          'Content-Type': 'video/mp4',
-        });
-        (res as any).flushHeaders?.();
-
         const ffProc = spawn('ffmpeg', ffArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+        activeFfmpegProcs.add(ffProc);
         let procClosed = false;
+        let headersCommitted = false;
+        let clientClosed = false;
+        let lastErrLine = '';
 
-        ffProc.stdout.pipe(res);
+        const killFf = () => {
+          clientClosed = true;
+          if (!procClosed) {
+            try {
+              ffProc.kill('SIGTERM');
+              setTimeout(() => {
+                if (!procClosed) {
+                  try { ffProc.kill('SIGKILL'); } catch {}
+                }
+              }, 500);
+            } catch {}
+          }
+        };
+
+        const startupTimer = setTimeout(() => {
+          if (!headersCommitted && !procClosed) {
+            console.warn(`[FFmpeg ${effectiveMode}] Startup timeout before first output byte`);
+            killFf();
+            if (!res.headersSent && !res.writableEnded) {
+              res.status(504).json({ error: 'Stream transcode startup timed out' });
+            }
+          }
+        }, 25000);
+
+        ffProc.stdout.on('data', (chunk: Buffer) => {
+          if (clientClosed || res.writableEnded) return;
+          if (!headersCommitted) {
+            headersCommitted = true;
+            clearTimeout(startupTimer);
+            res.writeHead(200, {
+              ...commonHeaders,
+              'Content-Type': 'video/mp4',
+            });
+            (res as any).flushHeaders?.();
+          }
+          const ok = res.write(chunk);
+          if (!ok) {
+            ffProc.stdout.pause();
+            res.once('drain', () => {
+              if (!procClosed && !clientClosed) ffProc.stdout.resume();
+            });
+          }
+        });
+
         ffProc.stderr.on('data', (chunk: Buffer) => {
-          const msg = chunk.toString();
-          if (msg.toLowerCase().includes('error')) {
-            console.warn(`[FFmpeg ${effectiveMode}]`, msg.trim());
+          const msg = chunk.toString().trim();
+          if (msg) {
+            lastErrLine = msg;
+            if (msg.toLowerCase().includes('error')) {
+              console.warn(`[FFmpeg ${effectiveMode}]`, msg);
+            }
           }
         });
 
         ffProc.on('error', (err) => {
-          console.error('[FFmpeg] Spawn error:', err.message);
-          if (!res.writableEnded) res.end();
-        });
-
-        ffProc.on('close', () => {
+          clearTimeout(startupTimer);
+          activeFfmpegProcs.delete(ffProc);
           procClosed = true;
-          if (!res.writableEnded) res.end();
+          console.error('[FFmpeg] Spawn error:', err.message);
+          if (!headersCommitted && !res.headersSent) {
+            res.status(502).json({ error: 'FFmpeg failed to start: ' + err.message });
+          } else if (!res.writableEnded) {
+            res.end();
+          }
         });
 
-        const killFf = () => {
-          if (!procClosed) {
-            try {
-              ffProc.kill('SIGKILL');
-            } catch {}
+        ffProc.on('close', (code) => {
+          clearTimeout(startupTimer);
+          activeFfmpegProcs.delete(ffProc);
+          procClosed = true;
+          if (!headersCommitted && !clientClosed && !res.headersSent) {
+            res.status(502).json({
+              error: `FFmpeg exited (${code}) before streaming${lastErrLine ? ': ' + lastErrLine.slice(-180) : ''}`,
+            });
+          } else if (!res.writableEnded) {
+            res.end();
           }
-        };
+        });
+
         req.on('close', killFf);
         res.on('close', killFf);
         res.on('error', killFf);

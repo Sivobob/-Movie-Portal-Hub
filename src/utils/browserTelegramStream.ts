@@ -3,6 +3,7 @@ import { TelegramClient, Api } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
 import bigInt from 'big-integer';
 import { parseTelegramUrl } from './telegramParser';
+import { inspectMediaHeaderBytes, LocalHeaderProbeResult } from './mediaHeaderParser';
 
 const TG_API_ID = 31425129;
 const TG_API_HASH = 'd1069176c0bd22479ffed449cb9b3d2a';
@@ -19,12 +20,17 @@ interface CachedBrowserMedia {
   document: Api.Document;
   fileSize: number;
   durationSec: number;
+  width: number;
+  height: number;
+  fileName: string;
+  rawMime: string;
   mimeType: string;
+  headerProbe?: LocalHeaderProbeResult;
   cachedAt: number;
 }
 
 const mediaCache = new Map<string, CachedBrowserMedia>();
-const MEDIA_CACHE_TTL_MS = 5 * 60 * 1000;
+const MEDIA_CACHE_TTL_MS = 10 * 60 * 1000;
 
 let browserClient: TelegramClient | null = null;
 let connectPromise: Promise<TelegramClient> | null = null;
@@ -242,7 +248,6 @@ async function resolveTelegramDocument(telegramUrl: string, allowRetry = true): 
     }
   }
 
-  // Fallback: scan recent messages in channel if direct ID query missed
   if (!foundMsg) {
     for (const peer of candidates) {
       if (foundMsg) break;
@@ -279,9 +284,14 @@ async function resolveTelegramDocument(telegramUrl: string, allowRetry = true): 
 
   const fileSize = Number(document.size);
   let durationSec = 0;
+  let width = 0;
+  let height = 0;
   const videoAttr = document.attributes.find((a) => a instanceof Api.DocumentAttributeVideo);
   if (videoAttr) {
-    durationSec = (videoAttr as Api.DocumentAttributeVideo).duration || 0;
+    const v = videoAttr as Api.DocumentAttributeVideo;
+    durationSec = v.duration || 0;
+    width = v.w || 0;
+    height = v.h || 0;
   }
 
   let fileName = '';
@@ -309,6 +319,10 @@ async function resolveTelegramDocument(telegramUrl: string, allowRetry = true): 
     document,
     fileSize,
     durationSec,
+    width,
+    height,
+    fileName,
+    rawMime,
     mimeType,
     cachedAt: Date.now(),
   };
@@ -387,6 +401,8 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
 
   const base = localBaseUrl.replace(/\/+$/, '');
   const abortedReqs = new Set<string>();
+  const activeReqIds = new Set<string>();
+  const localBlockCache = ((window as any).__tgBlockCache ||= new Map<string, Uint8Array>());
   const nativeBridge = () => (window as any).AndroidStreamBridge;
 
   const postBridge = async (path: string, body: BodyInit, contentType: string) => {
@@ -428,25 +444,97 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
     await postBridge(qs, '', 'text/plain');
   };
 
+  // Prefer raw binary HTTP loopback transfer (zero Base64 encoding on UI thread); fallback to JNI Base64 only if fetch fails
   const sendChunk = async (reqId: string, data: Uint8Array): Promise<number> => {
+    const copyForFetch = data.buffer.byteLength === data.byteLength && data.byteOffset === 0
+      ? data
+      : data.slice();
+    const status = await postBridge(
+      `/__bridge/chunk?id=${encodeURIComponent(reqId)}`,
+      copyForFetch as unknown as BodyInit,
+      'application/octet-stream'
+    );
+    if (status > 0) {
+      return status;
+    }
+
     const nb = nativeBridge();
     if (nb && typeof nb.postChunkBase64 === 'function') {
       try {
         return Number(nb.postChunkBase64(reqId, uint8ToBase64(data))) || 200;
       } catch {}
     }
+    return 0;
+  };
 
-    const status = await postBridge(
-      `/__bridge/chunk?id=${encodeURIComponent(reqId)}`,
-      data as unknown as BodyInit,
-      'application/octet-stream'
-    );
-    return status;
+  const BLOCK = 512 * 1024;
+
+  const fetchOneBlockWithRetry = async (
+    client: TelegramClient,
+    doc: Api.Document,
+    blockIdx: number
+  ): Promise<Uint8Array> => {
+    const cacheKey = `${doc.id.toString()}:${blockIdx}`;
+    const cached = localBlockCache.get(cacheKey);
+    if (cached) {
+      // LRU refresh
+      localBlockCache.delete(cacheKey);
+      localBlockCache.set(cacheKey, cached);
+      return cached;
+    }
+
+    let lastErr: any = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const fileLocation = new Api.InputDocumentFileLocation({
+          id: doc.id,
+          accessHash: doc.accessHash,
+          fileReference: doc.fileReference,
+          thumbSize: '',
+        });
+
+        let collected: Uint8Array | null = null;
+        for await (const chunk of client.iterDownload({
+          file: fileLocation,
+          offset: bigInt(blockIdx * BLOCK) as any,
+          requestSize: BLOCK,
+          dcId: (doc as any).dcId,
+          fileSize: doc.size,
+        })) {
+          collected = new Uint8Array(chunk);
+          break;
+        }
+        const result = collected || new Uint8Array(0);
+        if (result.length > 0) {
+          if (localBlockCache.size >= 96) {
+            const oldest = localBlockCache.keys().next().value;
+            if (oldest !== undefined) localBlockCache.delete(oldest);
+          }
+          localBlockCache.set(cacheKey, result);
+        }
+        return result;
+      } catch (err: any) {
+        lastErr = err;
+        if (String(err?.message || '').includes('FILE_REFERENCE')) {
+          throw err;
+        }
+        if (attempt < 2) {
+          await new Promise((r) => setTimeout(r, 350));
+        }
+      }
+    }
+    throw lastErr || new Error('Failed to fetch Telegram block');
   };
 
   (window as any).__tgStreamBridge = {
     abort(reqId: string) {
       abortedReqs.add(reqId);
+    },
+
+    abortAll() {
+      for (const id of activeReqIds) {
+        abortedReqs.add(id);
+      }
     },
 
     getCachedMeta(telegramUrl: string) {
@@ -456,8 +544,9 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
       if (!entry) return null;
       return {
         fileSize: entry.fileSize,
-        durationSec: entry.durationSec,
+        durationSec: entry.headerProbe?.durationSec || entry.durationSec,
         mimeType: entry.mimeType,
+        headerProbe: entry.headerProbe,
       };
     },
 
@@ -467,8 +556,11 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
         await sendMeta(reqId, {
           ok: true,
           fileSize: meta.fileSize,
-          durationSec: meta.durationSec,
+          durationSec: meta.headerProbe?.durationSec || meta.durationSec,
           mimeType: meta.mimeType,
+          fileName: meta.fileName,
+          width: meta.width,
+          height: meta.height,
         });
       } catch (err: any) {
         await sendMeta(reqId, {
@@ -478,48 +570,68 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
       }
     },
 
+    async resolveStreamInfo(reqId: string, telegramUrl: string) {
+      try {
+        const meta = await resolveTelegramDocument(telegramUrl);
+        if (!meta.headerProbe) {
+          try {
+            const client = await getBrowserTelegramClient();
+            const block0 = await fetchOneBlockWithRetry(client, meta.document, 0);
+            meta.headerProbe = inspectMediaHeaderBytes(
+              block0,
+              meta.fileName,
+              meta.rawMime,
+              meta.durationSec,
+              meta.width,
+              meta.height
+            );
+            if (meta.headerProbe.durationSec > 0 && meta.durationSec <= 0) {
+              meta.durationSec = meta.headerProbe.durationSec;
+            }
+          } catch {
+            meta.headerProbe = inspectMediaHeaderBytes(
+              new Uint8Array(0),
+              meta.fileName,
+              meta.rawMime,
+              meta.durationSec,
+              meta.width,
+              meta.height
+            );
+          }
+        }
+        const p = meta.headerProbe;
+        await sendMeta(reqId, {
+          ok: true,
+          status: 'ok',
+          isTelegram: true,
+          fileName: meta.fileName,
+          fileSize: meta.fileSize,
+          durationSec: p.durationSec || meta.durationSec || 0,
+          container: p.container,
+          videoCodec: p.videoCodec,
+          is10Bit: p.is10Bit,
+          width: p.width || meta.width,
+          height: p.height || meta.height,
+          audioCodec: p.audioCodec,
+          hasUnsupportedAudio: p.hasUnsupportedAudio,
+          probedByFfprobe: false,
+          mimeType: meta.mimeType,
+        });
+      } catch (err: any) {
+        await sendMeta(reqId, {
+          ok: false,
+          error: err?.message || 'Failed to inspect local Telegram stream',
+        });
+      }
+    },
+
     async pumpRange(reqId: string, telegramUrl: string, startByte: number, endByte: number) {
-      const BLOCK = 512 * 1024;
-      const CONCURRENCY = 2;
-      const localBlockCache = ((window as any).__tgBlockCache ||= new Map<string, Uint8Array>());
+      const CONCURRENCY = 4;
+      activeReqIds.add(reqId);
 
       try {
         let entry = await resolveTelegramDocument(telegramUrl);
         let client = await getBrowserTelegramClient();
-
-        const fetchOneBlock = async (doc: Api.Document, blockIdx: number): Promise<Uint8Array> => {
-          const cacheKey = `${doc.id.toString()}:${blockIdx}`;
-          const cached = localBlockCache.get(cacheKey);
-          if (cached) return cached;
-
-          const fileLocation = new Api.InputDocumentFileLocation({
-            id: doc.id,
-            accessHash: doc.accessHash,
-            fileReference: doc.fileReference,
-            thumbSize: '',
-          });
-
-          let collected: Uint8Array | null = null;
-          for await (const chunk of client.iterDownload({
-            file: fileLocation,
-            offset: bigInt(blockIdx * BLOCK) as any,
-            requestSize: BLOCK,
-            dcId: (doc as any).dcId,
-            fileSize: doc.size,
-          })) {
-            collected = new Uint8Array(chunk);
-            break;
-          }
-          const result = collected || new Uint8Array(0);
-          if (result.length > 0) {
-            if (localBlockCache.size >= 80) {
-              const oldest = localBlockCache.keys().next().value;
-              if (oldest !== undefined) localBlockCache.delete(oldest);
-            }
-            localBlockCache.set(cacheKey, result);
-          }
-          return result;
-        };
 
         const runPump = async (doc: Api.Document) => {
           const firstBlock = Math.floor(startByte / BLOCK);
@@ -532,7 +644,7 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
             while (nextQueue <= cap && !abortedReqs.has(reqId)) {
               const idx = nextQueue++;
               if (!pending.has(idx)) {
-                const p = fetchOneBlock(doc, idx);
+                const p = fetchOneBlockWithRetry(client, doc, idx);
                 p.catch(() => {});
                 pending.set(idx, p);
               }
@@ -541,14 +653,13 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
 
           for (let blockIdx = firstBlock; blockIdx <= lastBlock; blockIdx++) {
             if (abortedReqs.has(reqId)) break;
-            // Fetch the very first block solo so DC export authorization completes cleanly before pipelining
             if (blockIdx > firstBlock) {
               queueAhead(blockIdx + CONCURRENCY);
             } else {
               nextQueue = Math.max(nextQueue, firstBlock + 1);
             }
 
-            const blockData = await (pending.get(blockIdx) || fetchOneBlock(doc, blockIdx));
+            const blockData = await (pending.get(blockIdx) || fetchOneBlockWithRetry(client, doc, blockIdx));
             pending.delete(blockIdx);
 
             if (abortedReqs.has(reqId) || blockData.length === 0) break;
@@ -590,6 +701,7 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
       } catch (err: any) {
         await sendEnd(reqId, err?.message || 'stream_failed');
       } finally {
+        activeReqIds.delete(reqId);
         abortedReqs.delete(reqId);
       }
     },

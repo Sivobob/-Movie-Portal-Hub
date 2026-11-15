@@ -1,6 +1,6 @@
 export const LIVE_BACKEND_URL = 'https://ais-dev-6gly7u37gub42qcc23fd3k-828533060153.asia-northeast1.run.app';
 export const PRE_BACKEND_URL = 'https://ais-pre-6gly7u37gub42qcc23fd3k-828533060153.asia-northeast1.run.app';
-export const APP_VERSION = 'v3.5.208';
+export const APP_VERSION = 'v3.5.209';
 
 const ENV_BACKEND_URL = (
   (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_BASE_URL) ||
@@ -11,6 +11,7 @@ const ENV_BACKEND_URL = (
   .replace(/\/+$/, '');
 
 let resolvedNativeBackendUrl: string | null = null;
+let resolvedRemoteTranscodeUrl: string | null = null;
 let lastProbeTimestamp = 0;
 let inflightProbePromise: Promise<string | null> | null = null;
 let bridgeReadyPromise: Promise<void> | null = null;
@@ -41,6 +42,16 @@ export function isUsingLocalNativeBridge(): boolean {
   return /^https?:\/\/127\.0\.0\.1:\d+/i.test(base);
 }
 
+export function hasRemoteTranscodeBackend(): boolean {
+  if (!isNativeAppRuntime()) return true;
+  return Boolean(resolvedRemoteTranscodeUrl);
+}
+
+export function getRemoteTranscodeBackendUrl(): string {
+  if (!isNativeAppRuntime()) return '';
+  return resolvedRemoteTranscodeUrl || '';
+}
+
 export function forceUseLocalNativeBridge(): string {
   const localUrl = getNativeLocalBridgeUrl();
   if (localUrl) {
@@ -48,6 +59,16 @@ export function forceUseLocalNativeBridge(): string {
     lastProbeTimestamp = Date.now();
   }
   return localUrl;
+}
+
+export function abortLocalBridgeStreams(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    (window as any).AndroidStreamBridge?.abortAllStreams?.();
+  } catch {}
+  try {
+    (window as any).__tgStreamBridge?.abortAll?.();
+  } catch {}
 }
 
 export async function ensureAndroidStreamBridge(): Promise<string> {
@@ -91,13 +112,19 @@ export function getApiBaseUrl(): string {
     return '';
   }
 
-  // 3. For Native APK: prefer build-time public backend, probed reachable backend, or local Android bridge
-  return ENV_BACKEND_URL || resolvedNativeBackendUrl || getNativeLocalBridgeUrl() || LIVE_BACKEND_URL;
+  // 3. For Native APK: prefer build-time/probed healthy public backend, else built-in Android local bridge
+  return resolvedRemoteTranscodeUrl || ENV_BACKEND_URL || resolvedNativeBackendUrl || getNativeLocalBridgeUrl() || '';
 }
 
-async function isBackendHealthy(baseUrl: string, timeoutMs = 2000): Promise<boolean> {
+interface HealthCheckResult {
+  ok: boolean;
+  transcodeSupported: boolean;
+}
+
+async function checkBackendHealth(baseUrl: string, timeoutMs = 2000): Promise<HealthCheckResult> {
   const target = baseUrl.replace(/\/+$/, '');
-  const healthUrl = target ? `${target}/api/health` : '/api/health';
+  if (!target) return { ok: false, transcodeSupported: false };
+  const healthUrl = `${target}/api/health`;
 
   try {
     const controller = new AbortController();
@@ -110,23 +137,50 @@ async function isBackendHealthy(baseUrl: string, timeoutMs = 2000): Promise<bool
     clearTimeout(timer);
 
     if (res.redirected && /aistudio\.google\.com|__cookie_check|accounts\.google/i.test(res.url)) {
-      return false;
+      return { ok: false, transcodeSupported: false };
     }
 
     const ct = (res.headers.get('content-type') || '').toLowerCase();
     if (!res.ok || !ct.includes('application/json')) {
-      return false;
+      return { ok: false, transcodeSupported: false };
     }
 
     const data = await res.json().catch(() => null);
-    return Boolean(data && data.status === 'ok');
+    if (!data || data.status !== 'ok') {
+      return { ok: false, transcodeSupported: false };
+    }
+    const transcodeSupported =
+      data.transcodeSupported === true ||
+      (data.ffmpegAvailable === true && data.ffprobeAvailable === true && data.telegramConfigured !== false) ||
+      (data.ffmpegAvailable === undefined && data.status === 'ok');
+    return { ok: true, transcodeSupported };
   } catch {
-    return false;
+    return { ok: false, transcodeSupported: false };
+  }
+}
+
+async function fetchFirestoreConfiguredBackendUrl(): Promise<string> {
+  try {
+    const [{ doc, getDoc }, { db }] = await Promise.all([
+      import('firebase/firestore'),
+      import('../firebase'),
+    ]);
+    const controllerTimeout = new Promise<string>((resolve) => setTimeout(() => resolve(''), 1400));
+    const readDoc = getDoc(doc(db, 'app_config', 'backend'))
+      .then((snap) => {
+        if (!snap.exists()) return '';
+        const d: any = snap.data();
+        const url = String(d?.backendUrl || d?.apiBaseUrl || d?.url || '').trim().replace(/\/+$/, '');
+        return /^https?:\/\//i.test(url) ? url : '';
+      })
+      .catch(() => '');
+    return await Promise.race([readDoc, controllerTimeout]);
+  } catch {
+    return '';
   }
 }
 
 export async function probeWorkingBackendUrl(force = false): Promise<string | null> {
-  // Always make sure local Android bridge is initialized & pre-warmed in parallel
   const bridgeInitPromise = ensureAndroidStreamBridge().catch(() => '');
 
   if (
@@ -148,25 +202,30 @@ export async function probeWorkingBackendUrl(force = false): Promise<string | nu
       custom = (localStorage.getItem('movie_portal_backend_url') || '').trim().replace(/\/+$/, '');
     } catch {}
 
+    const firestoreBackendUrl = await fetchFirestoreConfiguredBackendUrl();
+
     const remoteCandidates = Array.from(
-      new Set([custom, ENV_BACKEND_URL, PRE_BACKEND_URL, LIVE_BACKEND_URL].filter(Boolean))
+      new Set([custom, ENV_BACKEND_URL, firestoreBackendUrl, PRE_BACKEND_URL, LIVE_BACKEND_URL].filter(Boolean))
     );
 
     if (remoteCandidates.length > 0) {
       const checks = await Promise.all(
         remoteCandidates.map(async (candidate) => ({
           candidate,
-          ok: await isBackendHealthy(candidate, 1500),
+          ...(await checkBackendHealth(candidate, 2000)),
         }))
       );
       const firstHealthy = checks.find((c) => c.ok);
       if (firstHealthy) {
         resolvedNativeBackendUrl = firstHealthy.candidate;
+        resolvedRemoteTranscodeUrl = firstHealthy.transcodeSupported ? firstHealthy.candidate : null;
         lastProbeTimestamp = Date.now();
         await bridgeInitPromise;
         return firstHealthy.candidate;
       }
     }
+
+    resolvedRemoteTranscodeUrl = null;
 
     // Fallback on native Android APK: use built-in in-app localhost streaming bridge
     const localBridgeUrl = await bridgeInitPromise;

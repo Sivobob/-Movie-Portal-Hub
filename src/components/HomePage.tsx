@@ -934,7 +934,7 @@ export default function HomePage() {
             Boolean(playingMovie.movie?.seasons) &&
             (playingMovie.seasonIndex > 0 || playingMovie.episodeIndex > 0)
           }
-          initialDuration={playingMovie.movie?.duration}
+          initialDuration={playingMovie.movie?.seasons ? undefined : playingMovie.movie?.duration}
           onNextEpisode={() => {
             const m = playingMovie.movie;
             const sIdx = playingMovie.seasonIndex;

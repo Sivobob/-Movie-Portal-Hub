@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Tv, Wifi, CheckCircle2, RefreshCw, ShieldCheck, Play, Pause } from 'lucide-react';
-import { LIVE_BACKEND_URL } from '../utils/apiConfig';
+import { getApiBaseUrl, getRemoteTranscodeBackendUrl } from '../utils/apiConfig';
 
 interface TVCastModalProps {
   isOpen: boolean;
@@ -37,11 +37,24 @@ export default function TVCastModal({
   // Helper to resolve a public HTTPS video stream URL for TV receivers
   const getCastTargetUrl = (sourceUrl: string): string => {
     if (!sourceUrl) return '';
-    let target = sourceUrl.trim();
+    const target = sourceUrl.trim();
     if (target.startsWith('/') || target.includes('127.0.0.1') || target.includes('localhost')) {
       const queryIdx = target.indexOf('?');
       const query = queryIdx >= 0 ? target.substring(queryIdx) : '';
-      return `${LIVE_BACKEND_URL}/api/stream${query}`;
+      const activeBase = getApiBaseUrl();
+      const remoteBase =
+        getRemoteTranscodeBackendUrl() ||
+        (activeBase && !/127\.0\.0\.1|localhost/i.test(activeBase) ? activeBase : '');
+      if (remoteBase) {
+        return `${remoteBase}/api/stream${query}`;
+      }
+      if (
+        typeof window !== 'undefined' &&
+        /^https?:\/\//i.test(window.location.origin) &&
+        !/localhost|127\.0\.0\.1/i.test(window.location.hostname)
+      ) {
+        return `${window.location.origin}/api/stream${query}`;
+      }
     }
     return target;
   };

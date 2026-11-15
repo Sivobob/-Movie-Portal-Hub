@@ -8,10 +8,24 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, '.env') });
 
 import express from 'express';
+import { spawnSync } from 'child_process';
 import metadataRouter from './src/server/metadataRouter.ts';
 import telegramRouter, { handleStream } from './src/server/telegramRouter.ts';
 import videoRouter from './src/server/videoRouter.ts';
 import downloadCastRouter from './src/server/downloadCastRouter.ts';
+import { getTelegramCredentials } from './src/utils/telegramClient.ts';
+
+function checkBinaryAvailable(bin: string): boolean {
+  try {
+    const res = spawnSync(bin, ['-version'], { stdio: 'ignore', timeout: 3000 });
+    return res.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+const FFMPEG_AVAILABLE = checkBinaryAvailable('ffmpeg');
+const FFPROBE_AVAILABLE = checkBinaryAvailable('ffprobe');
 
 const app = express();
 // In AI Studio container environment, port 3000 is required for the application.
@@ -46,7 +60,7 @@ app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, HEAD');
   res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Range');
   res.setHeader('Access-Control-Allow-Private-Network', 'true');
-  res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length, X-Video-Duration, Content-Type');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length, X-Video-Duration, X-Stream-Mode, Content-Type');
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
   }
@@ -63,14 +77,26 @@ app.use('/api', (req, res, next) => {
 
 // API Routes
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', time: new Date().toISOString() });
+  const creds = getTelegramCredentials();
+  const telegramConfigured = Boolean(creds.apiId && creds.apiHash && (creds.botToken || creds.sessionStr));
+  res.json({
+    status: 'ok',
+    time: new Date().toISOString(),
+    version: '3.5.209',
+    ffmpegAvailable: FFMPEG_AVAILABLE,
+    ffprobeAvailable: FFPROBE_AVAILABLE,
+    telegramConfigured,
+    transcodeSupported: FFMPEG_AVAILABLE && FFPROBE_AVAILABLE && telegramConfigured,
+  });
 });
 
 app.get('/api/debug-env', (req, res) => {
   res.json({
     nodeEnv: process.env.NODE_ENV,
     hasGeminiKey: !!process.env.GEMINI_API_KEY,
-    projectId: process.env.FIREBASE_PROJECT_ID || 'not set in env'
+    projectId: process.env.FIREBASE_PROJECT_ID || 'not set in env',
+    ffmpegAvailable: FFMPEG_AVAILABLE,
+    ffprobeAvailable: FFPROBE_AVAILABLE,
   });
 });
 
