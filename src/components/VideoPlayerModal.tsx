@@ -96,6 +96,8 @@ export default function VideoPlayerModal({
   hasNext,
   hasPrev,
   initialDuration = 0,
+  initialTime = 0,
+  onProgress,
 }: VideoPlayerModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -546,8 +548,8 @@ export default function VideoPlayerModal({
       // Apply saved resume position upfront when opening in remux/transcode or native direct
       if (episodeResumeKey) {
         try {
-          const savedPos = parseFloat(localStorage.getItem(`resume_pos_${episodeResumeKey}`) || '0');
-          if (savedPos > 15 && (!probedDuration || savedPos < probedDuration - 45)) {
+          const savedPos = initialTime > 0 ? initialTime : parseFloat(localStorage.getItem(`resume_pos_${episodeResumeKey}`) || '0');
+          if (savedPos > 5 && (!probedDuration || savedPos < probedDuration - 20)) {
             if (chosenMode !== 'direct') {
               initialStart = Math.floor(savedPos);
             } else {
@@ -994,16 +996,21 @@ export default function VideoPlayerModal({
         if (typeof st.bufferedPosition === 'number') {
           setBufferedTime(effectiveBuffered);
         }
-        if (streamFallbackModeRef.current === 'direct' && typeof st.duration === 'number' && st.duration > 0 && isFinite(st.duration)) {
-          setDuration(st.duration);
-          durationRef.current = st.duration;
-          knownDurationRef.current = st.duration;
+        if (typeof st.duration === 'number' && st.duration > 0 && isFinite(st.duration)) {
+          if (st.duration !== durationRef.current) {
+            setDuration(st.duration);
+            durationRef.current = st.duration;
+            knownDurationRef.current = st.duration;
+          }
         }
 
-        if (effectiveTime > 10 && episodeResumeKey) {
-          try {
-            localStorage.setItem(`resume_pos_${episodeResumeKey}`, String(effectiveTime));
-          } catch {}
+        if (effectiveTime > 1) {
+          onProgress?.(effectiveTime, durationRef.current);
+          if (effectiveTime > 10 && episodeResumeKey) {
+            try {
+              localStorage.setItem(`resume_pos_${episodeResumeKey}`, String(effectiveTime));
+            } catch {}
+          }
         }
 
         if (Array.isArray(st.audioTracks) && st.audioTracks.length > 0) {
@@ -1135,10 +1142,19 @@ export default function VideoPlayerModal({
         }
       }
 
-      if (effectiveTime > 10 && episodeResumeKey) {
-        try {
-          localStorage.setItem(`resume_pos_${episodeResumeKey}`, effectiveTime.toString());
-        } catch (e) {}
+      if (video.duration && isFinite(video.duration) && video.duration > 0 && video.duration !== durationRef.current) {
+        setDuration(video.duration);
+        durationRef.current = video.duration;
+        knownDurationRef.current = video.duration;
+      }
+
+      if (effectiveTime > 1) {
+        onProgress?.(effectiveTime, durationRef.current);
+        if (effectiveTime > 10 && episodeResumeKey) {
+          try {
+            localStorage.setItem(`resume_pos_${episodeResumeKey}`, effectiveTime.toString());
+          } catch (e) {}
+        }
       }
 
       if (video.buffered.length > 0) {
@@ -1419,7 +1435,7 @@ export default function VideoPlayerModal({
       video.removeEventListener('error', onError);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [playableUrl, isYouTube, exoModeActive, episodeResumeKey, streamFallbackMode, streamStartOffset, manualRetryNonce]);
+  }, [playableUrl, isYouTube, exoModeActive, episodeResumeKey, streamFallbackMode, manualRetryNonce]);
 
   // Keyboard shortcut listener (Space = play/pause, Left/Right = skip, Escape = close)
   useEffect(() => {
@@ -1484,7 +1500,7 @@ export default function VideoPlayerModal({
     }
   };
 
-  // Helper: commit seek to targetTime (handles ExoPlayer, direct HTTP Range, & FFmpeg seek)
+  // Helper: commit seek to targetTime (handles ExoPlayer and HTML5 video seek directly without restarting)
   const commitSeek = (targetTime: number) => {
     const maxDur = durationRef.current || knownDurationRef.current || 0;
     const clamped = maxDur > 0 ? Math.max(0, Math.min(maxDur, targetTime)) : Math.max(0, targetTime);
@@ -1494,60 +1510,26 @@ export default function VideoPlayerModal({
     isDraggingSeekRef.current = false;
 
     if (exoModeActive) {
-      if (streamFallbackMode === 'direct') {
+      try {
         (window as any).AndroidPlayerBridge?.exoSeek?.(clamped);
-        setCurrentTime(clamped);
-        currentTimeRef.current = clamped;
-        return;
+      } catch (e) {
+        console.warn('Exo seek error:', e);
       }
-
-      const localTarget = clamped - streamStartOffset;
-      const localBufferedEnd = Math.max(0, bufferedTime - streamStartOffset);
-      if (localTarget >= 0 && localTarget <= localBufferedEnd - 1.0) {
-        (window as any).AndroidPlayerBridge?.exoSeek?.(localTarget);
-        setCurrentTime(clamped);
-        currentTimeRef.current = clamped;
-        return;
-      }
-
-      // Restart remux/transcode stream cleanly from new server-side timestamp
-      setIsLoading(true);
-      setHasDecodedFrame(false);
       setCurrentTime(clamped);
       currentTimeRef.current = clamped;
-      setStreamStartOffset(Math.floor(clamped));
       return;
     }
 
     const vid = videoRef.current;
     if (!vid) return;
 
-    if (streamFallbackMode === 'direct') {
+    try {
       vid.currentTime = clamped;
-      setCurrentTime(clamped);
-      currentTimeRef.current = clamped;
-      return;
+    } catch (e) {
+      console.warn('HTML5 seek error:', e);
     }
-
-    // In remux/transcode mode: check if target is ALREADY buffered inside <video> to avoid restarting FFmpeg
-    const localTarget = clamped - streamStartOffset;
-    if (localTarget >= 0 && vid.buffered.length > 0) {
-      for (let i = 0; i < vid.buffered.length; i++) {
-        if (localTarget >= vid.buffered.start(i) && localTarget <= vid.buffered.end(i) - 0.5) {
-          vid.currentTime = localTarget;
-          setCurrentTime(clamped);
-          currentTimeRef.current = clamped;
-          return;
-        }
-      }
-    }
-
-    // Otherwise restart stream seamlessly at exact timestamp via FFmpeg -ss
-    setIsLoading(true);
-    setHasDecodedFrame(false);
     setCurrentTime(clamped);
     currentTimeRef.current = clamped;
-    setStreamStartOffset(Math.floor(clamped));
   };
 
   // Real 10-Second Skip Control
@@ -1793,14 +1775,13 @@ export default function VideoPlayerModal({
     }
   };
 
-  // Format Time into hh:mm:ss or mm:ss
+  // Format Time into hh:mm:ss (e.g. 02:00:00 with proper zero padding)
   const formatTime = (secs: number) => {
-    if (isNaN(secs) || !isFinite(secs) || secs < 0) return '00:00';
+    if (isNaN(secs) || !isFinite(secs) || secs < 0) return '00:00:00';
     const hrs = Math.floor(secs / 3600);
     const mins = Math.floor((secs % 3600) / 60);
     const s = Math.floor(secs % 60);
-    if (hrs > 0) return `${hrs}:${mins.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-    return `${mins.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
   const modalMarkup = (

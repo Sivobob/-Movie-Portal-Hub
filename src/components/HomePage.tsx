@@ -7,6 +7,7 @@ import { Capacitor } from '@capacitor/core';
 import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import VideoPlayerModal from './VideoPlayerModal';
+import MovieDetailsModal from './MovieDetailsModal';
 import { useAuth } from '../context/AuthContext';
 import {
   fetchWatchHistory,
@@ -408,30 +409,52 @@ export default function HomePage() {
     } catch (e) {}
   };
 
-  const handleWatchNow = (movie: any) => {
+  const handleWatchNow = (
+    movie: any,
+    seasonIndex = 0,
+    episodeIndex = 0,
+    audioLanguage?: string
+  ) => {
     try {
       window.history.pushState({ appModal: 'player' }, '');
     } catch (e) {}
 
     const uid = user?.uid || 'guest_user';
-    saveWatchProgress(uid, movie, 0, movie.duration || 100).catch(() => {});
+    const resumeTime = movie.currentTime || 0;
+    saveWatchProgress(uid, movie, resumeTime, movie.duration || 100).catch(() => {});
 
-    if (movie.seasons && movie.seasons.length > 0 && movie.seasons[0].episodes?.length > 0 && movie.seasons[0].episodes[0].streamUrl) {
-      const ep = movie.seasons[0].episodes[0];
-      setPlayingMovie({
-        title: `${movie.title} - S01E01: ${ep.title}`,
-        streamingUrl: ep.streamUrl.trim(),
-        displayCategory: movie.displayCategory,
-        posterUrl: movie.posterUrl,
-        movie: movie,
-        seasonIndex: 0,
-        episodeIndex: 0,
-      });
-    } else if (movie.streamingUrl) {
+    if (movie.seasons && movie.seasons.length > 0) {
+      const sIdx = Math.max(0, Math.min(seasonIndex, movie.seasons.length - 1));
+      const season = movie.seasons[sIdx];
+      const episodes = season?.episodes || [];
+      const eIdx = Math.max(0, Math.min(episodeIndex, episodes.length - 1));
+      const ep = episodes[eIdx];
+
+      if (ep && ep.streamUrl) {
+        setPlayingMovie({
+          title: `${movie.title} - S0${season.seasonNumber || sIdx + 1}E0${ep.episodeNumber || eIdx + 1}: ${ep.title}`,
+          streamingUrl: ep.streamUrl.trim(),
+          displayCategory: movie.displayCategory,
+          posterUrl: movie.posterUrl,
+          movie: movie,
+          seasonIndex: sIdx,
+          episodeIndex: eIdx,
+          language: audioLanguage || movie.language,
+          currentTime: resumeTime,
+        });
+        setSelectedMovie(null);
+        return;
+      }
+    }
+
+    if (movie.streamingUrl) {
       setPlayingMovie({
         ...movie,
         streamingUrl: movie.streamingUrl.trim(),
+        language: audioLanguage || movie.language,
+        currentTime: resumeTime,
       });
+      setSelectedMovie(null);
     } else {
       setSelectedMovie(movie);
     }
@@ -969,148 +992,19 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Movie Details Modal */}
+      {/* Movie & Series Details Page Matching Reference Screenshot */}
       {selectedMovie && (
-        <div
-          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200"
-          onClick={() => setSelectedMovie(null)}
-        >
-          <div
-            className="bg-neutral-900 rounded-[24px] sm:rounded-[28px] max-w-[min(92vw,370px)] w-full max-h-[88dvh] flex flex-col overflow-hidden shadow-2xl relative border border-neutral-800/60 text-white"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              type="button"
-              onClick={() => setSelectedMovie(null)}
-              className="absolute top-3 right-3 z-30 bg-black/80 hover:bg-black text-white p-2 rounded-full backdrop-blur-md border border-white/20 shadow-lg cursor-pointer transition-transform hover:scale-110"
-              aria-label="Close"
-            >
-              <X size={18} />
-            </button>
-
-            <div
-              onClick={() => {
-                handleWatchNow(selectedMovie);
-                setSelectedMovie(null);
-              }}
-              className="relative w-full aspect-[3/4] max-h-[40dvh] bg-neutral-950 overflow-hidden cursor-pointer group flex-shrink-0"
-            >
-              <img
-                src={upgradePosterUrl(selectedMovie.posterUrl || selectedMovie.backdropUrl, 1080) || selectedMovie.posterUrl || selectedMovie.backdropUrl}
-                alt={selectedMovie.title}
-                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-              />
-
-              {getVisibleQualityBadge(selectedMovie) && (
-                <div className="absolute top-3.5 left-3.5 z-10">
-                  <span className="bg-black/90 text-red-500 font-black text-xs px-2.5 py-1 rounded-md border border-red-500/30 shadow-md tracking-wider uppercase">
-                    {getVisibleQualityBadge(selectedMovie)}
-                  </span>
-                </div>
-              )}
-
-              <div className="absolute bottom-4 right-4 z-20">
-                <div className="w-16 h-16 rounded-full bg-red-600 flex items-center justify-center shadow-2xl scale-90 group-hover:scale-100 transition-transform">
-                  <Play size={24} fill="white" className="ml-1" />
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-neutral-900 p-4 sm:p-5 pb-5 rounded-b-[24px] sm:rounded-b-[28px] overflow-y-auto overscroll-contain flex-1 min-h-0">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-lg font-black text-white tracking-tight leading-snug uppercase">
-                  {selectedMovie.title}
-                </h3>
-                <button
-                  type="button"
-                  onClick={(e) => toggleMyList(e, selectedMovie)}
-                  className="px-3 py-1.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-xs font-bold text-white flex items-center gap-1.5 cursor-pointer"
-                >
-                  {myListIds.has(selectedMovie.id || selectedMovie.imdbId) ? (
-                    <>
-                      <Check size={14} className="text-red-500 stroke-[3]" />
-                      <span>Saved</span>
-                    </>
-                  ) : (
-                    <>
-                      <Plus size={14} />
-                      <span>My List</span>
-                    </>
-                  )}
-                </button>
-              </div>
-
-              <p className="text-xs font-semibold text-gray-400 mb-3">
-                {selectedMovie.genre || selectedMovie.displayCategory || 'Movie'}
-              </p>
-
-              {selectedMovie.description ? (
-                <div className="text-xs text-gray-300 leading-relaxed max-h-28 overflow-y-auto px-1 mb-3">
-                  {selectedMovie.description}
-                </div>
-              ) : (
-                <p className="text-xs text-gray-500 italic mb-3">No description available.</p>
-              )}
-
-              {/* Seasons & Episodes for Series */}
-              {selectedMovie.seasons && selectedMovie.seasons.length > 0 && (
-                <div className="mt-4 pt-3.5 border-t border-neutral-800 space-y-2.5">
-                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-                    {selectedMovie.seasons.map((season: any, sIdx: number) => (
-                      <button
-                        key={sIdx}
-                        type="button"
-                        onClick={() => setActiveSeasonIndex(sIdx)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex-shrink-0 ${
-                          activeSeasonIndex === sIdx
-                            ? 'bg-red-600 text-white shadow'
-                            : 'bg-neutral-800 text-gray-300 hover:bg-neutral-700'
-                        }`}
-                      >
-                        Season {season.seasonNumber}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
-                    {selectedMovie.seasons[activeSeasonIndex]?.episodes?.map((ep: any, eIdx: number) => (
-                      <div
-                        key={eIdx}
-                        onClick={() => {
-                          if (!ep.streamUrl) {
-                            showToast('Streaming link for this episode is not available yet.');
-                            return;
-                          }
-                          setPlayingMovie({
-                            title: `${selectedMovie.title} - S0${selectedMovie.seasons[activeSeasonIndex].seasonNumber}E0${ep.episodeNumber}: ${ep.title}`,
-                            streamingUrl: ep.streamUrl,
-                            displayCategory: selectedMovie.displayCategory,
-                            posterUrl: selectedMovie.posterUrl,
-                            movie: selectedMovie,
-                            seasonIndex: activeSeasonIndex,
-                            episodeIndex: eIdx,
-                          });
-                          setSelectedMovie(null);
-                        }}
-                        className="flex items-center gap-2 bg-neutral-950 hover:bg-neutral-800 border border-neutral-800 p-2.5 rounded-lg transition-colors cursor-pointer group"
-                      >
-                        <div className="w-6 h-6 rounded bg-red-600 text-white flex items-center justify-center font-bold text-[11px] flex-shrink-0">
-                          {ep.episodeNumber}
-                        </div>
-                        <div className="flex-grow min-w-0 text-left">
-                          <h4 className="text-xs font-bold text-white truncate">{ep.title}</h4>
-                        </div>
-                        <div className="w-6 h-6 rounded-full bg-red-600 flex items-center justify-center flex-shrink-0">
-                          <Play size={12} fill="white" className="ml-0.5" />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        <MovieDetailsModal
+          isOpen={Boolean(selectedMovie)}
+          movie={selectedMovie}
+          onClose={() => setSelectedMovie(null)}
+          onWatchNow={(m, sIdx, eIdx, lang) => handleWatchNow(m, sIdx, eIdx, lang)}
+          allMovies={movies}
+          userId={user?.uid || 'guest_user'}
+          isSavedInMyList={Boolean(selectedMovie && myListIds.has(selectedMovie.id || selectedMovie.imdbId))}
+          onToggleMyList={(m) => toggleMyList({ stopPropagation: () => {} } as any, m)}
+          onSelectMovie={(m) => setSelectedMovie(m)}
+        />
       )}
 
       {/* In-App Video Player Modal */}
@@ -1127,6 +1021,12 @@ export default function HomePage() {
           seasonIndex={playingMovie.seasonIndex ?? 0}
           episodeIndex={playingMovie.episodeIndex ?? 0}
           language={playingMovie.language || playingMovie.movie?.language}
+          initialTime={playingMovie.currentTime || 0}
+          onProgress={(curr, dur) => {
+            const uid = user?.uid || 'guest_user';
+            const m = playingMovie.movie || playingMovie;
+            saveWatchProgress(uid, m, curr, dur).catch(() => {});
+          }}
         />
       )}
     </div>

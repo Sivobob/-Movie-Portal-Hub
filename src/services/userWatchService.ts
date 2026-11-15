@@ -1,4 +1,4 @@
-import { collection, doc, getDocs, setDoc, deleteDoc, serverTimestamp, query, orderBy } from 'firebase/firestore';
+import { collection, doc, getDocs, getDoc, setDoc, deleteDoc, addDoc, serverTimestamp, query, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 
 export interface WatchHistoryItem {
@@ -162,3 +162,73 @@ export async function fetchMyList(userId: string): Promise<MyListItem[]> {
     return [];
   }
 }
+
+export async function saveUserRating(userId: string, movieId: string, rating: number) {
+  if (!userId || !movieId) return;
+  const payload = {
+    movieId,
+    rating,
+    updatedAt: serverTimestamp(),
+  };
+
+  try {
+    const ref = doc(db, 'users', userId, 'ratings', movieId);
+    await setDoc(ref, payload, { merge: true });
+  } catch (e) {
+    console.warn('Failed to save rating to Firestore:', e);
+  }
+
+  try {
+    localStorage.setItem(`movie_rating_${userId}_${movieId}`, String(rating));
+  } catch (e) {}
+}
+
+export async function getUserRating(userId: string, movieId: string): Promise<number | null> {
+  if (!userId || !movieId) return null;
+  try {
+    const ref = doc(db, 'users', userId, 'ratings', movieId);
+    const snap = await getDoc(ref);
+    if (snap.exists()) {
+      return (snap.data() as any).rating ?? null;
+    }
+  } catch (e) {
+    console.warn('Failed to load rating from Firestore:', e);
+  }
+
+  try {
+    const val = localStorage.getItem(`movie_rating_${userId}_${movieId}`);
+    return val ? Number(val) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+export async function submitContentReport(
+  userId: string,
+  reportData: {
+    movieId: string;
+    movieTitle: string;
+    reason: string;
+    details?: string;
+  }
+) {
+  const payload = {
+    ...reportData,
+    userId: userId || 'anonymous',
+    createdAt: serverTimestamp(),
+    status: 'pending',
+  };
+
+  try {
+    await addDoc(collection(db, 'reports'), payload);
+  } catch (e) {
+    console.warn('Failed to submit report to Firestore:', e);
+  }
+
+  try {
+    const existing = JSON.parse(localStorage.getItem('movie_portal_reports') || '[]');
+    existing.unshift({ ...payload, createdAt: new Date().toISOString() });
+    localStorage.setItem('movie_portal_reports', JSON.stringify(existing.slice(0, 30)));
+  } catch (e) {}
+}
+

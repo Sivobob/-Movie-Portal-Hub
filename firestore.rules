@@ -31,5 +31,10 @@ service cloud.firestore {
     match /users/{userId}/{document=**} {
       allow read, write: if true;
     }
+
+    // Content reports submitted by users
+    match /reports/{reportId} {
+      allow read, write: if true;
+    }
   }
 }
