@@ -124,7 +124,7 @@ export function useAppUpdate() {
       })
       .catch(() => {});
 
-    const interval = setInterval(checkUpdate, 5 * 60 * 1000);
+    const interval = setInterval(checkUpdate, 60 * 1000);
 
     return () => {
       isMounted = false;

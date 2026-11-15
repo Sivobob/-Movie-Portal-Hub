@@ -541,7 +541,7 @@ export default function HomePage() {
       )}
 
       {category ? (
-        <div className="flex-grow pt-3">
+        <div className="flex-grow pt-[max(3.75rem,calc(env(safe-area-inset-top)+3rem))]">
           <div className="flex items-center justify-between px-3 sm:px-4 mb-3">
             <div className="flex items-baseline gap-2.5">
               <h2 className="text-red-500 font-black text-lg tracking-wide uppercase">{category}</h2>
@@ -551,56 +551,58 @@ export default function HomePage() {
                   : `${categoryMovies.length} ${category === 'Series' ? 'titles' : 'movies'}`}
               </span>
             </div>
-            {/* Folder Search Toggle Button */}
-            {isFolderSearchSupported && !isFolderSearchOpen && (
+          </div>
+
+          {/* Floating Bottom-Right Search Icon & Expandable Bar (ONLY for Bollywood, Hollywood, Series) */}
+          {isFolderSearchSupported && !selectedMovie && !playingMovie && (
+            !isFolderSearchOpen ? (
               <button
                 type="button"
                 onClick={() => setIsFolderSearchOpen(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-neutral-900 border border-neutral-800 text-xs font-bold text-gray-300 hover:text-white cursor-pointer transition-all"
+                className="fixed right-4 bottom-[calc(5.25rem+env(safe-area-inset-bottom))] z-40 w-12 h-12 rounded-full bg-red-600 hover:bg-red-500 text-white shadow-[0_6px_24px_rgba(229,9,20,0.55)] border border-white/20 flex items-center justify-center transition-transform active:scale-90 cursor-pointer"
+                aria-label={`Search ${category}`}
+                title={`Search ${category}`}
               >
-                <Search size={14} className="text-red-500" />
-                <span>Search {category}</span>
+                <Search size={21} className="stroke-[2.5]" />
               </button>
-            )}
-          </div>
-
-          {/* Folder-Scoped Search Bar (Bollywood, Hollywood, Series) */}
-          {isFolderSearchSupported && isFolderSearchOpen && (
-            <div className="px-3 sm:px-4 mb-4">
-              <div className="flex items-center gap-2.5 bg-neutral-900 border border-red-600/60 focus-within:border-red-600 rounded-2xl px-3.5 py-2.5 shadow-lg shadow-black/40">
-                <Search size={18} className="text-red-500 shrink-0" />
-                <input
-                  ref={folderSearchInputRef}
-                  type="text"
-                  value={folderSearchQuery}
-                  onChange={(e) => setFolderSearchQuery(e.target.value)}
-                  placeholder={`Search in ${category}...`}
-                  className="bg-transparent flex-grow min-w-0 text-sm text-white placeholder-gray-400 outline-none"
-                />
-                {folderSearchQuery && (
+            ) : (
+              <div className="fixed left-3 right-3 bottom-[calc(5.25rem+env(safe-area-inset-bottom))] z-40 animate-in fade-in slide-in-from-bottom-2 duration-150">
+                <div className="max-w-xl mx-auto flex items-center gap-2.5 bg-neutral-900/95 backdrop-blur-xl border border-red-600 rounded-2xl px-3.5 py-2.5 shadow-2xl shadow-black/80">
+                  <Search size={18} className="text-red-500 shrink-0" />
+                  <input
+                    ref={folderSearchInputRef}
+                    type="text"
+                    value={folderSearchQuery}
+                    onChange={(e) => setFolderSearchQuery(e.target.value)}
+                    placeholder={`Search in ${category}...`}
+                    className="bg-transparent flex-grow min-w-0 text-sm text-white placeholder-gray-400 outline-none"
+                  />
+                  {folderSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFolderSearchQuery('');
+                        folderSearchInputRef.current?.focus();
+                      }}
+                      className="min-w-[34px] min-h-[34px] flex items-center justify-center rounded-lg text-gray-400 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"
+                      aria-label="Clear search"
+                    >
+                      <X size={16} />
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => {
+                      setIsFolderSearchOpen(false);
                       setFolderSearchQuery('');
-                      folderSearchInputRef.current?.focus();
                     }}
-                    className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg text-gray-400 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"
+                    className="px-2.5 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-xs font-bold text-red-400 whitespace-nowrap shrink-0 cursor-pointer transition-colors"
                   >
-                    <X size={16} />
+                    Close
                   </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsFolderSearchOpen(false);
-                    setFolderSearchQuery('');
-                  }}
-                  className="px-2.5 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-xs font-bold text-red-400 whitespace-nowrap shrink-0 cursor-pointer transition-colors"
-                >
-                  Close
-                </button>
+                </div>
               </div>
-            </div>
+            )
           )}
 
           {categoryMovies.length === 0 ? (

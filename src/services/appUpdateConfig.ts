@@ -13,8 +13,8 @@ import { buildApiUrl } from '../utils/apiConfig';
 export const APP_UPDATE_COLLECTION = 'admins';
 export const APP_UPDATE_DOC_ID = 'android_update';
 
-export const CURRENT_VERSION_NAME = '3.5.213';
-export const CURRENT_VERSION_CODE = 3433;
+export const CURRENT_VERSION_NAME = '3.5.214';
+export const CURRENT_VERSION_CODE = 3434;
 
 export const OFFICIAL_APK_DIRECT_URL =
   'https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk';
@@ -233,6 +233,28 @@ export async function fetchRemoteUpdateConfig(): Promise<RemoteUpdateConfig | nu
     return null;
   };
 
+  const fetchFirestoreRestConfig = async (): Promise<RemoteUpdateConfig | null> => {
+    try {
+      const restUrl = `https://firestore.googleapis.com/v1/projects/gen-lang-client-0267042672/databases/ai-studio-movieportalhub-664a3e40-85f3-4758-945e-fd031bdc459f/documents/${APP_UPDATE_COLLECTION}/${APP_UPDATE_DOC_ID}?t=${Date.now()}`;
+      const res = await fetch(restUrl, { cache: 'no-store' });
+      if (res.ok) {
+        const docJson = await res.json();
+        const f = docJson?.fields;
+        if (f) {
+          return normalizeRemoteUpdateConfig({
+            latestVersion: f.latestVersion?.stringValue,
+            minimumRequiredVersion: f.minimumRequiredVersion?.stringValue,
+            latestVersionCode: f.latestVersionCode?.integerValue ? Number(f.latestVersionCode.integerValue) : undefined,
+            minimumRequiredVersionCode: f.minimumRequiredVersionCode?.integerValue ? Number(f.minimumRequiredVersionCode.integerValue) : undefined,
+            apkDownloadUrl: f.apkDownloadUrl?.stringValue,
+            updateMessage: f.updateMessage?.stringValue,
+          });
+        }
+      }
+    } catch {}
+    return null;
+  };
+
   const fetchGithubConfig = async (): Promise<RemoteUpdateConfig | null> => {
     try {
       const ghRes = await fetch(`${GITHUB_VERSION_JSON_URL}?t=${Date.now()}`, {
@@ -246,13 +268,15 @@ export async function fetchRemoteUpdateConfig(): Promise<RemoteUpdateConfig | nu
     return null;
   };
 
-  // Query both live Firebase Firestore and GitHub version.json, picking the highest version
-  const [firestoreConfig, githubConfig] = await Promise.all([
+  // Query live Firebase Firestore (SDK + REST) and GitHub version.json, picking the highest version
+  const [firestoreConfig, firestoreRestConfig, githubConfig] = await Promise.all([
     fetchFirestoreConfig(),
+    fetchFirestoreRestConfig(),
     fetchGithubConfig(),
   ]);
 
-  const bestRemote = pickHigherRemoteUpdateConfig(firestoreConfig, githubConfig);
+  const bestFirestore = pickHigherRemoteUpdateConfig(firestoreConfig, firestoreRestConfig);
+  const bestRemote = pickHigherRemoteUpdateConfig(bestFirestore, githubConfig);
   if (bestRemote) {
     return bestRemote;
   }
