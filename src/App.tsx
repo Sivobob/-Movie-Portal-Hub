@@ -14,6 +14,7 @@ import { ShieldCheck, ArrowLeft } from 'lucide-react';
 import { registerActiveDeviceInstall } from './services/appStatsService';
 import { CURRENT_VERSION_NAME } from './services/appUpdateConfig';
 import { ensureAndroidStreamBridge } from './utils/apiConfig';
+import AndroidBottomNav from './components/AndroidBottomNav';
 
 function AdminRoute({ children }: { children: React.ReactElement }) {
   const [unlocked, setUnlocked] = useState(() => {
@@ -108,6 +109,7 @@ function AppContent() {
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </main>
+          <AndroidBottomNav />
         </div>
       )}
     </>

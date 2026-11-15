@@ -1,41 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useAuth, isAuthorizedAdminEmail } from '../context/AuthContext';
+import { useAuth } from '../context/AuthContext';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
-import { ShieldCheck, Settings, Lock, Eye, EyeOff, X, KeyRound, LogOut, Download, Smartphone } from 'lucide-react';
+import { ShieldCheck, Settings, Lock, Eye, EyeOff, X, KeyRound, LogOut, Download, Smartphone, Bookmark } from 'lucide-react';
 import { isNativeAndroid, isInstalledPhoneApp, downloadOfficialApk, OFFICIAL_APK_DOWNLOAD_URL } from '../utils/platform';
 import { CURRENT_VERSION_NAME } from '../services/appUpdateConfig';
+import MyListModal from './MyListModal';
 
-export const MoviePortal3DLogo = React.memo(function MoviePortal3DLogo() {
-  return (
-    <div className="flex flex-col items-center select-none text-center">
-      <span
-        style={{
-          fontFamily: "'Bangers', cursive, system-ui",
-          color: '#FFD700',
-          letterSpacing: '0.02em',
-          WebkitTextStroke: '2.5px #E60000',
-          textShadow: `
-            3px 3px 0 #800000,
-            0px 0px 15px rgba(255, 215, 0, 0.3)
-          `,
-          transform: 'scale(1.06) rotate(-1deg)',
-        }}
-        className="text-3xl sm:text-5xl font-normal uppercase tracking-tight active:scale-95 transition-transform duration-150 drop-shadow-2xl"
-      >
-        MOVIE PORTAL
-      </span>
-    </div>
-  );
-});
+interface HeaderProps {
+  onOpenMyList?: () => void;
+}
 
 export default function Header() {
-  const { user, handleLogout } = useAuth();
+  const { handleLogout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const isAndroid = isNativeAndroid();
 
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showMyListModal, setShowMyListModal] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
   const [showPasswordText, setShowPasswordText] = useState(false);
   const [passwordError, setPasswordError] = useState('');
@@ -214,95 +197,106 @@ export default function Header() {
   ) : null;
 
   const showPromoBar = !isInstalled && isOnHome && (!isAndroid || showTopHeader);
-  const showSettingsGear = !isAndroid || !isInstalled;
-
-  if (isOnHome) {
-    return (
-      <>
-        <div
-          className={`fixed top-0 left-0 right-0 z-40 pointer-events-none transition-all duration-300 ${
-            isAndroid && !showTopHeader ? '-translate-y-full opacity-0' : 'translate-y-0 opacity-100'
-          }`}
-        >
-          {showPromoBar && (
-            <div className="pointer-events-auto w-full bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 text-black px-2.5 sm:px-4 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] flex items-center justify-between gap-2 shadow-lg">
-              <div className="flex items-center gap-2 min-w-0 flex-1">
-                <div className="w-7 h-7 rounded-lg bg-black text-yellow-400 flex items-center justify-center flex-shrink-0 shadow">
-                  <Smartphone size={15} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <span className="text-[11px] sm:text-sm font-black uppercase tracking-tight text-black truncate">
-                      Movie Portal App
-                    </span>
-                    <span className="hidden xs:inline-block sm:inline-block bg-black/20 text-black text-[9px] sm:text-[10px] font-extrabold px-1.5 py-0.5 rounded uppercase flex-shrink-0">
-                      v{CURRENT_VERSION_NAME}
-                    </span>
-                  </div>
-                  <p className="text-[10px] sm:text-[11px] font-semibold text-neutral-900 truncate">
-                    High-speed streaming on Android!
-                  </p>
-                </div>
-              </div>
-              <a
-                href={OFFICIAL_APK_DOWNLOAD_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={downloadOfficialApk}
-                className="flex-shrink-0 bg-black hover:bg-neutral-900 active:scale-95 text-yellow-400 font-black text-[11px] sm:text-xs px-2.5 sm:px-4 py-1.5 rounded-xl flex items-center gap-1.5 shadow transition-all cursor-pointer uppercase tracking-wider no-underline whitespace-nowrap"
-              >
-                <Download size={13} className="stroke-[2.5]" />
-                <span>Get App</span>
-              </a>
-            </div>
-          )}
-
-          {showSettingsGear && (
-            <div
-              className={`max-w-7xl mx-auto flex items-center justify-end px-3 sm:px-4 ${
-                showPromoBar ? 'pt-2.5' : 'pt-[max(0.75rem,env(safe-area-inset-top))]'
-              }`}
-            >
-              <button
-                type="button"
-                onClick={handleSettingsClick}
-                className="pointer-events-auto p-2.5 rounded-full bg-yellow-400 text-black border border-yellow-500 shadow-[0_0_15px_rgba(250,204,21,0.5)] cursor-pointer active:scale-90 transition-all hover:bg-yellow-300"
-                aria-label="Settings"
-                title="Settings"
-              >
-                <Settings size={18} className="transition-transform hover:rotate-90 duration-300" />
-              </button>
-            </div>
-          )}
-        </div>
-        {settingsModal}
-      </>
-    );
-  }
 
   return (
     <>
-      <header
-        className={`w-full z-40 sticky top-0 left-0 bg-black/95 backdrop-blur-md border-b border-neutral-900 px-3 sm:px-4 py-2.5 pt-[max(0.65rem,env(safe-area-inset-top))] transition-all duration-300 ${
-          isAndroid && !showTopHeader ? '-translate-y-full opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'
+      <div
+        className={`fixed top-0 left-0 right-0 z-40 pointer-events-none transition-all duration-300 ${
+          isAndroid && !showTopHeader ? '-translate-y-full opacity-0' : 'translate-y-0 opacity-100'
         }`}
       >
-        <div className="max-w-7xl mx-auto flex items-center justify-between w-full">
-          <div className="min-w-0" />
-          {showSettingsGear && (
+        {showPromoBar && (
+          <div className="pointer-events-auto w-full bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 text-black px-2.5 sm:px-4 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] flex items-center justify-between gap-2 shadow-lg">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <div className="w-7 h-7 rounded-lg bg-black text-yellow-400 flex items-center justify-center flex-shrink-0 shadow">
+                <Smartphone size={15} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-[11px] sm:text-sm font-black uppercase tracking-tight text-black truncate">
+                    Movie Portal App
+                  </span>
+                  <span className="hidden xs:inline-block sm:inline-block bg-black/20 text-black text-[9px] sm:text-[10px] font-extrabold px-1.5 py-0.5 rounded uppercase flex-shrink-0">
+                    v{CURRENT_VERSION_NAME}
+                  </span>
+                </div>
+                <p className="text-[10px] sm:text-[11px] font-semibold text-neutral-900 truncate">
+                  High-speed streaming on Android!
+                </p>
+              </div>
+            </div>
+            <a
+              href={OFFICIAL_APK_DOWNLOAD_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={downloadOfficialApk}
+              className="flex-shrink-0 bg-black hover:bg-neutral-900 active:scale-95 text-yellow-400 font-black text-[11px] sm:text-xs px-2.5 sm:px-4 py-1.5 rounded-xl flex items-center gap-1.5 shadow transition-all cursor-pointer uppercase tracking-wider no-underline whitespace-nowrap"
+            >
+              <Download size={13} className="stroke-[2.5]" />
+              <span>Get App</span>
+            </a>
+          </div>
+        )}
+
+        {/* Top Header Bar: Red M Branding on left, My List icon + Settings gear on right */}
+        <div
+          className={`max-w-7xl mx-auto flex items-center justify-between px-3 sm:px-6 pointer-events-auto ${
+            showPromoBar ? 'pt-2.5' : 'pt-[max(0.75rem,env(safe-area-inset-top))]'
+          }`}
+        >
+          {/* Red M Branding */}
+          <div
+            onClick={() => navigate('/')}
+            className="flex items-center gap-1.5 cursor-pointer active:scale-95 transition-transform"
+          >
+            <span
+              style={{
+                fontFamily: "'Bangers', cursive, system-ui",
+                color: '#E50914',
+                textShadow: '0 0 15px rgba(229,9,20,0.5)',
+              }}
+              className="text-4xl sm:text-5xl font-black tracking-tighter"
+            >
+              M
+            </span>
+          </div>
+
+          {/* Right Action Icons: My List + Settings Gear */}
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => setShowMyListModal(true)}
+              className="p-2.5 rounded-full bg-neutral-900/80 text-white border border-neutral-700/80 shadow-lg cursor-pointer active:scale-90 transition-all hover:bg-neutral-800 flex items-center gap-1.5"
+              aria-label="My List"
+              title="My List"
+            >
+              <Bookmark size={17} className="text-red-500" />
+            </button>
+
             <button
               type="button"
               onClick={handleSettingsClick}
-              className="p-2 rounded-full bg-yellow-400 text-black border border-yellow-500 shadow-[0_0_15px_rgba(250,204,21,0.5)] cursor-pointer active:scale-90 transition-all hover:bg-yellow-300"
-              aria-label="Settings"
-              title="Settings"
+              className="p-2.5 rounded-full bg-neutral-900/80 text-gray-300 border border-neutral-700/80 shadow-lg cursor-pointer active:scale-90 transition-all hover:bg-neutral-800"
+              aria-label="Settings / Admin"
+              title="Settings / Admin"
             >
-              <Settings size={18} className="transition-transform hover:rotate-90 duration-300" />
+              <Settings size={17} className="transition-transform hover:rotate-90 duration-300" />
             </button>
-          )}
+          </div>
         </div>
-      </header>
+      </div>
+
       {settingsModal}
+      <MyListModal
+        isOpen={showMyListModal}
+        onClose={() => setShowMyListModal(false)}
+        onSelectMovie={(movie) => {
+          navigate('/');
+        }}
+        onPlayMovie={(movie) => {
+          navigate('/');
+        }}
+      />
     </>
   );
 }

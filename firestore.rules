@@ -26,5 +26,10 @@ service cloud.firestore {
     match /app_installs/{deviceId} {
       allow read, write: if true;
     }
+
+    // User preferences, watch history, and My List
+    match /users/{userId}/{document=**} {
+      allow read, write: if true;
+    }
   }
 }

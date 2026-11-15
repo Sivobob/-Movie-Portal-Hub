@@ -49,6 +49,8 @@ export interface VideoPlayerModalProps {
   hasNext?: boolean;
   hasPrev?: boolean;
   initialDuration?: number;
+  initialTime?: number;
+  onProgress?: (currentTime: number, duration: number) => void;
   onNextEpisode?: () => void;
   onPrevEpisode?: () => void;
   onEpisodeChange?: (seasonIndex: number, episodeIndex: number) => void;
