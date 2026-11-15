@@ -7,6 +7,7 @@ import VideoPlayerModal from './VideoPlayerModal';
 import MovieCard from './MovieCard';
 import { fetchMoviesFromFirestore, sortMoviesList } from '../services/movieStorage';
 import { normalizeMoviePosters } from '../utils/posterUrl';
+import { parseDurationToSeconds } from '../utils/duration';
 
 const GENRES = [
   "Action", "Adult", "Adventure", "Animation", "Animated Series", "Anime", "Biography", "Ceremony",
@@ -155,6 +156,9 @@ export default function SearchPage() {
               key={movie.id}
               movie={movie}
               onClick={() => {
+                const movDur =
+                  (typeof movie.duration === 'number' && movie.duration > 0 ? movie.duration : 0) ||
+                  parseDurationToSeconds(movie.runtime);
                 if (
                   movie.seasons &&
                   movie.seasons.length > 0 &&
@@ -162,6 +166,10 @@ export default function SearchPage() {
                   movie.seasons[0].episodes[0].streamUrl
                 ) {
                   const ep = movie.seasons[0].episodes[0];
+                  const epDur =
+                    (typeof ep.durationSec === 'number' && ep.durationSec > 0 ? ep.durationSec : 0) ||
+                    parseDurationToSeconds(ep.duration) ||
+                    movDur;
                   setPlayingMovie({
                     title: `${movie.title} - S01E01: ${ep.title}`,
                     streamingUrl: ep.streamUrl.trim(),
@@ -170,11 +178,13 @@ export default function SearchPage() {
                     movie: movie,
                     seasonIndex: 0,
                     episodeIndex: 0,
+                    initialDuration: epDur,
                   });
                 } else if (movie.streamingUrl) {
                   setPlayingMovie({
                     ...movie,
                     streamingUrl: movie.streamingUrl.trim(),
+                    initialDuration: movDur,
                   });
                 } else if (movie.trailerUrl) {
                   setPlayingMovie({
@@ -183,7 +193,7 @@ export default function SearchPage() {
                     streamingUrl: movie.trailerUrl.trim(),
                   });
                 } else {
-                  setPlayingMovie(movie);
+                  setPlayingMovie({ ...movie, initialDuration: movDur });
                 }
               }}
             />
@@ -235,6 +245,7 @@ export default function SearchPage() {
           seasonIndex={playingMovie.seasonIndex ?? 0}
           episodeIndex={playingMovie.episodeIndex ?? 0}
           language={playingMovie.language}
+          initialDuration={playingMovie.initialDuration || playingMovie.duration || 0}
         />
       )}
     </div>

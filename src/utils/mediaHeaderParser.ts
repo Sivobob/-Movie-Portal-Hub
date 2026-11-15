@@ -143,6 +143,36 @@ function parseMp4Header(buf: Uint8Array): Partial<LocalHeaderProbeResult> {
   return out;
 }
 
+function readFloat32BE(buf: Uint8Array, off: number): number {
+  if (off + 4 > buf.length) return 0;
+  const view = new DataView(buf.buffer, buf.byteOffset + off, 4);
+  return view.getFloat32(0, false);
+}
+
+function readFloat64BE(buf: Uint8Array, off: number): number {
+  if (off + 8 > buf.length) return 0;
+  const view = new DataView(buf.buffer, buf.byteOffset + off, 8);
+  return view.getFloat64(0, false);
+}
+
+function readEbmlVintSize(buf: Uint8Array, off: number): { size: number; len: number } {
+  if (off >= buf.length) return { size: 0, len: 0 };
+  const first = buf[off];
+  if (first === 0) return { size: 0, len: 0 };
+  let mask = 0x80;
+  let len = 1;
+  while (len <= 8 && (first & mask) === 0) {
+    mask >>= 1;
+    len++;
+  }
+  if (len > 8 || off + len > buf.length) return { size: 0, len: 0 };
+  let size = first & ~mask;
+  for (let i = 1; i < len; i++) {
+    size = size * 256 + buf[off + i];
+  }
+  return { size, len };
+}
+
 function parseEbmlHeader(buf: Uint8Array): Partial<LocalHeaderProbeResult> {
   const isWebm = containsBytes(buf, 'webm') >= 0;
   const out: Partial<LocalHeaderProbeResult> = {
@@ -185,6 +215,58 @@ function parseEbmlHeader(buf: Uint8Array): Partial<LocalHeaderProbeResult> {
     out.audioCodec = 'mp3';
   } else if (containsBytes(buf, 'A_FLAC') >= 0) {
     out.audioCodec = 'flac';
+  }
+
+  // Locate Matroska Segment Info element (ID: 0x15 0x49 0xA9 0x66) to extract TimecodeScale & Duration
+  for (let i = 0; i <= buf.length - 12; i++) {
+    if (
+      buf[i] === 0x15 &&
+      buf[i + 1] === 0x49 &&
+      buf[i + 2] === 0xa9 &&
+      buf[i + 3] === 0x66
+    ) {
+      const { size: infoSize, len: sizeLen } = readEbmlVintSize(buf, i + 4);
+      const infoStart = i + 4 + sizeLen;
+      const infoEnd = Math.min(buf.length, infoSize > 0 && infoSize < 65536 ? infoStart + infoSize : infoStart + 4096);
+
+      let timecodeScaleNs = 1000000;
+      let durationTicks = 0;
+
+      for (let j = infoStart; j <= infoEnd - 6; j++) {
+        // TimecodeScale (0x2A 0xD7 0xB1)
+        if (buf[j] === 0x2a && buf[j + 1] === 0xd7 && buf[j + 2] === 0xb1) {
+          const { size: dLen, len: vLen } = readEbmlVintSize(buf, j + 3);
+          const valStart = j + 3 + vLen;
+          if (dLen >= 1 && dLen <= 8 && valStart + dLen <= infoEnd) {
+            let scale = 0;
+            for (let b = 0; b < dLen; b++) {
+              scale = scale * 256 + buf[valStart + b];
+            }
+            if (scale > 0) timecodeScaleNs = scale;
+          }
+        }
+        // Duration (0x44 0x89)
+        if (buf[j] === 0x44 && buf[j + 1] === 0x89) {
+          const { size: dLen, len: vLen } = readEbmlVintSize(buf, j + 2);
+          const valStart = j + 2 + vLen;
+          if (dLen === 4 && valStart + 4 <= infoEnd) {
+            const val = readFloat32BE(buf, valStart);
+            if (Number.isFinite(val) && val > 0) durationTicks = val;
+          } else if (dLen === 8 && valStart + 8 <= infoEnd) {
+            const val = readFloat64BE(buf, valStart);
+            if (Number.isFinite(val) && val > 0) durationTicks = val;
+          }
+        }
+      }
+
+      if (durationTicks > 0) {
+        const sec = Math.round((durationTicks * timecodeScaleNs) / 1_000_000_000);
+        if (sec > 0 && sec < 86400) {
+          out.durationSec = sec;
+          break;
+        }
+      }
+    }
   }
 
   return out;

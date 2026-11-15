@@ -32,6 +32,7 @@ import {
   isUsingLocalNativeBridge,
   probeWorkingBackendUrl,
 } from '../utils/apiConfig';
+import { formatClockTime, parseDurationToSeconds } from '../utils/duration';
 
 
 export interface VideoPlayerModalProps {
@@ -317,14 +318,37 @@ export default function VideoPlayerModal({
   const [streamSourceKey, setStreamSourceKey] = useState<string>('');
   const [preflightReadyKey, setPreflightReadyKey] = useState<number>(0);
 
+  // Compute initial known duration for the active movie or selected episode
+  const resolveKnownEpisodeOrMovieDuration = () => {
+    if (isSeries && currentEpisode) {
+      const epDur =
+        (typeof currentEpisode.durationSec === 'number' && currentEpisode.durationSec > 0
+          ? currentEpisode.durationSec
+          : 0) || parseDurationToSeconds(currentEpisode.duration);
+      if (epDur > 0) return epDur;
+      // Only fall back to parent initialDuration prop if we are still on the initially opened episode
+      if (activeSeasonIdx === seasonIndex && activeEpisodeIdx === episodeIndex && initialDuration > 0) {
+        return initialDuration;
+      }
+      return 0;
+    }
+    return (
+      (initialDuration && initialDuration > 0 ? initialDuration : 0) ||
+      (typeof targetMovie?.duration === 'number' && targetMovie.duration > 0 ? targetMovie.duration : 0) ||
+      parseDurationToSeconds(targetMovie?.runtime) ||
+      0
+    );
+  };
+
   // Sync late initialDuration only when no probed duration is known yet
   useEffect(() => {
-    if (initialDuration && initialDuration > 0 && knownDurationRef.current === 0) {
-      setDuration(initialDuration);
-      durationRef.current = initialDuration;
-      knownDurationRef.current = initialDuration;
+    const resolved = resolveKnownEpisodeOrMovieDuration();
+    if (resolved > 0 && knownDurationRef.current === 0) {
+      setDuration(resolved);
+      durationRef.current = resolved;
+      knownDurationRef.current = resolved;
     }
-  }, [initialDuration]);
+  }, [initialDuration, activeSeasonIdx, activeEpisodeIdx]);
 
   // Reset playback state ONLY when opening, switching movies/episodes, or clicking Retry
   useEffect(() => {
@@ -363,7 +387,7 @@ export default function VideoPlayerModal({
     setCurrentTime(0);
     currentTimeRef.current = 0;
     setBufferedTime(0);
-    const resetDur = initialDuration || 0;
+    const resetDur = resolveKnownEpisodeOrMovieDuration();
     setDuration(resetDur);
     durationRef.current = resetDur;
     knownDurationRef.current = resetDur;
@@ -996,11 +1020,19 @@ export default function VideoPlayerModal({
         if (typeof st.bufferedPosition === 'number') {
           setBufferedTime(effectiveBuffered);
         }
-        if (typeof st.duration === 'number' && st.duration > 0 && isFinite(st.duration)) {
-          if (st.duration !== durationRef.current) {
-            setDuration(st.duration);
-            durationRef.current = st.duration;
-            knownDurationRef.current = st.duration;
+        if (typeof st.duration === 'number' && st.duration > 1 && isFinite(st.duration)) {
+          const isDirectMode = streamFallbackModeRef.current === 'direct';
+          const candidateDur = !isDirectMode && baseOffset > 0 ? baseOffset + st.duration : st.duration;
+          if (isDirectMode) {
+            if (Math.abs(candidateDur - durationRef.current) >= 0.5) {
+              setDuration(candidateDur);
+              durationRef.current = candidateDur;
+              knownDurationRef.current = candidateDur;
+            }
+          } else if (knownDurationRef.current <= 0 && candidateDur > durationRef.current) {
+            // In remux/transcode fMP4 mode, never let partial segment duration overwrite known probed duration
+            setDuration(candidateDur);
+            durationRef.current = candidateDur;
           }
         }
 
@@ -1128,7 +1160,9 @@ export default function VideoPlayerModal({
     };
 
     const onTimeUpdate = () => {
-      const effectiveTime = (streamFallbackMode !== 'direct' ? streamStartOffset : 0) + video.currentTime;
+      const activeMode = streamFallbackModeRef.current;
+      const startOff = activeMode !== 'direct' ? streamStartOffsetRef.current : 0;
+      const effectiveTime = startOff + video.currentTime;
       if (!isDraggingSeekRef.current) {
         setCurrentTime(effectiveTime);
       }
@@ -1142,10 +1176,20 @@ export default function VideoPlayerModal({
         }
       }
 
-      if (video.duration && isFinite(video.duration) && video.duration > 0 && video.duration !== durationRef.current) {
-        setDuration(video.duration);
-        durationRef.current = video.duration;
-        knownDurationRef.current = video.duration;
+      if (video.duration && isFinite(video.duration) && video.duration > 1) {
+        if (activeMode === 'direct') {
+          if (Math.abs(video.duration - durationRef.current) >= 0.5) {
+            setDuration(video.duration);
+            durationRef.current = video.duration;
+            knownDurationRef.current = video.duration;
+          }
+        } else if (knownDurationRef.current <= 0) {
+          const fallbackFragDur = startOff + video.duration;
+          if (fallbackFragDur > durationRef.current) {
+            setDuration(fallbackFragDur);
+            durationRef.current = fallbackFragDur;
+          }
+        }
       }
 
       if (effectiveTime > 1) {
@@ -1158,7 +1202,7 @@ export default function VideoPlayerModal({
       }
 
       if (video.buffered.length > 0) {
-        const offsetBase = streamFallbackMode !== 'direct' ? streamStartOffset : 0;
+        const offsetBase = activeMode !== 'direct' ? streamStartOffsetRef.current : 0;
         for (let i = 0; i < video.buffered.length; i++) {
           if (video.buffered.start(i) <= video.currentTime && video.buffered.end(i) >= video.currentTime) {
             setBufferedTime(offsetBase + video.buffered.end(i));
@@ -1191,9 +1235,10 @@ export default function VideoPlayerModal({
 
     const syncDurationFallback = () => {
       const vidDuration = video.duration;
+      const activeMode = streamFallbackModeRef.current;
       // In remux/transcode fragmented MP4 mode, browser reports growing fragment duration or Infinity — never overwrite real known duration
-      if (streamFallbackMode === 'direct') {
-        if (vidDuration && isFinite(vidDuration) && vidDuration > 0) {
+      if (activeMode === 'direct') {
+        if (vidDuration && isFinite(vidDuration) && vidDuration > 1) {
           setDuration(vidDuration);
           durationRef.current = vidDuration;
           knownDurationRef.current = vidDuration;
@@ -1205,7 +1250,7 @@ export default function VideoPlayerModal({
         return;
       }
 
-      if (durationRef.current > 0) return;
+      if (knownDurationRef.current > 0) return;
 
       try {
         const activeSrc = activeStreamUrl;
@@ -1236,10 +1281,10 @@ export default function VideoPlayerModal({
     };
 
     const onDurationChange = () => {
-      if (streamFallbackMode !== 'direct' && knownDurationRef.current > 0) {
+      if (streamFallbackModeRef.current !== 'direct' && knownDurationRef.current > 0) {
         return;
       }
-      if (video.duration && isFinite(video.duration) && video.duration > 0) {
+      if (video.duration && isFinite(video.duration) && video.duration > 1) {
         setDuration(video.duration);
         durationRef.current = video.duration;
         knownDurationRef.current = video.duration;
@@ -1776,13 +1821,7 @@ export default function VideoPlayerModal({
   };
 
   // Format Time into hh:mm:ss (e.g. 02:00:00 with proper zero padding)
-  const formatTime = (secs: number) => {
-    if (isNaN(secs) || !isFinite(secs) || secs < 0) return '00:00:00';
-    const hrs = Math.floor(secs / 3600);
-    const mins = Math.floor((secs % 3600) / 60);
-    const s = Math.floor(secs % 60);
-    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  };
+  const formatTime = formatClockTime;
 
   const modalMarkup = (
     <div className={`fixed inset-0 z-[100] ${exoModeActive ? 'bg-transparent' : 'bg-black'} flex flex-col justify-between select-none overflow-hidden`}>

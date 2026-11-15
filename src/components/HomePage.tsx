@@ -22,6 +22,7 @@ import {
 import { getLocalMovies, saveLocalMovies, sortMoviesList } from '../services/movieStorage';
 import { upgradePosterUrl, normalizeMoviePosters } from '../utils/posterUrl';
 import { getVisibleQualityBadge } from '../utils/qualityBadge';
+import { parseDurationToSeconds } from '../utils/duration';
 
 const slideVariants = {
   enter: (direction: number) => ({
@@ -427,7 +428,9 @@ export default function HomePage() {
 
     const uid = user?.uid || 'guest_user';
     const resumeTime = movie.currentTime || 0;
-    saveWatchProgress(uid, movie, resumeTime, movie.duration || 100).catch(() => {});
+    const movieDurationSec =
+      (typeof movie.duration === 'number' && movie.duration > 0 ? movie.duration : 0) ||
+      parseDurationToSeconds(movie.runtime);
 
     if (movie.seasons && movie.seasons.length > 0) {
       const sIdx = Math.max(0, Math.min(seasonIndex, movie.seasons.length - 1));
@@ -437,6 +440,13 @@ export default function HomePage() {
       const ep = episodes[eIdx];
 
       if (ep && ep.streamUrl) {
+        const epDurationSec =
+          (typeof ep.durationSec === 'number' && ep.durationSec > 0 ? ep.durationSec : 0) ||
+          parseDurationToSeconds(ep.duration) ||
+          movieDurationSec;
+        if (epDurationSec > 0 || resumeTime > 0) {
+          saveWatchProgress(uid, movie, resumeTime, epDurationSec).catch(() => {});
+        }
         setPlayingMovie({
           title: `${movie.title} - S0${season.seasonNumber || sIdx + 1}E0${ep.episodeNumber || eIdx + 1}: ${ep.title}`,
           streamingUrl: ep.streamUrl.trim(),
@@ -447,6 +457,7 @@ export default function HomePage() {
           episodeIndex: eIdx,
           language: audioLanguage || movie.language,
           currentTime: resumeTime,
+          initialDuration: epDurationSec,
         });
         setSelectedMovie(null);
         return;
@@ -454,11 +465,15 @@ export default function HomePage() {
     }
 
     if (movie.streamingUrl) {
+      if (movieDurationSec > 0 || resumeTime > 0) {
+        saveWatchProgress(uid, movie, resumeTime, movieDurationSec).catch(() => {});
+      }
       setPlayingMovie({
         ...movie,
         streamingUrl: movie.streamingUrl.trim(),
         language: audioLanguage || movie.language,
         currentTime: resumeTime,
+        initialDuration: movieDurationSec,
       });
       setSelectedMovie(null);
     } else {
@@ -1033,6 +1048,7 @@ export default function HomePage() {
           seasonIndex={playingMovie.seasonIndex ?? 0}
           episodeIndex={playingMovie.episodeIndex ?? 0}
           language={playingMovie.language || playingMovie.movie?.language}
+          initialDuration={playingMovie.initialDuration || playingMovie.duration || 0}
           initialTime={playingMovie.currentTime || 0}
           onProgress={(curr, dur) => {
             const uid = user?.uid || 'guest_user';

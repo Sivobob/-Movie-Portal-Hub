@@ -63,6 +63,7 @@ import {
 import { loginWithGoogle } from '../services/authService';
 import { buildApiUrl } from '../utils/apiConfig';
 import { upgradePosterUrl, normalizeMoviePosters } from '../utils/posterUrl';
+import { formatHumanDuration, parseDurationToSeconds } from '../utils/duration';
 import {
   searchWikipediaFilmSuggestions,
   mergeImdbAndWikiResults,
@@ -210,7 +211,7 @@ export default function AdminDashboard() {
   const [showChannelPanel, setShowChannelPanel] = useState(false);
 
   // Series Season & Episode Management State
-  const [seasons, setSeasons] = useState<Array<{ seasonNumber: number; episodes: Array<{ episodeNumber: number; title: string; streamUrl: string; duration?: string }> }>>([
+  const [seasons, setSeasons] = useState<Array<{ seasonNumber: number; episodes: Array<{ episodeNumber: number; title: string; streamUrl: string; duration?: string; durationSec?: number }> }>>([
     {
       seasonNumber: 1,
       episodes: [
@@ -922,7 +923,7 @@ export default function AdminDashboard() {
   };
 
   // Test Stream Preview
-  const handleTestStream = async (urlToTest?: string) => {
+  const handleTestStream = async (urlToTest?: string, epTarget?: { sIdx: number; eIdx: number }) => {
     let targetUrl = (urlToTest || '').trim();
     if (!targetUrl) {
       // Auto-fallback to any available URL in form
@@ -958,20 +959,43 @@ export default function AdminDashboard() {
           showNotification('error', errMsg);
           return;
         }
+        const probedDurSec = Number(data.duration || data.metadata?.duration || 0);
+        const humanDur = formatHumanDuration(data.metadata?.durationFormatted, probedDurSec) || data.metadata?.durationFormatted || '';
         if (data.metadata) {
           setVerifiedTelegramMetadata(data.metadata);
-          if (data.metadata.durationFormatted && (!runtime || runtime === '')) {
-            setRuntime(data.metadata.durationFormatted);
+          if (epTarget) {
+            setSeasons((prev) =>
+              prev.map((s, si) =>
+                si !== epTarget.sIdx
+                  ? s
+                  : {
+                      ...s,
+                      episodes: s.episodes.map((epItem, ei) =>
+                        ei !== epTarget.eIdx
+                          ? epItem
+                          : {
+                              ...epItem,
+                              duration: humanDur || epItem.duration || '',
+                              durationSec: probedDurSec > 0 ? probedDurSec : epItem.durationSec,
+                            }
+                      ),
+                    }
+              )
+            );
+          } else if (humanDur && (!runtime || runtime === '')) {
+            setRuntime(humanDur);
           }
         }
         setStreamNotice({ type: 'success', message: data.message || '✅ Telegram link verified!' });
         showNotification('success', data.message || 'Telegram link verified! Starting test preview...');
         setTestingStream({
           url: targetUrl,
-          title: title.trim() || 'Telegram Stream Preview',
+          title: epTarget
+            ? `${title.trim() || 'Series'} - E${seasons[epTarget.sIdx]?.episodes[epTarget.eIdx]?.episodeNumber || epTarget.eIdx + 1}`
+            : title.trim() || 'Telegram Stream Preview',
           category: originalCategory,
           posterUrl: posterUrl.trim(),
-          duration: data.duration || data.metadata?.duration || 0
+          duration: probedDurSec,
         });
       } catch (err: any) {
         const msg = err?.message || 'Could not verify Telegram link. Opening preview player...';
@@ -990,11 +1014,15 @@ export default function AdminDashboard() {
       setVerifiedTelegramMetadata(null);
       setStreamNotice({ type: 'success', message: '✅ Direct video stream verified!' });
       showNotification('success', 'Starting stream test preview...');
+      const epExistingDur = epTarget
+        ? parseDurationToSeconds(seasons[epTarget.sIdx]?.episodes[epTarget.eIdx]?.duration)
+        : 0;
       setTestingStream({
         url: targetUrl,
         title: title.trim() || 'Video Stream Preview',
         category: originalCategory,
         posterUrl: posterUrl.trim(),
+        duration: epExistingDur || parseDurationToSeconds(runtime) || 0,
       });
     }
   };
@@ -1155,7 +1183,7 @@ export default function AdminDashboard() {
         featured: Boolean(featured),
         published: asDraft ? false : true,
         qualityBadge,
-        duration: testingStream?.duration || (editingMovie as any)?.duration || 0,
+        duration: (!isSeries ? testingStream?.duration : 0) || parseDurationToSeconds(runtime) || (editingMovie as any)?.duration || 0,
         updatedAt: serverTimestamp(),
       };
 
@@ -2683,45 +2711,63 @@ export default function AdminDashboard() {
                                           <Trash2 size={14} />
                                         </button>
                                       )}
+                                        <button
+                                          type="button"
+                                          onClick={() => handleTestStream(ep.streamUrl, { sIdx, eIdx })}
+                                          title="Test Episode Stream"
+                                          className="p-1.5 text-yellow-400 hover:bg-yellow-400/20 rounded transition-colors"
+                                        >
+                                          <Play size={14} fill="currentColor" />
+                                        </button>
+                                      </div>
+                                    </div>
+                                    <div className="relative">
+                                      <input
+                                        type="text"
+                                        value={ep.streamUrl}
+                                        onChange={(e) => {
+                                          const val = e.target.value;
+                                          setSeasons((prev) => {
+                                            const updated = [...prev];
+                                            updated[sIdx].episodes[eIdx].streamUrl = val;
+                                            return updated;
+                                          });
+                                        }}
+                                        placeholder="1080p Video URL (Direct MP4 / Telegram)..."
+                                        className="w-full bg-neutral-900 border border-neutral-800 rounded p-1.5 text-white font-mono text-[11px] pr-12"
+                                      />
+                                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-black text-purple-500 uppercase">1080p</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <input
+                                        type="text"
+                                        value={ep.duration || ''}
+                                        onChange={(e) => {
+                                          const val = e.target.value;
+                                          const sec = parseDurationToSeconds(val);
+                                          setSeasons((prev) => {
+                                            const updated = [...prev];
+                                            updated[sIdx].episodes[eIdx].duration = val;
+                                            if (sec > 0) {
+                                              updated[sIdx].episodes[eIdx].durationSec = sec;
+                                            }
+                                            return updated;
+                                          });
+                                        }}
+                                        placeholder="Duration (e.g. 45m or 00:45:10)"
+                                        className="w-40 bg-neutral-900 border border-neutral-800 rounded p-1 text-white text-[11px] placeholder-gray-600 focus:outline-none focus:border-yellow-400"
+                                      />
                                       <button
                                         type="button"
-                                        onClick={() => handleTestStream(ep.streamUrl)}
-                                        title="Test Episode Stream"
-                                        className="p-1.5 text-yellow-400 hover:bg-yellow-400/20 rounded transition-colors"
+                                        onClick={() => handleTestStream(ep.streamUrl, { sIdx, eIdx })}
+                                        disabled={!ep.streamUrl.trim()}
+                                        className="flex items-center gap-1.5 bg-yellow-400/10 hover:bg-yellow-400/20 text-yellow-400 text-[10px] font-black uppercase px-2.5 py-1 rounded border border-yellow-400/20 transition-all active:scale-95 disabled:opacity-40 cursor-pointer"
                                       >
-                                        <Play size={14} fill="currentColor" />
+                                        <Play size={10} fill="currentColor" />
+                                        Test & Verify Episode
                                       </button>
                                     </div>
                                   </div>
-                                  <div className="relative">
-                                    <input
-                                      type="text"
-                                      value={ep.streamUrl}
-                                      onChange={(e) => {
-                                        const val = e.target.value;
-                                        setSeasons((prev) => {
-                                          const updated = [...prev];
-                                          updated[sIdx].episodes[eIdx].streamUrl = val;
-                                          return updated;
-                                        });
-                                      }}
-                                      placeholder="1080p Video URL (Direct MP4 / Telegram)..."
-                                      className="w-full bg-neutral-900 border border-neutral-800 rounded p-1.5 text-white font-mono text-[11px] pr-12"
-                                    />
-                                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-black text-purple-500 uppercase">1080p</span>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleTestStream(ep.streamUrl)}
-                                      disabled={!ep.streamUrl.trim()}
-                                      className="flex items-center gap-1.5 bg-yellow-400/10 hover:bg-yellow-400/20 text-yellow-400 text-[10px] font-black uppercase px-2.5 py-1 rounded border border-yellow-400/20 transition-all active:scale-95 disabled:opacity-40 cursor-pointer"
-                                    >
-                                      <Play size={10} fill="currentColor" />
-                                      Test & Verify Episode
-                                    </button>
-                                  </div>
-                                </div>
                               ))}
                             </div>
                           </div>

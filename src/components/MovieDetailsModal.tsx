@@ -24,6 +24,11 @@ import {
   addToMyList,
   removeFromMyList,
 } from '../services/userWatchService';
+import {
+  formatHumanDuration,
+  parseDurationToSeconds,
+  probeTelegramDurationSec,
+} from '../utils/duration';
 
 interface MovieDetailsModalProps {
   movie: any | null;
@@ -61,6 +66,8 @@ export default function MovieDetailsModal({
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimeoutRef = useRef<any>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const [probedMovieDurationSec, setProbedMovieDurationSec] = useState<number>(0);
+  const [probedEpisodeDurations, setProbedEpisodeDurations] = useState<Record<string, number>>({});
 
   const isSeries = Boolean(
     movie?.contentType === 'series' ||
@@ -79,6 +86,8 @@ export default function MovieDetailsModal({
       }
       setActiveSeasonIndex(0);
       setIsSeasonDropdownOpen(false);
+      setProbedMovieDurationSec(0);
+      setProbedEpisodeDurations({});
       scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'auto' });
     }
   }, [movie?.id, isSeries]);
@@ -175,10 +184,100 @@ export default function MovieDetailsModal({
       .slice(0, 12);
   }, [movie, allMovies]);
 
+  // Probe real duration from Telegram stream when movie runtime/duration or active season episode durations are missing
+  useEffect(() => {
+    if (!isOpen || !movie) return;
+    let cancelled = false;
+
+    if (!isSeries) {
+      const existingSec =
+        (typeof movie.duration === 'number' && movie.duration > 0 ? movie.duration : 0) ||
+        parseDurationToSeconds(movie.runtime);
+      if (existingSec <= 0) {
+        const candidateUrl =
+          movie.streamingUrl ||
+          movie.videoQualities?.['1080p'] ||
+          movie.videoQualities?.['720p'] ||
+          movie.videoQualities?.['480p'] ||
+          '';
+        if (candidateUrl) {
+          probeTelegramDurationSec(candidateUrl).then((sec) => {
+            if (!cancelled && sec > 0) {
+              setProbedMovieDurationSec(sec);
+            }
+          });
+        }
+      }
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const activeSeasonObj = movie.seasons?.[activeSeasonIndex] || movie.seasons?.[0];
+    const eps: any[] = activeSeasonObj?.episodes || [];
+    const probeEpisodes = async () => {
+      for (const ep of eps.slice(0, 12)) {
+        if (cancelled) break;
+        const epSec =
+          (typeof ep?.durationSec === 'number' && ep.durationSec > 0 ? ep.durationSec : 0) ||
+          parseDurationToSeconds(ep?.duration);
+        if (epSec > 0 || !ep?.streamUrl) continue;
+        const url = String(ep.streamUrl).trim();
+        if (!/t\.me|telegram\.me/i.test(url)) continue;
+        const sec = await probeTelegramDurationSec(url);
+        if (!cancelled && sec > 0) {
+          setProbedEpisodeDurations((prev) => (prev[url] === sec ? prev : { ...prev, [url]: sec }));
+        }
+      }
+    };
+    probeEpisodes();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, movie?.id, isSeries, activeSeasonIndex]);
+
   if (!isOpen || !movie) return null;
 
   const currentSeason = movie.seasons?.[activeSeasonIndex] || movie.seasons?.[0];
   const episodeList = currentSeason?.episodes || [];
+
+  const knownMovieDurationSec =
+    (typeof movie.duration === 'number' && movie.duration > 0 ? movie.duration : 0) ||
+    parseDurationToSeconds(movie.runtime) ||
+    probedMovieDurationSec;
+
+  const formattedMovieDuration = formatHumanDuration(movie.runtime, knownMovieDurationSec);
+
+  const enrichMovieWithResolvedDuration = (sIdx = activeSeasonIndex, eIdx = 0) => {
+    if (!movie) return movie;
+    if (!isSeries) {
+      return knownMovieDurationSec > 0 && !(movie.duration > 0)
+        ? { ...movie, duration: knownMovieDurationSec }
+        : movie;
+    }
+    const season = movie.seasons?.[sIdx];
+    const ep = season?.episodes?.[eIdx];
+    const epUrl = String(ep?.streamUrl || '').trim();
+    const epSec =
+      (typeof ep?.durationSec === 'number' && ep.durationSec > 0 ? ep.durationSec : 0) ||
+      parseDurationToSeconds(ep?.duration) ||
+      (epUrl ? probedEpisodeDurations[epUrl] || 0 : 0);
+    if (epSec > 0 && ep && !ep.durationSec) {
+      const updatedSeasons = movie.seasons.map((s: any, si: number) =>
+        si !== sIdx
+          ? s
+          : {
+              ...s,
+              episodes: (s.episodes || []).map((eItem: any, ei: number) =>
+                ei === eIdx ? { ...eItem, durationSec: epSec } : eItem
+              ),
+            }
+      );
+      return { ...movie, seasons: updatedSeasons };
+    }
+    return movie;
+  };
 
   const handleRatingSelect = async (stars: number) => {
     setUserRating(stars);
@@ -304,7 +403,7 @@ export default function MovieDetailsModal({
             <div className="absolute inset-0 flex flex-col items-center justify-center p-4">
               <button
                 type="button"
-                onClick={() => onWatchNow(movie, activeSeasonIndex, 0, selectedLanguage)}
+                onClick={() => onWatchNow(enrichMovieWithResolvedDuration(activeSeasonIndex, 0), activeSeasonIndex, 0, selectedLanguage)}
                 className="w-16 h-16 sm:w-20 sm:h-20 rounded-full border-2 border-amber-400/90 bg-black/45 backdrop-blur-md flex items-center justify-center shadow-2xl transition-transform hover:scale-110 active:scale-95 group cursor-pointer"
                 aria-label="Play"
               >
@@ -350,11 +449,13 @@ export default function MovieDetailsModal({
               <span className="px-1.5 py-0.5 rounded border border-neutral-600/90 bg-neutral-800/60 text-[11px] font-semibold text-neutral-300">
                 U/A 18+ [A]
               </span>
-              <span className="text-neutral-300">
-                {isSeries
-                  ? `${movie.seasons?.length || 1} Season${(movie.seasons?.length || 1) > 1 ? 's' : ''}`
-                  : movie.runtime || '2h 15m'}
-              </span>
+              {(isSeries || formattedMovieDuration) && (
+                <span className="text-neutral-300">
+                  {isSeries
+                    ? `${movie.seasons?.length || 1} Season${(movie.seasons?.length || 1) > 1 ? 's' : ''}`
+                    : formattedMovieDuration}
+                </span>
+              )}
               <span className="px-1.5 py-0.5 rounded border border-neutral-600/90 bg-neutral-800/60 text-[10px] font-black text-neutral-300 uppercase">
                 {movie.qualityBadge || 'HD'}
               </span>
@@ -391,7 +492,7 @@ export default function MovieDetailsModal({
             <div className="pt-2">
               <button
                 type="button"
-                onClick={() => onWatchNow(movie, activeSeasonIndex, 0, selectedLanguage)}
+                onClick={() => onWatchNow(enrichMovieWithResolvedDuration(activeSeasonIndex, 0), activeSeasonIndex, 0, selectedLanguage)}
                 className="w-full py-3 sm:py-3.5 px-6 bg-white hover:bg-neutral-200 text-black font-black text-sm sm:text-base rounded-md flex items-center justify-center gap-2.5 transition-all shadow-xl hover:shadow-2xl active:scale-[0.99] cursor-pointer"
               >
                 <Play size={20} fill="black" />
@@ -579,47 +680,62 @@ export default function MovieDetailsModal({
                 {/* Episodes List */}
                 <div className="space-y-2.5 pt-1">
                   {episodeList.length > 0 ? (
-                    episodeList.map((ep: any, eIdx: number) => (
-                      <div
-                        key={eIdx}
-                        onClick={() => onWatchNow(movie, activeSeasonIndex, eIdx, selectedLanguage)}
-                        className="flex items-center gap-3 bg-neutral-900/90 hover:bg-neutral-800/90 border border-neutral-800/80 p-2.5 rounded-xl transition-all cursor-pointer group shadow-sm hover:shadow-md"
-                      >
-                        {/* Thumbnail with Play Icon */}
-                        <div className="relative w-28 sm:w-32 aspect-video bg-neutral-950 rounded-lg overflow-hidden flex-shrink-0">
-                          <img
-                            src={
-                              upgradePosterUrl(ep.thumbnailUrl || movie.backdropUrl || movie.posterUrl, 400) ||
-                              movie.backdropUrl ||
-                              movie.posterUrl
-                            }
-                            alt={ep.title}
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                          />
-                          <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                            <div className="w-8 h-8 rounded-full bg-black/60 border border-white/30 flex items-center justify-center group-hover:bg-red-600 group-hover:border-red-600 transition-colors">
-                              <Play size={14} fill="white" className="ml-0.5 text-white" />
+                    episodeList.map((ep: any, eIdx: number) => {
+                      const epStreamUrl = String(ep?.streamUrl || '').trim();
+                      const epFormattedDur = formatHumanDuration(
+                        ep.duration,
+                        (typeof ep?.durationSec === 'number' && ep.durationSec > 0 ? ep.durationSec : 0) ||
+                          (epStreamUrl ? probedEpisodeDurations[epStreamUrl] || 0 : 0)
+                      );
+                      return (
+                        <div
+                          key={eIdx}
+                          onClick={() =>
+                            onWatchNow(
+                              enrichMovieWithResolvedDuration(activeSeasonIndex, eIdx),
+                              activeSeasonIndex,
+                              eIdx,
+                              selectedLanguage
+                            )
+                          }
+                          className="flex items-center gap-3 bg-neutral-900/90 hover:bg-neutral-800/90 border border-neutral-800/80 p-2.5 rounded-xl transition-all cursor-pointer group shadow-sm hover:shadow-md"
+                        >
+                          {/* Thumbnail with Play Icon */}
+                          <div className="relative w-28 sm:w-32 aspect-video bg-neutral-950 rounded-lg overflow-hidden flex-shrink-0">
+                            <img
+                              src={
+                                upgradePosterUrl(ep.thumbnailUrl || movie.backdropUrl || movie.posterUrl, 400) ||
+                                movie.backdropUrl ||
+                                movie.posterUrl
+                              }
+                              alt={ep.title}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                            />
+                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                              <div className="w-8 h-8 rounded-full bg-black/60 border border-white/30 flex items-center justify-center group-hover:bg-red-600 group-hover:border-red-600 transition-colors">
+                                <Play size={14} fill="white" className="ml-0.5 text-white" />
+                              </div>
                             </div>
                           </div>
-                        </div>
 
-                        {/* Episode Info */}
-                        <div className="flex-1 min-w-0 text-left">
-                          <h4 className="text-xs sm:text-sm font-bold text-white truncate group-hover:text-red-400 transition-colors">
-                            {ep.title}
-                          </h4>
-                          <p className="text-[11px] font-semibold text-neutral-400 mt-0.5">
-                            E{ep.episodeNumber || eIdx + 1} • S{currentSeason?.seasonNumber || activeSeasonIndex + 1} •{' '}
-                            {ep.duration || '45m'}
-                          </p>
-                          {ep.description && (
-                            <p className="text-[11px] text-neutral-500 line-clamp-1 mt-1 hidden sm:block">
-                              {ep.description}
+                          {/* Episode Info */}
+                          <div className="flex-1 min-w-0 text-left">
+                            <h4 className="text-xs sm:text-sm font-bold text-white truncate group-hover:text-red-400 transition-colors">
+                              {ep.title}
+                            </h4>
+                            <p className="text-[11px] font-semibold text-neutral-400 mt-0.5">
+                              E{ep.episodeNumber || eIdx + 1} • S{currentSeason?.seasonNumber || activeSeasonIndex + 1}
+                              {epFormattedDur ? ` • ${epFormattedDur}` : ''}
                             </p>
-                          )}
+                            {ep.description && (
+                              <p className="text-[11px] text-neutral-500 line-clamp-1 mt-1 hidden sm:block">
+                                {ep.description}
+                              </p>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                   ) : (
                     <div className="text-center py-8 text-neutral-400 text-xs">
                       No episodes listed for this season yet.
@@ -710,6 +826,12 @@ export default function MovieDetailsModal({
                     <span className="text-neutral-400 font-semibold">Video Resolution</span>
                     <span className="text-white font-bold">{movie.qualityBadge || '1080p Full HD'}</span>
                   </div>
+                  {formattedMovieDuration && (
+                    <div className="py-2 flex justify-between">
+                      <span className="text-neutral-400 font-semibold">Duration</span>
+                      <span className="text-white font-bold">{formattedMovieDuration}</span>
+                    </div>
+                  )}
                   <div className="py-2 flex justify-between">
                     <span className="text-neutral-400 font-semibold">Content Type</span>
                     <span className="text-white font-bold uppercase">{isSeries ? 'Web Series' : 'Feature Movie'}</span>
