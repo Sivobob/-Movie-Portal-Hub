@@ -1565,6 +1565,14 @@ export default function VideoPlayerModal({
       return;
     }
 
+    if (streamFallbackMode !== 'direct' && /t\.me|telegram\.me/i.test(activeStreamUrl)) {
+      setStreamStartOffset(Math.floor(clamped));
+      setCurrentTime(clamped);
+      currentTimeRef.current = clamped;
+      setIsLoading(true);
+      return;
+    }
+
     const vid = videoRef.current;
     if (!vid) return;
 
