@@ -1849,7 +1849,7 @@ export default function VideoPlayerModal({
               {isLoading && (
                 <div className="absolute inset-0 m-auto w-24 h-24 flex flex-col items-center justify-center gap-2 bg-black/60 backdrop-blur-md rounded-2xl z-25 pointer-events-none shadow-2xl">
                   <RefreshCw className="animate-spin text-yellow-400" size={28} />
-                  <span className="text-[11px] text-gray-200 font-bold tracking-wide">Buffering</span>
+                  <span className="text-[11px] text-gray-200 font-bold tracking-wide">Loading</span>
                 </div>
               )}
             </>

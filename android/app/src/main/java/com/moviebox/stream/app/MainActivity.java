@@ -650,10 +650,10 @@ public class MainActivity extends BridgeActivity {
 
         DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                lowRam ? 10000 : 15000,
-                lowRam ? 40000 : 75000,
-                1000,
-                lowRam ? 2000 : 2500
+                lowRam ? 20000 : 45000,
+                lowRam ? 90000 : 180000,
+                1500,
+                lowRam ? 3500 : 5000
             )
             .build();
 

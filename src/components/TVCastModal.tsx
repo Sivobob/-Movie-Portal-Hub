@@ -454,7 +454,7 @@ export default function TVCastModal({
                       : castPlayerState === 'paused'
                         ? `Paused on ${connectedDevice}`
                         : castPlayerState === 'buffering'
-                          ? `Buffering on ${connectedDevice}...`
+                          ? `Loading on ${connectedDevice}...`
                           : castPlayerState === 'ended'
                             ? `Finished on ${connectedDevice}`
                             : `Loading on ${connectedDevice}...`}
