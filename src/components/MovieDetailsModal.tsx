@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X,
   Play,
@@ -59,6 +60,7 @@ export default function MovieDetailsModal({
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimeoutRef = useRef<any>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
   const isSeries = Boolean(
     movie?.contentType === 'series' ||
@@ -77,6 +79,7 @@ export default function MovieDetailsModal({
       }
       setActiveSeasonIndex(0);
       setIsSeasonDropdownOpen(false);
+      scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'auto' });
     }
   }, [movie?.id, isSeries]);
 
@@ -252,38 +255,37 @@ export default function MovieDetailsModal({
     }
   };
 
-  return (
+  const modalContent = (
     <div
-      className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col justify-end sm:justify-center items-center overflow-y-auto overscroll-contain"
-      onClick={onClose}
+      className="fixed inset-0 z-[90] w-full h-[100dvh] bg-[#141414] text-white flex flex-col overflow-hidden"
     >
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[80] bg-neutral-900 border border-neutral-700 text-white text-xs sm:text-sm font-semibold px-4 py-2.5 rounded-full shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-4 duration-200">
+        <div className="fixed top-[max(1.25rem,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-[110] bg-neutral-900 border border-neutral-700 text-white text-xs sm:text-sm font-semibold px-4 py-2.5 rounded-full shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-4 duration-200">
           <CheckCircle2 size={16} className="text-[#46d369]" />
           <span>{toastMessage}</span>
         </div>
       )}
 
-      {/* Main Details Sheet / Modal Container */}
-      <div
-        className="relative w-full max-w-2xl bg-[#141414] text-white rounded-t-[28px] sm:rounded-[28px] overflow-hidden shadow-2xl border border-neutral-800/80 my-0 sm:my-8 max-h-[96dvh] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
+      {/* Full-Screen Details Container */}
+      <div className="relative w-full h-full bg-[#141414] text-white flex flex-col overflow-hidden">
         {/* Top Floating Close Button */}
         <button
           type="button"
           onClick={onClose}
-          className="absolute top-3.5 right-3.5 z-40 w-8 h-8 rounded-full bg-black/75 hover:bg-black text-white flex items-center justify-center backdrop-blur-md border border-white/20 shadow-lg cursor-pointer transition-transform hover:scale-110 active:scale-95"
+          className="fixed top-[max(0.85rem,env(safe-area-inset-top))] right-3.5 z-40 w-9 h-9 rounded-full bg-black/75 hover:bg-black text-white flex items-center justify-center backdrop-blur-md border border-white/25 shadow-lg cursor-pointer transition-transform hover:scale-110 active:scale-95"
           aria-label="Close"
         >
-          <X size={18} />
+          <X size={20} />
         </button>
 
-        {/* Scrollable Modal Content */}
-        <div className="overflow-y-auto overscroll-contain flex-1 pb-16">
-          {/* Hero Banner / Backdrop */}
-          <div className="relative w-full aspect-[16/9] bg-neutral-950 overflow-hidden flex-shrink-0">
+        {/* Full-Screen Scrollable Content */}
+        <div
+          ref={scrollContainerRef}
+          className="overflow-y-auto overscroll-y-contain touch-pan-y flex-1 w-full pb-[calc(5.5rem+env(safe-area-inset-bottom))]"
+        >
+          {/* Full-Bleed Hero Banner / Backdrop */}
+          <div className="relative w-full aspect-[16/9] sm:h-[44dvh] sm:min-h-[300px] sm:max-h-[460px] bg-neutral-950 overflow-hidden flex-shrink-0">
             <img
               src={
                 upgradePosterUrl(movie.backdropUrl || movie.posterUrl, 1280) ||
@@ -291,10 +293,11 @@ export default function MovieDetailsModal({
                 movie.posterUrl
               }
               alt={movie.title}
+              draggable={false}
               className="w-full h-full object-cover"
             />
             {/* Deep Vignette Gradient */}
-            <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-[#141414]/30 to-black/30" />
+            <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-[#141414]/30 to-black/35" />
             <div className="absolute inset-0 bg-gradient-to-r from-black/50 via-transparent to-transparent" />
 
             {/* Central Circular Play Button with Amber Ring */}
@@ -324,7 +327,7 @@ export default function MovieDetailsModal({
           </div>
 
           {/* Details Body */}
-          <div className="p-4 sm:p-6 space-y-4">
+          <div className="w-full max-w-4xl mx-auto p-4 sm:p-6 space-y-4">
             {/* M SERIES or M MOVIE Branding */}
             <div className="flex items-center gap-2">
               <span className="bg-red-600 text-white font-black text-xs px-1.5 py-0.5 rounded shadow tracking-tighter">
@@ -717,8 +720,8 @@ export default function MovieDetailsModal({
           </div>
         </div>
 
-        {/* Floating Bottom Dismiss Circle Button (Matching screenshot) */}
-        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-30">
+        {/* Floating Bottom Dismiss Circle Button */}
+        <div className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-30">
           <button
             type="button"
             onClick={onClose}
@@ -854,4 +857,6 @@ export default function MovieDetailsModal({
       )}
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 }
