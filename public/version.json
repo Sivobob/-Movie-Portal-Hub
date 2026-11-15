@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.216",
-  "minimumRequiredVersion": "3.5.216",
-  "latestVersionCode": 3436,
-  "minimumRequiredVersionCode": 3436,
+  "latestVersion": "3.5.217",
+  "minimumRequiredVersion": "3.5.217",
+  "latestVersionCode": 3437,
+  "minimumRequiredVersionCode": 3437,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Portal v3.5.216 update is ready! Full-screen Movie & Series Details Page, smooth vertical scrolling everywhere on Home/Bollywood/Hollywood/Series, and Total Uploaded counts.",
-  "releaseNotes": "v3.5.216: Full-screen edge-to-edge Movie & Series Details Page, smooth vertical scrolling from anywhere on Home/Bollywood/Hollywood/Series, and prominent Total Uploaded count header."
+  "updateMessage": "Movie Portal v3.5.217 update is ready! Full-screen Movie & Series Details Page, smooth vertical scrolling, Total Uploaded counts, and clean Android header (Settings icon Chrome-only).",
+  "releaseNotes": "v3.5.217: Hide top Settings gear icon inside installed Android APK (visible in Chrome only), full-screen Details Page, smooth vertical scrolling, and Total Uploaded counts."
 }

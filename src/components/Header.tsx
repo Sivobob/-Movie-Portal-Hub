@@ -59,7 +59,7 @@ export default function Header() {
     navigate('/');
   };
 
-  const [isInstalled, setIsInstalled] = useState(false);
+  const [isInstalled, setIsInstalled] = useState(() => isInstalledPhoneApp());
   useEffect(() => {
     setIsInstalled(isInstalledPhoneApp());
   }, []);
@@ -277,20 +277,22 @@ export default function Header() {
               <Bookmark size={17} className="text-red-500" />
             </button>
 
-            <button
-              type="button"
-              onClick={handleSettingsClick}
-              className="p-2.5 rounded-full bg-neutral-900/80 text-gray-300 border border-neutral-700/80 shadow-lg cursor-pointer active:scale-90 transition-all hover:bg-neutral-800"
-              aria-label="Settings / Admin"
-              title="Settings / Admin"
-            >
-              <Settings size={17} className="transition-transform hover:rotate-90 duration-300" />
-            </button>
+            {!isInstalled && (
+              <button
+                type="button"
+                onClick={handleSettingsClick}
+                className="p-2.5 rounded-full bg-neutral-900/80 text-gray-300 border border-neutral-700/80 shadow-lg cursor-pointer active:scale-90 transition-all hover:bg-neutral-800"
+                aria-label="Settings / Admin"
+                title="Settings / Admin"
+              >
+                <Settings size={17} className="transition-transform hover:rotate-90 duration-300" />
+              </button>
+            )}
           </div>
         </div>
       </div>
 
-      {settingsModal}
+      {!isInstalled && settingsModal}
       <MyListModal
         isOpen={showMyListModal}
         onClose={() => setShowMyListModal(false)}
