@@ -1409,6 +1409,21 @@ export default function VideoPlayerModal({
       }
     };
 
+    const onStalled = () => {
+      if (cancelled || video.paused) return;
+      console.warn('[VideoPlayer] Stream stalled. Auto-resuming...');
+      video.play().catch(() => {});
+    };
+
+    const onStallWaiting = () => {
+      if (cancelled || video.paused) return;
+      setTimeout(() => {
+        if (!cancelled && video.paused === false && video.readyState < 3) {
+          video.play().catch(() => {});
+        }
+      }, 2500);
+    };
+
     video.addEventListener('play', onPlay);
     video.addEventListener('pause', onPause);
     video.addEventListener('timeupdate', onTimeUpdate);
@@ -1416,6 +1431,9 @@ export default function VideoPlayerModal({
     video.addEventListener('loadedmetadata', onLoadedMetadata);
     video.addEventListener('loadeddata', onLoadedData);
     video.addEventListener('waiting', onWaiting);
+    video.addEventListener('waiting', onStallWaiting);
+    video.addEventListener('stalled', onStalled);
+    video.addEventListener('suspend', onStalled);
     video.addEventListener('playing', onPlaying);
     video.addEventListener('canplay', onCanPlay);
     video.addEventListener('ended', onEnded);

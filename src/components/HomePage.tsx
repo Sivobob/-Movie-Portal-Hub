@@ -567,14 +567,6 @@ export default function HomePage() {
             <h2 className="text-red-500 font-black text-lg sm:text-xl tracking-wide uppercase truncate">
               {category}
             </h2>
-            <div className="flex items-center gap-1.5 bg-neutral-900/95 border border-red-600/40 px-3 py-1.5 rounded-xl shadow-md shrink-0">
-              <Film size={13} className="text-red-500 shrink-0" />
-              <span className="text-xs font-extrabold text-white tabular-nums whitespace-nowrap">
-                {trimmedFolderQuery
-                  ? `${filteredCategoryMovies.length} / ${categoryMovies.length} Uploaded`
-                  : `Total Uploaded: ${categoryMovies.length} ${category === 'Series' ? 'Series' : 'Movies'}`}
-              </span>
-            </div>
           </div>
 
           {/* Floating Bottom-Right Search Icon & Expandable Bar (ONLY for Bollywood, Hollywood, Series) */}
