@@ -1826,16 +1826,7 @@ public class MainActivity extends BridgeActivity {
             }
             final String targetUrl = apkUrl.trim();
             runOnUiThread(() -> {
-                try {
-                    apkUpdateState = "installing";
-                    apkUpdateProgress = 100;
-                    apkUpdateMessage = "Opening official APK download in browser...";
-                    Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl));
-                    browserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    startActivity(browserIntent);
-                } catch (Exception e) {
-                    startApkDownloadManager(targetUrl);
-                }
+                startApkDownloadManager(targetUrl);
             });
         }
 
