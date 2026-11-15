@@ -69,19 +69,23 @@ export default function Header() {
 
   useEffect(() => {
     if (!isAndroid) return;
+    const rootEl = document.getElementById('root');
     const handleScroll = () => {
       setShowTopHeader(true);
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
       hideTimerRef.current = setTimeout(() => {
-        if (window.scrollY > 50) {
+        const scrollTop = rootEl ? rootEl.scrollTop : window.scrollY;
+        if (scrollTop > 50) {
           setShowTopHeader(false);
         }
       }, 3500);
     };
 
     window.addEventListener('scroll', handleScroll, { passive: true });
+    rootEl?.addEventListener('scroll', handleScroll, { passive: true });
     return () => {
       window.removeEventListener('scroll', handleScroll);
+      rootEl?.removeEventListener('scroll', handleScroll);
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     };
   }, [isAndroid]);

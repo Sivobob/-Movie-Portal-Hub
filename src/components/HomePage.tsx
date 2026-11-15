@@ -532,7 +532,7 @@ export default function HomePage() {
   });
 
   return (
-    <div className={`relative flex-1 min-h-0 w-full max-w-full bg-black text-white flex flex-col select-none overflow-x-hidden ${category ? 'overflow-y-auto pb-[calc(5.75rem+env(safe-area-inset-bottom))] pt-2' : 'overflow-y-auto pb-[calc(5.75rem+env(safe-area-inset-bottom))] pt-0'}`}>
+    <div className={`relative flex-1 w-full max-w-full bg-black text-white flex flex-col select-none ${category ? 'pb-[calc(5.75rem+env(safe-area-inset-bottom))] pt-2' : 'pb-[calc(5.75rem+env(safe-area-inset-bottom))] pt-0'}`}>
 
       {toastMessage && (
         <div className="fixed top-[max(4.25rem,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-[120] bg-neutral-900/95 border border-red-600/50 text-white text-xs font-bold px-4 py-2.5 rounded-full shadow-2xl backdrop-blur-md max-w-[90vw] truncate">
@@ -640,7 +640,7 @@ export default function HomePage() {
         <div className="flex flex-col w-full">
           {/* Cinematic Hero Banner Matching First Screenshot */}
           <div
-            className="relative w-full h-[62dvh] sm:h-[68dvh] flex flex-col justify-end overflow-hidden select-none touch-none"
+            className="relative w-full h-[62dvh] sm:h-[68dvh] flex flex-col justify-end overflow-hidden select-none touch-pan-y"
             onTouchStart={handleTouchStart}
             onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}

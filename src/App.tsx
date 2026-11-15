@@ -91,10 +91,10 @@ function AppContent() {
       {showSplash ? (
         <SplashScreen onFinish={() => setShowSplash(false)} />
       ) : (
-        <div className="h-full min-h-[100dvh] w-full max-w-full bg-black flex flex-col select-none overflow-x-hidden">
+        <div className="min-h-[100dvh] w-full max-w-full bg-black flex flex-col select-none">
           <Header />
           <UpdateNotification />
-          <main className="flex-1 min-h-0 w-full flex flex-col">
+          <main className="flex-1 w-full flex flex-col">
             <Routes>
               <Route path="/" element={<HomePage />} />
               <Route
