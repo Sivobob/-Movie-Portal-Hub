@@ -21,5 +21,10 @@ service cloud.firestore {
     match /app_config/{configId} {
       allow read, write: if true;
     }
+
+    // App installed active devices tracking
+    match /app_installs/{deviceId} {
+      allow read, write: if true;
+    }
   }
 }

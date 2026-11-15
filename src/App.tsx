@@ -1,15 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
+import { StatusBar } from '@capacitor/status-bar';
 import { handleRedirectResult } from './services/authService';
-import { useAuth, isAuthorizedAdminEmail } from './context/AuthContext';
+import { useAuth } from './context/AuthContext';
 import SplashScreen from './components/SplashScreen';
 import HomePage from './components/HomePage';
 import AdminDashboard from './components/AdminDashboard';
 import Header from './components/Header';
 import SearchPage from './components/SearchPage';
 import UpdateNotification from './components/UpdateNotification';
-import { ShieldCheck, LogIn, ArrowLeft } from 'lucide-react';
+import { ShieldCheck, ArrowLeft } from 'lucide-react';
+import { registerActiveDeviceInstall } from './services/appStatsService';
+import { CURRENT_VERSION_NAME } from './services/appUpdateConfig';
+import { ensureAndroidStreamBridge } from './utils/apiConfig';
 
 function AdminRoute({ children }: { children: React.ReactElement }) {
   const [unlocked, setUnlocked] = useState(() => {
@@ -110,19 +114,14 @@ function AppContent() {
   );
 }
 
-import { StatusBar } from '@capacitor/status-bar';
-import { ensureAndroidStreamBridge } from './utils/apiConfig';
-import { recordInstalledApkDevice } from './services/appStatsService';
-import { CURRENT_VERSION_NAME } from './services/appUpdateConfig';
-
 export default function App() {
   useEffect(() => {
     handleRedirectResult().catch(() => {});
+    registerActiveDeviceInstall(CURRENT_VERSION_NAME).catch(() => {});
     
     // Hide top status bar by default for immersive app experience
     if (Capacitor.isNativePlatform()) {
       ensureAndroidStreamBridge().catch(() => {});
-      recordInstalledApkDevice(CURRENT_VERSION_NAME).catch(() => {});
       try {
         StatusBar.hide().catch(() => {});
         StatusBar.setOverlaysWebView({ overlay: true }).catch(() => {});

@@ -1,6 +1,8 @@
 import {
+  collection,
   doc,
   getDocFromServer,
+  getDocs,
   increment,
   onSnapshot,
   serverTimestamp,
@@ -8,18 +10,21 @@ import {
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { buildApiUrl } from '../utils/apiConfig';
+import { Capacitor } from '@capacitor/core';
 
 export const APP_STATS_COLLECTION = 'app_config';
 export const APP_STATS_DOC_ID = 'app_stats';
+export const APP_INSTALLS_COLLECTION = 'app_installs';
 
 const DOWNLOADED_USER_KEY = 'mp_apk_downloaded_user_v1';
-const INSTALLED_DEVICE_KEY = 'mp_native_installed_device_v1';
+const DEVICE_UUID_KEY = 'mp_device_uuid_v1';
 
 export interface FirestoreAppStats {
   totalApkClicks: number;
   uniqueDownloadUsers: number;
   installedAppUsers: number;
   inAppUpdateDownloads: number;
+  realInstalledDevicesCount: number;
 }
 
 export interface GitHubApkStats {
@@ -65,60 +70,104 @@ export async function recordApkDownloadClick(
 }
 
 export async function recordInstalledApkDevice(versionName?: string): Promise<void> {
+  return registerActiveDeviceInstall(versionName);
+}
+
+/**
+ * Registers or updates the current device in Firestore 'app_installs' collection on app startup,
+ * ensuring accurate active device tracking for all installed phone users.
+ */
+export async function registerActiveDeviceInstall(versionName?: string): Promise<void> {
   try {
     if (typeof window === 'undefined' || !window.localStorage) return;
-    const alreadyCounted = localStorage.getItem(INSTALLED_DEVICE_KEY);
-    if (alreadyCounted) return;
 
-    localStorage.setItem(INSTALLED_DEVICE_KEY, String(Date.now()));
+    let deviceId = localStorage.getItem(DEVICE_UUID_KEY);
+    if (!deviceId) {
+      deviceId = 'dev_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now();
+      localStorage.setItem(DEVICE_UUID_KEY, deviceId);
+    }
 
+    const platform = Capacitor.isNativePlatform() ? 'android' : (/android/i.test(navigator.userAgent) ? 'android_web' : 'web');
+    const userAgent = navigator.userAgent || '';
+
+    await setDoc(
+      doc(db, APP_INSTALLS_COLLECTION, deviceId),
+      {
+        deviceId,
+        platform,
+        versionName: versionName || '3.5.211',
+        lastActiveAt: serverTimestamp(),
+        userAgent,
+        updatedAt: Date.now(),
+      },
+      { merge: true }
+    );
+
+    // Also update aggregate counter in app_stats
     await setDoc(
       doc(db, APP_STATS_COLLECTION, APP_STATS_DOC_ID),
       {
-        installedAppUsers: increment(1),
-        lastInstalledVersion: versionName || 'unknown',
+        lastInstalledVersion: versionName || '3.5.211',
         lastActiveAt: serverTimestamp(),
       },
       { merge: true }
     );
   } catch (err) {
-    handleFirestoreError(err, OperationType.WRITE, `${APP_STATS_COLLECTION}/${APP_STATS_DOC_ID}`);
+    handleFirestoreError(err, OperationType.WRITE, `${APP_INSTALLS_COLLECTION}/device`);
   }
 }
 
-export function normalizeFirestoreAppStats(data: any): FirestoreAppStats {
+export function normalizeFirestoreAppStats(data: any, realCount = 0): FirestoreAppStats {
   return {
     totalApkClicks: Math.max(0, Number(data?.totalApkClicks) || 0),
     uniqueDownloadUsers: Math.max(0, Number(data?.uniqueDownloadUsers) || 0),
-    installedAppUsers: Math.max(0, Number(data?.installedAppUsers) || 0),
+    installedAppUsers: Math.max(realCount, Number(data?.installedAppUsers) || 0),
     inAppUpdateDownloads: Math.max(0, Number(data?.inAppUpdateDownloads) || 0),
+    realInstalledDevicesCount: realCount,
   };
-}
-
-export async function fetchFirestoreAppStats(): Promise<FirestoreAppStats> {
-  try {
-    const snap = await getDocFromServer(doc(db, APP_STATS_COLLECTION, APP_STATS_DOC_ID));
-    if (snap.exists()) {
-      return normalizeFirestoreAppStats(snap.data());
-    }
-  } catch {}
-  return normalizeFirestoreAppStats(null);
 }
 
 export function subscribeAppDownloadStats(
   onStats: (stats: FirestoreAppStats) => void
 ): () => void {
-  const ref = doc(db, APP_STATS_COLLECTION, APP_STATS_DOC_ID);
-  return onSnapshot(
-    ref,
+  const statsRef = doc(db, APP_STATS_COLLECTION, APP_STATS_DOC_ID);
+  const installsCol = collection(db, APP_INSTALLS_COLLECTION);
+
+  let latestStatsData: any = null;
+  let latestInstallCount = 0;
+
+  const emit = () => {
+    onStats(normalizeFirestoreAppStats(latestStatsData, latestInstallCount));
+  };
+
+  const unsubStats = onSnapshot(
+    statsRef,
     { includeMetadataChanges: false },
     (snap) => {
-      onStats(normalizeFirestoreAppStats(snap.exists() ? snap.data() : null));
+      latestStatsData = snap.exists() ? snap.data() : null;
+      emit();
     },
     (err) => {
       handleFirestoreError(err, OperationType.GET, `${APP_STATS_COLLECTION}/${APP_STATS_DOC_ID}`);
     }
   );
+
+  const unsubInstalls = onSnapshot(
+    installsCol,
+    { includeMetadataChanges: false },
+    (snap) => {
+      latestInstallCount = snap.size;
+      emit();
+    },
+    (err) => {
+      handleFirestoreError(err, OperationType.GET, APP_INSTALLS_COLLECTION);
+    }
+  );
+
+  return () => {
+    unsubStats();
+    unsubInstalls();
+  };
 }
 
 export async function fetchGitHubApkDownloadStats(): Promise<GitHubApkStats | null> {
