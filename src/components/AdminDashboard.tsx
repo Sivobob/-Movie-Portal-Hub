@@ -1810,21 +1810,31 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-              <button
-                type="button"
-                disabled={savingUpdateConfig}
-                onClick={handleQuickPushCurrentRelease}
-                className="mt-2.5 w-full bg-yellow-400 hover:bg-yellow-300 disabled:opacity-50 text-black font-black text-xs py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95"
-              >
-                <RefreshCw size={13} className={savingUpdateConfig ? 'animate-spin' : ''} />
-                <span>
-                  {savingUpdateConfig
-                    ? 'Syncing to Firebase...'
-                    : (!firebaseUpdateVersion || compareVersions(firebaseUpdateVersion, CURRENT_VERSION_NAME) < 0)
-                      ? `Push v${CURRENT_VERSION_NAME} Update Popup to All Apps`
-                      : `Re-Push v${CURRENT_VERSION_NAME} Update Popup to All Apps`}
-                </span>
-              </button>
+                {firebaseUpdateVersion && compareVersions(firebaseUpdateVersion, CURRENT_VERSION_NAME) >= 0 ? (
+                  <div className="mt-2.5 bg-emerald-950/60 border border-emerald-800/80 rounded-xl p-3 text-center animate-in fade-in">
+                    <div className="flex items-center justify-center gap-1.5 text-emerald-400 font-black text-xs">
+                      <CheckCircle2 size={16} />
+                      <span>Update v{CURRENT_VERSION_NAME} Pushed & Active</span>
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-1">
+                      All phones are up to date. Update control will reappear when next version is prepared.
+                    </p>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={savingUpdateConfig}
+                    onClick={handleQuickPushCurrentRelease}
+                    className="mt-2.5 w-full bg-yellow-400 hover:bg-yellow-300 disabled:opacity-50 text-black font-black text-xs py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                  >
+                    <RefreshCw size={13} className={savingUpdateConfig ? 'animate-spin' : ''} />
+                    <span>
+                      {savingUpdateConfig
+                        ? 'Syncing to Firebase...'
+                        : `Push v${CURRENT_VERSION_NAME} Update Popup to All Apps`}
+                    </span>
+                  </button>
+                )}
 
               {showUpdateConfigPanel && (
                 <form onSubmit={handleSaveRemoteUpdateConfig} className="mt-3 pt-3 border-t border-neutral-800 space-y-2.5 text-xs">

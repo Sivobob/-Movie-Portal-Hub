@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.211",
-  "minimumRequiredVersion": "3.5.211",
-  "latestVersionCode": 3431,
-  "minimumRequiredVersionCode": 3431,
+  "latestVersion": "3.5.212",
+  "minimumRequiredVersion": "3.5.212",
+  "latestVersionCode": 3432,
+  "minimumRequiredVersionCode": 3432,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Portal v3.5.211 update is ready! Fixes Chromecast / Smart TV video playback and landscape rotation stability.",
-  "releaseNotes": "Fixes Chromecast playback via Wi-Fi LAN proxy, real TV receiver status tracking, MIME/redirect handling, and Admin update control visibility."
+  "updateMessage": "Movie Portal v3.5.212 update is ready! Fixes Chromecast receiver video decoding, 3-4 min playback buffering, and admin update control visibility.",
+  "releaseNotes": "Fixes Chromecast Wi-Fi LAN streaming, ExoPlayer buffering, active device tracking, and auto-hiding update control once pushed."
 }
