@@ -4,10 +4,13 @@ import { useNavigate } from 'react-router-dom';
 import { collection, getDocs, getDocsFromServer } from 'firebase/firestore';
 import { db } from '../firebase';
 import VideoPlayerModal from './VideoPlayerModal';
+import MovieDetailsModal from './MovieDetailsModal';
 import MovieCard from './MovieCard';
 import { fetchMoviesFromFirestore, sortMoviesList } from '../services/movieStorage';
 import { normalizeMoviePosters } from '../utils/posterUrl';
 import { parseDurationToSeconds } from '../utils/duration';
+import { saveWatchProgress } from '../services/userWatchService';
+import { useAuth } from '../context/AuthContext';
 
 const GENRES = [
   "Action", "Adult", "Adventure", "Animation", "Animated Series", "Anime", "Biography", "Ceremony",
@@ -17,12 +20,75 @@ const GENRES = [
 ];
 
 export default function SearchPage() {
+  const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [results, setResults] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [playingMovie, setPlayingMovie] = useState<any | null>(null);
+  const [selectedMovie, setSelectedMovie] = useState<any | null>(null);
   const navigate = useNavigate();
+
+  const handleWatchNow = (
+    movie: any,
+    seasonIndex = 0,
+    episodeIndex = 0,
+    audioLanguage?: string
+  ) => {
+    const uid = user?.uid || 'guest_user';
+    const resumeTime = movie.currentTime || 0;
+    const movieDurationSec =
+      (typeof movie.duration === 'number' && movie.duration > 0 ? movie.duration : 0) ||
+      parseDurationToSeconds(movie.runtime);
+
+    if (movie.seasons && movie.seasons.length > 0) {
+      const sIdx = Math.max(0, Math.min(seasonIndex, movie.seasons.length - 1));
+      const season = movie.seasons[sIdx];
+      const episodes = season?.episodes || [];
+      const eIdx = Math.max(0, Math.min(episodeIndex, episodes.length - 1));
+      const ep = episodes[eIdx];
+
+      if (ep && ep.streamUrl) {
+        const epDurationSec =
+          (typeof ep.durationSec === 'number' && ep.durationSec > 0 ? ep.durationSec : 0) ||
+          parseDurationToSeconds(ep.duration) ||
+          movieDurationSec;
+        if (epDurationSec > 0 || resumeTime > 0) {
+          saveWatchProgress(uid, movie, resumeTime, epDurationSec).catch(() => {});
+        }
+        setPlayingMovie({
+          title: `${movie.title} - S0${season.seasonNumber || sIdx + 1}E0${ep.episodeNumber || eIdx + 1}: ${ep.title}`,
+          streamingUrl: ep.streamUrl.trim(),
+          displayCategory: movie.displayCategory,
+          posterUrl: movie.posterUrl,
+          movie: movie,
+          seasonIndex: sIdx,
+          episodeIndex: eIdx,
+          language: audioLanguage || movie.language,
+          currentTime: resumeTime,
+          initialDuration: epDurationSec,
+        });
+        setSelectedMovie(null);
+        return;
+      }
+    }
+
+    if (movie.streamingUrl) {
+      if (movieDurationSec > 0 || resumeTime > 0) {
+        saveWatchProgress(uid, movie, resumeTime, movieDurationSec).catch(() => {});
+      }
+      setPlayingMovie({
+        ...movie,
+        streamingUrl: movie.streamingUrl.trim(),
+        language: audioLanguage || movie.language,
+        currentTime: resumeTime,
+        initialDuration: movieDurationSec,
+      });
+      setSelectedMovie(null);
+    } else {
+      setSelectedMovie(movie);
+    }
+  };
 
   useEffect(() => {
     if (searchQuery.trim().length < 2 && selectedGenres.length === 0) {
@@ -155,47 +221,7 @@ export default function SearchPage() {
             <MovieCard
               key={movie.id}
               movie={movie}
-              onClick={() => {
-                const movDur =
-                  (typeof movie.duration === 'number' && movie.duration > 0 ? movie.duration : 0) ||
-                  parseDurationToSeconds(movie.runtime);
-                if (
-                  movie.seasons &&
-                  movie.seasons.length > 0 &&
-                  movie.seasons[0].episodes?.length > 0 &&
-                  movie.seasons[0].episodes[0].streamUrl
-                ) {
-                  const ep = movie.seasons[0].episodes[0];
-                  const epDur =
-                    (typeof ep.durationSec === 'number' && ep.durationSec > 0 ? ep.durationSec : 0) ||
-                    parseDurationToSeconds(ep.duration) ||
-                    movDur;
-                  setPlayingMovie({
-                    title: `${movie.title} - S01E01: ${ep.title}`,
-                    streamingUrl: ep.streamUrl.trim(),
-                    displayCategory: movie.displayCategory,
-                    posterUrl: movie.posterUrl,
-                    movie: movie,
-                    seasonIndex: 0,
-                    episodeIndex: 0,
-                    initialDuration: epDur,
-                  });
-                } else if (movie.streamingUrl) {
-                  setPlayingMovie({
-                    ...movie,
-                    streamingUrl: movie.streamingUrl.trim(),
-                    initialDuration: movDur,
-                  });
-                } else if (movie.trailerUrl) {
-                  setPlayingMovie({
-                    ...movie,
-                    title: `${movie.title} (Official Trailer)`,
-                    streamingUrl: movie.trailerUrl.trim(),
-                  });
-                } else {
-                  setPlayingMovie({ ...movie, initialDuration: movDur });
-                }
-              }}
+              onClick={() => setSelectedMovie(movie)}
             />
           ))}
         </div>
@@ -231,6 +257,15 @@ export default function SearchPage() {
           Apply Filters
         </button>
       </div>
+
+      {selectedMovie && (
+        <MovieDetailsModal
+          isOpen={Boolean(selectedMovie)}
+          onClose={() => setSelectedMovie(null)}
+          movie={selectedMovie}
+          onWatchNow={(m, sIdx, eIdx, lang) => handleWatchNow(m, sIdx, eIdx, lang)}
+        />
+      )}
 
       {playingMovie && (
         <VideoPlayerModal

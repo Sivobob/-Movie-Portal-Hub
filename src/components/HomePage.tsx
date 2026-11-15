@@ -787,7 +787,7 @@ export default function HomePage() {
                     >
                       {/* Poster Image with Circular Play Overlay & Red Progress Bar */}
                       <div
-                        onClick={() => handleWatchNow(movie)}
+                        onClick={() => handleMovieClick(movie)}
                         className="relative aspect-[3/4] w-full bg-neutral-950 overflow-hidden cursor-pointer group"
                       >
                         <img
