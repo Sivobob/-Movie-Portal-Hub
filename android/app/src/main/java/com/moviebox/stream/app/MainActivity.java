@@ -1103,11 +1103,56 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
+    private boolean isValidParsedApkPackage(File apkFile) {
+        if (!isValidApkZipHeader(apkFile)) {
+            return false;
+        }
+        try {
+            PackageInfo archiveInfo = getPackageManager().getPackageArchiveInfo(apkFile.getAbsolutePath(), 0);
+            if (archiveInfo == null || archiveInfo.packageName == null) {
+                return false;
+            }
+            return getPackageName().equals(archiveInfo.packageName);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private boolean isDeviceInSecureFrpOrUnprovisioned() {
+        try {
+            int provisioned = Settings.Global.getInt(getContentResolver(), Settings.Global.DEVICE_PROVISIONED, 1);
+            if (provisioned == 0) {
+                return true;
+            }
+        } catch (Exception ignored) {}
+        try {
+            int setupComplete = Settings.Secure.getInt(getContentResolver(), "user_setup_complete", 1);
+            if (setupComplete == 0) {
+                return true;
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
     private void launchApkPackageInstaller(File apkFile) {
         if (!isValidApkZipHeader(apkFile)) {
             apkUpdateState = "error";
             apkUpdateProgress = 0;
             apkUpdateMessage = "Downloaded update file is missing or incomplete. Please tap Retry.";
+            return;
+        }
+
+        if (!isValidParsedApkPackage(apkFile)) {
+            apkUpdateState = "error";
+            apkUpdateProgress = 0;
+            apkUpdateMessage = "Downloaded APK failed package verification. Tap Retry or use Download in Browser.";
+            return;
+        }
+
+        if (isDeviceInSecureFrpOrUnprovisioned()) {
+            apkUpdateState = "error";
+            apkUpdateProgress = 100;
+            apkUpdateMessage = "Android security lock (FRP / incomplete phone setup) is blocking APK installs on this device. Complete Google/device setup in Settings, or use Download in Browser.";
             return;
         }
 
@@ -1129,51 +1174,60 @@ public class MainActivity extends BridgeActivity {
             Intent installIntent = new Intent(Intent.ACTION_VIEW);
             installIntent.setDataAndType(apkUri, "application/vnd.android.package-archive");
             installIntent.setClipData(android.content.ClipData.newRawUri("", apkUri));
-            installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+            installIntent.putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                installIntent.putExtra(Intent.EXTRA_INSTALLER_PACKAGE_NAME, getPackageName());
+            }
+
+            if (installIntent.resolveActivity(getPackageManager()) == null) {
+                apkUpdateState = "error";
+                apkUpdateProgress = 100;
+                apkUpdateMessage = "No Android Package Installer found on this device. Tap \"Download in Browser\" below.";
+                return;
+            }
 
             apkUpdateState = "installing";
             apkUpdateProgress = 100;
-            apkUpdateMessage = "Update ready! Tap Install / Update on the Android popup inside the app.";
+            apkUpdateMessage = "Update ready! Tap Install / Update on the Android popup. If your phone's Package Installer crashes or blocks it, tap \"Download in Browser\" below.";
 
-            try {
-                startActivity(installIntent);
-            } catch (Exception firstEx) {
-                Intent fallbackIntent = new Intent(Intent.ACTION_INSTALL_PACKAGE);
-                fallbackIntent.setData(apkUri);
-                fallbackIntent.setClipData(android.content.ClipData.newRawUri("", apkUri));
-                fallbackIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                try {
-                    startActivity(fallbackIntent);
-                } catch (Exception secondEx) {
-                    installIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    startActivity(installIntent);
-                }
-            }
+            startActivity(installIntent);
+        } catch (SecurityException secEx) {
+            apkUpdateState = "error";
+            apkUpdateProgress = 100;
+            apkUpdateMessage = "Android system security blocked in-app installation ("
+                + (secEx.getMessage() != null ? secEx.getMessage() : "SecurityException")
+                + "). Use \"Download in Browser\" or check device FRP/Unknown Sources settings.";
         } catch (Exception e) {
             apkUpdateState = "error";
             apkUpdateProgress = 0;
-            apkUpdateMessage = "Could not start Android installer: " + (e.getMessage() != null ? e.getMessage() : "Unknown error");
+            apkUpdateMessage = "Could not start Android installer ("
+                + (e.getMessage() != null ? e.getMessage() : "Unknown error")
+                + "). Try \"Download in Browser\".";
         }
     }
 
     private File resolveApkDownloadDir() {
-        File internalDir = getFilesDir();
         File externalDir = null;
         try {
             externalDir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
         } catch (Exception ignored) {}
+        File internalDir = getFilesDir();
 
-        long minRecommendedBytes = 210L * 1024L * 1024L;
-        if (internalDir != null && internalDir.getUsableSpace() >= minRecommendedBytes) {
-            return internalDir;
-        }
+        long minRecommendedBytes = 60L * 1024L * 1024L;
         if (externalDir != null) {
             if (!externalDir.exists()) {
                 externalDir.mkdirs();
             }
-            if (externalDir.getUsableSpace() >= minRecommendedBytes) {
+            if (externalDir.exists() && externalDir.canWrite() && externalDir.getUsableSpace() >= minRecommendedBytes) {
                 return externalDir;
             }
+        }
+        if (internalDir != null && internalDir.getUsableSpace() >= minRecommendedBytes) {
+            return internalDir;
+        }
+        if (externalDir != null && externalDir.exists() && externalDir.canWrite()) {
+            return externalDir;
         }
         return internalDir != null ? internalDir : getCacheDir();
     }
@@ -1241,11 +1295,11 @@ public class MainActivity extends BridgeActivity {
                 apkUpdateMessage = "Storage directory unavailable. Please check device storage and tap Retry.";
                 return;
             }
-            if (targetDir.getUsableSpace() > 0 && targetDir.getUsableSpace() < 180L * 1024L * 1024L) {
+            if (targetDir.getUsableSpace() > 0 && targetDir.getUsableSpace() < 60L * 1024L * 1024L) {
                 isDownloadingApk = false;
                 apkUpdateState = "error";
                 apkUpdateProgress = 0;
-                apkUpdateMessage = "Not enough free storage space (~200 MB required). Free up space and tap Retry.";
+                apkUpdateMessage = "Not enough free storage space (~60 MB required). Free up space and tap Retry.";
                 return;
             }
 
@@ -1312,8 +1366,8 @@ public class MainActivity extends BridgeActivity {
                     if (totalBytes > 0 && downloaded < totalBytes) {
                         throw new IOException("Incomplete download (" + downloaded + " / " + totalBytes + " bytes)");
                     }
-                    if (!isValidApkZipHeader(tempPartFile)) {
-                        throw new IOException("Downloaded file is not a valid Android APK package");
+                    if (!isValidParsedApkPackage(tempPartFile)) {
+                        throw new IOException("Downloaded file is corrupted or not a valid Movie Portal APK");
                     }
 
                     if (finalApkFile.exists()) {
@@ -1934,11 +1988,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.224");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.225");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.224\",\"versionCode\":3444}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.225\",\"versionCode\":3445}";
             }
         }
 
@@ -2005,12 +2059,30 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface
         public void retryInstallDownloadedApk() {
             runOnUiThread(() -> {
-                if (isValidApkZipHeader(downloadedApkFile)) {
+                if (isValidParsedApkPackage(downloadedApkFile)) {
                     launchApkPackageInstaller(downloadedApkFile);
                 } else if (lastApkDownloadUrl != null && !lastApkDownloadUrl.isEmpty()) {
                     startApkDownloadManager(lastApkDownloadUrl);
                 } else {
                     launchApkPackageInstaller(downloadedApkFile);
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void openApkDownloadInBrowser(final String apkUrl) {
+            final String targetUrl = (apkUrl != null && !apkUrl.trim().isEmpty())
+                ? apkUrl.trim()
+                : lastApkDownloadUrl;
+            if (targetUrl == null || targetUrl.isEmpty()) return;
+            runOnUiThread(() -> {
+                try {
+                    Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl));
+                    browserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(browserIntent);
+                } catch (Exception e) {
+                    apkUpdateState = "error";
+                    apkUpdateMessage = "Could not open browser. Download manually from GitHub Releases.";
                 }
             });
         }

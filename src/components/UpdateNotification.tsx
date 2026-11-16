@@ -14,6 +14,7 @@ export default function UpdateNotification() {
     startUpdateDownload,
     openUnknownSourcesSettings,
     retryInstallDownloadedApk,
+    openBrowserDownloadFallback,
   } = useAppUpdate();
 
   // Lock background page scrolling whenever mandatory update modal is active
@@ -58,7 +59,7 @@ export default function UpdateNotification() {
       onClick={(e) => e.stopPropagation()}
     >
       <div
-        className="w-full max-w-sm bg-neutral-900 border-2 border-yellow-400/90 rounded-3xl p-6 shadow-[0_0_50px_rgba(250,204,21,0.22)] text-center text-white"
+        className="w-full max-w-sm bg-neutral-900 border-2 border-yellow-400/90 rounded-3xl p-6 shadow-[0_0_50px_rgba(250,204,21,0.22)] text-center text-white max-h-[90dvh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="w-16 h-16 rounded-2xl bg-yellow-400/15 border border-yellow-400/40 flex items-center justify-center text-yellow-400 mx-auto mb-4 shadow-lg">
@@ -160,9 +161,14 @@ export default function UpdateNotification() {
 
         {/* Network / Download Error State with Retry */}
         {isError && (
-          <div className="mb-4 bg-red-950/60 border border-red-500/40 rounded-xl p-3 text-xs text-red-200 leading-relaxed">
-            {installStatus.message ||
-              'Download failed or internet is unavailable. Please check your connection and tap Retry.'}
+          <div className="mb-4 bg-red-950/60 border border-red-500/40 rounded-xl p-3 text-left text-xs text-red-200 leading-relaxed space-y-1.5">
+            <p>
+              {installStatus.message ||
+                'Download failed or internet is unavailable. Please check your connection and tap Retry.'}
+            </p>
+            <p className="text-[11px] text-gray-300">
+              If your phone shows &quot;Package installer keeps stopping&quot; or &quot;secure FRP&quot;, complete phone Google setup in Settings or tap &quot;Download in Browser&quot; below.
+            </p>
           </div>
         )}
 
@@ -193,17 +199,27 @@ export default function UpdateNotification() {
           </button>
         )}
 
-        {/* Secondary non-dismissive version re-check button if user just finished installing */}
+        {/* Fallback Browser Download if OEM PackageInstaller crashes */}
         {(isInstalling || isPermissionRequired || isError) && (
-          <button
-            type="button"
-            disabled={checkingUpdate}
-            onClick={checkUpdate}
-            className="mt-3 w-full bg-neutral-800 hover:bg-neutral-700 text-gray-200 font-bold text-xs py-2.5 px-4 rounded-xl border border-neutral-700 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <RefreshCw size={14} className={checkingUpdate ? 'animate-spin' : ''} />
-            <span>{checkingUpdate ? 'Checking Version...' : 'Check Installed Version'}</span>
-          </button>
+          <div className="mt-3 space-y-2">
+            <button
+              type="button"
+              onClick={openBrowserDownloadFallback}
+              className="w-full bg-neutral-800 hover:bg-neutral-700 text-yellow-400 font-bold text-xs py-2.5 px-4 rounded-xl border border-yellow-400/30 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <Download size={14} />
+              <span>Download in Browser (If Installer Fails)</span>
+            </button>
+            <button
+              type="button"
+              disabled={checkingUpdate}
+              onClick={checkUpdate}
+              className="w-full bg-neutral-800 hover:bg-neutral-700 text-gray-200 font-bold text-xs py-2.5 px-4 rounded-xl border border-neutral-700 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <RefreshCw size={14} className={checkingUpdate ? 'animate-spin' : ''} />
+              <span>{checkingUpdate ? 'Checking Version...' : 'Check Installed Version'}</span>
+            </button>
+          </div>
         )}
       </div>
     </div>
