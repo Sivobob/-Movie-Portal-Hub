@@ -1,11 +1,11 @@
 {
   "latestVersion": "3.5.225",
-  "minimumRequiredVersion": "3.5.225",
+  "minimumRequiredVersion": "1.0.0",
   "latestVersionCode": 3445,
-  "minimumRequiredVersionCode": 3445,
+  "minimumRequiredVersionCode": 1,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
-  "isMandatory": true,
-  "updateMessage": "Movie Portal v3.5.225 lightweight update is ready (~20 MB)! Faster install, verified APK package & browser download fallback for all Android phones.",
-  "releaseNotes": "v3.5.225: Removed 126MB dummy asset bloat, added APK archive verification, external download directory priority, FRP detection, and browser download fallback."
+  "isMandatory": false,
+  "updateMessage": "Movie Portal v3.5.225 is available.",
+  "releaseNotes": "In-app update prompts disabled; 24-hour New Episodes list enabled on Home."
 }

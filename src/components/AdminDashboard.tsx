@@ -62,6 +62,7 @@ import {
   toggleFeaturedLocally,
   clearAllMoviesLocally,
   sortMoviesList,
+  getTimestampMs,
   MovieData
 } from '../services/movieStorage';
 import { loginWithGoogle } from '../services/authService';
@@ -231,7 +232,7 @@ export default function AdminDashboard() {
   const [showChannelPanel, setShowChannelPanel] = useState(false);
 
   // Series Season & Episode Management State
-  const [seasons, setSeasons] = useState<Array<{ seasonNumber: number; episodes: Array<{ episodeNumber: number; title: string; streamUrl: string; duration?: string; durationSec?: number }> }>>([
+  const [seasons, setSeasons] = useState<Array<{ seasonNumber: number; episodes: Array<{ episodeNumber: number; title: string; streamUrl: string; duration?: string; durationSec?: number; createdAt?: any; addedAt?: any }> }>>([
     {
       seasonNumber: 1,
       episodes: [
@@ -511,13 +512,24 @@ export default function AdminDashboard() {
         totalKept += keptItems.length;
         totalRemoved += Number(data.removedCount || 0);
 
-        const cleanEps = keptItems.map((item, idx) => ({
-          episodeNumber: idx + 1,
-          title: `Episode ${idx + 1}`,
-          streamUrl: item.url,
-          ...(item.duration ? { duration: item.duration } : {}),
-          ...(item.durationSec > 0 ? { durationSec: item.durationSec } : {}),
-        }));
+        const existingTimestampByUrl = new Map<string, number>();
+        for (const oldEp of season.episodes || []) {
+          const u = String(oldEp?.streamUrl || '').trim();
+          const ts = getTimestampMs(oldEp?.addedAt) || getTimestampMs(oldEp?.createdAt);
+          if (u && ts > 0) existingTimestampByUrl.set(u, ts);
+        }
+
+        const cleanEps = keptItems.map((item, idx) => {
+          const prevTs = existingTimestampByUrl.get(item.url.trim());
+          return {
+            episodeNumber: idx + 1,
+            title: `Episode ${idx + 1}`,
+            streamUrl: item.url,
+            ...(prevTs ? { createdAt: prevTs, addedAt: prevTs } : {}),
+            ...(item.duration ? { duration: item.duration } : {}),
+            ...(item.durationSec > 0 ? { durationSec: item.durationSec } : {}),
+          };
+        });
         updatedSeasons.push({
           ...season,
           episodes: cleanEps.length > 0 ? cleanEps : [{ episodeNumber: 1, title: 'Episode 1', streamUrl: '' }],
@@ -617,7 +629,7 @@ export default function AdminDashboard() {
     const durSecOverride = durTrim ? parseDurationToSeconds(durTrim) : 0;
     const targetNum = Math.max(1, bulkTargetSeasonNum);
 
-    let generatedEpisodes: Array<{ episodeNumber: number; title: string; streamUrl: string; duration?: string; durationSec?: number }> = [];
+    let generatedEpisodes: Array<{ episodeNumber: number; title: string; streamUrl: string; duration?: string; durationSec?: number; createdAt?: number; addedAt?: number }> = [];
     let skippedSummary = '';
 
     if (!skipTelegramScan) {
@@ -770,6 +782,7 @@ export default function AdminDashboard() {
             episodeNumber: epNum,
             title: `Episode ${epNum}`,
             streamUrl: urlMatch[1],
+            createdAt: Date.now(),
             ...(durTrim ? { duration: durTrim } : {}),
             ...(durSec > 0 ? { durationSec: durSec } : {}),
           });
@@ -897,10 +910,13 @@ export default function AdminDashboard() {
             setScanningRange(false);
             return;
           }
+          const stampNow = Date.now();
           newEpisodes = scanData.episodes.map((ep, i) => ({
             episodeNumber: i + 1,
             title: `Episode ${i + 1}`,
             streamUrl: ep.streamUrl,
+            createdAt: stampNow,
+            addedAt: stampNow,
             ...(durTrim
               ? { duration: durTrim, ...(durSec > 0 ? { durationSec: durSec } : {}) }
               : ep.duration
@@ -918,10 +934,13 @@ export default function AdminDashboard() {
           setScanningRange(false);
         }
       } else {
+        const stampNow = Date.now();
         newEpisodes = check.urls.map((u, i) => ({
           episodeNumber: i + 1,
           title: `Episode ${i + 1}`,
           streamUrl: u,
+          createdAt: stampNow,
+          addedAt: stampNow,
           ...(durTrim ? { duration: durTrim } : {}),
           ...(durSec > 0 ? { durationSec: durSec } : {}),
         }));
@@ -934,10 +953,13 @@ export default function AdminDashboard() {
           return m ? m[1] : (l.trim().startsWith('t.me/') ? `https://${l.trim()}` : '');
         })
         .filter(Boolean);
+      const stampNow = Date.now();
       newEpisodes = urls.map((u, i) => ({
         episodeNumber: i + 1,
         title: `Episode ${i + 1}`,
         streamUrl: u,
+        createdAt: stampNow,
+        addedAt: stampNow,
         ...(durTrim ? { duration: durTrim } : {}),
         ...(durSec > 0 ? { durationSec: durSec } : {}),
       }));
@@ -1509,14 +1531,14 @@ export default function AdminDashboard() {
     try {
       const saved = await saveRemoteUpdateConfig({
         ...updateConfigForm,
-        latestVersion: CURRENT_VERSION_NAME,
-        minimumRequiredVersion: CURRENT_VERSION_NAME,
-        latestVersionCode: CURRENT_VERSION_CODE,
-        minimumRequiredVersionCode: CURRENT_VERSION_CODE,
+        latestVersion: '1.0.0',
+        minimumRequiredVersion: '1.0.0',
+        latestVersionCode: 1,
+        minimumRequiredVersionCode: 1,
       });
       setUpdateConfigForm(saved);
       setFirebaseUpdateVersion(saved.minimumRequiredVersion || saved.latestVersion);
-      showNotification('success', `✅ Firebase updated to v${saved.latestVersion} (#${saved.latestVersionCode})! Older APKs will now show the update popup.`);
+      showNotification('success', '✅ Update popup disabled for all apps (Firebase min version set to v1.0.0).');
     } catch (err: any) {
       showNotification('error', `Failed to update Firebase: ${err?.message || 'Permission denied'}`);
     } finally {
@@ -1935,11 +1957,54 @@ export default function AdminDashboard() {
       const autoDisplayCategory = getDisplayCategory(catToSave);
 
       const isSeries = catToSave === 'Web Series' || catToSave === 'Anime Series';
-      const resolvedSeasons = isSeries
+      const rawSeasons = isSeries
         ? (editingMovie?.seasons && editingMovie.seasons.length > 0 && (!seasons || seasons.length === 0)
             ? editingMovie.seasons
             : seasons)
         : (editingMovie?.seasons || []);
+
+      // Track previously saved episodes when editing so ONLY genuinely new episodes get a 24h timestamp
+      const saveNowMs = Date.now();
+      const prevStreamTimestampMap = new Map<string, number>();
+      if (editingMovie && Array.isArray(editingMovie.seasons)) {
+        for (const prevSeason of editingMovie.seasons) {
+          for (const prevEp of prevSeason.episodes || []) {
+            const pUrl = String(prevEp?.streamUrl || '').trim();
+            if (!pUrl) continue;
+            const pTs = getTimestampMs((prevEp as any)?.addedAt) || getTimestampMs((prevEp as any)?.createdAt);
+            if (!prevStreamTimestampMap.has(pUrl)) {
+              prevStreamTimestampMap.set(pUrl, pTs > 0 ? pTs : -1);
+            }
+          }
+        }
+      }
+
+      const resolvedSeasons = Array.isArray(rawSeasons)
+        ? rawSeasons.map((season) => ({
+            ...season,
+            episodes: (season.episodes || []).map((ep: any) => {
+              const cleanUrl = String(ep?.streamUrl || '').trim();
+              if (!cleanUrl) return ep;
+
+              if (editingMovie) {
+                if (prevStreamTimestampMap.has(cleanUrl)) {
+                  const prevTs = prevStreamTimestampMap.get(cleanUrl)!;
+                  if (prevTs > 0) {
+                    return { ...ep, createdAt: prevTs, addedAt: prevTs };
+                  }
+                  const { createdAt: _c, addedAt: _a, ...restEp } = ep;
+                  return restEp;
+                }
+                const newTs = getTimestampMs(ep?.addedAt) || getTimestampMs(ep?.createdAt) || saveNowMs;
+                return { ...ep, createdAt: newTs, addedAt: newTs };
+              }
+
+              const newTs = getTimestampMs(ep?.addedAt) || getTimestampMs(ep?.createdAt) || saveNowMs;
+              return { ...ep, createdAt: newTs, addedAt: newTs };
+            }),
+          }))
+        : [];
+
       const firstEpStream = isSeries && resolvedSeasons.length > 0 && resolvedSeasons[0].episodes?.length > 0
         ? resolvedSeasons[0].episodes[0].streamUrl
         : '';
@@ -2665,14 +2730,14 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-                {firebaseUpdateVersion && compareVersions(firebaseUpdateVersion, CURRENT_VERSION_NAME) >= 0 ? (
+                {firebaseUpdateVersion === '1.0.0' ? (
                   <div className="mt-2.5 bg-emerald-950/60 border border-emerald-800/80 rounded-xl p-3 text-center animate-in fade-in">
                     <div className="flex items-center justify-center gap-1.5 text-emerald-400 font-black text-xs">
                       <CheckCircle2 size={16} />
-                      <span>Update v{CURRENT_VERSION_NAME} Pushed & Active</span>
+                      <span>No Update Popups Active (Disabled)</span>
                     </div>
                     <p className="text-[10px] text-gray-400 mt-1">
-                      All phones are up to date. Update control will reappear when next version is prepared.
+                      Mandatory app update popups are turned off for all phones and Chrome.
                     </p>
                   </div>
                 ) : (
@@ -2686,7 +2751,7 @@ export default function AdminDashboard() {
                     <span>
                       {savingUpdateConfig
                         ? 'Syncing to Firebase...'
-                        : `Push v${CURRENT_VERSION_NAME} Update Popup to All Apps`}
+                        : 'Disable Update Popups on All Old APKs'}
                     </span>
                   </button>
                 )}

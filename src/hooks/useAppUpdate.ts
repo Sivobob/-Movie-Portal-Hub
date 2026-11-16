@@ -5,11 +5,7 @@ import {
   InstalledAppVersion,
   CURRENT_VERSION_NAME,
   CURRENT_VERSION_CODE,
-  fetchRemoteUpdateConfig,
-  subscribeRemoteUpdateConfig,
   getInstalledAppVersion,
-  isAppUpdateRequired,
-  pickHigherRemoteUpdateConfig,
   OFFICIAL_APK_DIRECT_URL,
 } from '../services/appUpdateConfig';
 import { recordApkDownloadClick } from '../services/appStatsService';
@@ -28,7 +24,7 @@ export function useAppUpdate() {
     packageName: 'com.moviebox.stream.app',
     source: 'bundled_fallback',
   });
-  const [isMandatoryUpdate, setIsMandatoryUpdate] = useState(false);
+  const [isMandatoryUpdate] = useState(false);
   const [installStatus, setInstallStatus] = useState<ApkInstallStatus>({
     state: 'idle',
     progress: 0,
@@ -40,140 +36,37 @@ export function useAppUpdate() {
   remoteConfigRef.current = remoteConfig;
 
   const evaluateUpdateLock = useCallback(
-    (installed: InstalledAppVersion, remote: RemoteUpdateConfig | null) => {
-      if (!Capacitor.isNativePlatform()) {
-        setIsMandatoryUpdate(false);
-        return false;
-      }
-      const required = isAppUpdateRequired(installed, remote);
-      setIsMandatoryUpdate(required);
+    (_installed: InstalledAppVersion, _remote: RemoteUpdateConfig | null) => {
       if (typeof window !== 'undefined') {
-        (window as any).__MOVIE_PORTAL_MANDATORY_UPDATE__ = required;
+        (window as any).__MOVIE_PORTAL_MANDATORY_UPDATE__ = false;
         try {
-          (window as any).AndroidPlayerBridge?.setMandatoryUpdateRequired?.(required);
+          (window as any).AndroidPlayerBridge?.setMandatoryUpdateRequired?.(false);
         } catch {}
       }
-      return required;
+      return false;
     },
     []
   );
 
   const checkUpdate = useCallback(async () => {
-    if (!Capacitor.isNativePlatform()) return;
-    setCheckingUpdate(true);
-    try {
-      const [installed, fetchedRemote] = await Promise.all([
-        getInstalledAppVersion(),
-        fetchRemoteUpdateConfig(),
-      ]);
-      setInstalledVersion(installed);
-      const effectiveRemote = fetchedRemote || remoteConfigRef.current;
-      if (fetchedRemote) {
-        setRemoteConfig(fetchedRemote);
-      }
-      evaluateUpdateLock(installed, effectiveRemote);
-    } catch (err) {
-      console.warn('Mandatory update check warning:', err);
-    } finally {
-      setCheckingUpdate(false);
-    }
-  }, [evaluateUpdateLock]);
+    setCheckingUpdate(false);
+    evaluateUpdateLock(installedVersion, null);
+  }, [evaluateUpdateLock, installedVersion]);
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as any).__MOVIE_PORTAL_MANDATORY_UPDATE__ = false;
+      try {
+        (window as any).AndroidPlayerBridge?.setMandatoryUpdateRequired?.(false);
+      } catch {}
+    }
     if (!Capacitor.isNativePlatform()) return;
-
-    let isMounted = true;
-    checkUpdate();
-
-    // Real-time Firebase Firestore listener for instant enforcement without app restart
-    const unsubscribeSnapshot = subscribeRemoteUpdateConfig(
-      async (config) => {
-        if (!isMounted) return;
-        const effectiveConfig =
-          pickHigherRemoteUpdateConfig(config, remoteConfigRef.current) || config;
-        setRemoteConfig(effectiveConfig);
-        const installed = await getInstalledAppVersion();
-        if (!isMounted) return;
+    getInstalledAppVersion()
+      .then((installed) => {
         setInstalledVersion(installed);
-        evaluateUpdateLock(installed, effectiveConfig);
-      },
-      (err) => {
-        console.warn('Firestore remote update listener notice:', err);
-      }
-    );
-
-    // Re-check installed version & Firebase config when user returns from PackageInstaller or Settings
-    const handleVisibilityOrFocus = () => {
-      if (document.visibilityState === 'visible') {
-        checkUpdate();
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
-    window.addEventListener('focus', checkUpdate);
-
-    let appStateHandle: any = null;
-    let resumeHandle: any = null;
-    import('@capacitor/app')
-      .then(({ App: CapApp }) => {
-        appStateHandle = CapApp.addListener('appStateChange', ({ isActive }) => {
-          if (isActive) checkUpdate();
-        });
-        resumeHandle = CapApp.addListener('resume', () => {
-          checkUpdate();
-        });
       })
       .catch(() => {});
-
-    const interval = setInterval(checkUpdate, 60 * 1000);
-
-    return () => {
-      isMounted = false;
-      unsubscribeSnapshot();
-      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
-      window.removeEventListener('focus', checkUpdate);
-      clearInterval(interval);
-      if (appStateHandle && typeof appStateHandle.remove === 'function') {
-        appStateHandle.remove();
-      }
-      if (resumeHandle && typeof resumeHandle.remove === 'function') {
-        resumeHandle.remove();
-      }
-    };
-  }, [checkUpdate, evaluateUpdateLock]);
-
-  // Poll native APK download/install progress when downloading or awaiting permission
-  useEffect(() => {
-    if (!isMandatoryUpdate || !Capacitor.isNativePlatform()) return;
-    const bridge = (window as any).AndroidPlayerBridge;
-    if (!bridge || typeof bridge.getApkUpdateStatus !== 'function') return;
-
-    const poll = () => {
-      try {
-        const raw = bridge.getApkUpdateStatus();
-        if (!raw) return;
-        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-        if (parsed && parsed.state) {
-          setInstallStatus((prev) => {
-            if (
-              prev.state === parsed.state &&
-              prev.progress === Number(parsed.progress || 0) &&
-              prev.message === String(parsed.message || '')
-            ) {
-              return prev;
-            }
-            return {
-              state: parsed.state,
-              progress: Number(parsed.progress || 0),
-              message: String(parsed.message || ''),
-            };
-          });
-        }
-      } catch {}
-    };
-
-    const timer = setInterval(poll, 350);
-    return () => clearInterval(timer);
-  }, [isMandatoryUpdate]);
+  }, []);
 
   const startUpdateDownload = useCallback(async () => {
     const rawUrl = (remoteConfigRef.current?.apkDownloadUrl || OFFICIAL_APK_DIRECT_URL).trim();

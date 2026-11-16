@@ -34,8 +34,25 @@ export interface MovieData {
       title: string;
       streamUrl: string;
       duration?: string;
+      durationSec?: number;
+      createdAt?: any;
+      addedAt?: any;
     }>;
   }>;
+}
+
+export const NEW_EPISODE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+export interface RecentEpisodeItem {
+  key: string;
+  movie: MovieData;
+  seasonIndex: number;
+  episodeIndex: number;
+  seasonNumber: number;
+  episodeNumber: number;
+  episodeTitle: string;
+  duration?: string;
+  addedAtMs: number;
 }
 
 const COLLECTION_NAME = 'movies';
@@ -44,6 +61,8 @@ export function getTimestampMs(val: any): number {
   if (!val) return 0;
   if (typeof val === 'number') return val;
   if (typeof val === 'string') {
+    const num = Number(val);
+    if (Number.isFinite(num) && num > 0 && /^\d+$/.test(val.trim())) return num;
     const parsed = Date.parse(val);
     return Number.isFinite(parsed) ? parsed : 0;
   }
@@ -58,6 +77,51 @@ export function getTimestampMs(val: any): number {
     return val.seconds * 1000;
   }
   return 0;
+}
+
+export function getNewEpisodesWithin24h(
+  moviesList: MovieData[],
+  nowMs: number = Date.now()
+): RecentEpisodeItem[] {
+  const items: RecentEpisodeItem[] = [];
+
+  for (const movie of moviesList) {
+    if (!movie || movie.published === false) continue;
+    if (!Array.isArray(movie.seasons) || movie.seasons.length === 0) continue;
+
+    movie.seasons.forEach((season, sIdx) => {
+      if (!season || !Array.isArray(season.episodes)) return;
+      const seasonNum = Number(season.seasonNumber) || sIdx + 1;
+
+      season.episodes.forEach((ep, eIdx) => {
+        if (!ep || !ep.streamUrl || !String(ep.streamUrl).trim()) return;
+        const epTimeMs = getTimestampMs(ep.addedAt) || getTimestampMs(ep.createdAt);
+        if (epTimeMs <= 0) return;
+
+        const ageMs = nowMs - epTimeMs;
+        if (ageMs >= -60_000 && ageMs < NEW_EPISODE_WINDOW_MS) {
+          const epNum = Number(ep.episodeNumber) || eIdx + 1;
+          items.push({
+            key: `${movie.id}_s${seasonNum}_e${epNum}_${eIdx}`,
+            movie,
+            seasonIndex: sIdx,
+            episodeIndex: eIdx,
+            seasonNumber: seasonNum,
+            episodeNumber: epNum,
+            episodeTitle: ep.title?.trim() || `Episode ${epNum}`,
+            duration: ep.duration,
+            addedAtMs: epTimeMs,
+          });
+        }
+      });
+    });
+  }
+
+  return items.sort((a, b) => {
+    if (b.addedAtMs !== a.addedAtMs) return b.addedAtMs - a.addedAtMs;
+    if (b.seasonNumber !== a.seasonNumber) return b.seasonNumber - a.seasonNumber;
+    return b.episodeNumber - a.episodeNumber;
+  });
 }
 
 export function sortMoviesList<T extends Partial<MovieData>>(list: T[]): T[] {

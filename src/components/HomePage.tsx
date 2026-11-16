@@ -19,7 +19,13 @@ import {
   saveWatchProgress,
 } from '../services/userWatchService';
 
-import { getLocalMovies, saveLocalMovies, sortMoviesList } from '../services/movieStorage';
+import {
+  getLocalMovies,
+  saveLocalMovies,
+  sortMoviesList,
+  getNewEpisodesWithin24h,
+  NEW_EPISODE_WINDOW_MS,
+} from '../services/movieStorage';
 import { upgradePosterUrl, normalizeMoviePosters } from '../utils/posterUrl';
 import { getVisibleQualityBadge } from '../utils/qualityBadge';
 import { parseDurationToSeconds } from '../utils/duration';
@@ -71,6 +77,7 @@ export default function HomePage() {
   // Recently watched & My List state
   const [recentlyWatched, setRecentlyWatched] = useState<WatchHistoryItem[]>([]);
   const [myListIds, setMyListIds] = useState<Set<string>>(new Set());
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
 
   const isFolderSearchSupported =
     category === 'Bollywood' || category === 'Hollywood' || category === 'Series';
@@ -565,6 +572,32 @@ export default function HomePage() {
     }
   };
 
+  useEffect(() => {
+    const updateClock = () => setNowMs(Date.now());
+    const timer = setInterval(updateClock, 30_000);
+    window.addEventListener('focus', updateClock);
+    document.addEventListener('visibilitychange', updateClock);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', updateClock);
+      document.removeEventListener('visibilitychange', updateClock);
+    };
+  }, []);
+
+  const newEpisodes24h = useMemo(() => {
+    return getNewEpisodesWithin24h(movies, nowMs);
+  }, [movies, nowMs]);
+
+  const formatEpisodeAge = (addedAtMs: number) => {
+    const elapsedMs = Math.max(0, nowMs - addedAtMs);
+    const elapsedMins = Math.floor(elapsedMs / 60_000);
+    const remainingHrs = Math.max(1, Math.ceil((NEW_EPISODE_WINDOW_MS - elapsedMs) / 3_600_000));
+    if (elapsedMins < 1) return 'Just added • 24h left';
+    if (elapsedMins < 60) return `${elapsedMins}m ago • ${remainingHrs}h left`;
+    const elapsedHrs = Math.floor(elapsedMins / 60);
+    return `${elapsedHrs}h ago • ${remainingHrs}h left`;
+  };
+
   // Check if movie was recently added (within last 14 days)
   const isRecentlyAdded = (movie: any) => {
     if (!movie.updatedAt) return false;
@@ -819,6 +852,80 @@ export default function HomePage() {
               )}
             </div>
           </div>
+
+          {/* NEW EPISODES (Last 24 Hours Only) */}
+          {newEpisodes24h.length > 0 && (
+            <div className="mt-5 px-3 sm:px-6">
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="w-1.5 h-5 bg-[#E50914] rounded-full flex-shrink-0" />
+                  <h3 className="text-base sm:text-lg font-bold text-white tracking-wide truncate">
+                    New Episodes
+                  </h3>
+                </div>
+                <span className="text-[11px] font-bold text-red-400 whitespace-nowrap flex-shrink-0">
+                  {newEpisodes24h.length} • 24h Only
+                </span>
+              </div>
+              <div className="flex items-stretch gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
+                {newEpisodes24h.map((item) => {
+                  const epCode = `S${String(item.seasonNumber).padStart(2, '0')} • E${String(item.episodeNumber).padStart(2, '0')}`;
+                  return (
+                    <div
+                      key={item.key}
+                      onClick={() => handleWatchNow(item.movie, item.seasonIndex, item.episodeIndex)}
+                      className="flex-shrink-0 w-36 sm:w-44 bg-neutral-900 rounded-xl overflow-hidden border border-neutral-800 hover:border-red-600/60 flex flex-col shadow-lg cursor-pointer group transition-colors"
+                    >
+                      <div className="relative aspect-[3/4] w-full bg-neutral-950 overflow-hidden">
+                        <img
+                          src={upgradePosterUrl(item.movie.posterUrl || item.movie.backdropUrl, 400) || item.movie.posterUrl}
+                          alt={`${item.movie.title} ${epCode}`}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/25 to-transparent" />
+                        <span className="absolute top-2 left-2 bg-[#E50914] text-white font-black text-[9px] px-2 py-0.5 rounded shadow uppercase tracking-wider">
+                          NEW
+                        </span>
+                        <span className="absolute top-2 right-2 bg-black/80 backdrop-blur-sm text-white font-bold text-[10px] px-1.5 py-0.5 rounded border border-white/15">
+                          {epCode}
+                        </span>
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <div className="w-10 h-10 rounded-full bg-black/55 backdrop-blur-sm border border-white/40 text-white flex items-center justify-center shadow-lg group-hover:bg-[#E50914] group-hover:border-[#E50914] group-hover:scale-110 transition-all">
+                            <Play size={16} fill="white" className="ml-0.5" />
+                          </div>
+                        </div>
+                        <div className="absolute bottom-2 left-2 right-2 text-left">
+                          <p className="text-xs font-extrabold text-white truncate drop-shadow">
+                            {item.movie.title}
+                          </p>
+                          <p className="text-[11px] font-semibold text-red-400 truncate drop-shadow">
+                            {item.episodeTitle}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between gap-1.5 px-2.5 py-2 bg-neutral-900 border-t border-neutral-800/80">
+                        <span className="text-[10px] font-semibold text-gray-400 truncate">
+                          {formatEpisodeAge(item.addedAtMs)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleMovieClick(item.movie);
+                          }}
+                          className="w-6 h-6 rounded-full bg-neutral-800 text-gray-300 hover:text-white flex items-center justify-center flex-shrink-0 transition-colors cursor-pointer"
+                          title="Series Details"
+                          aria-label="Series Details"
+                        >
+                          <Info size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* 1. RECENTLY WATCHED SECTION (Exact Match with Reference Screenshot 2) */}
           {recentlyWatched.length > 0 && (

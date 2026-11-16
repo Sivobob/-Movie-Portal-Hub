@@ -44,9 +44,9 @@ export interface InstalledAppVersion {
 
 export const DEFAULT_REMOTE_UPDATE_CONFIG: RemoteUpdateConfig = {
   latestVersion: CURRENT_VERSION_NAME,
-  minimumRequiredVersion: CURRENT_VERSION_NAME,
+  minimumRequiredVersion: '1.0.0',
   latestVersionCode: CURRENT_VERSION_CODE,
-  minimumRequiredVersionCode: CURRENT_VERSION_CODE,
+  minimumRequiredVersionCode: 1,
   apkDownloadUrl: OFFICIAL_APK_DIRECT_URL,
   updateMessage: DEFAULT_UPDATE_MESSAGE,
 };
@@ -134,34 +134,9 @@ export async function getInstalledAppVersion(): Promise<InstalledAppVersion> {
  * Evaluates whether the installed app fails the Firebase minimum required version check.
  */
 export function isAppUpdateRequired(
-  installed: Pick<InstalledAppVersion, 'versionName' | 'versionCode'>,
-  remote: RemoteUpdateConfig | null | undefined
+  _installed: Pick<InstalledAppVersion, 'versionName' | 'versionCode'>,
+  _remote: RemoteUpdateConfig | null | undefined
 ): boolean {
-  if (!remote) return false;
-
-  const minVersion = (remote.minimumRequiredVersion || '').trim();
-  const minCode = Number(remote.minimumRequiredVersionCode || 0);
-  const latestCode = Number(remote.latestVersionCode || 0);
-
-  if (minVersion) {
-    const semverCmp = compareVersions(installed.versionName, minVersion);
-    if (semverCmp < 0) {
-      return true;
-    }
-    if (semverCmp > 0) {
-      return false;
-    }
-    // Same versionName string: check minimumRequiredVersionCode if provided
-    if (minCode > 0 && installed.versionCode > 0 && installed.versionCode < minCode) {
-      return true;
-    }
-    return false;
-  }
-
-  if (latestCode > 0 && installed.versionCode > 0 && installed.versionCode < latestCode) {
-    return true;
-  }
-
   return false;
 }
 
