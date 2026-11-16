@@ -125,7 +125,7 @@ async function updateServerInstallStats(opts: {
           fields: {
             deviceId: { stringValue: opts.deviceId },
             platform: { stringValue: opts.platform || 'android' },
-            versionName: { stringValue: opts.versionName || '3.5.221' },
+            versionName: { stringValue: opts.versionName || '3.5.222' },
             updatedAt: { integerValue: String(Date.now()) },
             lastActiveAt: { timestampValue: new Date().toISOString() },
           },
