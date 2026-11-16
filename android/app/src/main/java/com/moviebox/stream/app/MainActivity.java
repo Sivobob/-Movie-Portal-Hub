@@ -1988,11 +1988,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.225");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.226");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.225\",\"versionCode\":3445}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.226\",\"versionCode\":3446}";
             }
         }
 
