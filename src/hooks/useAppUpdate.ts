@@ -196,14 +196,19 @@ export function useAppUpdate() {
       setInstallStatus({
         state: 'downloading',
         progress: 0,
-        message: 'Starting official APK download...',
+        message: 'Starting official APK download inside app...',
       });
       try {
         bridge.downloadAndInstallApk(url);
-        return;
       } catch (err) {
         console.warn('Native downloadAndInstallApk error:', err);
+        setInstallStatus({
+          state: 'error',
+          progress: 0,
+          message: 'Could not start in-app download. Please tap Retry.',
+        });
       }
+      return;
     }
 
     // Secondary fallback for older shells without native APK downloader
