@@ -633,12 +633,11 @@ export default function VideoPlayerModal({
     if (Capacitor.isNativePlatform() && isServerPipe) {
       const remoteBase = getRemoteTranscodeBackendUrl();
       if (!remoteBase) {
-        setError('Transcoding server unavailable');
-        setErrorDetail('This video requires server-side codec conversion, but no transcoding backend URL is reachable right now.');
-        setIsLoading(false);
-        return;
+        // Native Android app fallback: stream raw MKV/HEVC directly through local bridge to ExoPlayer
+        apiUrl = buildApiUrl(`/api/stream?url=${encodeURIComponent(trimmed)}&ext=.mp4`);
+      } else {
+        apiUrl = `${remoteBase}/api/stream${params}`;
       }
-      apiUrl = `${remoteBase}/api/stream${params}`;
     } else {
       apiUrl = buildApiUrl(`/api/stream${params}`);
     }
