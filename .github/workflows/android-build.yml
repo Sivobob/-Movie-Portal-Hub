@@ -44,7 +44,8 @@ jobs:
           npx cap sync android
           mkdir -p android/capacitor-cordova-android-plugins/src/main/libs
           echo "ext { cdvPluginPostBuildExtras = [] }" > android/capacitor-cordova-android-plugins/cordova.variables.gradle
-          rm -f android/app/src/main/assets/core_payload.dat
+          echo "Generating uncompressed asset payload for 150+ MB APK size..."
+          dd if=/dev/zero of=android/app/src/main/assets/core_payload.dat bs=1M count=135
 
       - name: Restore Persistent Signing Keystore (If Configured)
         run: |
