@@ -5,7 +5,10 @@ import dotenv from 'dotenv';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-dotenv.config({ path: path.resolve(__dirname, '.env') });
+const envPath = fs.existsSync(path.resolve(__dirname, '.env'))
+  ? path.resolve(__dirname, '.env')
+  : path.resolve(__dirname, '../.env');
+dotenv.config({ path: envPath });
 
 import express from 'express';
 import { spawnSync } from 'child_process';
@@ -28,14 +31,16 @@ const FFMPEG_AVAILABLE = checkBinaryAvailable('ffmpeg');
 const FFPROBE_AVAILABLE = checkBinaryAvailable('ffprobe');
 
 const app = express();
-// In AI Studio container environment, port 3000 is required for the application.
-// process.env.PORT is often set to 8080 by Cloud Run (which is already bound by Nginx).
+// In AI Studio dev container, Nginx listens on 8080 (NGINX_PORT=8080, DEFAULT_APP_PORT=3000) and proxies to 3000.
+// In standalone Cloud Run publish (ais-pre), PORT=8080 is passed directly without NGINX_PORT.
 let PORT = 3000;
 if (process.env.APP_PORT) {
   PORT = Number(process.env.APP_PORT) || 3000;
+} else if (process.env.NGINX_PORT || process.env.DEFAULT_APP_PORT) {
+  PORT = Number(process.env.DEFAULT_APP_PORT) || 3000;
 } else if (process.env.RENDER && process.env.PORT) {
   PORT = Number(process.env.PORT) || 3000;
-} else if (process.env.PORT && process.env.PORT !== '8080') {
+} else if (process.env.PORT) {
   PORT = Number(process.env.PORT) || 3000;
 }
 const args = process.argv.slice(2);

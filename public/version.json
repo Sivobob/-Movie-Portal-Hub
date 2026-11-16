@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.223",
-  "minimumRequiredVersion": "3.5.223",
-  "latestVersionCode": 3443,
-  "minimumRequiredVersionCode": 3443,
+  "latestVersion": "3.5.224",
+  "minimumRequiredVersion": "3.5.224",
+  "latestVersionCode": 3444,
+  "minimumRequiredVersionCode": 3444,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Portal v3.5.223 update is ready! Now supports direct in-app update download and installation.",
-  "releaseNotes": "v3.5.223: True in-app APK downloader & installer across Android devices, universal 164MB build with V1+V2+V3 signing."
+  "updateMessage": "Movie Portal v3.5.224 update is ready! Improved compatibility for Xiaomi, Realme, Vivo & all Android phones.",
+  "releaseNotes": "v3.5.224: Fixed Package Installer compatibility across MIUI/Android phones with clean V1+V2 signing and safe in-app installer intent."
 }

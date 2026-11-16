@@ -7,8 +7,8 @@ android {
         applicationId "com.moviebox.stream.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 3443
-        versionName "3.5.223"
+        versionCode 3444
+        versionName "3.5.224"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              noCompress 'dat'
@@ -31,8 +31,14 @@ android {
                 keyPassword project.hasProperty('RELEASE_KEY_PASSWORD') ? RELEASE_KEY_PASSWORD : ""
                 enableV1Signing true
                 enableV2Signing true
-                enableV3Signing true
+                enableV3Signing false
             }
+        }
+    }
+    packaging {
+        resources {
+            excludes.add('META-INF/com/android/build/gradle/app-metadata.properties')
+            excludes.add('META-INF/*.version')
         }
     }
     buildTypes {

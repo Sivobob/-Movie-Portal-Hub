@@ -1128,9 +1128,8 @@ public class MainActivity extends BridgeActivity {
             );
             Intent installIntent = new Intent(Intent.ACTION_VIEW);
             installIntent.setDataAndType(apkUri, "application/vnd.android.package-archive");
+            installIntent.setClipData(android.content.ClipData.newRawUri("", apkUri));
             installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            installIntent.putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true);
-            installIntent.putExtra(Intent.EXTRA_RETURN_RESULT, true);
 
             apkUpdateState = "installing";
             apkUpdateProgress = 100;
@@ -1141,8 +1140,8 @@ public class MainActivity extends BridgeActivity {
             } catch (Exception firstEx) {
                 Intent fallbackIntent = new Intent(Intent.ACTION_INSTALL_PACKAGE);
                 fallbackIntent.setData(apkUri);
+                fallbackIntent.setClipData(android.content.ClipData.newRawUri("", apkUri));
                 fallbackIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                fallbackIntent.putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true);
                 try {
                     startActivity(fallbackIntent);
                 } catch (Exception secondEx) {
@@ -1935,11 +1934,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.223");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.224");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.223\",\"versionCode\":3443}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.224\",\"versionCode\":3444}";
             }
         }
 
