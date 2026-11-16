@@ -1,5 +1,19 @@
 {
+  "3432917101": {
+    "channelId": "3432917101",
+    "accessHash": "-4482230480674919611",
+    "title": "Naruto Shippuden Hindi Dub | Official Hindi Dub Sony Yay",
+    "username": "+QrZpe437skZiNTg1",
+    "updatedAt": 1794797500000
+  },
   "3850537977": {
+    "channelId": "3850537977",
+    "accessHash": "5272514172729841892",
+    "title": "app Databas",
+    "username": "",
+    "updatedAt": 1794509596536
+  },
+  "-1003850537977": {
     "channelId": "3850537977",
     "accessHash": "5272514172729841892",
     "title": "app Databas",
@@ -34,11 +48,25 @@
     "username": "+QSL_3k54YfBjMjE1",
     "updatedAt": 1794318563707
   },
-  "-1003850537977": {
-    "channelId": "3850537977",
-    "accessHash": "5272514172729841892",
-    "title": "app Databas",
-    "username": "",
-    "updatedAt": 1794509596536
+  "4340768605": {
+    "channelId": "4340768605",
+    "accessHash": "1132591071925895642",
+    "title": "Naruto Shippuden All Episode Sony Yay Hindi Dub | Official Hindi Dubbed",
+    "username": "Naruto_Shippuden_HindiiDubb",
+    "updatedAt": 1794805493350
+  },
+  "-1004340768605": {
+    "channelId": "4340768605",
+    "accessHash": "1132591071925895642",
+    "title": "Naruto Shippuden All Episode Sony Yay Hindi Dub | Official Hindi Dubbed",
+    "username": "Naruto_Shippuden_HindiiDubb",
+    "updatedAt": 1794805493350
+  },
+  "-1003432917101": {
+    "channelId": "3432917101",
+    "accessHash": "-4482230480674919611",
+    "title": "Naruto Shippuden Hindi Dub | Official Hindi Dub Sony Yay",
+    "username": "+QrZpe437skZiNTg1",
+    "updatedAt": 1794797500000
   }
 }
