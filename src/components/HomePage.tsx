@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { collection, query, where, onSnapshot, getDocsFromServer } from 'firebase/firestore';
 import { db } from '../firebase';
 import MovieCard from './MovieCard';
@@ -235,11 +235,68 @@ export default function HomePage() {
     );
 
     syncFromServer();
+
+    const handleMoviesUpdated = () => {
+      syncFromServer();
+      const local = sortMoviesList(getLocalMovies().filter((m: any) => m.published !== false));
+      if (local.length > 0) {
+        applyMovieList(local.map((m: any) => ({ id: m.id, data: () => m })), true);
+      }
+    };
+    window.addEventListener('movies_updated', handleMoviesUpdated);
+
+    let bc: BroadcastChannel | null = null;
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        bc = new BroadcastChannel('movie_portal_updates');
+        bc.onmessage = (event) => {
+          if (event.data?.type === 'MOVIES_UPDATED' || event.data?.type === 'NEW_RELEASE') {
+            handleMoviesUpdated();
+          }
+        };
+      } catch {}
+    }
+
+    const handleVisibilityOrFocus = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      syncFromServer();
+    };
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+
     return () => {
       isMounted = false;
       unsubscribe();
+      window.removeEventListener('movies_updated', handleMoviesUpdated);
+      if (bc) {
+        try { bc.close(); } catch {}
+      }
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
     };
   }, []);
+
+  const resolvedSelectedMovie = useMemo(() => {
+    if (!selectedMovie) return null;
+    const live = movies.find(
+      (m) => m.id === selectedMovie.id || (selectedMovie.imdbId && m.imdbId === selectedMovie.imdbId)
+    );
+    if (!live) return selectedMovie;
+    return selectedMovie.currentTime
+      ? { ...live, currentTime: selectedMovie.currentTime }
+      : live;
+  }, [selectedMovie, movies]);
+
+  const resolvedPlayingParentMovie = useMemo(() => {
+    if (!playingMovie) return undefined;
+    const candidate = playingMovie.movie || (playingMovie.seasons ? playingMovie : null);
+    if (!candidate) return undefined;
+    return (
+      movies.find(
+        (m) => m.id === candidate.id || (candidate.imdbId && m.imdbId === candidate.imdbId)
+      ) || candidate
+    );
+  }, [playingMovie, movies]);
 
   useEffect(() => {
     if (featuredMovies.length > 0 && activeSlideIndex >= featuredMovies.length) {
@@ -771,7 +828,12 @@ export default function HomePage() {
               </h3>
               <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
                 {recentlyWatched.map((item) => {
-                  const movie = item.movieData || item;
+                  const liveMovie = movies.find(
+                    (m) => m.id === item.movieId || (m.imdbId && m.imdbId === item.movieId)
+                  );
+                  const movie = liveMovie
+                    ? { ...liveMovie, currentTime: item.currentTime || 0 }
+                    : (item.movieData || item);
                   return (
                     <div
                       key={item.movieId}
@@ -1012,15 +1074,15 @@ export default function HomePage() {
       )}
 
       {/* Movie & Series Details Page Matching Reference Screenshot */}
-      {selectedMovie && (
+      {resolvedSelectedMovie && (
         <MovieDetailsModal
-          isOpen={Boolean(selectedMovie)}
-          movie={selectedMovie}
+          isOpen={Boolean(resolvedSelectedMovie)}
+          movie={resolvedSelectedMovie}
           onClose={() => setSelectedMovie(null)}
           onWatchNow={(m, sIdx, eIdx, lang) => handleWatchNow(m, sIdx, eIdx, lang)}
           allMovies={movies}
           userId={user?.uid || 'guest_user'}
-          isSavedInMyList={Boolean(selectedMovie && myListIds.has(selectedMovie.id || selectedMovie.imdbId))}
+          isSavedInMyList={Boolean(resolvedSelectedMovie && myListIds.has(resolvedSelectedMovie.id || resolvedSelectedMovie.imdbId))}
           onToggleMyList={(m) => toggleMyList({ stopPropagation: () => {} } as any, m)}
           onSelectMovie={(m) => setSelectedMovie(m)}
         />
@@ -1036,7 +1098,7 @@ export default function HomePage() {
           videoQualities={playingMovie.videoQualities}
           category={playingMovie.displayCategory}
           posterUrl={playingMovie.posterUrl}
-          movie={playingMovie.movie || (playingMovie.seasons ? playingMovie : undefined)}
+          movie={resolvedPlayingParentMovie}
           seasonIndex={playingMovie.seasonIndex ?? 0}
           episodeIndex={playingMovie.episodeIndex ?? 0}
           language={playingMovie.language || playingMovie.movie?.language}

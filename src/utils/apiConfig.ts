@@ -166,7 +166,10 @@ async function fetchFirestoreConfiguredBackendUrl(): Promise<string> {
       import('../firebase'),
     ]);
     const controllerTimeout = new Promise<string>((resolve) => setTimeout(() => resolve(''), 1400));
-    const readDoc = getDoc(doc(db, 'app_config', 'backend'))
+    const readDoc = Promise.any([
+      getDoc(doc(db, 'admins', 'backend')),
+      getDoc(doc(db, 'app_config', 'backend')),
+    ])
       .then((snap) => {
         if (!snap.exists()) return '';
         const d: any = snap.data();

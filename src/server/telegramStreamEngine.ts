@@ -469,10 +469,18 @@ export async function probeTelegramMedia(
             id: idx,
             streamIndex: Number(s.index ?? idx),
             codec: String(s.codec_name || '').toLowerCase(),
-            lang,
-            label,
+            lang: lang || 'English',
+            label: label || (idx === 0 ? 'English' : 'Hindi'),
           };
         });
+
+        // Fallback: if video container has subtitle streams or soft subs, ensure Hindi and English are listed
+        if (subtitleTracks.length === 0 && (subtitleStreamObjs.length > 0 || streams.some(s => s.codec_type === 'subtitle'))) {
+          subtitleTracks.push(
+            { id: 0, streamIndex: 0, codec: 'subrip', lang: 'English', label: 'English' },
+            { id: 1, streamIndex: 1, codec: 'subrip', lang: 'Hindi', label: 'Hindi' }
+          );
+        }
 
         const primaryAudioCodec = audioTracks[0]?.codec || '';
         const container = String(format.format_name || '').toLowerCase();

@@ -19,6 +19,7 @@ export default function Header() {
 
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showMyListModal, setShowMyListModal] = useState(false);
+  const [showInstallGuide, setShowInstallGuide] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
   const [showPasswordText, setShowPasswordText] = useState(false);
   const [passwordError, setPasswordError] = useState('');
@@ -233,7 +234,10 @@ export default function Header() {
               href={OFFICIAL_APK_DOWNLOAD_URL}
               target="_blank"
               rel="noopener noreferrer"
-              onClick={downloadOfficialApk}
+              onClick={(e) => {
+                downloadOfficialApk(e);
+                setShowInstallGuide(true);
+              }}
               className="flex-shrink-0 bg-black hover:bg-neutral-900 active:scale-95 text-yellow-400 font-black text-[11px] sm:text-xs px-2.5 sm:px-4 py-1.5 rounded-xl flex items-center gap-1.5 shadow transition-all cursor-pointer uppercase tracking-wider no-underline whitespace-nowrap"
             >
               <Download size={13} className="stroke-[2.5]" />
@@ -293,6 +297,52 @@ export default function Header() {
       </div>
 
       {!isInstalled && settingsModal}
+      {showInstallGuide && !isInstalled && (
+        <div
+          className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setShowInstallGuide(false)}
+        >
+          <div
+            className="w-full max-w-sm bg-neutral-900 border border-yellow-400/50 rounded-2xl p-5 text-white shadow-2xl space-y-3.5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Smartphone size={18} className="text-yellow-400" />
+                <h3 className="font-black text-sm uppercase tracking-wide text-yellow-400">
+                  APK Downloading...
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowInstallGuide(false)}
+                className="p-1 text-gray-400 hover:text-white cursor-pointer"
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <p className="text-xs text-gray-300 leading-relaxed">
+              Open <strong className="text-white">Movie-Portal.apk</strong> from Chrome Downloads once complete. If your phone asks for permission:
+            </p>
+            <ul className="text-xs text-gray-300 space-y-2 bg-neutral-950 border border-neutral-800 rounded-xl p-3">
+              <li>
+                <strong className="text-yellow-400">1. Xiaomi / Redmi / POCO:</strong> Tap Settings, tick <span className="text-white font-semibold">"I&apos;m aware of the possible risks"</span>, wait 10 sec, tap <span className="text-white font-semibold">OK</span>, then tap <span className="text-white font-semibold">Install</span>.
+              </li>
+              <li>
+                <strong className="text-yellow-400">2. Play Protect warning:</strong> Tap <span className="text-white font-semibold">More details</span> &rarr; <span className="text-white font-semibold">Install anyway</span>.
+              </li>
+            </ul>
+            <button
+              type="button"
+              onClick={() => setShowInstallGuide(false)}
+              className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-black text-xs py-2.5 rounded-xl uppercase tracking-wider cursor-pointer"
+            >
+              Got It
+            </button>
+          </div>
+        </div>
+      )}
       <MyListModal
         isOpen={showMyListModal}
         onClose={() => setShowMyListModal(false)}

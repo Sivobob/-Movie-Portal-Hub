@@ -40,6 +40,32 @@ function loadCacheFromDisk(): Record<string, CachedChannelInfo> {
     };
   }
 
+  // Auto-seed user's public anime channel (@Naruto_Shippuden_HindiiDubb)
+  if (!inMemoryCache['4340768605']) {
+    const narutoEntry: CachedChannelInfo = {
+      channelId: '4340768605',
+      accessHash: '1132591071925895642',
+      title: 'Naruto Shippuden All Episode Sony Yay Hindi Dub | Official Hindi Dubbed',
+      username: 'Naruto_Shippuden_HindiiDubb',
+      updatedAt: Date.now(),
+    };
+    inMemoryCache['4340768605'] = narutoEntry;
+    inMemoryCache['-1004340768605'] = narutoEntry;
+  }
+
+  // Auto-seed user's private anime channel (+QrZpe437skZiNTg1)
+  if (!inMemoryCache['3432917101']) {
+    const narutoPrivEntry: CachedChannelInfo = {
+      channelId: '3432917101',
+      accessHash: '-4482230480674919611',
+      title: 'Naruto Shippuden Hindi Dub | Official Hindi Dub Sony Yay',
+      username: '+QrZpe437skZiNTg1',
+      updatedAt: Date.now(),
+    };
+    inMemoryCache['3432917101'] = narutoPrivEntry;
+    inMemoryCache['-1003432917101'] = narutoPrivEntry;
+  }
+
   return inMemoryCache;
 }
 

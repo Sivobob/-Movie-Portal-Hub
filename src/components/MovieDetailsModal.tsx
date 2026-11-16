@@ -239,7 +239,9 @@ export default function MovieDetailsModal({
 
   if (!isOpen || !movie) return null;
 
-  const currentSeason = movie.seasons?.[activeSeasonIndex] || movie.seasons?.[0];
+  const seasonsList = Array.isArray(movie.seasons) ? movie.seasons : [];
+  const safeSeasonIndex = seasonsList.length > 0 ? Math.min(activeSeasonIndex, seasonsList.length - 1) : 0;
+  const currentSeason = seasonsList[safeSeasonIndex] || seasonsList[0];
   const episodeList = currentSeason?.episodes || [];
 
   const knownMovieDurationSec =
@@ -403,7 +405,7 @@ export default function MovieDetailsModal({
             <div className="absolute inset-0 flex flex-col items-center justify-center p-4">
               <button
                 type="button"
-                onClick={() => onWatchNow(enrichMovieWithResolvedDuration(activeSeasonIndex, 0), activeSeasonIndex, 0, selectedLanguage)}
+                onClick={() => onWatchNow(enrichMovieWithResolvedDuration(safeSeasonIndex, 0), safeSeasonIndex, 0, selectedLanguage)}
                 className="w-16 h-16 sm:w-20 sm:h-20 rounded-full border-2 border-amber-400/90 bg-black/45 backdrop-blur-md flex items-center justify-center shadow-2xl transition-transform hover:scale-110 active:scale-95 group cursor-pointer"
                 aria-label="Play"
               >
@@ -492,7 +494,7 @@ export default function MovieDetailsModal({
             <div className="pt-2">
               <button
                 type="button"
-                onClick={() => onWatchNow(enrichMovieWithResolvedDuration(activeSeasonIndex, 0), activeSeasonIndex, 0, selectedLanguage)}
+                onClick={() => onWatchNow(enrichMovieWithResolvedDuration(safeSeasonIndex, 0), safeSeasonIndex, 0, selectedLanguage)}
                 className="w-full py-3 sm:py-3.5 px-6 bg-white hover:bg-neutral-200 text-black font-black text-sm sm:text-base rounded-md flex items-center justify-center gap-2.5 transition-all shadow-xl hover:shadow-2xl active:scale-[0.99] cursor-pointer"
               >
                 <Play size={20} fill="black" />
@@ -632,46 +634,80 @@ export default function MovieDetailsModal({
             {/* TAB CONTENT 1: EPISODES (For Series) */}
             {activeTab === 'episodes' && isSeries && (
               <div className="space-y-3 pt-2">
-                {/* Season Dropdown Selector */}
-                {movie.seasons && movie.seasons.length > 0 && (
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => setIsSeasonDropdownOpen(!isSeasonDropdownOpen)}
-                      className="px-4 py-2.5 bg-neutral-800/90 hover:bg-neutral-800 text-white font-bold text-xs sm:text-sm rounded-lg flex items-center gap-2 border border-neutral-700/80 transition-all cursor-pointer shadow-md"
-                    >
-                      <span>
-                        Season {currentSeason?.seasonNumber || activeSeasonIndex + 1} ({episodeList.length} EP)
-                      </span>
-                      <ChevronDown
-                        size={16}
-                        className={`transition-transform duration-200 ${isSeasonDropdownOpen ? 'rotate-180' : ''}`}
-                      />
-                    </button>
+                {/* Season Selector: Dropdown + Visible Scrollable Season Bar */}
+                {seasonsList.length > 0 && (
+                  <div className="space-y-2.5">
+                    <div className="relative flex items-center gap-2.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => setIsSeasonDropdownOpen(!isSeasonDropdownOpen)}
+                        className="px-4 py-2.5 bg-neutral-800/90 hover:bg-neutral-800 text-white font-bold text-xs sm:text-sm rounded-lg flex items-center gap-2 border border-neutral-700/80 transition-all cursor-pointer shadow-md"
+                      >
+                        <span>
+                          Season {currentSeason?.seasonNumber || safeSeasonIndex + 1} ({episodeList.length} EP)
+                        </span>
+                        {seasonsList.length > 1 && (
+                          <span className="text-[11px] font-semibold text-neutral-400">
+                            • {seasonsList.length} Seasons
+                          </span>
+                        )}
+                        <ChevronDown
+                          size={16}
+                          className={`transition-transform duration-200 ${isSeasonDropdownOpen ? 'rotate-180' : ''}`}
+                        />
+                      </button>
 
-                    {/* Dropdown Menu */}
-                    {isSeasonDropdownOpen && (
-                      <div className="absolute left-0 mt-2 w-56 bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl z-40 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-                        {movie.seasons.map((season: any, idx: number) => (
-                          <button
-                            key={idx}
-                            type="button"
-                            onClick={() => {
-                              setActiveSeasonIndex(idx);
-                              setIsSeasonDropdownOpen(false);
-                            }}
-                            className={`w-full px-4 py-3 text-left text-xs font-bold transition-colors flex items-center justify-between cursor-pointer ${
-                              activeSeasonIndex === idx
-                                ? 'bg-red-600 text-white'
-                                : 'text-neutral-300 hover:bg-neutral-800'
-                            }`}
-                          >
-                            <span>Season {season.seasonNumber || idx + 1}</span>
-                            <span className="text-[11px] opacity-75 font-normal">
-                              ({season.episodes?.length || 0} Episodes)
-                            </span>
-                          </button>
-                        ))}
+                      {/* Dropdown Menu */}
+                      {isSeasonDropdownOpen && (
+                        <div className="absolute left-0 top-full mt-2 w-60 max-h-72 overflow-y-auto bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl z-40 animate-in fade-in zoom-in-95 duration-150">
+                          {seasonsList.map((season: any, idx: number) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => {
+                                setActiveSeasonIndex(idx);
+                                setIsSeasonDropdownOpen(false);
+                              }}
+                              className={`w-full px-4 py-3 text-left text-xs font-bold transition-colors flex items-center justify-between cursor-pointer ${
+                                safeSeasonIndex === idx
+                                  ? 'bg-red-600 text-white'
+                                  : 'text-neutral-300 hover:bg-neutral-800'
+                              }`}
+                            >
+                              <span>Season {season.seasonNumber || idx + 1}</span>
+                              <span className="text-[11px] opacity-75 font-normal">
+                                ({season.episodes?.length || 0} Episodes)
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {seasonsList.length > 1 && (
+                      <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none touch-pan-x">
+                        {seasonsList.map((season: any, idx: number) => {
+                          const sNum = season.seasonNumber || idx + 1;
+                          const epCount = season.episodes?.length || 0;
+                          const isActive = safeSeasonIndex === idx;
+                          return (
+                            <button
+                              key={sNum + '-' + idx}
+                              type="button"
+                              onClick={() => {
+                                setActiveSeasonIndex(idx);
+                                setIsSeasonDropdownOpen(false);
+                              }}
+                              className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all cursor-pointer whitespace-nowrap ${
+                                isActive
+                                  ? 'bg-red-600 border-red-500 text-white shadow-md shadow-red-600/20'
+                                  : 'bg-neutral-900/90 border-neutral-800 text-neutral-300 hover:bg-neutral-800 hover:text-white'
+                              }`}
+                            >
+                              Season {sNum} <span className="opacity-70 font-normal">({epCount})</span>
+                            </button>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -692,8 +728,8 @@ export default function MovieDetailsModal({
                           key={eIdx}
                           onClick={() =>
                             onWatchNow(
-                              enrichMovieWithResolvedDuration(activeSeasonIndex, eIdx),
-                              activeSeasonIndex,
+                              enrichMovieWithResolvedDuration(safeSeasonIndex, eIdx),
+                              safeSeasonIndex,
                               eIdx,
                               selectedLanguage
                             )
@@ -720,11 +756,16 @@ export default function MovieDetailsModal({
 
                           {/* Episode Info */}
                           <div className="flex-1 min-w-0 text-left">
-                            <h4 className="text-xs sm:text-sm font-bold text-white truncate group-hover:text-red-400 transition-colors">
-                              {ep.title}
+                            <h4 className="text-xs sm:text-sm font-bold text-white truncate group-hover:text-red-400 transition-colors flex items-center gap-2">
+                              <span className="truncate">{ep.title}</span>
+                              {ep.createdAt && (Date.now() - Number(ep.createdAt) < 24 * 3600 * 1000) && (
+                                <span className="bg-red-600 text-white font-black text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wider animate-pulse flex-shrink-0">
+                                  NEW
+                                </span>
+                              )}
                             </h4>
                             <p className="text-[11px] font-semibold text-neutral-400 mt-0.5">
-                              E{ep.episodeNumber || eIdx + 1} • S{currentSeason?.seasonNumber || activeSeasonIndex + 1}
+                              E{ep.episodeNumber || eIdx + 1} • S{currentSeason?.seasonNumber || safeSeasonIndex + 1}
                               {epFormattedDur ? ` • ${epFormattedDur}` : ''}
                             </p>
                             {ep.description && (

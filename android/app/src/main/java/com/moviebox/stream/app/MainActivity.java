@@ -99,6 +99,7 @@ public class MainActivity extends BridgeActivity {
     private volatile String apkUpdateState = "idle";
     private volatile int apkUpdateProgress = 0;
     private volatile String apkUpdateMessage = "";
+    private volatile String lastApkDownloadUrl = "";
     private volatile File downloadedApkFile = null;
     private volatile boolean isDownloadingApk = false;
     private long activeDownloadId = -1;
@@ -646,7 +647,7 @@ public class MainActivity extends BridgeActivity {
             .setReadTimeoutMs(45000)
             .setAllowCrossProtocolRedirects(true)
             .setKeepPostFor302Redirects(true)
-            .setUserAgent("MoviePortal/3.5.220 AndroidExoPlayer");
+            .setUserAgent("MoviePortal/3.5.221 AndroidExoPlayer");
 
         DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
             .setBufferDurationsMs(
@@ -1075,20 +1076,45 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
-    private void launchApkPackageInstaller(File apkFile) {
-        if (apkFile == null || !apkFile.exists() || apkFile.length() < 1024L) {
+    private void openApkInSystemBrowser(final String apkUrl) {
+        if (apkUrl == null || apkUrl.trim().isEmpty()) {
             apkUpdateState = "error";
-            apkUpdateMessage = "Downloaded update file was not found or is incomplete. Please tap Retry.";
+            apkUpdateMessage = "Official APK download URL is missing.";
+            return;
+        }
+        try {
+            Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl.trim()));
+            browserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            apkUpdateState = "installing";
+            apkUpdateProgress = 100;
+            apkUpdateMessage = "Opened official APK download in your browser. Once downloaded, tap Movie-Portal.apk to install.";
+            startActivity(browserIntent);
+        } catch (Exception e) {
+            apkUpdateState = "error";
+            apkUpdateProgress = 0;
+            apkUpdateMessage = "Could not open browser for APK download: " + (e.getMessage() != null ? e.getMessage() : "Unknown error");
+        }
+    }
+
+    private void launchApkPackageInstaller(File apkFile) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !getPackageManager().canRequestPackageInstalls()) {
+            if (lastApkDownloadUrl != null && !lastApkDownloadUrl.isEmpty()) {
+                openApkInSystemBrowser(lastApkDownloadUrl);
+                return;
+            }
+            apkUpdateState = "permission_required";
+            apkUpdateMessage = "Allow browser / File Manager to install apps in Android Settings, then tap Install.";
             return;
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            boolean canInstall = getPackageManager().canRequestPackageInstalls();
-            if (!canInstall) {
-                apkUpdateState = "permission_required";
-                apkUpdateMessage = "Allow Movie Portal to install app updates in Android Settings, then tap Install Update.";
+        if (apkFile == null || !apkFile.exists() || apkFile.length() < 1024L) {
+            if (lastApkDownloadUrl != null && !lastApkDownloadUrl.isEmpty()) {
+                openApkInSystemBrowser(lastApkDownloadUrl);
                 return;
             }
+            apkUpdateState = "error";
+            apkUpdateMessage = "Downloaded update file was not found or is incomplete. Please tap Retry.";
+            return;
         }
 
         try {
@@ -1106,12 +1132,21 @@ public class MainActivity extends BridgeActivity {
             apkUpdateMessage = "Android Package Installer opened. Tap Install / Update, then reopen Movie Box.";
             startActivity(installIntent);
         } catch (Exception e) {
+            if (lastApkDownloadUrl != null && !lastApkDownloadUrl.isEmpty()) {
+                openApkInSystemBrowser(lastApkDownloadUrl);
+                return;
+            }
             apkUpdateState = "error";
             apkUpdateMessage = "Could not open Android Package Installer: " + (e.getMessage() != null ? e.getMessage() : "Unknown error");
         }
     }
 
     private void startApkDownloadManager(final String apkUrl) {
+        lastApkDownloadUrl = apkUrl != null ? apkUrl.trim() : "";
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !getPackageManager().canRequestPackageInstalls()) {
+            openApkInSystemBrowser(lastApkDownloadUrl);
+            return;
+        }
         if (isDownloadingApk) return;
         isDownloadingApk = true;
         apkUpdateState = "downloading";
@@ -1147,9 +1182,7 @@ public class MainActivity extends BridgeActivity {
             }
         } catch (Exception e) {
             isDownloadingApk = false;
-            apkUpdateState = "error";
-            apkUpdateProgress = 0;
-            apkUpdateMessage = "Download failed: " + (e.getMessage() != null ? e.getMessage() : "Unknown error");
+            openApkInSystemBrowser(lastApkDownloadUrl);
         }
     }
 
@@ -1799,11 +1832,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.220");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.221");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.220\",\"versionCode\":3440}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.221\",\"versionCode\":3441}";
             }
         }
 

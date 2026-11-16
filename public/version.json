@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.220",
+  "latestVersion": "3.5.221",
   "minimumRequiredVersion": "3.5.220",
-  "latestVersionCode": 3440,
+  "latestVersionCode": 3441,
   "minimumRequiredVersionCode": 3440,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Portal v3.5.220 update is ready! Removed movie/series upload count badges from folder headers and added auto-resume stall recovery.",
-  "releaseNotes": "v3.5.220: Completely removed total movie/series upload count from Bollywood, Hollywood and Series folder headers; improved smooth playback and updated in-app updater."
+  "updateMessage": "Movie Portal v3.5.221 update is ready! Lightweight ~20MB APK with universal Android phone compatibility and smoother installation.",
+  "releaseNotes": "v3.5.221: Removed 160MB dummy payload and REQUEST_INSTALL_PACKAGES permission for universal compatibility across all Android phones (Xiaomi, Vivo, Oppo, Realme, Samsung, Pixel)."
 }

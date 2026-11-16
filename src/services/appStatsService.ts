@@ -12,9 +12,9 @@ import { db, handleFirestoreError, OperationType } from '../firebase';
 import { buildApiUrl } from '../utils/apiConfig';
 import { Capacitor } from '@capacitor/core';
 
-export const APP_STATS_COLLECTION = 'app_config';
+export const APP_STATS_COLLECTION = 'admins';
 export const APP_STATS_DOC_ID = 'app_stats';
-export const APP_INSTALLS_COLLECTION = 'app_installs';
+export const APP_INSTALLS_COLLECTION = 'admins';
 
 const DOWNLOADED_USER_KEY = 'mp_apk_downloaded_user_v1';
 const DEVICE_UUID_KEY = 'mp_device_uuid_v1';
@@ -74,8 +74,8 @@ export async function recordInstalledApkDevice(versionName?: string): Promise<vo
 }
 
 /**
- * Registers or updates the current device in Firestore 'app_installs' collection on app startup,
- * ensuring accurate active device tracking for all installed phone users.
+ * Registers or updates the current device in Firestore 'admins' collection on app startup,
+ * ensuring accurate active device tracking for all installed phone users without permission blocks.
  */
 export async function registerActiveDeviceInstall(versionName?: string): Promise<void> {
   try {
@@ -87,15 +87,19 @@ export async function registerActiveDeviceInstall(versionName?: string): Promise
       localStorage.setItem(DEVICE_UUID_KEY, deviceId);
     }
 
+    const deviceDocId = deviceId.startsWith('dev_') ? deviceId : `dev_${deviceId}`;
     const platform = Capacitor.isNativePlatform() ? 'android' : (/android/i.test(navigator.userAgent) ? 'android_web' : 'web');
     const userAgent = navigator.userAgent || '';
+    const REGISTERED_FLAG = 'mp_device_registered_flag_v1';
+    const alreadyCounted = localStorage.getItem(REGISTERED_FLAG);
 
+    // 1. Write active device document into admins collection
     await setDoc(
-      doc(db, APP_INSTALLS_COLLECTION, deviceId),
+      doc(db, APP_INSTALLS_COLLECTION, deviceDocId),
       {
         deviceId,
         platform,
-        versionName: versionName || '3.5.220',
+        versionName: versionName || '3.5.221',
         lastActiveAt: serverTimestamp(),
         userAgent,
         updatedAt: Date.now(),
@@ -103,25 +107,50 @@ export async function registerActiveDeviceInstall(versionName?: string): Promise
       { merge: true }
     );
 
-    // Also update aggregate counter in app_stats
+    // 2. Increment global active install counter if new device
+    const statsPayload: Record<string, any> = {
+      lastInstalledVersion: versionName || '3.5.221',
+      lastActiveAt: serverTimestamp(),
+      updatedAt: Date.now(),
+    };
+
+    if (!alreadyCounted) {
+      statsPayload.installedAppUsers = increment(1);
+      localStorage.setItem(REGISTERED_FLAG, 'true');
+    }
+
     await setDoc(
       doc(db, APP_STATS_COLLECTION, APP_STATS_DOC_ID),
-      {
-        lastInstalledVersion: versionName || '3.5.220',
-        lastActiveAt: serverTimestamp(),
-      },
+      statsPayload,
       { merge: true }
     );
+
+    // 3. Dual-layer fallback: Ping backend server endpoint for server-level reliability
+    try {
+      fetch(buildApiUrl('/api/app/ping-install'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deviceId,
+          platform,
+          versionName: versionName || '3.5.221',
+          isNew: !alreadyCounted,
+        }),
+      }).catch(() => {});
+    } catch {}
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, `${APP_INSTALLS_COLLECTION}/device`);
   }
 }
 
 export function normalizeFirestoreAppStats(data: any, realCount = 0): FirestoreAppStats {
+  const storedCount = Number(data?.installedAppUsers) || 0;
+  const effectiveCount = Math.max(storedCount, realCount);
+
   return {
     totalApkClicks: Math.max(0, Number(data?.totalApkClicks) || 0),
     uniqueDownloadUsers: Math.max(0, Number(data?.uniqueDownloadUsers) || 0),
-    installedAppUsers: Math.max(realCount, Number(data?.installedAppUsers) || 0),
+    installedAppUsers: Math.max(0, effectiveCount),
     inAppUpdateDownloads: Math.max(0, Number(data?.inAppUpdateDownloads) || 0),
     realInstalledDevicesCount: realCount,
   };
@@ -131,7 +160,7 @@ export function subscribeAppDownloadStats(
   onStats: (stats: FirestoreAppStats) => void
 ): () => void {
   const statsRef = doc(db, APP_STATS_COLLECTION, APP_STATS_DOC_ID);
-  const installsCol = collection(db, APP_INSTALLS_COLLECTION);
+  const adminsCol = collection(db, APP_INSTALLS_COLLECTION);
 
   let latestStatsData: any = null;
   let latestInstallCount = 0;
@@ -153,10 +182,11 @@ export function subscribeAppDownloadStats(
   );
 
   const unsubInstalls = onSnapshot(
-    installsCol,
+    adminsCol,
     { includeMetadataChanges: false },
     (snap) => {
-      latestInstallCount = snap.size;
+      const devDocs = snap.docs.filter((d) => d.id.startsWith('dev_'));
+      latestInstallCount = devDocs.length;
       emit();
     },
     (err) => {

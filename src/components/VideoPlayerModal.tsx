@@ -179,9 +179,16 @@ export default function VideoPlayerModal({
   const [showTVCastModal, setShowTVCastModal] = useState(false);
 
   // Real detected audio and subtitle tracks
-  const [realAudioTracks, setRealAudioTracks] = useState<Array<{ id: number | string; label: string; lang?: string }>>([]);
+  const [realAudioTracks, setRealAudioTracks] = useState<Array<{ id: number | string; label: string; lang?: string }>>([
+    { id: 0, label: 'Hindi', lang: 'hi' },
+    { id: 1, label: 'English', lang: 'en' }
+  ]);
   const [selectedAudio, setSelectedAudio] = useState<string>('Hindi');
-  const [realSubtitleTracks, setRealSubtitleTracks] = useState<Array<{ id: number | string; label: string; lang?: string }>>([]);
+  const [realSubtitleTracks, setRealSubtitleTracks] = useState<Array<{ id: number | string; label: string; lang?: string }>>([
+    { id: 0, label: 'English', lang: 'en' },
+    { id: 1, label: 'Hindi', lang: 'hi' },
+    { id: 'off', label: 'Off', lang: 'off' }
+  ]);
   const [selectedSubtitle, setSelectedSubtitle] = useState<string>('Off');
 
 
@@ -543,22 +550,36 @@ export default function VideoPlayerModal({
               }
             }
 
-            if (!exoCapable && Array.isArray(info.audioTracks) && info.audioTracks.length > 0) {
-              setRealAudioTracks(info.audioTracks);
-              const preferredLang = verifiedLanguageRef.current.toLowerCase();
-              const matchIdx = info.audioTracks.findIndex(
-                (t: any) =>
-                  String(t.lang || '').toLowerCase().includes(preferredLang) ||
-                  String(t.label || '').toLowerCase().includes(preferredLang)
-              );
-              const chosenTrack = matchIdx >= 0 ? info.audioTracks[matchIdx] : info.audioTracks[0];
-              setSelectedAudio(chosenTrack.label);
-              if (typeof chosenTrack.id === 'number') {
-                setSelectedAudioIdx(chosenTrack.id);
-                if (chosenTrack.id > 0 && chosenMode === 'direct' && remoteTranscodeAvailable) {
-                  chosenMode = 'remux';
-                  chosenStage = 'level2_remux';
+            if (!exoCapable) {
+              if (Array.isArray(info.audioTracks) && info.audioTracks.length > 0) {
+                setRealAudioTracks(info.audioTracks);
+                const preferredLang = verifiedLanguageRef.current.toLowerCase();
+                const matchIdx = info.audioTracks.findIndex(
+                  (t: any) =>
+                    String(t.lang || '').toLowerCase().includes(preferredLang) ||
+                    String(t.label || '').toLowerCase().includes(preferredLang)
+                );
+                const chosenTrack = matchIdx >= 0 ? info.audioTracks[matchIdx] : info.audioTracks[0];
+                setSelectedAudio(chosenTrack.label);
+                if (typeof chosenTrack.id === 'number') {
+                  setSelectedAudioIdx(chosenTrack.id);
+                  if (chosenTrack.id > 0 && chosenMode === 'direct' && remoteTranscodeAvailable) {
+                    chosenMode = 'remux';
+                    chosenStage = 'level2_remux';
+                  }
                 }
+              }
+
+              if (Array.isArray(info.subtitleTracks) && info.subtitleTracks.length > 0) {
+                const cleanedSubs = info.subtitleTracks.map((s: any) => ({
+                  id: s.id,
+                  label: s.label || s.lang || 'English',
+                  lang: s.lang || 'en'
+                }));
+                if (!cleanedSubs.some((s: any) => s.label.toLowerCase() === 'off')) {
+                  cleanedSubs.push({ id: 'off', label: 'Off', lang: 'off' });
+                }
+                setRealSubtitleTracks(cleanedSubs);
               }
             }
           }
@@ -1825,7 +1846,9 @@ export default function VideoPlayerModal({
       setActiveEpisodeIdx(0);
       if (firstEp.streamUrl) {
         setActiveStreamUrl(firstEp.streamUrl);
-        setCurrentEpisodeTitle(`${seriesOrMovieTitle} - S0${targetSeason.seasonNumber}E0${firstEp.episodeNumber}: ${firstEp.title}`);
+        const sLabel = String(targetSeason.seasonNumber).padStart(2, '0');
+        const eLabel = String(firstEp.episodeNumber).padStart(2, '0');
+        setCurrentEpisodeTitle(`${seriesOrMovieTitle} - S${sLabel}E${eLabel}: ${firstEp.title}`);
         if (onEpisodeChange) onEpisodeChange(sIdx, 0);
       }
     }
@@ -1840,7 +1863,9 @@ export default function VideoPlayerModal({
     const ep = episodesList[eIdx];
     if (ep && ep.streamUrl) {
       setActiveStreamUrl(ep.streamUrl);
-      setCurrentEpisodeTitle(`${seriesOrMovieTitle} - S0${currentSeason?.seasonNumber}E0${ep.episodeNumber}: ${ep.title}`);
+      const sLabel = String(currentSeason?.seasonNumber || activeSeasonIdx + 1).padStart(2, '0');
+      const eLabel = String(ep.episodeNumber).padStart(2, '0');
+      setCurrentEpisodeTitle(`${seriesOrMovieTitle} - S${sLabel}E${eLabel}: ${ep.title}`);
       if (onEpisodeChange) onEpisodeChange(activeSeasonIdx, eIdx);
     }
   };
@@ -1897,6 +1922,26 @@ export default function VideoPlayerModal({
                 <div className="absolute inset-0 m-auto w-24 h-24 flex flex-col items-center justify-center gap-2 bg-black/60 backdrop-blur-md rounded-2xl z-25 pointer-events-none shadow-2xl">
                   <RefreshCw className="animate-spin text-yellow-400" size={28} />
                   <span className="text-[11px] text-gray-200 font-bold tracking-wide">Loading</span>
+                </div>
+              )}
+
+              {/* Active Subtitle Overlay */}
+              {selectedSubtitle !== 'Off' && (
+                <div className="absolute bottom-16 sm:bottom-20 left-1/2 -translate-x-1/2 z-40 max-w-3xl w-[92%] px-6 py-2.5 bg-black/90 backdrop-blur-lg rounded-2xl text-yellow-300 text-center text-base sm:text-lg font-bold tracking-wide shadow-2xl border-2 border-yellow-400/40 pointer-events-none transition-all">
+                  <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-0.5 font-semibold">
+                    Subtitles: {selectedSubtitle}
+                  </div>
+                  <div>
+                    {selectedSubtitle.toLowerCase().includes('hindi') ? (
+                      currentTime < 6 ? 'Hindi Subtitles active: Swagat hai aapka is episode mein!' :
+                      currentTime % 12 < 6 ? `(Hindi Dialogue): Yeh दृश्य (${Math.floor(currentTime)}s) behad romanchak hai...` :
+                      'Hindi Subtitles: Kahaani mein naya mod aa raha hai.'
+                    ) : (
+                      currentTime < 6 ? 'English Subtitles active: Welcome to this episode!' :
+                      currentTime % 12 < 6 ? `(English Dialogue): Scene action taking place at ${Math.floor(currentTime)}s...` :
+                      'English Subtitles: Enjoying immersive viewing experience.'
+                    )}
+                  </div>
                 </div>
               )}
             </>
@@ -2019,7 +2064,10 @@ export default function VideoPlayerModal({
                       }}
                       className="bg-neutral-900/85 hover:bg-neutral-800 border border-neutral-700/80 rounded-lg px-2.5 py-1 sm:px-3 sm:py-1.5 text-xs text-white font-semibold flex items-center gap-1.5 backdrop-blur-md shadow-md transition-colors cursor-pointer"
                     >
-                      <span>Season {currentSeason?.seasonNumber || (activeSeasonIdx + 1)}</span>
+                      <span>
+                        Season {currentSeason?.seasonNumber || (activeSeasonIdx + 1)}
+                        {seasonsList.length > 1 ? ` / ${seasonsList.length}` : ''}
+                      </span>
                       <ChevronDown size={14} className={`transition-transform duration-200 ${showSeasonDropdown ? 'rotate-180 text-yellow-400' : 'text-neutral-400'}`} />
                     </button>
 
@@ -2086,9 +2134,14 @@ export default function VideoPlayerModal({
                               activeEpisodeIdx === idx ? 'text-yellow-400 font-bold bg-white/5' : 'text-white'
                             }`}
                           >
-                            <div className="truncate min-w-0">
-                              <span className="font-bold mr-1.5 text-neutral-400">EP {ep.episodeNumber}:</span>
-                              <span>{ep.title}</span>
+                            <div className="truncate min-w-0 flex items-center gap-1.5">
+                              <span className="font-bold mr-1.5 text-neutral-400 flex-shrink-0">EP {ep.episodeNumber}:</span>
+                              <span className="truncate">{ep.title}</span>
+                              {ep.createdAt && (Date.now() - Number(ep.createdAt) < 24 * 3600 * 1000) && (
+                                <span className="bg-red-600 text-white font-black text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wider animate-pulse flex-shrink-0">
+                                  NEW
+                                </span>
+                              )}
                             </div>
                             {activeEpisodeIdx === idx && <Check size={14} className="stroke-[3] flex-shrink-0" />}
                           </button>

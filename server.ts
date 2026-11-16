@@ -106,6 +106,7 @@ app.get('/api/stream', handleStream);
 app.head('/api/stream', handleStream);
 app.use('/api/video', videoRouter);
 app.use('/api', downloadCastRouter);
+app.use(downloadCastRouter);
 
 // API 404 Handler (Guaranteed JSON)
 app.use('/api', (req, res) => {

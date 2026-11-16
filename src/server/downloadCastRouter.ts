@@ -79,11 +79,97 @@ async function fetchLatestGitHubApk(): Promise<{ url: string; version: string; f
   return cachedApkInfo;
 }
 
+const FIRESTORE_ADMINS_BASE =
+  'https://firestore.googleapis.com/v1/projects/gen-lang-client-0267042672/databases/ai-studio-movieportalhub-664a3e40-85f3-4758-945e-fd031bdc459f/documents/admins';
+
+async function updateServerInstallStats(opts: {
+  deviceId?: string;
+  platform?: string;
+  versionName?: string;
+  isNew?: boolean;
+}): Promise<number> {
+  try {
+    const statsUrl = `${FIRESTORE_ADMINS_BASE}/app_stats`;
+    const res = await fetch(statsUrl, { cache: 'no-store' });
+    let currentCount = 10;
+    if (res.ok) {
+      const data: any = await res.json();
+      currentCount = Math.max(10, Number(data?.fields?.installedAppUsers?.integerValue) || 10);
+    }
+
+    if (opts.isNew) {
+      currentCount += 1;
+      await fetch(
+        `${statsUrl}?updateMask.fieldPaths=installedAppUsers&updateMask.fieldPaths=lastActiveAt&updateMask.fieldPaths=updatedAt`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fields: {
+              installedAppUsers: { integerValue: String(currentCount) },
+              lastActiveAt: { timestampValue: new Date().toISOString() },
+              updatedAt: { integerValue: String(Date.now()) },
+            },
+          }),
+        }
+      );
+    }
+
+    if (opts.deviceId) {
+      const cleanDevId = opts.deviceId.startsWith('dev_') ? opts.deviceId : `dev_${opts.deviceId}`;
+      const devUrl = `${FIRESTORE_ADMINS_BASE}/${cleanDevId}`;
+      await fetch(devUrl, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fields: {
+            deviceId: { stringValue: opts.deviceId },
+            platform: { stringValue: opts.platform || 'android' },
+            versionName: { stringValue: opts.versionName || '3.5.221' },
+            updatedAt: { integerValue: String(Date.now()) },
+            lastActiveAt: { timestampValue: new Date().toISOString() },
+          },
+        }),
+      });
+    }
+
+    return currentCount;
+  } catch (e) {
+    console.warn('[Install Stats Server Notice]', e);
+    return 10;
+  }
+}
+
 // Route 1: Official Android APK Dynamic Download Endpoint
 // Redirects Chrome & mobile browsers directly to high-speed GitHub release CDN
 downloadCastRouter.get('/download/apk', async (_req: Request, res: Response) => {
   const latest = await fetchLatestGitHubApk();
-  console.log(`[Download Router] Redirecting to latest APK: ${latest.url}`);
+  console.log(`[Download Router] User downloading APK: ${latest.url}`);
+
+  // Track download hit asynchronously
+  (async () => {
+    try {
+      const statsUrl = `${FIRESTORE_ADMINS_BASE}/app_stats`;
+      const sRes = await fetch(statsUrl, { cache: 'no-store' });
+      let clicks = 0;
+      if (sRes.ok) {
+        const d: any = await sRes.json();
+        clicks = Number(d?.fields?.totalApkClicks?.integerValue) || 0;
+      }
+      clicks += 1;
+      await fetch(`${statsUrl}?updateMask.fieldPaths=totalApkClicks&updateMask.fieldPaths=lastDownloadAt`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fields: {
+            totalApkClicks: { integerValue: String(clicks) },
+            lastDownloadAt: { timestampValue: new Date().toISOString() },
+          },
+        }),
+      });
+    } catch {}
+  })().catch(() => {});
+
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.redirect(302, latest.url);
 });
@@ -96,6 +182,36 @@ downloadCastRouter.get('/download/latest-info', async (_req: Request, res: Respo
     apkUrl: latest.url,
     fileName: latest.fileName,
   });
+});
+
+// Route 1c: Phone app startup install ping endpoint
+downloadCastRouter.post('/app/ping-install', async (req: Request, res: Response) => {
+  const { deviceId, platform, versionName, isNew } = req.body || {};
+  const currentCount = await updateServerInstallStats({
+    deviceId,
+    platform,
+    versionName,
+    isNew: Boolean(isNew),
+  });
+  res.json({ ok: true, installedAppUsers: currentCount });
+});
+
+// Route 1d: Quick stats retrieval endpoint
+downloadCastRouter.get('/app/stats', async (_req: Request, res: Response) => {
+  try {
+    const statsUrl = `${FIRESTORE_ADMINS_BASE}/app_stats`;
+    const r = await fetch(statsUrl, { cache: 'no-store' });
+    if (r.ok) {
+      const d: any = await r.json();
+      const installedAppUsers = Math.max(10, Number(d?.fields?.installedAppUsers?.integerValue) || 10);
+      return res.json({
+        installedAppUsers,
+        totalApkClicks: Number(d?.fields?.totalApkClicks?.integerValue) || 0,
+        updatedAt: d?.fields?.updatedAt?.integerValue || Date.now(),
+      });
+    }
+  } catch {}
+  res.json({ installedAppUsers: 10, totalApkClicks: 0 });
 });
 
 let cachedDownloadStats = {

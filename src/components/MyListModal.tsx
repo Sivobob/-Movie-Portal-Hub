@@ -3,6 +3,7 @@ import { X, Bookmark, Film, Trash2, Play } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { fetchMyList, removeFromMyList, MyListItem } from '../services/userWatchService';
 import { upgradePosterUrl } from '../utils/posterUrl';
+import { getLocalMovies } from '../services/movieStorage';
 
 interface MyListModalProps {
   isOpen: boolean;
@@ -87,8 +88,12 @@ export default function MyListModal({ isOpen, onClose, onSelectMovie, onPlayMovi
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 sm:gap-4">
               {listItems.map((item) => {
-                const movie = item.movieData || item;
-                const poster = upgradePosterUrl(item.posterUrl, 600) || item.posterUrl;
+                const liveMovies = getLocalMovies();
+                const liveMatch = liveMovies.find(
+                  (m) => m.id === item.movieId || (m.imdbId && m.imdbId === item.movieId)
+                );
+                const movie = liveMatch || item.movieData || item;
+                const poster = upgradePosterUrl(movie.posterUrl || item.posterUrl, 600) || item.posterUrl;
                 return (
                   <div
                     key={item.movieId}

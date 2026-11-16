@@ -11,9 +11,11 @@ const TG_BOT_TOKEN = '8993099137:AAH5ppM00ckVZvMek7fv623fbeYty3qgsxM';
 const SESSION_STORAGE_KEY = 'tg_browser_bot_session_v1';
 const CHANNEL_HASH_STORAGE_KEY = 'tg_known_channel_hashes_v1';
 
-// Known private channel access hashes (same registry used by backend)
+// Known channel access hashes (same registry used by backend)
 const KNOWN_ACCESS_HASHES: Record<string, string> = {
   '3850537977': '5272514172729841892',
+  '4340768605': '1132591071925895642',
+  '3432917101': '-4482230480674919611',
 };
 
 interface CachedBrowserMedia {

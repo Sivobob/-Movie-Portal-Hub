@@ -43,7 +43,11 @@ import {
   Pencil,
   Smartphone,
   Save,
-  Download
+  Download,
+  ChevronDown,
+  ChevronUp,
+  Zap,
+  ListPlus
 } from 'lucide-react';
 import VideoPlayerModal from './VideoPlayerModal';
 import { 
@@ -85,6 +89,8 @@ import {
 import {
   FirestoreAppStats,
   GitHubApkStats,
+  APP_STATS_COLLECTION,
+  APP_STATS_DOC_ID,
   fetchGitHubApkDownloadStats,
   subscribeAppDownloadStats,
 } from '../services/appStatsService';
@@ -180,6 +186,20 @@ export default function AdminDashboard() {
   });
   const [githubApkStats, setGithubApkStats] = useState<GitHubApkStats | null>(null);
 
+  const handleBoostInstalls = async (delta: number) => {
+    try {
+      const newCount = Math.max(0, firestoreAppStats.installedAppUsers + delta);
+      await setDoc(
+        doc(db, APP_STATS_COLLECTION, APP_STATS_DOC_ID),
+        { installedAppUsers: newCount, updatedAt: Date.now() },
+        { merge: true }
+      );
+      showNotification('success', `✅ Phone App Installs updated to ${newCount}!`);
+    } catch (e) {
+      showNotification('error', 'Failed to update install count.');
+    }
+  };
+
   // Quality URLs state
   const [url480p, setUrl480p] = useState('');
   const [url720p, setUrl720p] = useState('');
@@ -220,30 +240,789 @@ export default function AdminDashboard() {
       ],
     },
   ]);
+  const [expandedSeasons, setExpandedSeasons] = useState<Record<number, boolean>>({ 0: true });
+
+  // Bulk Episode / Multi-Season Importer State
+  const [showBulkImporter, setShowBulkImporter] = useState(false);
+  const [bulkMode, setBulkMode] = useState<'season_range' | 'range' | 'paste'>('season_range');
+  const [bulkTargetSeasonNum, setBulkTargetSeasonNum] = useState<number>(1);
+  const [bulkStartUrl, setBulkStartUrl] = useState('');
+  const [bulkEndUrl, setBulkEndUrl] = useState('');
+  const [bulkCountInput, setBulkCountInput] = useState('');
+  const [bulkPasteText, setBulkPasteText] = useState('');
+  const [bulkSplitType, setBulkSplitType] = useState<'equal' | 'custom' | 'single'>('equal');
+  const [bulkEpsPerSeason, setBulkEpsPerSeason] = useState('25');
+  const [bulkCustomCounts, setBulkCustomCounts] = useState('');
+  const [bulkDefaultDuration, setBulkDefaultDuration] = useState('');
+  const [bulkReplaceMode, setBulkReplaceMode] = useState<'replace' | 'append'>('replace');
+  const [scanningRange, setScanningRange] = useState(false);
+  const [skipTelegramScan, setSkipTelegramScan] = useState(false);
+  const [scanQualityFilter, setScanQualityFilter] = useState<'best' | '1080p' | '720p' | '480p' | 'all'>('1080p');
+
+  // Per-Season Inline Quick Bulk Import State
+  const [seasonBulkOpenIdx, setSeasonBulkOpenIdx] = useState<number | null>(null);
+  const [seasonBulkMode, setSeasonBulkMode] = useState<'paste' | 'range'>('range');
+  const [seasonBulkPaste, setSeasonBulkPaste] = useState('');
+  const [seasonBulkStartUrl, setSeasonBulkStartUrl] = useState('');
+  const [seasonBulkEndUrl, setSeasonBulkEndUrl] = useState('');
+  const [seasonBulkDuration, setSeasonBulkDuration] = useState('');
+
+  type LiveScanCache = {
+    key: string;
+    loading: boolean;
+    error: string;
+    data: {
+      success: boolean;
+      channelTitle: string;
+      totalScanned: number;
+      videosFound: number;
+      skippedStickers: number;
+      skippedDuplicates?: number;
+      skippedOther: number;
+      skippedCount: number;
+      episodes: Array<{
+        msgId: number;
+        streamUrl: string;
+        durationSec: number;
+        duration: string;
+        fileName: string;
+        sizeBytes: number;
+        quality?: string;
+      }>;
+    } | null;
+  };
+  const [liveBulkScan, setLiveBulkScan] = useState<LiveScanCache>({ key: '', loading: false, error: '', data: null });
+  const [livePerSeasonScan, setLivePerSeasonScan] = useState<LiveScanCache>({ key: '', loading: false, error: '', data: null });
+
+  const parseSequentialTelegramLink = (rawUrl: string): { prefix: string; msgId: number; suffix: string } | null => {
+    const clean = (rawUrl || '').trim();
+    const match = clean.match(/^(https?:\/\/(?:t\.me|telegram\.me)\/(?:c\/\d+(?:\/\d+)?|[a-zA-Z0-9_]{4,}(?:\/\d+)?)\/)(\d+)([?#].*)?$/i);
+    if (!match) return null;
+    return {
+      prefix: match[1],
+      msgId: parseInt(match[2], 10),
+      suffix: match[3] || '',
+    };
+  };
+
+  const splitUrlsIntoSeasons = (
+    urls: string[],
+    splitType: 'equal' | 'custom' | 'single',
+    epsPerSeasonVal: string,
+    customCountsVal: string,
+    defaultDur: string,
+    startingSeasonNum = 1
+  ) => {
+    const durTrim = defaultDur.trim();
+    const durSec = durTrim ? parseDurationToSeconds(durTrim) : 0;
+    const makeEp = (url: string, epNum: number) => ({
+      episodeNumber: epNum,
+      title: `Episode ${epNum}`,
+      streamUrl: url,
+      createdAt: Date.now(),
+      ...(durTrim ? { duration: durTrim } : {}),
+      ...(durSec > 0 ? { durationSec: durSec } : {}),
+    });
+
+    if (splitType === 'single') {
+      return [
+        {
+          seasonNumber: startingSeasonNum,
+          episodes: urls.map((u, idx) => makeEp(u, idx + 1)),
+        },
+      ];
+    }
+
+    if (splitType === 'custom') {
+      const counts = customCountsVal
+        .split(/[\s,;]+/)
+        .map((n) => parseInt(n.trim(), 10))
+        .filter((n) => Number.isFinite(n) && n > 0);
+      if (counts.length === 0) {
+        return [
+          {
+            seasonNumber: startingSeasonNum,
+            episodes: urls.map((u, idx) => makeEp(u, idx + 1)),
+          },
+        ];
+      }
+      const result: Array<{ seasonNumber: number; episodes: any[] }> = [];
+      let cursor = 0;
+      let sNum = startingSeasonNum;
+      for (const c of counts) {
+        if (cursor >= urls.length) break;
+        const slice = urls.slice(cursor, cursor + c);
+        result.push({
+          seasonNumber: sNum++,
+          episodes: slice.map((u, idx) => makeEp(u, idx + 1)),
+        });
+        cursor += c;
+      }
+      if (cursor < urls.length) {
+        const leftover = urls.slice(cursor);
+        result.push({
+          seasonNumber: sNum,
+          episodes: leftover.map((u, idx) => makeEp(u, idx + 1)),
+        });
+      }
+      return result;
+    }
+
+    // Equal per season
+    const perSeason = Math.max(1, parseInt(epsPerSeasonVal, 10) || 25);
+    const result: Array<{ seasonNumber: number; episodes: any[] }> = [];
+    for (let i = 0; i < urls.length; i += perSeason) {
+      const slice = urls.slice(i, i + perSeason);
+      result.push({
+        seasonNumber: startingSeasonNum + result.length,
+        episodes: slice.map((u, idx) => makeEp(u, idx + 1)),
+      });
+    }
+    return result;
+  };
+
+  const computeRangeCount = (startRaw: string, endRaw: string) => {
+    const startTrim = startRaw.trim();
+    const endTrim = endRaw.trim();
+    if (!startTrim && !endTrim) {
+      return { count: 0, startMsgId: 0, endMsgId: 0, urls: [] as string[], error: '' };
+    }
+    const startParsed = parseSequentialTelegramLink(startTrim);
+    if (!startParsed) {
+      return {
+        count: 0,
+        startMsgId: 0,
+        endMsgId: 0,
+        urls: [] as string[],
+        error: startTrim ? 'Enter valid Starting Telegram link (e.g. https://t.me/c/123456/101)' : '',
+      };
+    }
+    if (!endTrim) {
+      return { count: 0, startMsgId: startParsed.msgId, endMsgId: 0, urls: [] as string[], error: '' };
+    }
+    const endParsed = parseSequentialTelegramLink(endTrim);
+    if (!endParsed) {
+      return {
+        count: 0,
+        startMsgId: startParsed.msgId,
+        endMsgId: 0,
+        urls: [] as string[],
+        error: 'Enter valid Ending Telegram link (e.g. https://t.me/c/123456/124)',
+      };
+    }
+    if (endParsed.prefix.toLowerCase() !== startParsed.prefix.toLowerCase()) {
+      return {
+        count: 0,
+        startMsgId: startParsed.msgId,
+        endMsgId: endParsed.msgId,
+        urls: [] as string[],
+        error: 'Starting URL and Ending URL must be from the same Telegram channel.',
+      };
+    }
+    if (endParsed.msgId < startParsed.msgId) {
+      return {
+        count: 0,
+        startMsgId: startParsed.msgId,
+        endMsgId: endParsed.msgId,
+        urls: [] as string[],
+        error: 'Ending URL message ID must be greater than or equal to Starting URL.',
+      };
+    }
+    const count = endParsed.msgId - startParsed.msgId + 1;
+    if (count > 2500) {
+      return {
+        count: 0,
+        startMsgId: startParsed.msgId,
+        endMsgId: endParsed.msgId,
+        urls: [] as string[],
+        error: 'Maximum 2500 episodes allowed per batch.',
+      };
+    }
+    const urls = Array.from({ length: count }, (_, i) => `${startParsed.prefix}${startParsed.msgId + i}${startParsed.suffix}`);
+    return { count, startMsgId: startParsed.msgId, endMsgId: endParsed.msgId, urls, error: '' };
+  };
+
+  const scanTelegramVideoRange = async (startUrl: string, endUrl: string, count?: number) => {
+    const response = await authFetch('/api/telegram/scan-range', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ startUrl, endUrl, count, qualityFilter: scanQualityFilter }),
+    });
+    const text = await response.text();
+    let data: any = null;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error('Server did not return JSON while scanning Telegram channel.');
+    }
+    if (!response.ok || !data?.success) {
+      throw new Error(data?.error || 'Failed to scan Telegram channel messages.');
+    }
+    return data as {
+      success: boolean;
+      channelTitle: string;
+      totalScanned: number;
+      videosFound: number;
+      skippedStickers: number;
+      skippedDuplicates?: number;
+      skippedOther: number;
+      skippedCount: number;
+      episodes: Array<{
+        msgId: number;
+        streamUrl: string;
+        durationSec: number;
+        duration: string;
+        fileName: string;
+        sizeBytes: number;
+        quality?: string;
+      }>;
+    };
+  };
+
+  const handleFilterExistingSeasonsTo1080p = async () => {
+    const allUrls = seasons.flatMap((s) => s.episodes.map((e) => e.streamUrl.trim()).filter(Boolean));
+    if (allUrls.length === 0) {
+      showNotification('error', 'No episode links found to filter.');
+      return;
+    }
+
+    setScanningRange(true);
+    try {
+      let totalKept = 0;
+      let totalRemoved = 0;
+      const updatedSeasons = [];
+
+      for (const season of seasons) {
+        const urls = season.episodes.map((e) => e.streamUrl.trim()).filter(Boolean);
+        if (urls.length === 0) {
+          updatedSeasons.push(season);
+          continue;
+        }
+        const response = await authFetch('/api/telegram/filter-urls', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ urls, qualityFilter: '1080p' }),
+        });
+        const data = await response.json();
+        if (!response.ok || !data?.success) {
+          throw new Error(data?.error || `Failed to filter Season ${season.seasonNumber}`);
+        }
+        const keptItems: Array<{ url: string; duration: string; durationSec: number }> = data.keptItems || [];
+        totalKept += keptItems.length;
+        totalRemoved += Number(data.removedCount || 0);
+
+        const cleanEps = keptItems.map((item, idx) => ({
+          episodeNumber: idx + 1,
+          title: `Episode ${idx + 1}`,
+          streamUrl: item.url,
+          ...(item.duration ? { duration: item.duration } : {}),
+          ...(item.durationSec > 0 ? { durationSec: item.durationSec } : {}),
+        }));
+        updatedSeasons.push({
+          ...season,
+          episodes: cleanEps.length > 0 ? cleanEps : [{ episodeNumber: 1, title: 'Episode 1', streamUrl: '' }],
+        });
+      }
+
+      setSeasons(updatedSeasons);
+      showNotification(
+        'success',
+        `✅ Cleaned! Kept ${totalKept} (1080p) episodes & removed ${totalRemoved} 480p/720p/sticker entries. Click Update/Publish to save.`
+      );
+    } catch (err: any) {
+      showNotification('error', err?.message || 'Failed to clean existing episodes.');
+    } finally {
+      setScanningRange(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!showBulkImporter || skipTelegramScan || (bulkMode !== 'season_range' && bulkMode !== 'range')) {
+      setLiveBulkScan((prev) => (prev.loading || prev.data || prev.error ? { key: '', loading: false, error: '', data: null } : prev));
+      return;
+    }
+    const parsedRange = computeRangeCount(bulkStartUrl, bulkEndUrl);
+    if (parsedRange.error || parsedRange.count <= 0) {
+      setLiveBulkScan({ key: '', loading: false, error: '', data: null });
+      return;
+    }
+    const scanKey = `${bulkStartUrl.trim()}|${bulkEndUrl.trim()}|${scanQualityFilter}`;
+    let cancelled = false;
+    setLiveBulkScan({ key: scanKey, loading: true, error: '', data: null });
+
+    const timer = setTimeout(async () => {
+      try {
+        const data = await scanTelegramVideoRange(bulkStartUrl.trim(), bulkEndUrl.trim());
+        if (!cancelled) {
+          setLiveBulkScan({ key: scanKey, loading: false, error: '', data });
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          setLiveBulkScan({ key: scanKey, loading: false, error: err?.message || 'Scan failed', data: null });
+        }
+      }
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [showBulkImporter, bulkMode, bulkStartUrl, bulkEndUrl, scanQualityFilter, skipTelegramScan]);
+
+  useEffect(() => {
+    if (seasonBulkOpenIdx === null || seasonBulkMode !== 'range' || skipTelegramScan) {
+      setLivePerSeasonScan((prev) => (prev.loading || prev.data || prev.error ? { key: '', loading: false, error: '', data: null } : prev));
+      return;
+    }
+    const parsedRange = computeRangeCount(seasonBulkStartUrl, seasonBulkEndUrl);
+    if (parsedRange.error || parsedRange.count <= 0) {
+      setLivePerSeasonScan({ key: '', loading: false, error: '', data: null });
+      return;
+    }
+    const scanKey = `${seasonBulkStartUrl.trim()}|${seasonBulkEndUrl.trim()}|${scanQualityFilter}`;
+    let cancelled = false;
+    setLivePerSeasonScan({ key: scanKey, loading: true, error: '', data: null });
+
+    const timer = setTimeout(async () => {
+      try {
+        const data = await scanTelegramVideoRange(seasonBulkStartUrl.trim(), seasonBulkEndUrl.trim());
+        if (!cancelled) {
+          setLivePerSeasonScan({ key: scanKey, loading: false, error: '', data });
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          setLivePerSeasonScan({ key: scanKey, loading: false, error: err?.message || 'Scan failed', data: null });
+        }
+      }
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [seasonBulkOpenIdx, seasonBulkMode, seasonBulkStartUrl, seasonBulkEndUrl, scanQualityFilter, skipTelegramScan]);
+
+  const handleApplySelectedSeasonRange = async (moveNext: boolean, appendToExisting = false) => {
+    const res = computeRangeCount(bulkStartUrl, bulkEndUrl);
+    if (res.error) {
+      showNotification('error', res.error);
+      return;
+    }
+    if (res.count <= 0 || res.urls.length === 0) {
+      showNotification('error', 'Please enter both Starting URL and Ending URL.');
+      return;
+    }
+
+    const durTrim = bulkDefaultDuration.trim();
+    const durSecOverride = durTrim ? parseDurationToSeconds(durTrim) : 0;
+    const targetNum = Math.max(1, bulkTargetSeasonNum);
+
+    let generatedEpisodes: Array<{ episodeNumber: number; title: string; streamUrl: string; duration?: string; durationSec?: number }> = [];
+    let skippedSummary = '';
+
+    if (!skipTelegramScan) {
+      const scanKey = `${bulkStartUrl.trim()}|${bulkEndUrl.trim()}|${scanQualityFilter}`;
+      setScanningRange(true);
+      try {
+        const scanData =
+          liveBulkScan.key === scanKey && liveBulkScan.data
+            ? liveBulkScan.data
+            : await scanTelegramVideoRange(bulkStartUrl.trim(), bulkEndUrl.trim());
+        if (!scanData.episodes || scanData.episodes.length === 0) {
+          showNotification('error', `No video episodes found between #${res.startMsgId} and #${res.endMsgId} (${scanData.skippedCount || 0} stickers/posts skipped).`);
+          setScanningRange(false);
+          return;
+        }
+        generatedEpisodes = scanData.episodes.map((ep, idx) => ({
+          episodeNumber: idx + 1,
+          title: `Episode ${idx + 1}`,
+          streamUrl: ep.streamUrl,
+          createdAt: Date.now(),
+          ...(durTrim
+            ? { duration: durTrim, ...(durSecOverride > 0 ? { durationSec: durSecOverride } : {}) }
+            : ep.duration
+            ? { duration: ep.duration, ...(ep.durationSec > 0 ? { durationSec: ep.durationSec } : {}) }
+            : {}),
+        }));
+        if (scanData.skippedCount > 0) {
+          const dupPart = scanData.skippedDuplicates ? `, ${scanData.skippedDuplicates} lower-quality duplicates` : '';
+          skippedSummary = ` (${scanData.skippedStickers} stickers${dupPart}, ${scanData.skippedOther} other posts skipped)`;
+        }
+      } catch (err: any) {
+        showNotification('error', err?.message || 'Telegram scan failed.');
+        setScanningRange(false);
+        return;
+      } finally {
+        setScanningRange(false);
+      }
+    } else {
+      generatedEpisodes = res.urls.map((u, idx) => ({
+        episodeNumber: idx + 1,
+        title: `Episode ${idx + 1}`,
+        streamUrl: u,
+        createdAt: Date.now(),
+        ...(durTrim ? { duration: durTrim } : {}),
+        ...(durSecOverride > 0 ? { durationSec: durSecOverride } : {}),
+      }));
+    }
+
+    let finalSeasonCount = generatedEpisodes.length;
+    let appendedNewCount = generatedEpisodes.length;
+
+    setSeasons((prev) => {
+      const next = [...prev];
+      const existingIdx = next.findIndex((s) => s.seasonNumber === targetNum);
+      if (existingIdx >= 0) {
+        if (appendToExisting) {
+          const existingEps = (next[existingIdx].episodes || []).filter((e) => e.streamUrl && e.streamUrl.trim());
+          const seenUrls = new Set(existingEps.map((e) => e.streamUrl.trim()));
+          const uniqueNew = generatedEpisodes.filter((ep) => !seenUrls.has(ep.streamUrl.trim()));
+          appendedNewCount = uniqueNew.length;
+          const combined = [...existingEps, ...uniqueNew].map((ep, idx) => ({
+            ...ep,
+            episodeNumber: idx + 1,
+            title: ep.title && !/^Episode \d+$/i.test(ep.title.trim()) ? ep.title : `Episode ${idx + 1}`,
+          }));
+          finalSeasonCount = combined.length;
+          next[existingIdx] = { seasonNumber: targetNum, episodes: combined };
+        } else {
+          next[existingIdx] = { seasonNumber: targetNum, episodes: generatedEpisodes };
+        }
+      } else {
+        for (let s = 1; s < targetNum; s++) {
+          if (!next.some((item) => item.seasonNumber === s)) {
+            next.push({ seasonNumber: s, episodes: [] });
+          }
+        }
+        next.push({ seasonNumber: targetNum, episodes: generatedEpisodes });
+      }
+      return next.sort((a, b) => a.seasonNumber - b.seasonNumber);
+    });
+
+    showNotification(
+      'success',
+      appendToExisting
+        ? `✅ Season ${targetNum}: +${appendedNewCount} Episodes appended (Total ${finalSeasonCount} Eps)!${skippedSummary}`
+        : `✅ Season ${targetNum}: ${generatedEpisodes.length} Video Episodes added!${skippedSummary}`
+    );
+
+    if (appendToExisting) {
+      setBulkStartUrl('');
+      setBulkEndUrl('');
+    } else if (moveNext) {
+      setBulkTargetSeasonNum(targetNum + 1);
+      setBulkStartUrl('');
+      setBulkEndUrl('');
+    } else {
+      setShowBulkImporter(false);
+    }
+  };
+
+  const buildBulkPreview = () => {
+    const startNum = bulkReplaceMode === 'append' ? seasons.length + 1 : 1;
+    if (bulkMode === 'range') {
+      const startParsed = parseSequentialTelegramLink(bulkStartUrl);
+      if (!startParsed) return { seasons: [], totalEpisodes: 0, error: bulkStartUrl.trim() ? 'Enter a valid Telegram post link (e.g. https://t.me/c/123456/101)' : '' };
+      const endParsed = parseSequentialTelegramLink(bulkEndUrl);
+      let count = parseInt(bulkCountInput, 10) || 0;
+      if (endParsed) {
+        if (endParsed.prefix.toLowerCase() !== startParsed.prefix.toLowerCase()) {
+          return { seasons: [], totalEpisodes: 0, error: 'Start Link and End Link must be from the same Telegram channel.' };
+        }
+        if (endParsed.msgId < startParsed.msgId) {
+          return { seasons: [], totalEpisodes: 0, error: 'End Link message ID must be >= Start Link message ID.' };
+        }
+        count = endParsed.msgId - startParsed.msgId + 1;
+      }
+      if (count <= 0) return { seasons: [], totalEpisodes: 0, error: '' };
+      if (count > 2500) return { seasons: [], totalEpisodes: 0, error: 'Max 2500 episodes per import batch.' };
+      const urls = Array.from({ length: count }, (_, i) => `${startParsed.prefix}${startParsed.msgId + i}${startParsed.suffix}`);
+      const built = splitUrlsIntoSeasons(urls, bulkSplitType, bulkEpsPerSeason, bulkCustomCounts, bulkDefaultDuration, startNum);
+      return { seasons: built, totalEpisodes: urls.length, error: '' };
+    }
+
+    // Paste mode: supports optional "Season X" / "S1" / "S01" header lines OR plain links
+    const lines = bulkPasteText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (lines.length === 0) return { seasons: [], totalEpisodes: 0, error: '' };
+
+    const durTrim = bulkDefaultDuration.trim();
+    const durSec = durTrim ? parseDurationToSeconds(durTrim) : 0;
+    const hasSeasonHeaders = lines.some((l) => /^(?:season|s)\s*\d+\b/i.test(l) && !/https?:\/\//i.test(l));
+
+    if (hasSeasonHeaders) {
+      const grouped: Array<{ seasonNumber: number; episodes: any[] }> = [];
+      let currentGroup: { seasonNumber: number; episodes: any[] } | null = null;
+      for (const line of lines) {
+        const headerMatch = line.match(/^(?:season|s)\s*(\d+)\b/i);
+        if (headerMatch && !/https?:\/\//i.test(line)) {
+          currentGroup = { seasonNumber: parseInt(headerMatch[1], 10) || (grouped.length + 1), episodes: [] };
+          grouped.push(currentGroup);
+          continue;
+        }
+        const urlMatch = line.match(/(https?:\/\/[^\s]+)/i);
+        if (urlMatch) {
+          if (!currentGroup) {
+            currentGroup = { seasonNumber: startNum, episodes: [] };
+            grouped.push(currentGroup);
+          }
+          const epNum = currentGroup.episodes.length + 1;
+          currentGroup.episodes.push({
+            episodeNumber: epNum,
+            title: `Episode ${epNum}`,
+            streamUrl: urlMatch[1],
+            ...(durTrim ? { duration: durTrim } : {}),
+            ...(durSec > 0 ? { durationSec: durSec } : {}),
+          });
+        }
+      }
+      const nonEmpty = grouped.filter((g) => g.episodes.length > 0);
+      const total = nonEmpty.reduce((acc, g) => acc + g.episodes.length, 0);
+      return { seasons: nonEmpty, totalEpisodes: total, error: total === 0 ? 'No valid http/https links found.' : '' };
+    }
+
+    const extractedUrls = lines
+      .map((l) => {
+        const m = l.match(/(https?:\/\/[^\s]+)/i);
+        return m ? m[1] : (l.startsWith('t.me/') ? `https://${l}` : '');
+      })
+      .filter(Boolean);
+
+    if (extractedUrls.length === 0) {
+      return { seasons: [], totalEpisodes: 0, error: 'No valid video/Telegram URLs found in pasted text.' };
+    }
+    const built = splitUrlsIntoSeasons(extractedUrls, bulkSplitType, bulkEpsPerSeason, bulkCustomCounts, bulkDefaultDuration, startNum);
+    return { seasons: built, totalEpisodes: extractedUrls.length, error: '' };
+  };
+
+  const handleApplyBulkImport = async () => {
+    const preview = buildBulkPreview();
+    if (preview.error) {
+      showNotification('error', preview.error);
+      return;
+    }
+    if (preview.seasons.length === 0 || preview.totalEpisodes === 0) {
+      showNotification('error', 'Please enter valid links or range first.');
+      return;
+    }
+
+    let finalSeasons = preview.seasons;
+    let totalImported = preview.totalEpisodes;
+    let skippedNote = '';
+
+    if (bulkMode === 'range' && !skipTelegramScan) {
+      const scanKey = `${bulkStartUrl.trim()}|${bulkEndUrl.trim()}|${scanQualityFilter}`;
+      setScanningRange(true);
+      try {
+        const countNum = bulkEndUrl.trim() ? undefined : (parseInt(bulkCountInput, 10) || undefined);
+        const scanData =
+          !countNum && liveBulkScan.key === scanKey && liveBulkScan.data
+            ? liveBulkScan.data
+            : await scanTelegramVideoRange(bulkStartUrl.trim(), bulkEndUrl.trim(), countNum);
+        if (!scanData.episodes || scanData.episodes.length === 0) {
+          showNotification('error', `No video episodes found (${scanData.skippedCount || 0} stickers/posts skipped).`);
+          setScanningRange(false);
+          return;
+        }
+        const startNum = bulkReplaceMode === 'append' ? seasons.length + 1 : 1;
+        const scannedUrls = scanData.episodes.map((e) => e.streamUrl);
+        const splitBuilt = splitUrlsIntoSeasons(scannedUrls, bulkSplitType, bulkEpsPerSeason, bulkCustomCounts, bulkDefaultDuration, startNum);
+        const durMap = new Map(scanData.episodes.map((e) => [e.streamUrl, e]));
+        finalSeasons = splitBuilt.map((s) => ({
+          ...s,
+          episodes: s.episodes.map((ep: any) => {
+            const meta = durMap.get(ep.streamUrl);
+            if (!bulkDefaultDuration.trim() && meta?.duration) {
+              return { ...ep, duration: meta.duration, ...(meta.durationSec > 0 ? { durationSec: meta.durationSec } : {}) };
+            }
+            return ep;
+          }),
+        }));
+        totalImported = scanData.episodes.length;
+        if (scanData.skippedCount > 0) {
+          const dupPart = scanData.skippedDuplicates ? `, ${scanData.skippedDuplicates} extra quality copies` : '';
+          skippedNote = ` (${scanData.skippedStickers} stickers${dupPart} & ${scanData.skippedOther} other posts skipped)`;
+        }
+      } catch (err: any) {
+        showNotification('error', err?.message || 'Telegram scan failed.');
+        setScanningRange(false);
+        return;
+      } finally {
+        setScanningRange(false);
+      }
+    }
+
+    if (bulkReplaceMode === 'append') {
+      setSeasons((prev) => {
+        const merged = [...prev, ...finalSeasons].map((s, idx) => ({ ...s, seasonNumber: idx + 1 }));
+        return merged;
+      });
+    } else {
+      setSeasons(finalSeasons);
+    }
+
+    setExpandedSeasons(finalSeasons.length <= 2 ? { 0: true, 1: true } : { 0: true });
+    setShowBulkImporter(false);
+    showNotification(
+      'success',
+      `⚡ Imported ${totalImported} video episodes across ${finalSeasons.length} season(s)!${skippedNote} Now click Publish/Update to save.`
+    );
+  };
+
+  const handleApplyPerSeasonBulk = async (sIdx: number, appendToExisting = false) => {
+    const durTrim = seasonBulkDuration.trim();
+    const durSec = durTrim ? parseDurationToSeconds(durTrim) : 0;
+    let newEpisodes: Array<{ episodeNumber: number; title: string; streamUrl: string; duration?: string; durationSec?: number }> = [];
+    let skippedNote = '';
+
+    if (seasonBulkMode === 'range') {
+      const check = computeRangeCount(seasonBulkStartUrl, seasonBulkEndUrl);
+      if (check.error) {
+        showNotification('error', check.error);
+        return;
+      }
+      if (check.count <= 0) {
+        showNotification('error', 'Enter valid Start and End Telegram links.');
+        return;
+      }
+      if (!skipTelegramScan) {
+        const scanKey = `${seasonBulkStartUrl.trim()}|${seasonBulkEndUrl.trim()}|${scanQualityFilter}`;
+        setScanningRange(true);
+        try {
+          const scanData =
+            livePerSeasonScan.key === scanKey && livePerSeasonScan.data
+              ? livePerSeasonScan.data
+              : await scanTelegramVideoRange(seasonBulkStartUrl.trim(), seasonBulkEndUrl.trim());
+          if (!scanData.episodes || scanData.episodes.length === 0) {
+            showNotification('error', `No video episodes found (${scanData.skippedCount || 0} stickers/posts skipped).`);
+            setScanningRange(false);
+            return;
+          }
+          newEpisodes = scanData.episodes.map((ep, i) => ({
+            episodeNumber: i + 1,
+            title: `Episode ${i + 1}`,
+            streamUrl: ep.streamUrl,
+            ...(durTrim
+              ? { duration: durTrim, ...(durSec > 0 ? { durationSec: durSec } : {}) }
+              : ep.duration
+              ? { duration: ep.duration, ...(ep.durationSec > 0 ? { durationSec: ep.durationSec } : {}) }
+              : {}),
+          }));
+          if (scanData.skippedCount > 0) {
+            skippedNote = ` (${scanData.skippedStickers} stickers skipped)`;
+          }
+        } catch (err: any) {
+          showNotification('error', err?.message || 'Telegram scan failed.');
+          setScanningRange(false);
+          return;
+        } finally {
+          setScanningRange(false);
+        }
+      } else {
+        newEpisodes = check.urls.map((u, i) => ({
+          episodeNumber: i + 1,
+          title: `Episode ${i + 1}`,
+          streamUrl: u,
+          ...(durTrim ? { duration: durTrim } : {}),
+          ...(durSec > 0 ? { durationSec: durSec } : {}),
+        }));
+      }
+    } else {
+      const urls = seasonBulkPaste
+        .split(/\r?\n/)
+        .map((l) => {
+          const m = l.trim().match(/(https?:\/\/[^\s]+)/i);
+          return m ? m[1] : (l.trim().startsWith('t.me/') ? `https://${l.trim()}` : '');
+        })
+        .filter(Boolean);
+      newEpisodes = urls.map((u, i) => ({
+        episodeNumber: i + 1,
+        title: `Episode ${i + 1}`,
+        streamUrl: u,
+        ...(durTrim ? { duration: durTrim } : {}),
+        ...(durSec > 0 ? { durationSec: durSec } : {}),
+      }));
+    }
+
+    if (newEpisodes.length === 0) {
+      showNotification('error', 'No valid video links found to import into this season.');
+      return;
+    }
+
+    let appendedCount = newEpisodes.length;
+    let totalAfter = newEpisodes.length;
+
+    setSeasons((prev) =>
+      prev.map((s, idx) => {
+        if (idx !== sIdx) return s;
+        if (!appendToExisting) return { ...s, episodes: newEpisodes };
+        const existingEps = (s.episodes || []).filter((e) => e.streamUrl && e.streamUrl.trim());
+        const seenUrls = new Set(existingEps.map((e) => e.streamUrl.trim()));
+        const uniqueNew = newEpisodes.filter((ep) => !seenUrls.has(ep.streamUrl.trim()));
+        appendedCount = uniqueNew.length;
+        const combined = [...existingEps, ...uniqueNew].map((ep, i) => ({
+          ...ep,
+          episodeNumber: i + 1,
+          title: ep.title && !/^Episode \d+$/i.test(ep.title.trim()) ? ep.title : `Episode ${i + 1}`,
+        }));
+        totalAfter = combined.length;
+        return { ...s, episodes: combined };
+      })
+    );
+    setExpandedSeasons((prev) => ({ ...prev, [sIdx]: true }));
+    if (!appendToExisting) {
+      setSeasonBulkOpenIdx(null);
+    }
+    setSeasonBulkPaste('');
+    setSeasonBulkStartUrl('');
+    setSeasonBulkEndUrl('');
+    const targetSeasonNum = seasons[sIdx]?.seasonNumber || sIdx + 1;
+    showNotification(
+      'success',
+      appendToExisting
+        ? `✅ Appended +${appendedCount} episodes to Season ${targetSeasonNum} (Total ${totalAfter} Eps)!${skippedNote}`
+        : `✅ Added ${newEpisodes.length} episodes to Season ${targetSeasonNum}!${skippedNote}`
+    );
+  };
+
+  const toggleSeasonExpand = (sIdx: number) => {
+    setExpandedSeasons((prev) => ({ ...prev, [sIdx]: !prev[sIdx] }));
+  };
 
   const handleAddSeason = () => {
-    setSeasons((prev) => [
-      ...prev,
-      {
-        seasonNumber: prev.length + 1,
-        episodes: [
-          { episodeNumber: 1, title: 'Episode 1', streamUrl: '' },
-        ],
-      },
-    ]);
+    setSeasons((prev) => {
+      const nextIdx = prev.length;
+      setExpandedSeasons((exp) => ({ ...exp, [nextIdx]: true }));
+      return [
+        ...prev,
+        {
+          seasonNumber: prev.length + 1,
+          episodes: [
+            { episodeNumber: 1, title: 'Episode 1', streamUrl: '' },
+          ],
+        },
+      ];
+    });
   };
 
   const handleAddEpisode = (seasonIndex: number) => {
-    setSeasons((prev) => {
-      const updated = [...prev];
-      const targetSeason = updated[seasonIndex];
-      targetSeason.episodes.push({
-        episodeNumber: targetSeason.episodes.length + 1,
-        title: `Episode ${targetSeason.episodes.length + 1}`,
-        streamUrl: '',
-      });
-      return updated;
-    });
+    setSeasons((prev) =>
+      prev.map((s, idx) =>
+        idx === seasonIndex
+          ? {
+              ...s,
+              episodes: [
+                ...s.episodes,
+                {
+                  episodeNumber: s.episodes.length + 1,
+                  title: `Episode ${s.episodes.length + 1}`,
+                  streamUrl: '',
+                },
+              ],
+            }
+          : s
+      )
+    );
+    setExpandedSeasons((prev) => ({ ...prev, [seasonIndex]: true }));
   };
 
   const handleRemoveEpisode = (seasonIndex: number, epIndex: number) => {
@@ -1062,6 +1841,9 @@ export default function AdminDashboard() {
         ],
       },
     ]);
+    setExpandedSeasons({ 0: true });
+    setShowBulkImporter(false);
+    setSeasonBulkOpenIdx(null);
   };
 
   const handleStartEditMovie = (movie: MovieData) => {
@@ -1093,6 +1875,7 @@ export default function AdminDashboard() {
     setQualityBadge(normalizeQualityBadge(movie.qualityBadge));
     if (Array.isArray(movie.seasons) && movie.seasons.length > 0) {
       setSeasons(JSON.parse(JSON.stringify(movie.seasons)));
+      setExpandedSeasons(movie.seasons.length <= 2 ? { 0: true, 1: true } : {});
     } else {
       setSeasons([
         {
@@ -1103,10 +1886,22 @@ export default function AdminDashboard() {
           ],
         },
       ]);
+      setExpandedSeasons({ 0: true });
     }
     if (typeof window !== 'undefined') {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
+  };
+
+  const broadcastMoviesUpdated = () => {
+    try {
+      window.dispatchEvent(new CustomEvent('movies_updated'));
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        const bc = new BroadcastChannel('movie_portal_updates');
+        bc.postMessage({ type: 'MOVIES_UPDATED' });
+        bc.close();
+      }
+    } catch {}
   };
 
   // Universal Publish / Update / Save Draft Content (Movies, Web Series, Anime)
@@ -1197,6 +1992,7 @@ export default function AdminDashboard() {
             updatedAt: Date.now(),
           } as MovieData;
           saveMovieLocally(updatedLocal);
+          broadcastMoviesUpdated();
           setMovies((prev) => prev.map((m) => (m.id === editingMovie.id ? updatedLocal : m)));
           showNotification('success', `✅ Updated "${moviePayload.title}" (Badge: ${qualityBadge === 'NONE' ? 'No Badge' : qualityBadge}).`);
           resetMovieForm();
@@ -1277,6 +2073,7 @@ export default function AdminDashboard() {
 
         // Always persist to local cache as well
         saveMovieLocally({ id: newDocId, ...moviePayload } as any);
+        broadcastMoviesUpdated();
 
         resetMovieForm();
 
@@ -1397,6 +2194,7 @@ export default function AdminDashboard() {
       
       // 2. Update local storage and local state
       deleteMovieLocally(movie.id);
+      broadcastMoviesUpdated();
       setMovies((prev) => prev.filter((m) => m.id !== movie.id));
       setSelectedMovieIds((prev) => prev.filter((id) => id !== movie.id));
       
@@ -1425,6 +2223,7 @@ export default function AdminDashboard() {
         }
         deleteMovieLocally(id);
       }
+      broadcastMoviesUpdated();
       
       setMovies((prev) => prev.filter((m) => !selectedMovieIds.includes(m.id)));
       setSelectedMovieIds([]);
@@ -1452,6 +2251,7 @@ export default function AdminDashboard() {
         console.warn('Firestore bulk delete warning:', e);
       }
       clearAllMoviesLocally();
+      broadcastMoviesUpdated();
       setMovies([]);
       setSelectedMovieIds([]);
       showNotification('success', 'All movies and series have been permanently deleted.');
@@ -1713,20 +2513,43 @@ export default function AdminDashboard() {
               {movies.filter((m: any) => m.displayCategory === 'Series' || m.displayCategory === 'Anime' || m.contentType === 'anime').length}
             </span>
           </div>
-          <div className="col-span-2 sm:col-span-1 bg-neutral-900 border border-emerald-800/60 p-3.5 rounded-lg">
-            <span className="text-[11px] text-emerald-400 flex items-center gap-1 uppercase font-bold">
-              <Download size={12} /> App Downloads
-            </span>
+          <div className="col-span-2 sm:col-span-1 bg-neutral-900 border border-emerald-800/60 p-3.5 rounded-lg relative group">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-emerald-400 flex items-center gap-1 uppercase font-bold">
+                <Smartphone size={12} /> Phone App Installs
+              </span>
+              <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
+                <button
+                  type="button"
+                  onClick={() => handleBoostInstalls(-1)}
+                  className="px-1.5 py-0.5 bg-neutral-800 hover:bg-neutral-700 text-gray-300 font-mono text-[10px] rounded border border-neutral-700 cursor-pointer"
+                  title="Subtract 1 Install"
+                >
+                  -1
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleBoostInstalls(1)}
+                  className="px-1.5 py-0.5 bg-emerald-950 hover:bg-emerald-900 text-emerald-300 font-mono text-[10px] rounded border border-emerald-700/60 cursor-pointer"
+                  title="Add 1 Install"
+                >
+                  +1
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleBoostInstalls(5)}
+                  className="px-1.5 py-0.5 bg-emerald-950 hover:bg-emerald-900 text-emerald-300 font-mono text-[10px] rounded border border-emerald-700/60 cursor-pointer"
+                  title="Add 5 Installs"
+                >
+                  +5
+                </button>
+              </div>
+            </div>
             <span className="text-2xl font-black text-white mt-1 block">
-              {(githubApkStats?.totalGitHubDownloads ?? 0) > 0
-                ? githubApkStats!.totalGitHubDownloads.toLocaleString()
-                : firestoreAppStats.uniqueDownloadUsers.toLocaleString()}
+              {firestoreAppStats.installedAppUsers.toLocaleString()}
             </span>
-            <span className="text-[10px] text-gray-400 block mt-0.5 truncate">
-              {githubApkStats?.latestReleaseTag
-                ? `${githubApkStats.latestReleaseTag}: ${githubApkStats.latestReleaseDownloads}`
-                : `Clicks: ${firestoreAppStats.totalApkClicks}`}{' '}
-              • Active App: {firestoreAppStats.installedAppUsers}
+            <span className="text-[10px] text-gray-400 block mt-0.5">
+              Online phone users (Real-time active)
             </span>
           </div>
         </div>
@@ -1764,6 +2587,22 @@ export default function AdminDashboard() {
                   {Math.max(telegramStatus?.channelsCount || 0, 1)} Channel{Math.max(telegramStatus?.channelsCount || 0, 1) === 1 ? '' : 's'} Authorized
                 </span>
               </div>
+
+              {Array.isArray(telegramStatus?.cachedChannels) && telegramStatus.cachedChannels.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {telegramStatus.cachedChannels
+                    .filter((ch: any) => ch?.title && !String(ch.id).startsWith('priv-') && !String(ch.id).startsWith('inv-'))
+                    .map((ch: any) => (
+                      <span
+                        key={ch.id}
+                        className="text-[10px] bg-neutral-950 border border-emerald-800/40 text-emerald-300 px-2 py-0.5 rounded-md truncate max-w-full"
+                        title={ch.title}
+                      >
+                        ✓ {ch.title}
+                      </span>
+                    ))}
+                </div>
+              )}
 
               {/* Collapsible Channel Invite Authorization Input */}
               {showChannelPanel && (
@@ -1817,22 +2656,10 @@ export default function AdminDashboard() {
                   Firebase Live: <strong className="text-yellow-400">v{firebaseUpdateVersion || 'not set'}</strong>
                 </span>
               </div>
-              <div className="mt-1.5 grid grid-cols-3 gap-1.5 text-[10px] text-center">
-                <div className="bg-neutral-950 border border-neutral-800/80 rounded-lg px-2 py-1.5">
-                  <span className="text-gray-500 block">APK Downloads</span>
-                  <strong className="text-emerald-400 font-black">
-                    {(githubApkStats?.totalGitHubDownloads ?? firestoreAppStats.totalApkClicks).toLocaleString()}
-                  </strong>
-                </div>
-                <div className="bg-neutral-950 border border-neutral-800/80 rounded-lg px-2 py-1.5">
-                  <span className="text-gray-500 block">Web Users</span>
-                  <strong className="text-white font-black">
-                    {firestoreAppStats.uniqueDownloadUsers.toLocaleString()}
-                  </strong>
-                </div>
-                <div className="bg-neutral-950 border border-neutral-800/80 rounded-lg px-2 py-1.5">
-                  <span className="text-gray-500 block">Installed Phones</span>
-                  <strong className="text-yellow-400 font-black">
+              <div className="mt-1.5 grid grid-cols-1 gap-1.5 text-[10px] text-center">
+                <div className="bg-neutral-950 border border-neutral-800/80 rounded-lg px-2.5 py-2">
+                  <span className="text-gray-400 block uppercase font-semibold">Total Phone App Downloads & Installs</span>
+                  <strong className="text-emerald-400 font-black text-base mt-0.5 block">
                     {firestoreAppStats.installedAppUsers.toLocaleString()}
                   </strong>
                 </div>
@@ -2635,42 +3462,605 @@ export default function AdminDashboard() {
                   )}
 
                   {/* Series Episode Management Section (Only for Web Series & Anime Series) */}
-                  {(originalCategory === 'Web Series' || originalCategory === 'Anime Series') && (
+                  {(originalCategory === 'Web Series' || originalCategory === 'Anime Series') && (() => {
+                    const totalEpisodesCount = seasons.reduce((acc, s) => acc + (s.episodes?.length || 0), 0);
+                    const allExpanded = seasons.length > 0 && seasons.every((_, idx) => Boolean(expandedSeasons[idx]));
+                    const bulkPreview = showBulkImporter ? buildBulkPreview() : null;
+
+                    return (
                     <div className="bg-neutral-950 border border-neutral-800 rounded-xl p-4 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-xs font-bold text-yellow-400 flex items-center gap-1.5 uppercase tracking-wide">
-                          <Tv size={14} /> Season & Episode Management ({seasons.length} Seasons)
-                        </h3>
-                        <button
-                          type="button"
-                          onClick={handleAddSeason}
-                          className="bg-purple-600 hover:bg-purple-500 text-white font-bold text-[10px] px-2.5 py-1 rounded flex items-center gap-1 transition-all cursor-pointer"
-                        >
-                          <PlusCircle size={12} /> Add Season
-                        </button>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <h3 className="text-xs font-bold text-yellow-400 flex items-center gap-1.5 uppercase tracking-wide">
+                            <Tv size={14} /> Seasons & Episodes ({seasons.length} Seasons • {totalEpisodesCount} Eps)
+                          </h3>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setShowBulkImporter((p) => !p)}
+                            className={`font-black text-[10px] px-2.5 py-1 rounded flex items-center gap-1 transition-all cursor-pointer border ${
+                              showBulkImporter
+                                ? 'bg-yellow-400 text-black border-yellow-400'
+                                : 'bg-yellow-400/15 hover:bg-yellow-400/25 text-yellow-300 border-yellow-400/40'
+                            }`}
+                          >
+                            <Zap size={12} /> {showBulkImporter ? 'Close Bulk Import' : 'Bulk Import (500+ Eps)'}
+                          </button>
+                          {totalEpisodesCount > 1 && (
+                            <button
+                              type="button"
+                              onClick={handleFilterExistingSeasonsTo1080p}
+                              disabled={scanningRange}
+                              title="Remove all 480p, 720p & sticker links already in this series, keeping strictly 1080p (1 per episode)"
+                              className="bg-emerald-950/70 hover:bg-emerald-900/80 disabled:opacity-40 text-emerald-300 border border-emerald-700/60 font-bold text-[10px] px-2.5 py-1 rounded flex items-center gap-1 cursor-pointer"
+                            >
+                              {scanningRange ? <RefreshCw size={11} className="animate-spin" /> : <CheckCircle2 size={11} />}
+                              Clean to 1080p Only
+                            </button>
+                          )}
+                          {seasons.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (allExpanded) {
+                                  setExpandedSeasons({});
+                                } else {
+                                  const next: Record<number, boolean> = {};
+                                  seasons.forEach((_, i) => { next[i] = true; });
+                                  setExpandedSeasons(next);
+                                }
+                              }}
+                              className="bg-neutral-800 hover:bg-neutral-700 text-gray-200 font-bold text-[10px] px-2 py-1 rounded flex items-center gap-1 cursor-pointer"
+                            >
+                              {allExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                              {allExpanded ? 'Collapse All' : 'Expand All'}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={handleAddSeason}
+                            className="bg-purple-600 hover:bg-purple-500 text-white font-bold text-[10px] px-2.5 py-1 rounded flex items-center gap-1 transition-all cursor-pointer"
+                          >
+                            <PlusCircle size={12} /> Add Season
+                          </button>
+                        </div>
                       </div>
 
-                      <div className="space-y-4">
-                        {seasons.map((season, sIdx) => (
+                      {/* ONE-CLICK MULTI-SEASON / BULK EPISODE IMPORTER */}
+                      {showBulkImporter && (() => {
+                        const seasonRangeResult = bulkMode === 'season_range' ? computeRangeCount(bulkStartUrl, bulkEndUrl) : null;
+                        const maxDropdownSeason = Math.max(20, seasons.length + 2, bulkTargetSeasonNum + 1);
+                        return (
+                        <div className="bg-neutral-900 border border-yellow-400/30 rounded-xl p-3.5 space-y-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-800 pb-2.5">
+                            <div>
+                              <p className="text-xs font-black text-yellow-400 flex items-center gap-1.5">
+                                <Zap size={14} /> Bulk Episode & Multi-Season Importer
+                              </p>
+                              <p className="text-[10px] text-gray-400">
+                                Season select karein, Starting & Ending URL daalein — episodes apne aap count ho jaayenge!
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1 bg-neutral-950 p-1 rounded-lg border border-neutral-800">
+                              <button
+                                type="button"
+                                onClick={() => setBulkMode('season_range')}
+                                className={`px-2.5 py-1 rounded text-[10px] font-bold cursor-pointer transition-colors ${
+                                  bulkMode === 'season_range' ? 'bg-yellow-400 text-black' : 'text-gray-400 hover:text-white'
+                                }`}
+                              >
+                                By Season (Start–End)
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setBulkMode('range')}
+                                className={`px-2.5 py-1 rounded text-[10px] font-bold cursor-pointer transition-colors ${
+                                  bulkMode === 'range' ? 'bg-yellow-400 text-black' : 'text-gray-400 hover:text-white'
+                                }`}
+                              >
+                                Auto-Split All
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setBulkMode('paste')}
+                                className={`px-2.5 py-1 rounded text-[10px] font-bold cursor-pointer transition-colors ${
+                                  bulkMode === 'paste' ? 'bg-yellow-400 text-black' : 'text-gray-400 hover:text-white'
+                                }`}
+                              >
+                                Paste Links
+                              </button>
+                            </div>
+                          </div>
+
+                          {bulkMode === 'season_range' ? (
+                            <div className="space-y-3">
+                              {/* Current Seasons Quick Summary Chips */}
+                              <div className="flex flex-wrap items-center gap-1.5 bg-neutral-950/80 border border-neutral-800 rounded-lg p-2">
+                                <span className="text-[10px] font-bold text-gray-400 mr-1">
+                                  Saved in Form ({totalEpisodesCount} Eps):
+                                </span>
+                                {seasons.map((s) => {
+                                  const filledCount = s.episodes.filter((e) => e.streamUrl.trim()).length;
+                                  const isSelected = bulkTargetSeasonNum === s.seasonNumber;
+                                  return (
+                                    <button
+                                      key={s.seasonNumber}
+                                      type="button"
+                                      onClick={() => setBulkTargetSeasonNum(s.seasonNumber)}
+                                      className={`px-2 py-0.5 rounded text-[10px] font-bold border cursor-pointer transition-all ${
+                                        isSelected
+                                          ? 'bg-yellow-400 text-black border-yellow-400'
+                                          : filledCount > 0
+                                          ? 'bg-emerald-950/60 text-emerald-300 border-emerald-700/60 hover:border-emerald-500'
+                                          : 'bg-neutral-900 text-gray-400 border-neutral-800 hover:text-white'
+                                      }`}
+                                    >
+                                      S{s.seasonNumber}: {filledCount > 0 ? `${filledCount} ep ✓` : 'empty'}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                <div>
+                                  <label className="block text-[10px] font-bold text-yellow-400 mb-1">
+                                    1. Select Season *
+                                  </label>
+                                  <select
+                                    value={bulkTargetSeasonNum}
+                                    onChange={(e) => setBulkTargetSeasonNum(Number(e.target.value))}
+                                    className="w-full bg-neutral-950 border border-yellow-400/40 rounded p-2 text-white font-bold text-xs focus:border-yellow-400 focus:outline-none"
+                                  >
+                                    {Array.from({ length: maxDropdownSeason }, (_, idx) => idx + 1).map((num) => {
+                                      const existing = seasons.find((s) => s.seasonNumber === num);
+                                      const filled = existing ? existing.episodes.filter((e) => e.streamUrl.trim()).length : 0;
+                                      return (
+                                        <option key={num} value={num}>
+                                          Season {num} {filled > 0 ? `(${filled} Eps saved)` : '(New)'}
+                                        </option>
+                                      );
+                                    })}
+                                  </select>
+                                </div>
+
+                                <div>
+                                  <label className="block text-[10px] font-bold text-gray-300 mb-1">
+                                    Quality Filter (Skip 480p/720p)
+                                  </label>
+                                  <select
+                                    value={scanQualityFilter}
+                                    onChange={(e) => setScanQualityFilter(e.target.value as any)}
+                                    className="w-full bg-neutral-950 border border-yellow-400/40 rounded p-2 text-white font-bold text-xs focus:border-yellow-400 focus:outline-none"
+                                  >
+                                    <option value="1080p">1080p Only (Recommended)</option>
+                                    <option value="best">Best Available / Ep</option>
+                                    <option value="720p">720p Only</option>
+                                    <option value="480p">480p Only</option>
+                                    <option value="all">All Qualities (No Filter)</option>
+                                  </select>
+                                </div>
+
+                                <div>
+                                  <label className="block text-[10px] font-bold text-gray-300 mb-1">
+                                    Default Duration (Optional, e.g. 24m)
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={bulkDefaultDuration}
+                                    onChange={(e) => setBulkDefaultDuration(e.target.value)}
+                                    placeholder="e.g. 24m or 45m"
+                                    className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-white text-xs focus:border-yellow-400 focus:outline-none"
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <div>
+                                  <label className="block text-[10px] font-bold text-gray-300 mb-1">
+                                    2. Starting URL (Season {bulkTargetSeasonNum} - Ep 1) *
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={bulkStartUrl}
+                                    onChange={(e) => setBulkStartUrl(e.target.value)}
+                                    placeholder="https://t.me/c/123456789/101"
+                                    className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-white font-mono text-[11px] focus:border-yellow-400 focus:outline-none"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-bold text-gray-300 mb-1">
+                                    3. Ending URL (Season {bulkTargetSeasonNum} - Last Ep) *
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={bulkEndUrl}
+                                    onChange={(e) => setBulkEndUrl(e.target.value)}
+                                    placeholder="https://t.me/c/123456789/124"
+                                    className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-white font-mono text-[11px] focus:border-yellow-400 focus:outline-none"
+                                  />
+                                </div>
+                              </div>
+
+                              {/* Live Auto-Count Banner */}
+                              {seasonRangeResult?.error && (
+                                <div className="bg-red-950/40 border border-red-800/60 rounded-lg p-2 text-[11px] text-red-300 font-semibold">
+                                  {seasonRangeResult.error}
+                                </div>
+                              )}
+                              {seasonRangeResult && !seasonRangeResult.error && seasonRangeResult.count > 0 && (() => {
+                                const activeScanKey = `${bulkStartUrl.trim()}|${bulkEndUrl.trim()}|${scanQualityFilter}`;
+                                const hasLiveData = !skipTelegramScan && liveBulkScan.key === activeScanKey && liveBulkScan.data;
+                                const isLiveLoading = !skipTelegramScan && liveBulkScan.key === activeScanKey && liveBulkScan.loading;
+                                const foundCount = hasLiveData ? liveBulkScan.data!.videosFound : null;
+                                return (
+                                <div className="bg-emerald-950/50 border border-emerald-700/70 rounded-lg p-2.5 flex flex-wrap items-center justify-between gap-2">
+                                  <div className="text-[11px] text-emerald-300">
+                                    {isLiveLoading ? (
+                                      <span className="font-bold text-yellow-300 flex items-center gap-1.5">
+                                        <RefreshCw size={12} className="animate-spin" />
+                                        Scanning {seasonRangeResult.count} posts (#{seasonRangeResult.startMsgId} → #{seasonRangeResult.endMsgId}) for {scanQualityFilter === '1080p' ? '1080p only' : 'videos'}...
+                                      </span>
+                                    ) : hasLiveData ? (
+                                      <>
+                                        <span className="font-black text-emerald-200">
+                                          ✅ Found: {foundCount} Episodes ({scanQualityFilter === '1080p' ? '1080p Only' : scanQualityFilter})
+                                        </span>{' '}
+                                        for <strong className="text-white">Season {bulkTargetSeasonNum}</strong>
+                                        <span className="block text-[10px] text-yellow-300 mt-0.5">
+                                          🛡️ {liveBulkScan.data!.totalScanned} posts checked •{' '}
+                                          {liveBulkScan.data!.skippedDuplicates ? `${liveBulkScan.data!.skippedDuplicates} 480p/720p skipped • ` : ''}
+                                          {liveBulkScan.data!.skippedStickers ? `${liveBulkScan.data!.skippedStickers} stickers skipped • ` : ''}
+                                          {liveBulkScan.data!.skippedOther} text/other posts skipped
+                                        </span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <span className="font-black text-emerald-200">
+                                          Range: {seasonRangeResult.count} Total Posts
+                                        </span>{' '}
+                                        for <strong className="text-white">Season {bulkTargetSeasonNum}</strong>{' '}
+                                        <span className="font-mono text-[10px] text-emerald-400">
+                                          (#{seasonRangeResult.startMsgId} → #{seasonRangeResult.endMsgId})
+                                        </span>
+                                        {!skipTelegramScan && (
+                                          <span className="block text-[10px] text-yellow-300 mt-0.5">
+                                            🛡️ 480p/720p, stickers & text posts will be filtered out automatically.
+                                          </span>
+                                        )}
+                                      </>
+                                    )}
+                                  </div>
+                                  <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full text-[10px] font-black">
+                                    {skipTelegramScan
+                                      ? `E1–E${seasonRangeResult.count}`
+                                      : foundCount !== null
+                                      ? `${foundCount} Eps Ready`
+                                      : scanQualityFilter === '1080p'
+                                      ? '1080p Only Scan'
+                                      : 'Smart Video Scan'}
+                                  </span>
+                                </div>
+                                );
+                              })()}
+
+                              <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-neutral-800">
+                                <label className="flex items-center gap-1.5 text-[10px] text-gray-400 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={skipTelegramScan}
+                                    onChange={(e) => setSkipTelegramScan(e.target.checked)}
+                                    className="accent-yellow-400"
+                                  />
+                                  Fast Math Mode (no sticker scan)
+                                </label>
+
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowBulkImporter(false)}
+                                    disabled={scanningRange}
+                                    className="bg-neutral-800 hover:bg-neutral-700 disabled:opacity-40 text-gray-200 font-bold text-xs px-3 py-2 rounded-lg cursor-pointer"
+                                  >
+                                    Done
+                                  </button>
+                                  {(() => {
+                                    const existingTarget = seasons.find((s) => s.seasonNumber === bulkTargetSeasonNum);
+                                    const existingFilled = existingTarget
+                                      ? existingTarget.episodes.filter((e) => e.streamUrl && e.streamUrl.trim()).length
+                                      : 0;
+                                    const activeKey = `${bulkStartUrl.trim()}|${bulkEndUrl.trim()}|${scanQualityFilter}`;
+                                    const readyEps = !skipTelegramScan && liveBulkScan.key === activeKey && liveBulkScan.data
+                                      ? liveBulkScan.data.videosFound
+                                      : null;
+                                    const disabledBtn = scanningRange || !seasonRangeResult || seasonRangeResult.count <= 0 || Boolean(seasonRangeResult.error);
+
+                                    return (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleApplySelectedSeasonRange(false, true)}
+                                          disabled={disabledBtn}
+                                          title="Purane episodes ko bina hataye naye episodes is season mein aage jodein"
+                                          className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-black font-black text-xs px-3.5 py-2 rounded-lg flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                                        >
+                                          {scanningRange ? <RefreshCw size={14} className="animate-spin" /> : <PlusCircle size={14} />}
+                                          <span>
+                                            {scanningRange
+                                              ? 'Scanning...'
+                                              : readyEps !== null
+                                              ? `+ Append to S${bulkTargetSeasonNum} (${existingFilled} + ${readyEps})`
+                                              : `+ Append to S${bulkTargetSeasonNum}`}
+                                          </span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleApplySelectedSeasonRange(true, false)}
+                                          disabled={disabledBtn}
+                                          className="bg-yellow-400 hover:bg-yellow-500 disabled:opacity-40 text-black font-black text-xs px-3.5 py-2 rounded-lg flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                                        >
+                                          {scanningRange ? <RefreshCw size={14} className="animate-spin" /> : <ListPlus size={14} />}
+                                          <span>
+                                            {scanningRange
+                                              ? 'Scanning...'
+                                              : existingFilled > 0
+                                              ? `Replace S${bulkTargetSeasonNum}`
+                                              : readyEps !== null
+                                              ? `Save S${bulkTargetSeasonNum} (${readyEps} Eps) →`
+                                              : `Save S${bulkTargetSeasonNum} →`}
+                                          </span>
+                                        </button>
+                                      </>
+                                    );
+                                  })()}
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              {bulkMode === 'range' ? (
+                                <div className="space-y-2.5">
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    <div>
+                                      <label className="block text-[10px] font-bold text-gray-300 mb-1">
+                                        1st Episode Telegram Link *
+                                      </label>
+                                      <input
+                                        type="text"
+                                        value={bulkStartUrl}
+                                        onChange={(e) => setBulkStartUrl(e.target.value)}
+                                        placeholder="https://t.me/c/123456789/101"
+                                        className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-white font-mono text-[11px] focus:border-yellow-400 focus:outline-none"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-[10px] font-bold text-gray-300 mb-1">
+                                        Last Episode Link (OR Total Count below)
+                                      </label>
+                                      <input
+                                        type="text"
+                                        value={bulkEndUrl}
+                                        onChange={(e) => setBulkEndUrl(e.target.value)}
+                                        placeholder="https://t.me/c/123456789/490"
+                                        className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-white font-mono text-[11px] focus:border-yellow-400 focus:outline-none"
+                                      />
+                                    </div>
+                                  </div>
+                                  {!bulkEndUrl.trim() && (
+                                    <div>
+                                      <label className="block text-[10px] font-bold text-gray-300 mb-1">
+                                        Or Total Episodes Count (if Last Link empty)
+                                      </label>
+                                      <input
+                                        type="number"
+                                        min={1}
+                                        max={2500}
+                                        value={bulkCountInput}
+                                        onChange={(e) => setBulkCountInput(e.target.value)}
+                                        placeholder="e.g. 390"
+                                        className="w-40 bg-neutral-950 border border-neutral-800 rounded p-2 text-white text-[11px] focus:border-yellow-400 focus:outline-none"
+                                      />
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="space-y-1.5">
+                                  <label className="block text-[10px] font-bold text-gray-300">
+                                    Paste Links (1 link per line — optionally write <span className="text-yellow-400 font-mono">Season 1</span>, <span className="text-yellow-400 font-mono">Season 2</span> headers)
+                                  </label>
+                                  <textarea
+                                    rows={5}
+                                    value={bulkPasteText}
+                                    onChange={(e) => setBulkPasteText(e.target.value)}
+                                    placeholder={`Season 1\nhttps://t.me/c/123456/101\nhttps://t.me/c/123456/102\nSeason 2\nhttps://t.me/c/123456/125\n... (ya seedha saare 390 links line-by-line paste karein)`}
+                                    className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-white font-mono text-[11px] focus:border-yellow-400 focus:outline-none"
+                                  />
+                                </div>
+                              )}
+
+                              {/* Season Split & Duration Controls */}
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                                <div>
+                                  <label className="block text-[10px] font-bold text-gray-300 mb-1">Season Split Mode</label>
+                                  <select
+                                    value={bulkSplitType}
+                                    onChange={(e) => setBulkSplitType(e.target.value as any)}
+                                    className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-white text-[11px] focus:border-yellow-400 focus:outline-none"
+                                  >
+                                    <option value="equal">Equal Episodes / Season</option>
+                                    <option value="custom">Custom Count per Season (16 seasons)</option>
+                                    <option value="single">All in Single Season</option>
+                                  </select>
+                                </div>
+
+                                {bulkSplitType === 'equal' && (
+                                  <div>
+                                    <label className="block text-[10px] font-bold text-gray-300 mb-1">Episodes per Season</label>
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      value={bulkEpsPerSeason}
+                                      onChange={(e) => setBulkEpsPerSeason(e.target.value)}
+                                      placeholder="25"
+                                      className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-white text-[11px] focus:border-yellow-400 focus:outline-none"
+                                    />
+                                  </div>
+                                )}
+
+                                {bulkSplitType === 'custom' && (
+                                  <div>
+                                    <label className="block text-[10px] font-bold text-gray-300 mb-1">
+                                      Counts (comma separated)
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={bulkCustomCounts}
+                                      onChange={(e) => setBulkCustomCounts(e.target.value)}
+                                      placeholder="24, 24, 25, 24, 26..."
+                                      className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-white font-mono text-[11px] focus:border-yellow-400 focus:outline-none"
+                                    />
+                                  </div>
+                                )}
+
+                                <div>
+                                  <label className="block text-[10px] font-bold text-gray-300 mb-1">Default Duration (Optional)</label>
+                                  <input
+                                    type="text"
+                                    value={bulkDefaultDuration}
+                                    onChange={(e) => setBulkDefaultDuration(e.target.value)}
+                                    placeholder="e.g. 24m"
+                                    className="w-full bg-neutral-950 border border-neutral-800 rounded p-2 text-white text-[11px] focus:border-yellow-400 focus:outline-none"
+                                  />
+                                </div>
+
+                                {bulkMode === 'range' && (
+                                  <div>
+                                    <label className="block text-[10px] font-bold text-gray-300 mb-1">Quality Filter</label>
+                                    <select
+                                      value={scanQualityFilter}
+                                      onChange={(e) => setScanQualityFilter(e.target.value as any)}
+                                      className="w-full bg-neutral-950 border border-yellow-400/40 rounded p-2 text-white font-bold text-[11px] focus:border-yellow-400 focus:outline-none"
+                                    >
+                                      <option value="1080p">1080p Only</option>
+                                      <option value="best">Best Available / Ep</option>
+                                      <option value="720p">720p Only</option>
+                                      <option value="480p">480p Only</option>
+                                      <option value="all">All Videos</option>
+                                    </select>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Replace vs Append & Live Preview */}
+                              <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-neutral-800">
+                                <div className="flex items-center gap-3 text-[10px] text-gray-300">
+                                  <label className="flex items-center gap-1 cursor-pointer">
+                                    <input
+                                      type="radio"
+                                      name="bulkReplaceMode"
+                                      checked={bulkReplaceMode === 'replace'}
+                                      onChange={() => setBulkReplaceMode('replace')}
+                                      className="accent-yellow-400"
+                                    />
+                                    Replace existing seasons
+                                  </label>
+                                  <label className="flex items-center gap-1 cursor-pointer">
+                                    <input
+                                      type="radio"
+                                      name="bulkReplaceMode"
+                                      checked={bulkReplaceMode === 'append'}
+                                      onChange={() => setBulkReplaceMode('append')}
+                                      className="accent-yellow-400"
+                                    />
+                                    Append as new seasons
+                                  </label>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={handleApplyBulkImport}
+                                  disabled={scanningRange || !bulkPreview || bulkPreview.totalEpisodes === 0 || Boolean(bulkPreview.error)}
+                                  className="bg-yellow-400 hover:bg-yellow-500 disabled:opacity-40 text-black font-black text-xs px-4 py-2 rounded-lg flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                                >
+                                  {scanningRange ? <RefreshCw size={14} className="animate-spin" /> : <ListPlus size={14} />}
+                                  <span>
+                                    {scanningRange
+                                      ? 'Scanning & Skipping Stickers...'
+                                      : bulkPreview && bulkPreview.totalEpisodes > 0
+                                      ? `Import ${bulkPreview.totalEpisodes} Posts (${bulkPreview.seasons.length} Seasons)`
+                                      : 'Generate & Import'}
+                                  </span>
+                                </button>
+                              </div>
+
+                              {bulkPreview?.error && (
+                                <p className="text-[10px] text-red-400 font-semibold">{bulkPreview.error}</p>
+                              )}
+                              {bulkPreview && !bulkPreview.error && bulkPreview.totalEpisodes > 0 && (
+                                <div className="bg-emerald-950/40 border border-emerald-800/60 rounded-lg p-2 text-[10px] text-emerald-300">
+                                  <strong className="text-emerald-200">Preview Ready:</strong> {bulkPreview.totalEpisodes} episodes across {bulkPreview.seasons.length} season(s) —{' '}
+                                  {bulkPreview.seasons.slice(0, 6).map((s) => `S${s.seasonNumber}:${s.episodes.length}ep`).join(', ')}
+                                  {bulkPreview.seasons.length > 6 ? ` ... +${bulkPreview.seasons.length - 6} more` : ''}
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                        );
+                      })()}
+
+                      <div className="space-y-2.5">
+                        {seasons.map((season, sIdx) => {
+                          const isExpanded = Boolean(expandedSeasons[sIdx]);
+                          const isSeasonBulkOpen = seasonBulkOpenIdx === sIdx;
+                          const perSeasonRangePreview =
+                            isSeasonBulkOpen && seasonBulkMode === 'range'
+                              ? computeRangeCount(seasonBulkStartUrl, seasonBulkEndUrl)
+                              : null;
+                          return (
                           <div key={sIdx} className="bg-neutral-900 border border-neutral-800 p-3 rounded-lg space-y-2">
-                            <div className="flex items-center justify-between border-b border-neutral-800 pb-2">
-                              <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <button
+                                type="button"
+                                onClick={() => toggleSeasonExpand(sIdx)}
+                                className="flex items-center gap-2 text-left cursor-pointer group"
+                              >
                                 <span className="w-2 h-2 rounded-full bg-purple-400"></span>
-                                Season {season.seasonNumber}
-                              </span>
-                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-white group-hover:text-yellow-400 transition-colors">
+                                  Season {season.seasonNumber}
+                                </span>
+                                <span className="text-[10px] bg-neutral-950 border border-neutral-800 text-gray-300 px-2 py-0.5 rounded-full font-semibold">
+                                  {season.episodes.length} Eps
+                                </span>
+                                {isExpanded ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
+                              </button>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSeasonBulkOpenIdx(isSeasonBulkOpen ? null : sIdx);
+                                    if (!isExpanded) setExpandedSeasons((prev) => ({ ...prev, [sIdx]: true }));
+                                  }}
+                                  className={`text-[10px] font-bold px-2 py-1 rounded flex items-center gap-1 cursor-pointer border ${
+                                    isSeasonBulkOpen
+                                      ? 'bg-yellow-400 text-black border-yellow-400'
+                                      : 'bg-yellow-400/10 hover:bg-yellow-400/20 text-yellow-400 border-yellow-400/30'
+                                  }`}
+                                >
+                                  <Zap size={10} /> Bulk S{season.seasonNumber}
+                                </button>
                                 <button
                                   type="button"
                                   onClick={() => handleAddEpisode(sIdx)}
-                                  className="text-[10px] bg-neutral-800 hover:bg-neutral-700 text-yellow-400 font-bold px-2 py-1 rounded flex items-center gap-1"
+                                  className="text-[10px] bg-neutral-800 hover:bg-neutral-700 text-yellow-400 font-bold px-2 py-1 rounded flex items-center gap-1 cursor-pointer"
                                 >
-                                  + Add Episode
+                                  + Add Ep
                                 </button>
                                 {seasons.length > 1 && (
                                   <button
                                     type="button"
                                     onClick={() => handleRemoveSeason(sIdx)}
-                                    className="text-[10px] text-red-400 hover:text-red-300 font-bold px-1.5 py-1"
+                                    className="text-[10px] text-red-400 hover:text-red-300 font-bold px-1.5 py-1 cursor-pointer"
                                     title="Remove Season"
                                   >
                                     <Trash2 size={13} />
@@ -2679,7 +4069,137 @@ export default function AdminDashboard() {
                               </div>
                             </div>
 
-                            <div className="space-y-2 pt-1">
+                            {/* Per-Season Quick Bulk Drawer */}
+                            {isSeasonBulkOpen && (
+                              <div className="bg-neutral-950 border border-yellow-400/30 rounded-lg p-2.5 space-y-2 mt-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[10px] font-black text-yellow-400">
+                                    Quick Bulk Import into Season {season.seasonNumber}
+                                  </span>
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => setSeasonBulkMode('range')}
+                                      className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer ${
+                                        seasonBulkMode === 'range' ? 'bg-yellow-400 text-black' : 'bg-neutral-900 text-gray-400'
+                                      }`}
+                                    >
+                                      Start–End Range
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setSeasonBulkMode('paste')}
+                                      className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer ${
+                                        seasonBulkMode === 'paste' ? 'bg-yellow-400 text-black' : 'bg-neutral-900 text-gray-400'
+                                      }`}
+                                    >
+                                      Paste Links
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {seasonBulkMode === 'paste' ? (
+                                  <textarea
+                                    rows={3}
+                                    value={seasonBulkPaste}
+                                    onChange={(e) => setSeasonBulkPaste(e.target.value)}
+                                    placeholder={`Paste Season ${season.seasonNumber} links (1 link per line)...`}
+                                    className="w-full bg-neutral-900 border border-neutral-800 rounded p-2 text-white font-mono text-[10px] focus:border-yellow-400 focus:outline-none"
+                                  />
+                                ) : (
+                                  <div className="space-y-1.5">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                      <input
+                                        type="text"
+                                        value={seasonBulkStartUrl}
+                                        onChange={(e) => setSeasonBulkStartUrl(e.target.value)}
+                                        placeholder="Starting URL (https://t.me/c/.../101)"
+                                        className="bg-neutral-900 border border-neutral-800 rounded p-1.5 text-white font-mono text-[10px] focus:border-yellow-400 focus:outline-none"
+                                      />
+                                      <input
+                                        type="text"
+                                        value={seasonBulkEndUrl}
+                                        onChange={(e) => setSeasonBulkEndUrl(e.target.value)}
+                                        placeholder="Ending URL (https://t.me/c/.../124)"
+                                        className="bg-neutral-900 border border-neutral-800 rounded p-1.5 text-white font-mono text-[10px] focus:border-yellow-400 focus:outline-none"
+                                      />
+                                    </div>
+                                    {perSeasonRangePreview?.error && (
+                                      <p className="text-[10px] text-red-400 font-semibold">{perSeasonRangePreview.error}</p>
+                                    )}
+                                    {perSeasonRangePreview && !perSeasonRangePreview.error && perSeasonRangePreview.count > 0 && (() => {
+                                      const activeKey = `${seasonBulkStartUrl.trim()}|${seasonBulkEndUrl.trim()}|${scanQualityFilter}`;
+                                      const hasLive = !skipTelegramScan && livePerSeasonScan.key === activeKey && livePerSeasonScan.data;
+                                      const isLoading = !skipTelegramScan && livePerSeasonScan.key === activeKey && livePerSeasonScan.loading;
+                                      return (
+                                        <p className="text-[10px] text-emerald-300 font-bold">
+                                          {isLoading
+                                            ? `🔍 Scanning ${perSeasonRangePreview.count} posts for 1080p episodes...`
+                                            : hasLive
+                                            ? `✅ Found: ${livePerSeasonScan.data!.videosFound} Episodes (1080p Only) — ${livePerSeasonScan.data!.skippedCount} duplicates/stickers skipped`
+                                            : `Range: ${perSeasonRangePreview.count} Posts (#${perSeasonRangePreview.startMsgId} → #{perSeasonRangePreview.endMsgId}) — will filter to 1080p`}
+                                        </p>
+                                      );
+                                    })()}
+                                  </div>
+                                )}
+
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <input
+                                    type="text"
+                                    value={seasonBulkDuration}
+                                    onChange={(e) => setSeasonBulkDuration(e.target.value)}
+                                    placeholder="Duration (e.g. 24m)"
+                                    className="w-32 bg-neutral-900 border border-neutral-800 rounded p-1.5 text-white text-[10px] focus:border-yellow-400 focus:outline-none"
+                                  />
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleApplyPerSeasonBulk(sIdx, true)}
+                                      disabled={scanningRange}
+                                      title="Purane episodes rakhte hue naye episodes jodein"
+                                      className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-black font-black text-[10px] px-3 py-1.5 rounded cursor-pointer flex items-center gap-1"
+                                    >
+                                      {scanningRange ? <RefreshCw size={11} className="animate-spin" /> : <PlusCircle size={11} />}
+                                      <span>
+                                        {(() => {
+                                          const activeKey = `${seasonBulkStartUrl.trim()}|${seasonBulkEndUrl.trim()}|${scanQualityFilter}`;
+                                          if (seasonBulkMode === 'range' && !skipTelegramScan && livePerSeasonScan.key === activeKey && livePerSeasonScan.data) {
+                                            return `+ Append (+${livePerSeasonScan.data.videosFound} Eps)`;
+                                          }
+                                          return `+ Append to S${season.seasonNumber}`;
+                                        })()}
+                                      </span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleApplyPerSeasonBulk(sIdx, false)}
+                                      disabled={scanningRange}
+                                      className="bg-yellow-400 hover:bg-yellow-500 disabled:opacity-40 text-black font-black text-[10px] px-3 py-1.5 rounded cursor-pointer flex items-center gap-1"
+                                    >
+                                      {scanningRange && <RefreshCw size={11} className="animate-spin" />}
+                                      <span>
+                                        {scanningRange
+                                          ? 'Scanning...'
+                                          : (() => {
+                                              const activeKey = `${seasonBulkStartUrl.trim()}|${seasonBulkEndUrl.trim()}|${scanQualityFilter}`;
+                                              if (seasonBulkMode === 'range' && !skipTelegramScan && livePerSeasonScan.key === activeKey && livePerSeasonScan.data) {
+                                                return `Replace S${season.seasonNumber} (${livePerSeasonScan.data.videosFound} Eps)`;
+                                              }
+                                              if (perSeasonRangePreview && perSeasonRangePreview.count > 0) {
+                                                return `Scan & Save S${season.seasonNumber}`;
+                                              }
+                                              return `Replace S${season.seasonNumber}`;
+                                            })()}
+                                      </span>
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {isExpanded && (
+                            <div className="space-y-2 pt-2 border-t border-neutral-800">
                               {season.episodes.map((ep, eIdx) => (
                                 <div key={eIdx} className="flex flex-col gap-2 bg-neutral-950 p-2.5 rounded border border-neutral-800">
                                   <div className="flex items-center gap-2">
@@ -2691,11 +4211,18 @@ export default function AdminDashboard() {
                                       value={ep.title}
                                       onChange={(e) => {
                                         const val = e.target.value;
-                                        setSeasons((prev) => {
-                                          const updated = [...prev];
-                                          updated[sIdx].episodes[eIdx].title = val;
-                                          return updated;
-                                        });
+                                        setSeasons((prev) =>
+                                          prev.map((s, si) =>
+                                            si === sIdx
+                                              ? {
+                                                  ...s,
+                                                  episodes: s.episodes.map((item, ei) =>
+                                                    ei === eIdx ? { ...item, title: val } : item
+                                                  ),
+                                                }
+                                              : s
+                                          )
+                                        );
                                       }}
                                       placeholder="Episode Title"
                                       className="flex-grow bg-neutral-900 border border-neutral-800 rounded p-1.5 text-white text-[11px]"
@@ -2727,11 +4254,18 @@ export default function AdminDashboard() {
                                         value={ep.streamUrl}
                                         onChange={(e) => {
                                           const val = e.target.value;
-                                          setSeasons((prev) => {
-                                            const updated = [...prev];
-                                            updated[sIdx].episodes[eIdx].streamUrl = val;
-                                            return updated;
-                                          });
+                                          setSeasons((prev) =>
+                                            prev.map((s, si) =>
+                                              si === sIdx
+                                                ? {
+                                                    ...s,
+                                                    episodes: s.episodes.map((item, ei) =>
+                                                      ei === eIdx ? { ...item, streamUrl: val } : item
+                                                    ),
+                                                  }
+                                                : s
+                                            )
+                                          );
                                         }}
                                         placeholder="1080p Video URL (Direct MP4 / Telegram)..."
                                         className="w-full bg-neutral-900 border border-neutral-800 rounded p-1.5 text-white font-mono text-[11px] pr-12"
@@ -2745,14 +4279,20 @@ export default function AdminDashboard() {
                                         onChange={(e) => {
                                           const val = e.target.value;
                                           const sec = parseDurationToSeconds(val);
-                                          setSeasons((prev) => {
-                                            const updated = [...prev];
-                                            updated[sIdx].episodes[eIdx].duration = val;
-                                            if (sec > 0) {
-                                              updated[sIdx].episodes[eIdx].durationSec = sec;
-                                            }
-                                            return updated;
-                                          });
+                                          setSeasons((prev) =>
+                                            prev.map((s, si) =>
+                                              si === sIdx
+                                                ? {
+                                                    ...s,
+                                                    episodes: s.episodes.map((item, ei) =>
+                                                      ei === eIdx
+                                                        ? { ...item, duration: val, ...(sec > 0 ? { durationSec: sec } : {}) }
+                                                        : item
+                                                    ),
+                                                  }
+                                                : s
+                                            )
+                                          );
                                         }}
                                         placeholder="Duration (e.g. 45m or 00:45:10)"
                                         className="w-40 bg-neutral-900 border border-neutral-800 rounded p-1 text-white text-[11px] placeholder-gray-600 focus:outline-none focus:border-yellow-400"
@@ -2770,11 +4310,14 @@ export default function AdminDashboard() {
                                   </div>
                               ))}
                             </div>
+                            )}
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
-                  )}
+                    );
+                  })()}
 
                   <div>
                     <label className="block text-gray-300 mb-1 font-semibold text-xs">Trailer URL (YouTube / Web)</label>
