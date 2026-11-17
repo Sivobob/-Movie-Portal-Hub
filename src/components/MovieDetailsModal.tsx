@@ -41,6 +41,7 @@ interface MovieDetailsModalProps {
   isSavedInMyList?: boolean;
   onToggleMyList?: (movie: any) => void;
   onSelectMovie?: (movie: any) => void;
+  initialSeasonIndex?: number;
 }
 
 export default function MovieDetailsModal({
@@ -53,9 +54,10 @@ export default function MovieDetailsModal({
   isSavedInMyList = false,
   onToggleMyList,
   onSelectMovie,
+  initialSeasonIndex = 0,
 }: MovieDetailsModalProps) {
   const [activeTab, setActiveTab] = useState<'episodes' | 'more_like_this' | 'more_details'>('episodes');
-  const [activeSeasonIndex, setActiveSeasonIndex] = useState(0);
+  const [activeSeasonIndex, setActiveSeasonIndex] = useState(initialSeasonIndex);
   const [isSeasonDropdownOpen, setIsSeasonDropdownOpen] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState<string>('Hindi');
   const [userRating, setUserRating] = useState<number | null>(null);
@@ -85,13 +87,14 @@ export default function MovieDetailsModal({
       } else {
         setActiveTab('more_like_this');
       }
-      setActiveSeasonIndex(0);
+      const maxSIdx = Math.max(0, (movie.seasons?.length || 1) - 1);
+      setActiveSeasonIndex(Math.max(0, Math.min(initialSeasonIndex, maxSIdx)));
       setIsSeasonDropdownOpen(false);
       setProbedMovieDurationSec(0);
       setProbedEpisodeDurations({});
       scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'auto' });
     }
-  }, [movie?.id, isSeries]);
+  }, [movie?.id, isSeries, initialSeasonIndex]);
 
   // Load user saved rating if available
   useEffect(() => {

@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.228",
-  "minimumRequiredVersion": "3.5.228",
-  "latestVersionCode": 3448,
-  "minimumRequiredVersionCode": 3448,
+  "latestVersion": "3.5.229",
+  "minimumRequiredVersion": "3.5.229",
+  "latestVersionCode": 3449,
+  "minimumRequiredVersionCode": 3449,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Portal v3.5.228 update is ready! Fixes reliable phone top status-bar movie notifications (even on permission & background) and Admin Update controls.",
-  "releaseNotes": "v3.5.228: Direct Firestore REST release notification mirror for reliable background notifications, Android 14 permission timing fix, and permanent Admin Update Push controls."
+  "updateMessage": "Movie Portal v3.5.229 update is ready! Removed Recently Added badges, fixed 1-press Back while watching episodes, and improved notification permission prompt.",
+  "releaseNotes": "v3.5.229: Single-press Back returns to Episode List/previous page instead of Home, removed Recently Added badges, and delayed Android 13/14 notification permission prompt."
 }

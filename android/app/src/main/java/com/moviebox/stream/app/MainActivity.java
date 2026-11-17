@@ -229,7 +229,7 @@ public class MainActivity extends BridgeActivity {
         configureWebView();
         createNotificationChannel();
         captureLaunchMovieIntent(getIntent());
-        requestPostNotificationsPermissionIfNeeded();
+        mainHandler.postDelayed(this::requestPostNotificationsPermissionIfNeeded, 1200);
         ReleaseNotificationHelper.scheduleBackgroundWorker(this);
         notificationExecutor.execute(() -> ReleaseNotificationHelper.syncAndNotifyLatestReleases(getApplicationContext()));
     }
@@ -2051,11 +2051,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.228");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.229");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.228\",\"versionCode\":3448}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.229\",\"versionCode\":3449}";
             }
         }
 

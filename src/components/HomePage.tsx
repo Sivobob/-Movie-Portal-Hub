@@ -56,11 +56,11 @@ export default function HomePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const category = searchParams.get('category');
 
-  const setCategory = (cat: string | null) => {
+  const setCategory = (cat: string | null, replace = false) => {
     if (cat) {
-      setSearchParams({ category: cat });
+      setSearchParams({ category: cat }, { replace });
     } else {
-      setSearchParams({});
+      setSearchParams({}, { replace });
     }
   };
 
@@ -86,6 +86,8 @@ export default function HomePage() {
   const selectedMovieRef = useRef(selectedMovie);
   const playingMovieRef = useRef(playingMovie);
   const isFolderSearchOpenRef = useRef(isFolderSearchOpen);
+  const ignoringPopstateRef = useRef(0);
+  const ignoreResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     categoryRef.current = category;
@@ -135,24 +137,62 @@ export default function HomePage() {
     loadUserHistory();
   }, [user, playingMovie]);
 
-  // Hardware back button handler
+  const popHistoryEntrySilently = () => {
+    ignoringPopstateRef.current += 1;
+    if (ignoreResetTimerRef.current) clearTimeout(ignoreResetTimerRef.current);
+    ignoreResetTimerRef.current = setTimeout(() => {
+      ignoringPopstateRef.current = 0;
+    }, 500);
+    try {
+      window.history.back();
+    } catch (e) {
+      ignoringPopstateRef.current = Math.max(0, ignoringPopstateRef.current - 1);
+    }
+  };
+
+  const closePlayer = () => {
+    if (!playingMovieRef.current) return;
+    playingMovieRef.current = null;
+    setPlayingMovie(null);
+    if (window.history.state?.appModal === 'player') {
+      popHistoryEntrySilently();
+    }
+  };
+
+  const closeMovieDetails = () => {
+    if (!selectedMovieRef.current) return;
+    selectedMovieRef.current = null;
+    setSelectedMovie(null);
+    if (window.history.state?.appModal === 'movie_detail') {
+      popHistoryEntrySilently();
+    }
+  };
+
+  // Hardware & browser back button handler (strictly 1 step back per press)
   useEffect(() => {
     const handlePopState = () => {
+      if (ignoringPopstateRef.current > 0) {
+        ignoringPopstateRef.current -= 1;
+        if (ignoringPopstateRef.current === 0 && ignoreResetTimerRef.current) {
+          clearTimeout(ignoreResetTimerRef.current);
+          ignoreResetTimerRef.current = null;
+        }
+        return;
+      }
       if (playingMovieRef.current) {
+        playingMovieRef.current = null;
         setPlayingMovie(null);
         return;
       }
       if (selectedMovieRef.current) {
+        selectedMovieRef.current = null;
         setSelectedMovie(null);
         return;
       }
       if (isFolderSearchOpenRef.current) {
+        isFolderSearchOpenRef.current = false;
         setIsFolderSearchOpen(false);
         setFolderSearchQuery('');
-        return;
-      }
-      if (categoryRef.current) {
-        setCategory(null);
         return;
       }
     };
@@ -167,23 +207,21 @@ export default function HomePage() {
             return;
           }
           if (playingMovieRef.current) {
-            setPlayingMovie(null);
-            try { window.history.back(); } catch (e) {}
+            closePlayer();
             return;
           }
           if (selectedMovieRef.current) {
-            setSelectedMovie(null);
-            try { window.history.back(); } catch (e) {}
+            closeMovieDetails();
             return;
           }
           if (isFolderSearchOpenRef.current) {
+            isFolderSearchOpenRef.current = false;
             setIsFolderSearchOpen(false);
             setFolderSearchQuery('');
             return;
           }
           if (categoryRef.current) {
-            setCategory(null);
-            try { window.history.back(); } catch (e) {}
+            setCategory(null, true);
             return;
           }
 
@@ -196,6 +234,9 @@ export default function HomePage() {
 
     return () => {
       window.removeEventListener('popstate', handlePopState);
+      if (ignoreResetTimerRef.current) {
+        clearTimeout(ignoreResetTimerRef.current);
+      }
       if (backListener && typeof backListener.remove === 'function') {
         backListener.remove();
       }
@@ -297,8 +338,9 @@ export default function HomePage() {
         try {
           sessionStorage.removeItem('mp_pending_open_movie_id');
         } catch {}
+        playingMovieRef.current = null;
         setPlayingMovie(null);
-        setSelectedMovie(match);
+        handleMovieClick(match);
       }
     };
 
@@ -512,10 +554,14 @@ export default function HomePage() {
       : categoryMovies;
 
   const handleMovieClick = (movie: any) => {
+    setActiveSeasonIndex(0);
+    selectedMovieRef.current = movie;
     setSelectedMovie(movie);
-    try {
-      window.history.pushState({ appModal: 'movie_detail' }, '');
-    } catch (e) {}
+    if (window.history.state?.appModal !== 'movie_detail') {
+      try {
+        window.history.pushState({ ...(window.history.state || {}), appModal: 'movie_detail' }, '');
+      } catch (e) {}
+    }
   };
 
   const handleWatchNow = (
@@ -524,15 +570,19 @@ export default function HomePage() {
     episodeIndex = 0,
     audioLanguage?: string
   ) => {
-    try {
-      window.history.pushState({ appModal: 'player' }, '');
-    } catch (e) {}
-
     const uid = user?.uid || 'guest_user';
     const resumeTime = movie.currentTime || 0;
     const movieDurationSec =
       (typeof movie.duration === 'number' && movie.duration > 0 ? movie.duration : 0) ||
       parseDurationToSeconds(movie.runtime);
+
+    const pushPlayerHistory = () => {
+      if (window.history.state?.appModal !== 'player') {
+        try {
+          window.history.pushState({ ...(window.history.state || {}), appModal: 'player' }, '');
+        } catch (e) {}
+      }
+    };
 
     if (movie.seasons && movie.seasons.length > 0) {
       const sIdx = Math.max(0, Math.min(seasonIndex, movie.seasons.length - 1));
@@ -542,6 +592,7 @@ export default function HomePage() {
       const ep = episodes[eIdx];
 
       if (ep && ep.streamUrl) {
+        setActiveSeasonIndex(sIdx);
         const epDurationSec =
           (typeof ep.durationSec === 'number' && ep.durationSec > 0 ? ep.durationSec : 0) ||
           parseDurationToSeconds(ep.duration) ||
@@ -549,7 +600,8 @@ export default function HomePage() {
         if (epDurationSec > 0 || resumeTime > 0) {
           saveWatchProgress(uid, movie, resumeTime, epDurationSec).catch(() => {});
         }
-        setPlayingMovie({
+        pushPlayerHistory();
+        const nextPlaying = {
           title: `${movie.title} - S0${season.seasonNumber || sIdx + 1}E0${ep.episodeNumber || eIdx + 1}: ${ep.title}`,
           streamingUrl: ep.streamUrl.trim(),
           displayCategory: movie.displayCategory,
@@ -560,8 +612,9 @@ export default function HomePage() {
           language: audioLanguage || movie.language,
           currentTime: resumeTime,
           initialDuration: epDurationSec,
-        });
-        setSelectedMovie(null);
+        };
+        playingMovieRef.current = nextPlaying;
+        setPlayingMovie(nextPlaying);
         return;
       }
     }
@@ -570,16 +623,18 @@ export default function HomePage() {
       if (movieDurationSec > 0 || resumeTime > 0) {
         saveWatchProgress(uid, movie, resumeTime, movieDurationSec).catch(() => {});
       }
-      setPlayingMovie({
+      pushPlayerHistory();
+      const nextPlaying = {
         ...movie,
         streamingUrl: movie.streamingUrl.trim(),
         language: audioLanguage || movie.language,
         currentTime: resumeTime,
         initialDuration: movieDurationSec,
-      });
-      setSelectedMovie(null);
+      };
+      playingMovieRef.current = nextPlaying;
+      setPlayingMovie(nextPlaying);
     } else {
-      setSelectedMovie(movie);
+      handleMovieClick(movie);
     }
   };
 
@@ -634,18 +689,6 @@ export default function HomePage() {
     if (elapsedMins < 60) return `${elapsedMins}m ago • ${remainingHrs}h left`;
     const elapsedHrs = Math.floor(elapsedMins / 60);
     return `${elapsedHrs}h ago • ${remainingHrs}h left`;
-  };
-
-  // Check if movie was recently added (within last 14 days)
-  const isRecentlyAdded = (movie: any) => {
-    if (!movie.updatedAt) return false;
-    try {
-      const timeMs = movie.updatedAt?.toMillis ? movie.updatedAt.toMillis() : new Date(movie.updatedAt).getTime();
-      const diffDays = (Date.now() - timeMs) / (1000 * 60 * 60 * 24);
-      return diffDays <= 14;
-    } catch (e) {
-      return false;
-    }
   };
 
   // Dynamic Genre filtering helpers
@@ -765,11 +808,6 @@ export default function HomePage() {
                 return (
                   <div key={movie.id} className="relative group">
                     <MovieCard movie={movie} onClick={() => handleMovieClick(movie)} />
-                    {isRecentlyAdded(movie) && (
-                      <span className="absolute bottom-2 left-2 z-10 bg-[#E50914] text-white font-bold text-[9px] px-2 py-0.5 rounded shadow tracking-tight">
-                        Recently added
-                      </span>
-                    )}
                   </div>
                 );
               })}
@@ -1049,11 +1087,6 @@ export default function HomePage() {
                         alt={movie.title}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                       />
-                      {isRecentlyAdded(movie) && (
-                        <span className="absolute bottom-2 left-2 bg-[#E50914] text-white font-bold text-[9px] px-2 py-0.5 rounded shadow tracking-tight">
-                          Recently added
-                        </span>
-                      )}
                     </div>
                   </div>
                 ))}
@@ -1076,11 +1109,6 @@ export default function HomePage() {
                         alt={movie.title}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                       />
-                      {isRecentlyAdded(movie) && (
-                        <span className="absolute bottom-2 left-2 bg-[#E50914] text-white font-bold text-[9px] px-2 py-0.5 rounded shadow tracking-tight">
-                          Recently added
-                        </span>
-                      )}
                     </div>
                   </div>
                 ))}
@@ -1107,11 +1135,6 @@ export default function HomePage() {
                         alt={movie.title}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                       />
-                      {isRecentlyAdded(movie) && (
-                        <span className="absolute bottom-2 left-2 bg-[#E50914] text-white font-bold text-[9px] px-2 py-0.5 rounded shadow tracking-tight">
-                          Recently added
-                        </span>
-                      )}
                       <span className="absolute top-1.5 right-1.5 bg-black/85 text-white font-black text-[11px] px-2 py-0.5 rounded border border-white/20">
                         #{index + 1}
                       </span>
@@ -1133,11 +1156,6 @@ export default function HomePage() {
                   <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
                       <img src={upgradePosterUrl(movie.posterUrl, 400) || movie.posterUrl} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                      {isRecentlyAdded(movie) && (
-                        <span className="absolute bottom-2 left-2 bg-[#E50914] text-white font-bold text-[9px] px-2 py-0.5 rounded shadow tracking-tight">
-                          Recently added
-                        </span>
-                      )}
                     </div>
                   </div>
                 ))}
@@ -1156,11 +1174,6 @@ export default function HomePage() {
                   <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
                       <img src={upgradePosterUrl(movie.posterUrl, 400) || movie.posterUrl} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                      {isRecentlyAdded(movie) && (
-                        <span className="absolute bottom-2 left-2 bg-[#E50914] text-white font-bold text-[9px] px-2 py-0.5 rounded shadow tracking-tight">
-                          Recently added
-                        </span>
-                      )}
                     </div>
                   </div>
                 ))}
@@ -1179,11 +1192,6 @@ export default function HomePage() {
                   <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
                       <img src={upgradePosterUrl(movie.posterUrl, 400) || movie.posterUrl} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                      {isRecentlyAdded(movie) && (
-                        <span className="absolute bottom-2 left-2 bg-[#E50914] text-white font-bold text-[9px] px-2 py-0.5 rounded shadow tracking-tight">
-                          Recently added
-                        </span>
-                      )}
                     </div>
                   </div>
                 ))}
@@ -1202,11 +1210,6 @@ export default function HomePage() {
                   <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
                       <img src={upgradePosterUrl(movie.posterUrl, 400) || movie.posterUrl} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                      {isRecentlyAdded(movie) && (
-                        <span className="absolute bottom-2 left-2 bg-[#E50914] text-white font-bold text-[9px] px-2 py-0.5 rounded shadow tracking-tight">
-                          Recently added
-                        </span>
-                      )}
                     </div>
                   </div>
                 ))}
@@ -1219,17 +1222,22 @@ export default function HomePage() {
       )}
 
       {/* Movie & Series Details Page Matching Reference Screenshot */}
-      {resolvedSelectedMovie && (
+      {resolvedSelectedMovie && !playingMovie && (
         <MovieDetailsModal
           isOpen={Boolean(resolvedSelectedMovie)}
           movie={resolvedSelectedMovie}
-          onClose={() => setSelectedMovie(null)}
+          onClose={closeMovieDetails}
           onWatchNow={(m, sIdx, eIdx, lang) => handleWatchNow(m, sIdx, eIdx, lang)}
           allMovies={movies}
           userId={user?.uid || 'guest_user'}
           isSavedInMyList={Boolean(resolvedSelectedMovie && myListIds.has(resolvedSelectedMovie.id || resolvedSelectedMovie.imdbId))}
           onToggleMyList={(m) => toggleMyList({ stopPropagation: () => {} } as any, m)}
-          onSelectMovie={(m) => setSelectedMovie(m)}
+          onSelectMovie={(m) => {
+            setActiveSeasonIndex(0);
+            selectedMovieRef.current = m;
+            setSelectedMovie(m);
+          }}
+          initialSeasonIndex={activeSeasonIndex}
         />
       )}
 
@@ -1237,7 +1245,8 @@ export default function HomePage() {
       {playingMovie && (
         <VideoPlayerModal
           isOpen={Boolean(playingMovie)}
-          onClose={() => setPlayingMovie(null)}
+          onClose={closePlayer}
+          manageHistory={false}
           title={playingMovie.title}
           videoUrl={playingMovie.streamingUrl || ''}
           videoQualities={playingMovie.videoQualities}
@@ -1249,6 +1258,7 @@ export default function HomePage() {
           language={playingMovie.language || playingMovie.movie?.language}
           initialDuration={playingMovie.initialDuration || playingMovie.duration || 0}
           initialTime={playingMovie.currentTime || 0}
+          onEpisodeChange={(sIdx) => setActiveSeasonIndex(sIdx)}
           onProgress={(curr, dur) => {
             const uid = user?.uid || 'guest_user';
             const m = playingMovie.movie || playingMovie;

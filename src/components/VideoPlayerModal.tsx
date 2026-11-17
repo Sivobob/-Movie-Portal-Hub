@@ -56,6 +56,7 @@ export interface VideoPlayerModalProps {
   onNextEpisode?: () => void;
   onPrevEpisode?: () => void;
   onEpisodeChange?: (seasonIndex: number, episodeIndex: number) => void;
+  manageHistory?: boolean;
 }
 
 // Custom 10-Second Rewind Icon matching reference design
@@ -100,6 +101,7 @@ export default function VideoPlayerModal({
   initialDuration = 0,
   initialTime = 0,
   onProgress,
+  manageHistory = true,
 }: VideoPlayerModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -684,9 +686,11 @@ export default function VideoPlayerModal({
       } catch {}
     }
 
-    try {
-      window.history.pushState({ playerModalOpen: true }, '');
-    } catch (e) {}
+    if (manageHistory) {
+      try {
+        window.history.pushState({ playerModalOpen: true }, '');
+      } catch (e) {}
+    }
 
     const handlePopState = (e: PopStateEvent) => {
       e.preventDefault();
@@ -728,7 +732,9 @@ export default function VideoPlayerModal({
       }
     };
 
-    window.addEventListener('popstate', handlePopState);
+    if (manageHistory) {
+      window.addEventListener('popstate', handlePopState);
+    }
     window.addEventListener('pointerup', handleGlobalPointerRelease);
     window.addEventListener('pointercancel', handleGlobalPointerRelease);
     window.addEventListener('touchend', handleGlobalPointerRelease);
@@ -736,7 +742,9 @@ export default function VideoPlayerModal({
     return () => {
       clearAutoHideTimer();
       isInteractingRef.current = false;
-      window.removeEventListener('popstate', handlePopState);
+      if (manageHistory) {
+        window.removeEventListener('popstate', handlePopState);
+      }
       window.removeEventListener('pointerup', handleGlobalPointerRelease);
       window.removeEventListener('pointercancel', handleGlobalPointerRelease);
       window.removeEventListener('touchend', handleGlobalPointerRelease);
@@ -761,7 +769,7 @@ export default function VideoPlayerModal({
         } catch {}
       }
     };
-  }, [isOpen]);
+  }, [isOpen, manageHistory]);
 
   useEffect(() => {
     if (isOpen) {

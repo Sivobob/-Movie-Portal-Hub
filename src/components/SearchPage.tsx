@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Search, X, ArrowLeft, Film } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
 import { collection, getDocs, getDocsFromServer } from 'firebase/firestore';
 import { db } from '../firebase';
 import VideoPlayerModal from './VideoPlayerModal';
@@ -27,7 +28,118 @@ export default function SearchPage() {
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [playingMovie, setPlayingMovie] = useState<any | null>(null);
   const [selectedMovie, setSelectedMovie] = useState<any | null>(null);
+  const [activeSeasonIndex, setActiveSeasonIndex] = useState(0);
   const navigate = useNavigate();
+
+  const selectedMovieRef = useRef(selectedMovie);
+  const playingMovieRef = useRef(playingMovie);
+  const ignoringPopstateRef = useRef(0);
+  const ignoreResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    selectedMovieRef.current = selectedMovie;
+  }, [selectedMovie]);
+
+  useEffect(() => {
+    playingMovieRef.current = playingMovie;
+  }, [playingMovie]);
+
+  const popHistoryEntrySilently = () => {
+    ignoringPopstateRef.current += 1;
+    if (ignoreResetTimerRef.current) clearTimeout(ignoreResetTimerRef.current);
+    ignoreResetTimerRef.current = setTimeout(() => {
+      ignoringPopstateRef.current = 0;
+    }, 500);
+    try {
+      window.history.back();
+    } catch {
+      ignoringPopstateRef.current = Math.max(0, ignoringPopstateRef.current - 1);
+    }
+  };
+
+  const openMovieDetails = (movie: any) => {
+    setActiveSeasonIndex(0);
+    selectedMovieRef.current = movie;
+    setSelectedMovie(movie);
+    if (window.history.state?.appModal !== 'movie_detail') {
+      try {
+        window.history.pushState({ ...(window.history.state || {}), appModal: 'movie_detail' }, '');
+      } catch {}
+    }
+  };
+
+  const closePlayer = () => {
+    if (!playingMovieRef.current) return;
+    playingMovieRef.current = null;
+    setPlayingMovie(null);
+    if (window.history.state?.appModal === 'player') {
+      popHistoryEntrySilently();
+    }
+  };
+
+  const closeMovieDetails = () => {
+    if (!selectedMovieRef.current) return;
+    selectedMovieRef.current = null;
+    setSelectedMovie(null);
+    if (window.history.state?.appModal === 'movie_detail') {
+      popHistoryEntrySilently();
+    }
+  };
+
+  useEffect(() => {
+    const handlePopState = () => {
+      if (ignoringPopstateRef.current > 0) {
+        ignoringPopstateRef.current -= 1;
+        if (ignoringPopstateRef.current === 0 && ignoreResetTimerRef.current) {
+          clearTimeout(ignoreResetTimerRef.current);
+          ignoreResetTimerRef.current = null;
+        }
+        return;
+      }
+      if (playingMovieRef.current) {
+        playingMovieRef.current = null;
+        setPlayingMovie(null);
+        return;
+      }
+      if (selectedMovieRef.current) {
+        selectedMovieRef.current = null;
+        setSelectedMovie(null);
+        return;
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+
+    let backListener: any = null;
+    if (Capacitor.isNativePlatform()) {
+      import('@capacitor/app').then(({ App: CapApp }) => {
+        backListener = CapApp.addListener('backButton', () => {
+          if (typeof window !== 'undefined' && (window as any).__MOVIE_PORTAL_MANDATORY_UPDATE__) {
+            return;
+          }
+          if (playingMovieRef.current) {
+            closePlayer();
+            return;
+          }
+          if (selectedMovieRef.current) {
+            closeMovieDetails();
+            return;
+          }
+          navigate(-1);
+        });
+      }).catch(() => {});
+    }
+
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      if (ignoreResetTimerRef.current) {
+        clearTimeout(ignoreResetTimerRef.current);
+      }
+      if (backListener && typeof backListener.remove === 'function') {
+        backListener.remove();
+      }
+    };
+  }, [navigate]);
 
   const handleWatchNow = (
     movie: any,
@@ -41,6 +153,14 @@ export default function SearchPage() {
       (typeof movie.duration === 'number' && movie.duration > 0 ? movie.duration : 0) ||
       parseDurationToSeconds(movie.runtime);
 
+    const pushPlayerHistory = () => {
+      if (window.history.state?.appModal !== 'player') {
+        try {
+          window.history.pushState({ ...(window.history.state || {}), appModal: 'player' }, '');
+        } catch {}
+      }
+    };
+
     if (movie.seasons && movie.seasons.length > 0) {
       const sIdx = Math.max(0, Math.min(seasonIndex, movie.seasons.length - 1));
       const season = movie.seasons[sIdx];
@@ -49,6 +169,7 @@ export default function SearchPage() {
       const ep = episodes[eIdx];
 
       if (ep && ep.streamUrl) {
+        setActiveSeasonIndex(sIdx);
         const epDurationSec =
           (typeof ep.durationSec === 'number' && ep.durationSec > 0 ? ep.durationSec : 0) ||
           parseDurationToSeconds(ep.duration) ||
@@ -56,7 +177,8 @@ export default function SearchPage() {
         if (epDurationSec > 0 || resumeTime > 0) {
           saveWatchProgress(uid, movie, resumeTime, epDurationSec).catch(() => {});
         }
-        setPlayingMovie({
+        pushPlayerHistory();
+        const nextPlaying = {
           title: `${movie.title} - S0${season.seasonNumber || sIdx + 1}E0${ep.episodeNumber || eIdx + 1}: ${ep.title}`,
           streamingUrl: ep.streamUrl.trim(),
           displayCategory: movie.displayCategory,
@@ -67,8 +189,9 @@ export default function SearchPage() {
           language: audioLanguage || movie.language,
           currentTime: resumeTime,
           initialDuration: epDurationSec,
-        });
-        setSelectedMovie(null);
+        };
+        playingMovieRef.current = nextPlaying;
+        setPlayingMovie(nextPlaying);
         return;
       }
     }
@@ -77,16 +200,18 @@ export default function SearchPage() {
       if (movieDurationSec > 0 || resumeTime > 0) {
         saveWatchProgress(uid, movie, resumeTime, movieDurationSec).catch(() => {});
       }
-      setPlayingMovie({
+      pushPlayerHistory();
+      const nextPlaying = {
         ...movie,
         streamingUrl: movie.streamingUrl.trim(),
         language: audioLanguage || movie.language,
         currentTime: resumeTime,
         initialDuration: movieDurationSec,
-      });
-      setSelectedMovie(null);
+      };
+      playingMovieRef.current = nextPlaying;
+      setPlayingMovie(nextPlaying);
     } else {
-      setSelectedMovie(movie);
+      openMovieDetails(movie);
     }
   };
 
@@ -221,7 +346,7 @@ export default function SearchPage() {
             <MovieCard
               key={movie.id}
               movie={movie}
-              onClick={() => setSelectedMovie(movie)}
+              onClick={() => openMovieDetails(movie)}
             />
           ))}
         </div>
@@ -258,19 +383,26 @@ export default function SearchPage() {
         </button>
       </div>
 
-      {selectedMovie && (
+      {selectedMovie && !playingMovie && (
         <MovieDetailsModal
           isOpen={Boolean(selectedMovie)}
-          onClose={() => setSelectedMovie(null)}
+          onClose={closeMovieDetails}
           movie={selectedMovie}
           onWatchNow={(m, sIdx, eIdx, lang) => handleWatchNow(m, sIdx, eIdx, lang)}
+          onSelectMovie={(m) => {
+            setActiveSeasonIndex(0);
+            selectedMovieRef.current = m;
+            setSelectedMovie(m);
+          }}
+          initialSeasonIndex={activeSeasonIndex}
         />
       )}
 
       {playingMovie && (
         <VideoPlayerModal
           isOpen={Boolean(playingMovie)}
-          onClose={() => setPlayingMovie(null)}
+          onClose={closePlayer}
+          manageHistory={false}
           title={playingMovie.title}
           videoUrl={playingMovie.streamingUrl || ''}
           videoQualities={playingMovie.videoQualities}
@@ -281,6 +413,7 @@ export default function SearchPage() {
           episodeIndex={playingMovie.episodeIndex ?? 0}
           language={playingMovie.language}
           initialDuration={playingMovie.initialDuration || playingMovie.duration || 0}
+          onEpisodeChange={(sIdx) => setActiveSeasonIndex(sIdx)}
         />
       )}
     </div>
