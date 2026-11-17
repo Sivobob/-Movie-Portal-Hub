@@ -37,9 +37,12 @@ public class ReleaseNotificationHelper {
     public static final String CHANNEL_ID = "movie_box_releases";
     private static final String PREFS_NAME = "movie_portal_notifications_v1";
     private static final String KEY_NOTIFIED_IDS = "notified_ids_json";
-    private static final String KEY_SEEDED_INITIAL = "seeded_initial_v1";
+    private static final String KEY_SEEDED_INITIAL = "seeded_initial_v2";
     private static final String KEY_BACKEND_URL = "backend_base_url";
     private static final String WORK_NAME = "movie_portal_release_sync";
+
+    private static final String FIRESTORE_RELEASE_FEED_URL =
+        "https://firestore.googleapis.com/v1/projects/gen-lang-client-0267042672/databases/ai-studio-movieportalhub-664a3e40-85f3-4758-945e-fd031bdc459f/documents/admins/latest_release_notification";
 
     private static final String[] FALLBACK_BACKEND_URLS = new String[] {
         "https://ais-pre-23ig7rhoci7kumxir7xicl-835315626292.asia-northeast1.run.app",
@@ -156,9 +159,21 @@ public class ReleaseNotificationHelper {
         } catch (Exception ignored) {}
     }
 
+    private static boolean hasPostNotificationPermission(Context context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            return ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
+                == PackageManager.PERMISSION_GRANTED;
+        }
+        return true;
+    }
+
     public static boolean showRichReleaseNotificationFromJson(Context context, String jsonStr, boolean forceNotify) {
         if (context == null || jsonStr == null || jsonStr.trim().isEmpty()) return false;
         try {
+            if (!hasPostNotificationPermission(context)) {
+                return false;
+            }
+
             JSONObject obj = new JSONObject(jsonStr);
             String id = obj.optString("id", "").trim();
             String movieId = obj.optString("movieId", "").trim();
@@ -182,13 +197,6 @@ public class ReleaseNotificationHelper {
                 return false;
             }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                if (ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
-                    != PackageManager.PERMISSION_GRANTED) {
-                    return false;
-                }
-            }
-
             createNotificationChannel(context);
 
             String customTitle = obj.optString("notificationTitle", "").trim();
@@ -198,24 +206,29 @@ public class ReleaseNotificationHelper {
                 ? customTitle
                 : ("Watch Now : " + title + yearPart + " " + typeLabel + " available now");
 
-            List<String> detailParts = new ArrayList<>();
-            if (!qualityBadge.isEmpty() && !"NONE".equalsIgnoreCase(qualityBadge)) {
-                detailParts.add(qualityBadge);
+            String customBody = obj.optString("notificationBody", "").trim();
+            String detailsLine;
+            if (!customBody.isEmpty()) {
+                detailsLine = customBody;
+            } else {
+                List<String> detailParts = new ArrayList<>();
+                if (!qualityBadge.isEmpty() && !"NONE".equalsIgnoreCase(qualityBadge)) {
+                    detailParts.add(qualityBadge);
+                }
+                if (!language.isEmpty()) {
+                    detailParts.add(language);
+                }
+                if (!genre.isEmpty()) {
+                    detailParts.add(genre);
+                }
+                if (!runtime.isEmpty()) {
+                    detailParts.add(runtime);
+                }
+                String baseMsg = !message.isEmpty() ? message : "GO STREAM or DOWNLOAD NOW";
+                detailsLine = detailParts.isEmpty()
+                    ? baseMsg
+                    : (baseMsg + " • " + TextUtils.join(" • ", detailParts));
             }
-            if (!language.isEmpty()) {
-                detailParts.add(language);
-            }
-            if (!genre.isEmpty()) {
-                detailParts.add(genre);
-            }
-            if (!runtime.isEmpty()) {
-                detailParts.add(runtime);
-            }
-
-            String baseMsg = !message.isEmpty() ? message : "GO STREAM or DOWNLOAD NOW";
-            String detailsLine = detailParts.isEmpty()
-                ? baseMsg
-                : (baseMsg + " • " + TextUtils.join(" • ", detailParts));
 
             String bigImageUrl = !explicitImage.isEmpty()
                 ? explicitImage
@@ -281,20 +294,99 @@ public class ReleaseNotificationHelper {
         }
     }
 
-    public static void syncAndNotifyLatestReleases(Context context) {
-        if (context == null) return;
+    private static JSONArray fetchReleaseFeedFromFirestoreRest() {
         try {
-            String jsonBody = null;
-            for (String baseUrl : getCandidateBackendUrls(context)) {
-                jsonBody = fetchUrlString(baseUrl + "/api/announcements/latest");
-                if (jsonBody != null && !jsonBody.trim().isEmpty()) {
-                    break;
+            String raw = fetchUrlString(FIRESTORE_RELEASE_FEED_URL + "?t=" + System.currentTimeMillis());
+            if (raw == null || raw.trim().isEmpty()) return null;
+            JSONObject doc = new JSONObject(raw);
+            JSONObject fields = doc.optJSONObject("fields");
+            if (fields == null) return null;
+
+            JSONObject itemsField = fields.optJSONObject("itemsJson");
+            if (itemsField != null) {
+                String itemsStr = itemsField.optString("stringValue", "").trim();
+                if (!itemsStr.isEmpty()) {
+                    JSONArray arr = new JSONArray(itemsStr);
+                    if (arr.length() > 0) return arr;
                 }
             }
-            if (jsonBody == null) return;
 
-            JSONObject root = new JSONObject(jsonBody);
-            JSONArray arr = root.optJSONArray("announcements");
+            String latestId = optFieldString(fields, "latestId");
+            String title = optFieldString(fields, "title");
+            if (!latestId.isEmpty() && !title.isEmpty()) {
+                JSONObject single = new JSONObject();
+                single.put("id", latestId);
+                single.put("movieId", optFieldString(fields, "movieId"));
+                single.put("title", title);
+                single.put("releaseYear", optFieldString(fields, "releaseYear"));
+                single.put("category", optFieldString(fields, "category"));
+                single.put("isSeries", optFieldBoolean(fields, "isSeries"));
+                single.put("language", optFieldString(fields, "language"));
+                single.put("genre", optFieldString(fields, "genre"));
+                single.put("qualityBadge", optFieldString(fields, "qualityBadge"));
+                single.put("runtime", optFieldString(fields, "runtime"));
+                single.put("posterUrl", optFieldString(fields, "posterUrl"));
+                single.put("backdropUrl", optFieldString(fields, "backdropUrl"));
+                single.put("imageUrl", optFieldString(fields, "imageUrl"));
+                single.put("message", optFieldString(fields, "message"));
+                single.put("notificationTitle", optFieldString(fields, "notificationTitle"));
+                single.put("notificationBody", optFieldString(fields, "notificationBody"));
+                single.put("createdAtMs", optFieldLong(fields, "createdAtMs"));
+                JSONArray wrapper = new JSONArray();
+                wrapper.put(single);
+                return wrapper;
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private static String optFieldString(JSONObject fields, String key) {
+        JSONObject f = fields.optJSONObject(key);
+        if (f == null) return "";
+        if (f.has("stringValue")) return f.optString("stringValue", "").trim();
+        if (f.has("integerValue")) return f.optString("integerValue", "").trim();
+        return "";
+    }
+
+    private static long optFieldLong(JSONObject fields, String key) {
+        JSONObject f = fields.optJSONObject(key);
+        if (f == null) return 0L;
+        try {
+            if (f.has("integerValue")) return Long.parseLong(f.optString("integerValue", "0"));
+            if (f.has("doubleValue")) return (long) f.optDouble("doubleValue", 0);
+        } catch (Exception ignored) {}
+        return 0L;
+    }
+
+    private static boolean optFieldBoolean(JSONObject fields, String key) {
+        JSONObject f = fields.optJSONObject(key);
+        return f != null && f.optBoolean("booleanValue", false);
+    }
+
+    public static void syncAndNotifyLatestReleases(Context context) {
+        if (context == null) return;
+        if (!hasPostNotificationPermission(context)) {
+            return;
+        }
+        try {
+            // 1. Primary: public Firestore REST document mirror (always reachable directly, no login cookies)
+            JSONArray arr = fetchReleaseFeedFromFirestoreRest();
+
+            // 2. Fallback: backend /api/announcements/latest
+            if (arr == null || arr.length() == 0) {
+                for (String baseUrl : getCandidateBackendUrls(context)) {
+                    String jsonBody = fetchUrlString(baseUrl + "/api/announcements/latest");
+                    if (jsonBody != null && jsonBody.trim().startsWith("{")) {
+                        JSONObject root = new JSONObject(jsonBody);
+                        JSONArray apiArr = root.optJSONArray("announcements");
+                        if (apiArr != null && apiArr.length() > 0) {
+                            arr = apiArr;
+                            break;
+                        }
+                    }
+                }
+            }
+
             if (arr == null || arr.length() == 0) return;
 
             SharedPreferences prefs = context.getApplicationContext()
@@ -348,6 +440,7 @@ public class ReleaseNotificationHelper {
         try {
             URL url = new URL(urlStr);
             conn = (HttpURLConnection) url.openConnection();
+            conn.setInstanceFollowRedirects(false);
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(6000);
             conn.setReadTimeout(8000);

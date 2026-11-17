@@ -1780,6 +1780,26 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleDisableUpdatePopups = async () => {
+    setSavingUpdateConfig(true);
+    try {
+      const saved = await saveRemoteUpdateConfig({
+        ...updateConfigForm,
+        latestVersion: '1.0.0',
+        minimumRequiredVersion: '1.0.0',
+        latestVersionCode: 1,
+        minimumRequiredVersionCode: 1,
+      });
+      setUpdateConfigForm(saved);
+      setFirebaseUpdateVersion(saved.minimumRequiredVersion || saved.latestVersion);
+      showNotification('success', '✅ Update popup paused/disabled for all phones (Firebase min version set to v1.0.0).');
+    } catch (err: any) {
+      showNotification('error', `Failed to update Firebase: ${err?.message || 'Permission denied'}`);
+    } finally {
+      setSavingUpdateConfig(false);
+    }
+  };
+
   useEffect(() => {
     if (!((user && (isAdmin || isAuthorizedEmail)) || isUnlockedSession)) return;
 
@@ -2224,6 +2244,23 @@ export default function AdminDashboard() {
       console.warn('Firestore announcement write warning:', annFsErr);
     }
 
+    const yearPart = announcementPayload.releaseYear && String(announcementPayload.releaseYear) !== '0'
+      ? ` (${announcementPayload.releaseYear})`
+      : '';
+    const typeLabel = announcementPayload.isSeries ? 'Full Series' : 'Full Movie';
+    const notificationTitle = `Watch Now : ${announcementPayload.title}${yearPart} ${typeLabel} available now`;
+    const detailsParts = [
+      announcementPayload.qualityBadge && announcementPayload.qualityBadge.toUpperCase() !== 'NONE'
+        ? announcementPayload.qualityBadge
+        : '',
+      announcementPayload.language,
+      announcementPayload.genre,
+      announcementPayload.runtime,
+    ].filter(Boolean);
+    const notificationBody = detailsParts.length > 0
+      ? `${announcementMsg} • ${detailsParts.join(' • ')}`
+      : announcementMsg;
+
     const broadcastPayload = {
       id: announcementDocId,
       title: announcementPayload.title,
@@ -2236,11 +2273,59 @@ export default function AdminDashboard() {
       runtime: announcementPayload.runtime,
       posterUrl: cleanPoster,
       backdropUrl: cleanBackdrop,
+      imageUrl: cleanBackdrop || cleanPoster,
       message: announcementMsg,
+      notificationTitle,
+      notificationBody,
       movieId: params.movieId,
       createdAt: { seconds: Math.floor(createdAtMs / 1000) },
       createdAtMs,
     };
+
+    // Mirror latest release feed to admins/latest_release_notification so Android background workers can read directly via public Firestore REST
+    try {
+      const feedRef = doc(db, 'admins', 'latest_release_notification');
+      let existingItems: any[] = [];
+      try {
+        const prevSnap = await getDocFromServer(feedRef);
+        if (prevSnap.exists()) {
+          const parsed = JSON.parse(String(prevSnap.data()?.itemsJson || '[]'));
+          if (Array.isArray(parsed)) existingItems = parsed;
+        }
+      } catch {}
+      const cutoff = createdAtMs - 48 * 60 * 60 * 1000;
+      const mergedItems = [
+        broadcastPayload,
+        ...existingItems.filter((item: any) => item && item.id !== broadcastPayload.id && Number(item.createdAtMs || 0) >= cutoff),
+      ].slice(0, 8);
+      await setDoc(
+        feedRef,
+        {
+          latestId: broadcastPayload.id,
+          movieId: broadcastPayload.movieId,
+          title: broadcastPayload.title,
+          releaseYear: String(broadcastPayload.releaseYear || ''),
+          category: broadcastPayload.category,
+          isSeries: broadcastPayload.isSeries,
+          language: broadcastPayload.language,
+          genre: broadcastPayload.genre,
+          qualityBadge: broadcastPayload.qualityBadge,
+          runtime: broadcastPayload.runtime,
+          posterUrl: broadcastPayload.posterUrl,
+          backdropUrl: broadcastPayload.backdropUrl,
+          imageUrl: broadcastPayload.imageUrl,
+          message: broadcastPayload.message,
+          notificationTitle: broadcastPayload.notificationTitle,
+          notificationBody: broadcastPayload.notificationBody,
+          createdAtMs,
+          itemsJson: JSON.stringify(mergedItems),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+    } catch (mirrorErr) {
+      console.warn('Release feed mirror warning:', mirrorErr);
+    }
 
     try {
       localStorage.setItem('app_latest_announcement', JSON.stringify(broadcastPayload));
@@ -3058,21 +3143,26 @@ export default function AdminDashboard() {
               </div>
 
                 {firebaseUpdateVersion === CURRENT_VERSION_NAME ? (
-                  <div className="mt-2.5 bg-emerald-950/60 border border-emerald-800/80 rounded-xl p-3 text-center animate-in fade-in">
+                  <div className="mt-2.5 bg-emerald-950/60 border border-emerald-800/80 rounded-xl p-2.5 text-center">
                     <div className="flex items-center justify-center gap-1.5 text-emerald-400 font-black text-xs">
-                      <CheckCircle2 size={16} />
-                      <span>All Users Prompted to Update (v{CURRENT_VERSION_NAME})</span>
+                      <CheckCircle2 size={15} />
+                      <span>Update Popup Active on Phones (v{CURRENT_VERSION_NAME})</span>
                     </div>
-                    <p className="text-[10px] text-gray-400 mt-1">
-                      Older APKs will show the in-app update popup automatically.
-                    </p>
                   </div>
-                ) : (
+                ) : firebaseUpdateVersion === '1.0.0' ? (
+                  <div className="mt-2.5 bg-neutral-950 border border-neutral-800 rounded-xl p-2.5 text-center">
+                    <span className="text-[11px] text-gray-400 font-bold">
+                      Update Popup is currently OFF (paused at v1.0.0)
+                    </span>
+                  </div>
+                ) : null}
+
+                <div className="mt-2 space-y-2">
                   <button
                     type="button"
                     disabled={savingUpdateConfig}
                     onClick={handleQuickPushCurrentRelease}
-                    className="mt-2.5 w-full bg-yellow-400 hover:bg-yellow-300 disabled:opacity-50 text-black font-black text-xs py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                    className="w-full bg-yellow-400 hover:bg-yellow-300 disabled:opacity-50 text-black font-black text-xs py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95"
                   >
                     <RefreshCw size={13} className={savingUpdateConfig ? 'animate-spin' : ''} />
                     <span>
@@ -3081,7 +3171,20 @@ export default function AdminDashboard() {
                         : `Push v${CURRENT_VERSION_NAME} Update Popup to All Phones`}
                     </span>
                   </button>
-                )}
+
+                  <button
+                    type="button"
+                    disabled={savingUpdateConfig || firebaseUpdateVersion === '1.0.0'}
+                    onClick={handleDisableUpdatePopups}
+                    className="w-full bg-neutral-800 hover:bg-neutral-700 disabled:opacity-45 text-gray-200 font-bold text-[11px] py-2 px-3 rounded-xl border border-neutral-700 flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                  >
+                    <span>
+                      {firebaseUpdateVersion === '1.0.0'
+                        ? 'Update Popups Disabled (v1.0.0)'
+                        : 'Disable Update Popups on All Phones'}
+                    </span>
+                  </button>
+                </div>
 
               {showUpdateConfigPanel && (
                 <form onSubmit={handleSaveRemoteUpdateConfig} className="mt-3 pt-3 border-t border-neutral-800 space-y-2.5 text-xs">

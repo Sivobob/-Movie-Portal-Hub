@@ -285,11 +285,31 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == 4102 && grantResults != null && grantResults.length > 0
+            && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            notificationExecutor.execute(() -> ReleaseNotificationHelper.syncAndNotifyLatestReleases(getApplicationContext()));
+            runOnUiThread(() -> {
+                try {
+                    if (getBridge() != null && getBridge().getWebView() != null) {
+                        getBridge().getWebView().evaluateJavascript(
+                            "window.dispatchEvent(new CustomEvent('movie_portal_notif_permission_granted'));",
+                            null
+                        );
+                    }
+                } catch (Exception ignored) {}
+            });
+        }
+    }
+
+    @Override
     public void onResume() {
         super.onResume();
         if (!webViewConfigured || localStreamServer == null) {
             configureWebView();
         }
+        notificationExecutor.execute(() -> ReleaseNotificationHelper.syncAndNotifyLatestReleases(getApplicationContext()));
         if (exoPlayer != null && exoActive) {
             try {
                 if ("surface".equals(currentSurfaceMode) && exoSurfaceView != null && surfaceHolderAvailable) {
@@ -2031,11 +2051,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.227");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.228");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.227\",\"versionCode\":3447}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.228\",\"versionCode\":3448}";
             }
         }
 

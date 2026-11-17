@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.227",
-  "minimumRequiredVersion": "3.5.227",
-  "latestVersionCode": 3447,
-  "minimumRequiredVersionCode": 3447,
+  "latestVersion": "3.5.228",
+  "minimumRequiredVersion": "3.5.228",
+  "latestVersionCode": 3448,
+  "minimumRequiredVersionCode": 3448,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Portal v3.5.227 update is ready! Includes rich phone status bar release notifications with posters, clean New Episodes filtering, and important fixes.",
-  "releaseNotes": "v3.5.227: Added rich Android notification bar movie/series alerts with images and details, background sync, and re-enabled in-app updates."
+  "updateMessage": "Movie Portal v3.5.228 update is ready! Fixes reliable phone top status-bar movie notifications (even on permission & background) and Admin Update controls.",
+  "releaseNotes": "v3.5.228: Direct Firestore REST release notification mirror for reliable background notifications, Android 14 permission timing fix, and permanent Admin Update Push controls."
 }
