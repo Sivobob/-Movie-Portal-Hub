@@ -15,6 +15,7 @@ import { registerActiveDeviceInstall } from './services/appStatsService';
 import { CURRENT_VERSION_NAME } from './services/appUpdateConfig';
 import { ensureAndroidStreamBridge } from './utils/apiConfig';
 import AndroidBottomNav from './components/AndroidBottomNav';
+import ReleaseNotificationBridge from './components/ReleaseNotificationBridge';
 
 function AdminRoute({ children }: { children: React.ReactElement }) {
   const [unlocked, setUnlocked] = useState(() => {
@@ -94,6 +95,7 @@ function AppContent() {
         <div className="min-h-[100dvh] w-full max-w-full overflow-x-clip bg-black flex flex-col select-none">
           <Header />
           <UpdateNotification />
+          <ReleaseNotificationBridge />
           <main className="flex-1 w-full flex flex-col">
             <Routes>
               <Route path="/" element={<HomePage />} />

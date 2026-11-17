@@ -35,12 +35,17 @@ import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import android.Manifest;
 import android.widget.FrameLayout;
 import androidx.activity.OnBackPressedCallback;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import androidx.media3.common.C;
 import androidx.media3.common.Format;
 import androidx.media3.common.MediaItem;
@@ -101,6 +106,8 @@ public class MainActivity extends BridgeActivity {
     private boolean isMandatoryUpdateActive = false;
     private OnBackPressedCallback fullscreenBackCallback;
     private OnBackPressedCallback mandatoryUpdateBackCallback;
+    private volatile String pendingOpenMovieId = null;
+    private final ExecutorService notificationExecutor = Executors.newSingleThreadExecutor();
 
     private volatile String apkUpdateState = "idle";
     private volatile int apkUpdateProgress = 0;
@@ -221,6 +228,60 @@ public class MainActivity extends BridgeActivity {
         enableImmersiveStickyMode(false);
         configureWebView();
         createNotificationChannel();
+        captureLaunchMovieIntent(getIntent());
+        requestPostNotificationsPermissionIfNeeded();
+        ReleaseNotificationHelper.scheduleBackgroundWorker(this);
+        notificationExecutor.execute(() -> ReleaseNotificationHelper.syncAndNotifyLatestReleases(getApplicationContext()));
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        captureLaunchMovieIntent(intent);
+        if (pendingOpenMovieId != null && !pendingOpenMovieId.isEmpty()) {
+            dispatchOpenMovieToWebView(pendingOpenMovieId);
+        }
+    }
+
+    private void captureLaunchMovieIntent(Intent intent) {
+        if (intent == null) return;
+        try {
+            String movieId = intent.getStringExtra("openMovieId");
+            if (movieId != null && !movieId.trim().isEmpty()) {
+                pendingOpenMovieId = movieId.trim();
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void dispatchOpenMovieToWebView(final String movieId) {
+        if (movieId == null || movieId.trim().isEmpty()) return;
+        runOnUiThread(() -> {
+            try {
+                if (getBridge() != null && getBridge().getWebView() != null) {
+                    String safeJson = JSONObject.quote(movieId.trim());
+                    getBridge().getWebView().evaluateJavascript(
+                        "window.dispatchEvent(new CustomEvent('movie_portal_open_movie',{detail:" + safeJson + "}));",
+                        null
+                    );
+                }
+            } catch (Exception ignored) {}
+        });
+    }
+
+    private void requestPostNotificationsPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            try {
+                if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED) {
+                    ActivityCompat.requestPermissions(
+                        this,
+                        new String[] { Manifest.permission.POST_NOTIFICATIONS },
+                        4102
+                    );
+                }
+            } catch (Exception ignored) {}
+        }
     }
 
     @Override
@@ -302,25 +363,7 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            try {
-                String channelId = "movie_box_releases";
-                CharSequence name = "Movie Box Releases";
-                String description = "New movies, series episodes and updates";
-                int importance = android.app.NotificationManager.IMPORTANCE_HIGH;
-                android.app.NotificationChannel channel = new android.app.NotificationChannel(channelId, name, importance);
-                channel.setDescription(description);
-                channel.enableLights(true);
-                channel.enableVibration(true);
-                channel.setShowBadge(true);
-                android.app.NotificationManager notificationManager = getSystemService(android.app.NotificationManager.class);
-                if (notificationManager != null) {
-                    notificationManager.createNotificationChannel(channel);
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
+        ReleaseNotificationHelper.createNotificationChannel(this);
     }
 
     private void configureWebView() {
@@ -1988,11 +2031,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.226");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.227");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.226\",\"versionCode\":3446}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.227\",\"versionCode\":3447}";
             }
         }
 
@@ -2406,6 +2449,48 @@ public class MainActivity extends BridgeActivity {
             return cachedCastStatusJson != null
                 ? cachedCastStatusJson
                 : "{\"state\":\"idle\",\"playerState\":\"idle\",\"connected\":false,\"deviceName\":\"\",\"isPlaying\":false,\"currentTime\":0,\"duration\":0,\"errorMessage\":\"\"}";
+        }
+
+        // --- RICH RELEASE NOTIFICATION BRIDGE METHODS ---
+        @JavascriptInterface
+        public void showReleaseNotification(final String jsonPayload) {
+            if (jsonPayload == null || jsonPayload.trim().isEmpty()) return;
+            notificationExecutor.execute(() -> {
+                ReleaseNotificationHelper.showRichReleaseNotificationFromJson(
+                    getApplicationContext(),
+                    jsonPayload,
+                    false
+                );
+            });
+        }
+
+        @JavascriptInterface
+        public void setBackendBaseUrl(final String baseUrl) {
+            ReleaseNotificationHelper.saveBackendBaseUrl(getApplicationContext(), baseUrl);
+        }
+
+        @JavascriptInterface
+        public void markAnnouncementNotified(final String announcementId) {
+            ReleaseNotificationHelper.markAnnouncementNotified(getApplicationContext(), announcementId);
+        }
+
+        @JavascriptInterface
+        public String consumePendingOpenMovieId() {
+            String val = pendingOpenMovieId;
+            pendingOpenMovieId = null;
+            return val != null ? val : "";
+        }
+
+        @JavascriptInterface
+        public void requestNotificationPermission() {
+            runOnUiThread(MainActivity.this::requestPostNotificationsPermissionIfNeeded);
+        }
+
+        @JavascriptInterface
+        public boolean hasNotificationPermission() {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true;
+            return ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.POST_NOTIFICATIONS)
+                == PackageManager.PERMISSION_GRANTED;
         }
     }
 

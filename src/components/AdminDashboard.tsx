@@ -47,7 +47,8 @@ import {
   ChevronDown,
   ChevronUp,
   Zap,
-  ListPlus
+  ListPlus,
+  Bell
 } from 'lucide-react';
 import VideoPlayerModal from './VideoPlayerModal';
 import { 
@@ -63,6 +64,8 @@ import {
   clearAllMoviesLocally,
   sortMoviesList,
   getTimestampMs,
+  isEpisodeNewActive,
+  NEW_EPISODE_WINDOW_MS,
   MovieData
 } from '../services/movieStorage';
 import { loginWithGoogle } from '../services/authService';
@@ -172,6 +175,8 @@ export default function AdminDashboard() {
   const [published, setPublished] = useState(true);
   const [qualityBadge, setQualityBadge] = useState<QualityBadgeValue>('HD');
   const [editingMovie, setEditingMovie] = useState<MovieData | null>(null);
+  const [notifyOnUpdate, setNotifyOnUpdate] = useState(false);
+  const [notifyingMovieId, setNotifyingMovieId] = useState<string | null>(null);
 
   // Firebase Remote App Update Config State
   const [showUpdateConfigPanel, setShowUpdateConfigPanel] = useState(false);
@@ -232,12 +237,12 @@ export default function AdminDashboard() {
   const [showChannelPanel, setShowChannelPanel] = useState(false);
 
   // Series Season & Episode Management State
-  const [seasons, setSeasons] = useState<Array<{ seasonNumber: number; episodes: Array<{ episodeNumber: number; title: string; streamUrl: string; duration?: string; durationSec?: number; createdAt?: any; addedAt?: any }> }>>([
+  const [seasons, setSeasons] = useState<Array<{ seasonNumber: number; episodes: Array<{ episodeNumber: number; title: string; streamUrl: string; duration?: string; durationSec?: number; createdAt?: any; addedAt?: any; showInNewEpisodes?: boolean; newEpisodeEnabledAt?: number }> }>>([
     {
       seasonNumber: 1,
       episodes: [
-        { episodeNumber: 1, title: 'Episode 1', streamUrl: '' },
-        { episodeNumber: 2, title: 'Episode 2', streamUrl: '' },
+        { episodeNumber: 1, title: 'Episode 1', streamUrl: '', showInNewEpisodes: false },
+        { episodeNumber: 2, title: 'Episode 2', streamUrl: '', showInNewEpisodes: false },
       ],
     },
   ]);
@@ -280,6 +285,8 @@ export default function AdminDashboard() {
       skippedStickers: number;
       skippedDuplicates?: number;
       skippedOther: number;
+      fallbackCount?: number;
+      silentSkippedCount?: number;
       skippedCount: number;
       episodes: Array<{
         msgId: number;
@@ -320,7 +327,7 @@ export default function AdminDashboard() {
       episodeNumber: epNum,
       title: `Episode ${epNum}`,
       streamUrl: url,
-      createdAt: Date.now(),
+      showInNewEpisodes: false,
       ...(durTrim ? { duration: durTrim } : {}),
       ...(durSec > 0 ? { durationSec: durSec } : {}),
     });
@@ -443,11 +450,12 @@ export default function AdminDashboard() {
     return { count, startMsgId: startParsed.msgId, endMsgId: endParsed.msgId, urls, error: '' };
   };
 
-  const scanTelegramVideoRange = async (startUrl: string, endUrl: string, count?: number) => {
+  const scanTelegramVideoRange = async (startUrl: string, endUrl: string, count?: number, signal?: AbortSignal) => {
     const response = await authFetch('/api/telegram/scan-range', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ startUrl, endUrl, count, qualityFilter: scanQualityFilter }),
+      signal,
     });
     const text = await response.text();
     let data: any = null;
@@ -467,6 +475,8 @@ export default function AdminDashboard() {
       skippedStickers: number;
       skippedDuplicates?: number;
       skippedOther: number;
+      fallbackCount?: number;
+      silentSkippedCount?: number;
       skippedCount: number;
       episodes: Array<{
         msgId: number;
@@ -491,7 +501,10 @@ export default function AdminDashboard() {
     try {
       let totalKept = 0;
       let totalRemoved = 0;
+      let totalFallback = 0;
+      let totalSilentSwitched = 0;
       const updatedSeasons = [];
+      const activeQ = scanQualityFilter === 'all' ? '1080p' : scanQualityFilter;
 
       for (const season of seasons) {
         const urls = season.episodes.map((e) => e.streamUrl.trim()).filter(Boolean);
@@ -502,7 +515,7 @@ export default function AdminDashboard() {
         const response = await authFetch('/api/telegram/filter-urls', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ urls, qualityFilter: '1080p' }),
+          body: JSON.stringify({ urls, qualityFilter: activeQ }),
         });
         const data = await response.json();
         if (!response.ok || !data?.success) {
@@ -511,35 +524,31 @@ export default function AdminDashboard() {
         const keptItems: Array<{ url: string; duration: string; durationSec: number }> = data.keptItems || [];
         totalKept += keptItems.length;
         totalRemoved += Number(data.removedCount || 0);
+        totalFallback += Number(data.fallbackCount || 0);
+        totalSilentSwitched += Number(data.silentSkippedCount || 0);
 
-        const existingTimestampByUrl = new Map<string, number>();
-        for (const oldEp of season.episodes || []) {
-          const u = String(oldEp?.streamUrl || '').trim();
-          const ts = getTimestampMs(oldEp?.addedAt) || getTimestampMs(oldEp?.createdAt);
-          if (u && ts > 0) existingTimestampByUrl.set(u, ts);
-        }
-
-        const cleanEps = keptItems.map((item, idx) => {
-          const prevTs = existingTimestampByUrl.get(item.url.trim());
-          return {
-            episodeNumber: idx + 1,
-            title: `Episode ${idx + 1}`,
-            streamUrl: item.url,
-            ...(prevTs ? { createdAt: prevTs, addedAt: prevTs } : {}),
-            ...(item.duration ? { duration: item.duration } : {}),
-            ...(item.durationSec > 0 ? { durationSec: item.durationSec } : {}),
-          };
-        });
+        const cleanEps = keptItems.map((item, idx) => ({
+          episodeNumber: idx + 1,
+          title: `Episode ${idx + 1}`,
+          streamUrl: item.url,
+          showInNewEpisodes: false,
+          ...(item.duration ? { duration: item.duration } : {}),
+          ...(item.durationSec > 0 ? { durationSec: item.durationSec } : {}),
+        }));
         updatedSeasons.push({
           ...season,
-          episodes: cleanEps.length > 0 ? cleanEps : [{ episodeNumber: 1, title: 'Episode 1', streamUrl: '' }],
+          episodes: cleanEps.length > 0 ? cleanEps : [{ episodeNumber: 1, title: 'Episode 1', streamUrl: '', showInNewEpisodes: false }],
         });
       }
 
       setSeasons(updatedSeasons);
+      const extraParts: string[] = [];
+      if (totalFallback > 0) extraParts.push(`${totalFallback} 720p fallback`);
+      if (totalSilentSwitched > 0) extraParts.push(`${totalSilentSwitched} silent 1080p→720p switched`);
+      const extraText = extraParts.length > 0 ? ` (${extraParts.join(', ')})` : '';
       showNotification(
         'success',
-        `✅ Cleaned! Kept ${totalKept} (1080p) episodes & removed ${totalRemoved} 480p/720p/sticker entries. Click Update/Publish to save.`
+        `✅ Cleaned! Kept ${totalKept} episodes${extraText} & removed ${totalRemoved} lower-quality/sticker/txt entries. Click Update/Publish to save.`
       );
     } catch (err: any) {
       showNotification('error', err?.message || 'Failed to clean existing episodes.');
@@ -560,16 +569,17 @@ export default function AdminDashboard() {
     }
     const scanKey = `${bulkStartUrl.trim()}|${bulkEndUrl.trim()}|${scanQualityFilter}`;
     let cancelled = false;
+    const controller = new AbortController();
     setLiveBulkScan({ key: scanKey, loading: true, error: '', data: null });
 
     const timer = setTimeout(async () => {
       try {
-        const data = await scanTelegramVideoRange(bulkStartUrl.trim(), bulkEndUrl.trim());
+        const data = await scanTelegramVideoRange(bulkStartUrl.trim(), bulkEndUrl.trim(), undefined, controller.signal);
         if (!cancelled) {
           setLiveBulkScan({ key: scanKey, loading: false, error: '', data });
         }
       } catch (err: any) {
-        if (!cancelled) {
+        if (!cancelled && err?.name !== 'AbortError') {
           setLiveBulkScan({ key: scanKey, loading: false, error: err?.message || 'Scan failed', data: null });
         }
       }
@@ -578,6 +588,7 @@ export default function AdminDashboard() {
     return () => {
       cancelled = true;
       clearTimeout(timer);
+      controller.abort();
     };
   }, [showBulkImporter, bulkMode, bulkStartUrl, bulkEndUrl, scanQualityFilter, skipTelegramScan]);
 
@@ -593,16 +604,17 @@ export default function AdminDashboard() {
     }
     const scanKey = `${seasonBulkStartUrl.trim()}|${seasonBulkEndUrl.trim()}|${scanQualityFilter}`;
     let cancelled = false;
+    const controller = new AbortController();
     setLivePerSeasonScan({ key: scanKey, loading: true, error: '', data: null });
 
     const timer = setTimeout(async () => {
       try {
-        const data = await scanTelegramVideoRange(seasonBulkStartUrl.trim(), seasonBulkEndUrl.trim());
+        const data = await scanTelegramVideoRange(seasonBulkStartUrl.trim(), seasonBulkEndUrl.trim(), undefined, controller.signal);
         if (!cancelled) {
           setLivePerSeasonScan({ key: scanKey, loading: false, error: '', data });
         }
       } catch (err: any) {
-        if (!cancelled) {
+        if (!cancelled && err?.name !== 'AbortError') {
           setLivePerSeasonScan({ key: scanKey, loading: false, error: err?.message || 'Scan failed', data: null });
         }
       }
@@ -611,6 +623,7 @@ export default function AdminDashboard() {
     return () => {
       cancelled = true;
       clearTimeout(timer);
+      controller.abort();
     };
   }, [seasonBulkOpenIdx, seasonBulkMode, seasonBulkStartUrl, seasonBulkEndUrl, scanQualityFilter, skipTelegramScan]);
 
@@ -629,7 +642,7 @@ export default function AdminDashboard() {
     const durSecOverride = durTrim ? parseDurationToSeconds(durTrim) : 0;
     const targetNum = Math.max(1, bulkTargetSeasonNum);
 
-    let generatedEpisodes: Array<{ episodeNumber: number; title: string; streamUrl: string; duration?: string; durationSec?: number; createdAt?: number; addedAt?: number }> = [];
+    let generatedEpisodes: Array<{ episodeNumber: number; title: string; streamUrl: string; duration?: string; durationSec?: number; createdAt?: number; addedAt?: number; showInNewEpisodes?: boolean; newEpisodeEnabledAt?: number }> = [];
     let skippedSummary = '';
 
     if (!skipTelegramScan) {
@@ -649,16 +662,21 @@ export default function AdminDashboard() {
           episodeNumber: idx + 1,
           title: `Episode ${idx + 1}`,
           streamUrl: ep.streamUrl,
-          createdAt: Date.now(),
+          showInNewEpisodes: false,
           ...(durTrim
             ? { duration: durTrim, ...(durSecOverride > 0 ? { durationSec: durSecOverride } : {}) }
             : ep.duration
             ? { duration: ep.duration, ...(ep.durationSec > 0 ? { durationSec: ep.durationSec } : {}) }
             : {}),
         }));
-        if (scanData.skippedCount > 0) {
-          const dupPart = scanData.skippedDuplicates ? `, ${scanData.skippedDuplicates} lower-quality duplicates` : '';
-          skippedSummary = ` (${scanData.skippedStickers} stickers${dupPart}, ${scanData.skippedOther} other posts skipped)`;
+        if (scanData.skippedCount > 0 || scanData.fallbackCount || scanData.silentSkippedCount) {
+          const parts: string[] = [];
+          if (scanData.skippedStickers) parts.push(`${scanData.skippedStickers} stickers`);
+          if (scanData.skippedDuplicates) parts.push(`${scanData.skippedDuplicates} lower-quality duplicates`);
+          if (scanData.skippedOther) parts.push(`${scanData.skippedOther} txt/other posts`);
+          if (scanData.fallbackCount) parts.push(`${scanData.fallbackCount} 720p fallback`);
+          if (scanData.silentSkippedCount) parts.push(`${scanData.silentSkippedCount} silent 1080p→720p`);
+          if (parts.length > 0) skippedSummary = ` (${parts.join(', ')})`;
         }
       } catch (err: any) {
         showNotification('error', err?.message || 'Telegram scan failed.');
@@ -672,7 +690,7 @@ export default function AdminDashboard() {
         episodeNumber: idx + 1,
         title: `Episode ${idx + 1}`,
         streamUrl: u,
-        createdAt: Date.now(),
+        showInNewEpisodes: false,
         ...(durTrim ? { duration: durTrim } : {}),
         ...(durSecOverride > 0 ? { durationSec: durSecOverride } : {}),
       }));
@@ -782,7 +800,7 @@ export default function AdminDashboard() {
             episodeNumber: epNum,
             title: `Episode ${epNum}`,
             streamUrl: urlMatch[1],
-            createdAt: Date.now(),
+            showInNewEpisodes: false,
             ...(durTrim ? { duration: durTrim } : {}),
             ...(durSec > 0 ? { durationSec: durSec } : {}),
           });
@@ -851,9 +869,14 @@ export default function AdminDashboard() {
           }),
         }));
         totalImported = scanData.episodes.length;
-        if (scanData.skippedCount > 0) {
-          const dupPart = scanData.skippedDuplicates ? `, ${scanData.skippedDuplicates} extra quality copies` : '';
-          skippedNote = ` (${scanData.skippedStickers} stickers${dupPart} & ${scanData.skippedOther} other posts skipped)`;
+        if (scanData.skippedCount > 0 || scanData.fallbackCount || scanData.silentSkippedCount) {
+          const parts: string[] = [];
+          if (scanData.skippedStickers) parts.push(`${scanData.skippedStickers} stickers`);
+          if (scanData.skippedDuplicates) parts.push(`${scanData.skippedDuplicates} extra quality copies`);
+          if (scanData.skippedOther) parts.push(`${scanData.skippedOther} txt/other posts`);
+          if (scanData.fallbackCount) parts.push(`${scanData.fallbackCount} 720p fallback`);
+          if (scanData.silentSkippedCount) parts.push(`${scanData.silentSkippedCount} silent 1080p→720p`);
+          if (parts.length > 0) skippedNote = ` (${parts.join(', ')})`;
         }
       } catch (err: any) {
         showNotification('error', err?.message || 'Telegram scan failed.');
@@ -861,6 +884,72 @@ export default function AdminDashboard() {
         return;
       } finally {
         setScanningRange(false);
+      }
+    } else if (bulkMode === 'paste' && !skipTelegramScan) {
+      const hasTelegramLinks = finalSeasons.some((s) =>
+        s.episodes.some((ep: any) => /t\.me|telegram\.me/i.test(String(ep.streamUrl || '')))
+      );
+      if (hasTelegramLinks) {
+        setScanningRange(true);
+        try {
+          const cleanedSeasons = [];
+          let totalRemoved = 0;
+          let totalFallback = 0;
+          let totalSilent = 0;
+          for (const s of finalSeasons) {
+            const urls = s.episodes.map((e: any) => String(e.streamUrl || '').trim()).filter(Boolean);
+            if (urls.length === 0) continue;
+            const resp = await authFetch('/api/telegram/filter-urls', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ urls, qualityFilter: scanQualityFilter }),
+            });
+            const data = await resp.json();
+            if (!resp.ok || !data?.success) {
+              throw new Error(data?.error || 'Failed to filter pasted Telegram links.');
+            }
+            const keptItems: Array<{ url: string; duration: string; durationSec: number }> = data.keptItems || [];
+            totalRemoved += Number(data.removedCount || 0);
+            totalFallback += Number(data.fallbackCount || 0);
+            totalSilent += Number(data.silentSkippedCount || 0);
+            if (keptItems.length > 0) {
+              const durTrim = bulkDefaultDuration.trim();
+              const durSecOverride = durTrim ? parseDurationToSeconds(durTrim) : 0;
+              cleanedSeasons.push({
+                ...s,
+                episodes: keptItems.map((item, idx) => ({
+                  episodeNumber: idx + 1,
+                  title: `Episode ${idx + 1}`,
+                  streamUrl: item.url,
+                  showInNewEpisodes: false,
+                  ...(durTrim
+                    ? { duration: durTrim, ...(durSecOverride > 0 ? { durationSec: durSecOverride } : {}) }
+                    : item.duration
+                    ? { duration: item.duration, ...(item.durationSec > 0 ? { durationSec: item.durationSec } : {}) }
+                    : {}),
+                })),
+              });
+            }
+          }
+          if (cleanedSeasons.length === 0) {
+            showNotification('error', 'No valid video episodes found in pasted links (stickers/txt/text posts removed).');
+            setScanningRange(false);
+            return;
+          }
+          finalSeasons = cleanedSeasons;
+          totalImported = cleanedSeasons.reduce((acc, s) => acc + s.episodes.length, 0);
+          const parts: string[] = [];
+          if (totalRemoved > 0) parts.push(`${totalRemoved} duplicates/stickers/txt removed`);
+          if (totalFallback > 0) parts.push(`${totalFallback} 720p fallback`);
+          if (totalSilent > 0) parts.push(`${totalSilent} silent 1080p→720p`);
+          if (parts.length > 0) skippedNote = ` (${parts.join(', ')})`;
+        } catch (err: any) {
+          showNotification('error', err?.message || 'Telegram link filter failed.');
+          setScanningRange(false);
+          return;
+        } finally {
+          setScanningRange(false);
+        }
       }
     }
 
@@ -884,7 +973,7 @@ export default function AdminDashboard() {
   const handleApplyPerSeasonBulk = async (sIdx: number, appendToExisting = false) => {
     const durTrim = seasonBulkDuration.trim();
     const durSec = durTrim ? parseDurationToSeconds(durTrim) : 0;
-    let newEpisodes: Array<{ episodeNumber: number; title: string; streamUrl: string; duration?: string; durationSec?: number }> = [];
+    let newEpisodes: Array<{ episodeNumber: number; title: string; streamUrl: string; duration?: string; durationSec?: number; createdAt?: number; addedAt?: number; showInNewEpisodes?: boolean }> = [];
     let skippedNote = '';
 
     if (seasonBulkMode === 'range') {
@@ -910,21 +999,25 @@ export default function AdminDashboard() {
             setScanningRange(false);
             return;
           }
-          const stampNow = Date.now();
           newEpisodes = scanData.episodes.map((ep, i) => ({
             episodeNumber: i + 1,
             title: `Episode ${i + 1}`,
             streamUrl: ep.streamUrl,
-            createdAt: stampNow,
-            addedAt: stampNow,
+            showInNewEpisodes: false,
             ...(durTrim
               ? { duration: durTrim, ...(durSec > 0 ? { durationSec: durSec } : {}) }
               : ep.duration
               ? { duration: ep.duration, ...(ep.durationSec > 0 ? { durationSec: ep.durationSec } : {}) }
               : {}),
           }));
-          if (scanData.skippedCount > 0) {
-            skippedNote = ` (${scanData.skippedStickers} stickers skipped)`;
+          if (scanData.skippedCount > 0 || scanData.fallbackCount || scanData.silentSkippedCount) {
+            const parts: string[] = [];
+            if (scanData.skippedStickers) parts.push(`${scanData.skippedStickers} stickers`);
+            if (scanData.skippedDuplicates) parts.push(`${scanData.skippedDuplicates} duplicates`);
+            if (scanData.skippedOther) parts.push(`${scanData.skippedOther} txt/other`);
+            if (scanData.fallbackCount) parts.push(`${scanData.fallbackCount} 720p fallback`);
+            if (scanData.silentSkippedCount) parts.push(`${scanData.silentSkippedCount} silent 1080p→720p`);
+            if (parts.length > 0) skippedNote = ` (${parts.join(', ')})`;
           }
         } catch (err: any) {
           showNotification('error', err?.message || 'Telegram scan failed.');
@@ -934,13 +1027,11 @@ export default function AdminDashboard() {
           setScanningRange(false);
         }
       } else {
-        const stampNow = Date.now();
         newEpisodes = check.urls.map((u, i) => ({
           episodeNumber: i + 1,
           title: `Episode ${i + 1}`,
           streamUrl: u,
-          createdAt: stampNow,
-          addedAt: stampNow,
+          showInNewEpisodes: false,
           ...(durTrim ? { duration: durTrim } : {}),
           ...(durSec > 0 ? { durationSec: durSec } : {}),
         }));
@@ -953,16 +1044,53 @@ export default function AdminDashboard() {
           return m ? m[1] : (l.trim().startsWith('t.me/') ? `https://${l.trim()}` : '');
         })
         .filter(Boolean);
-      const stampNow = Date.now();
-      newEpisodes = urls.map((u, i) => ({
-        episodeNumber: i + 1,
-        title: `Episode ${i + 1}`,
-        streamUrl: u,
-        createdAt: stampNow,
-        addedAt: stampNow,
-        ...(durTrim ? { duration: durTrim } : {}),
-        ...(durSec > 0 ? { durationSec: durSec } : {}),
-      }));
+      const hasTelegramLinks = urls.some((u) => /t\.me|telegram\.me/i.test(u));
+      if (!skipTelegramScan && hasTelegramLinks) {
+        setScanningRange(true);
+        try {
+          const resp = await authFetch('/api/telegram/filter-urls', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ urls, qualityFilter: scanQualityFilter }),
+          });
+          const data = await resp.json();
+          if (!resp.ok || !data?.success) {
+            throw new Error(data?.error || 'Failed to filter pasted links.');
+          }
+          const keptItems: Array<{ url: string; duration: string; durationSec: number }> = data.keptItems || [];
+          newEpisodes = keptItems.map((item, i) => ({
+            episodeNumber: i + 1,
+            title: `Episode ${i + 1}`,
+            streamUrl: item.url,
+            showInNewEpisodes: false,
+            ...(durTrim
+              ? { duration: durTrim, ...(durSec > 0 ? { durationSec: durSec } : {}) }
+              : item.duration
+              ? { duration: item.duration, ...(item.durationSec > 0 ? { durationSec: item.durationSec } : {}) }
+              : {}),
+          }));
+          const parts: string[] = [];
+          if (data.removedCount) parts.push(`${data.removedCount} stickers/txt/duplicates removed`);
+          if (data.fallbackCount) parts.push(`${data.fallbackCount} 720p fallback`);
+          if (data.silentSkippedCount) parts.push(`${data.silentSkippedCount} silent 1080p→720p`);
+          if (parts.length > 0) skippedNote = ` (${parts.join(', ')})`;
+        } catch (err: any) {
+          showNotification('error', err?.message || 'Telegram filter failed.');
+          setScanningRange(false);
+          return;
+        } finally {
+          setScanningRange(false);
+        }
+      } else {
+        newEpisodes = urls.map((u, i) => ({
+          episodeNumber: i + 1,
+          title: `Episode ${i + 1}`,
+          streamUrl: u,
+          showInNewEpisodes: false,
+          ...(durTrim ? { duration: durTrim } : {}),
+          ...(durSec > 0 ? { durationSec: durSec } : {}),
+        }));
+      }
     }
 
     if (newEpisodes.length === 0) {
@@ -1019,7 +1147,7 @@ export default function AdminDashboard() {
         {
           seasonNumber: prev.length + 1,
           episodes: [
-            { episodeNumber: 1, title: 'Episode 1', streamUrl: '' },
+            { episodeNumber: 1, title: 'Episode 1', streamUrl: '', showInNewEpisodes: false },
           ],
         },
       ];
@@ -1038,6 +1166,7 @@ export default function AdminDashboard() {
                   episodeNumber: s.episodes.length + 1,
                   title: `Episode ${s.episodes.length + 1}`,
                   streamUrl: '',
+                  showInNewEpisodes: false,
                 },
               ],
             }
@@ -1045,6 +1174,109 @@ export default function AdminDashboard() {
       )
     );
     setExpandedSeasons((prev) => ({ ...prev, [seasonIndex]: true }));
+  };
+
+  const handleToggleEpisodeNewFlag = async (seasonIndex: number, epIndex: number) => {
+    const now = Date.now();
+    const targetEp = seasons[seasonIndex]?.episodes?.[epIndex];
+    if (!targetEp) return;
+
+    const currentlyActive = isEpisodeNewActive(targetEp, now);
+    const nextActive = !currentlyActive;
+
+    const applyToggleToEp = (item: any) => {
+      if (nextActive) {
+        return {
+          ...item,
+          showInNewEpisodes: true,
+          newEpisodeEnabledAt: now,
+          createdAt: now,
+          addedAt: now,
+        };
+      }
+      const {
+        newEpisodeEnabledAt: _removed,
+        createdAt: _removedCreated,
+        addedAt: _removedAdded,
+        ...rest
+      } = item;
+      return {
+        ...rest,
+        showInNewEpisodes: false,
+      };
+    };
+
+    setSeasons((prev) =>
+      prev.map((s, si) =>
+        si === seasonIndex
+          ? {
+              ...s,
+              episodes: s.episodes.map((item, ei) => (ei === epIndex ? applyToggleToEp(item) : item)),
+            }
+          : s
+      )
+    );
+
+    const epLabel = `S${seasons[seasonIndex]?.seasonNumber || seasonIndex + 1} E${targetEp.episodeNumber || epIndex + 1}`;
+
+    // If editing an already-saved series and this episode already exists in saved data, sync immediately to Firestore
+    const cleanUrl = String(targetEp.streamUrl || '').trim();
+    if (editingMovie && cleanUrl && Array.isArray(editingMovie.seasons)) {
+      const savedMatchExists = editingMovie.seasons.some((s) =>
+        (s.episodes || []).some((e) => String(e?.streamUrl || '').trim() === cleanUrl)
+      );
+      if (savedMatchExists) {
+        const updatedMovieSeasons = editingMovie.seasons.map((s) => ({
+          ...s,
+          episodes: (s.episodes || []).map((ep: any) => {
+            if (String(ep?.streamUrl || '').trim() === cleanUrl) {
+              return applyToggleToEp(ep);
+            }
+            if (!isEpisodeNewActive(ep, now) && (ep.showInNewEpisodes || ep.newEpisodeEnabledAt || ep.createdAt || ep.addedAt)) {
+              const {
+                newEpisodeEnabledAt: _r,
+                createdAt: _rc,
+                addedAt: _ra,
+                ...rest
+              } = ep;
+              return { ...rest, showInNewEpisodes: false };
+            }
+            return ep;
+          }),
+        }));
+        try {
+          await updateDoc(doc(db, 'movies', editingMovie.id), {
+            seasons: updatedMovieSeasons,
+            updatedAt: serverTimestamp(),
+          });
+          const updatedMovie: MovieData = {
+            ...editingMovie,
+            seasons: updatedMovieSeasons,
+            updatedAt: now,
+          };
+          setEditingMovie(updatedMovie);
+          saveMovieLocally(updatedMovie);
+          setMovies((prev) => prev.map((m) => (m.id === editingMovie.id ? updatedMovie : m)));
+          broadcastMoviesUpdated();
+          showNotification(
+            'success',
+            nextActive
+              ? `✅ ${epLabel} "New Episode" ON ho gaya (24 ghante tak Home Page par dikhega).`
+              : `✅ ${epLabel} "New Episode" OFF ho gaya (Home Page se hata diya gaya).`
+          );
+          return;
+        } catch (err: any) {
+          console.warn('Immediate New Episode toggle sync failed:', err);
+        }
+      }
+    }
+
+    showNotification(
+      'success',
+      nextActive
+        ? `${epLabel} "New Episode" ON — Publish/Update dabane par 24h tak Home Page par dikhega.`
+        : `${epLabel} "New Episode" OFF.`
+    );
   };
 
   const handleRemoveEpisode = (seasonIndex: number, epIndex: number) => {
@@ -1531,14 +1763,16 @@ export default function AdminDashboard() {
     try {
       const saved = await saveRemoteUpdateConfig({
         ...updateConfigForm,
-        latestVersion: '1.0.0',
-        minimumRequiredVersion: '1.0.0',
-        latestVersionCode: 1,
-        minimumRequiredVersionCode: 1,
+        latestVersion: CURRENT_VERSION_NAME,
+        minimumRequiredVersion: CURRENT_VERSION_NAME,
+        latestVersionCode: CURRENT_VERSION_CODE,
+        minimumRequiredVersionCode: CURRENT_VERSION_CODE,
+        apkDownloadUrl: updateConfigForm.apkDownloadUrl || DEFAULT_REMOTE_UPDATE_CONFIG.apkDownloadUrl,
+        updateMessage: `Movie Portal v${CURRENT_VERSION_NAME} update is ready! Update now for push release notifications with movie posters and bug fixes.`,
       });
       setUpdateConfigForm(saved);
       setFirebaseUpdateVersion(saved.minimumRequiredVersion || saved.latestVersion);
-      showNotification('success', '✅ Update popup disabled for all apps (Firebase min version set to v1.0.0).');
+      showNotification('success', `✅ Pushed v${CURRENT_VERSION_NAME} update popup to all user phones!`);
     } catch (err: any) {
       showNotification('error', `Failed to update Firebase: ${err?.message || 'Permission denied'}`);
     } finally {
@@ -1854,12 +2088,13 @@ export default function AdminDashboard() {
     setPublished(true);
     setQualityBadge('HD');
     setAutoTranscode(false);
+    setNotifyOnUpdate(false);
     setSeasons([
       {
         seasonNumber: 1,
         episodes: [
-          { episodeNumber: 1, title: 'Episode 1', streamUrl: '' },
-          { episodeNumber: 2, title: 'Episode 2', streamUrl: '' },
+          { episodeNumber: 1, title: 'Episode 1', streamUrl: '', showInNewEpisodes: false },
+          { episodeNumber: 2, title: 'Episode 2', streamUrl: '', showInNewEpisodes: false },
         ],
       },
     ]);
@@ -1895,16 +2130,35 @@ export default function AdminDashboard() {
     setFeatured(Boolean(movie.featured));
     setPublished(movie.published !== false);
     setQualityBadge(normalizeQualityBadge(movie.qualityBadge));
+    setNotifyOnUpdate(false);
     if (Array.isArray(movie.seasons) && movie.seasons.length > 0) {
-      setSeasons(JSON.parse(JSON.stringify(movie.seasons)));
+      const nowMs = Date.now();
+      const normalizedSeasons = JSON.parse(JSON.stringify(movie.seasons)).map((s: any) => ({
+        ...s,
+        episodes: (s.episodes || []).map((ep: any) => {
+          if (isEpisodeNewActive(ep, nowMs)) {
+            return {
+              ...ep,
+              showInNewEpisodes: true,
+              newEpisodeEnabledAt: getTimestampMs(ep.newEpisodeEnabledAt),
+            };
+          }
+          const { newEpisodeEnabledAt: _removed, ...restEp } = ep;
+          return {
+            ...restEp,
+            showInNewEpisodes: false,
+          };
+        }),
+      }));
+      setSeasons(normalizedSeasons);
       setExpandedSeasons(movie.seasons.length <= 2 ? { 0: true, 1: true } : {});
     } else {
       setSeasons([
         {
           seasonNumber: 1,
           episodes: [
-            { episodeNumber: 1, title: 'Episode 1', streamUrl: '' },
-            { episodeNumber: 2, title: 'Episode 2', streamUrl: '' },
+            { episodeNumber: 1, title: 'Episode 1', streamUrl: '', showInNewEpisodes: false },
+            { episodeNumber: 2, title: 'Episode 2', streamUrl: '', showInNewEpisodes: false },
           ],
         },
       ]);
@@ -1924,6 +2178,111 @@ export default function AdminDashboard() {
         bc.close();
       }
     } catch {}
+  };
+
+  const publishReleaseAnnouncement = async (params: {
+    movieId: string;
+    title: string;
+    releaseYear: number | string;
+    originalCategory: string;
+    isSeries: boolean;
+    language?: string;
+    genre?: string;
+    qualityBadge?: string;
+    runtime?: string;
+    posterUrl?: string;
+    backdropUrl?: string;
+    customMessage?: string;
+  }) => {
+    const cleanPoster = upgradePosterUrl(params.posterUrl || '', 1080) || params.posterUrl || '';
+    const cleanBackdrop = upgradePosterUrl(params.backdropUrl || params.posterUrl || '', 1280) || params.backdropUrl || cleanPoster;
+    const announcementMsg = params.customMessage || 'GO STREAM or DOWNLOAD NOW';
+    const createdAtMs = Date.now();
+    const announcementPayload = {
+      title: params.title,
+      releaseYear: Number(params.releaseYear) || new Date().getFullYear(),
+      category: params.originalCategory,
+      isSeries: Boolean(params.isSeries),
+      language: String(params.language || '').trim(),
+      genre: String(params.genre || '').trim(),
+      qualityBadge: String(params.qualityBadge || '').trim(),
+      runtime: String(params.runtime || '').trim(),
+      posterUrl: cleanPoster,
+      backdropUrl: cleanBackdrop,
+      message: announcementMsg,
+      movieId: params.movieId,
+      createdAt: serverTimestamp(),
+      createdAtMs,
+      expiresAt: new Date(createdAtMs + 48 * 60 * 60 * 1000),
+    };
+
+    let announcementDocId = `ann-${createdAtMs}`;
+    try {
+      const ref = await addDoc(collection(db, 'announcements'), announcementPayload);
+      announcementDocId = ref.id;
+    } catch (annFsErr) {
+      console.warn('Firestore announcement write warning:', annFsErr);
+    }
+
+    const broadcastPayload = {
+      id: announcementDocId,
+      title: announcementPayload.title,
+      releaseYear: announcementPayload.releaseYear,
+      category: announcementPayload.category,
+      isSeries: announcementPayload.isSeries,
+      language: announcementPayload.language,
+      genre: announcementPayload.genre,
+      qualityBadge: announcementPayload.qualityBadge,
+      runtime: announcementPayload.runtime,
+      posterUrl: cleanPoster,
+      backdropUrl: cleanBackdrop,
+      message: announcementMsg,
+      movieId: params.movieId,
+      createdAt: { seconds: Math.floor(createdAtMs / 1000) },
+      createdAtMs,
+    };
+
+    try {
+      localStorage.setItem('app_latest_announcement', JSON.stringify(broadcastPayload));
+      window.dispatchEvent(new CustomEvent('new_movie_release', { detail: broadcastPayload }));
+
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        const bc = new BroadcastChannel('movie_portal_updates');
+        bc.postMessage({ type: 'NEW_RELEASE', data: broadcastPayload });
+        bc.close();
+      }
+    } catch (bcErr) {
+      console.warn('Broadcast notification error:', bcErr);
+    }
+  };
+
+  const handleManualSendNotification = async (movie: MovieData) => {
+    if (!movie?.id) return;
+    setNotifyingMovieId(movie.id);
+    try {
+      const isSeriesItem = Boolean(
+        (movie.originalCategory || '').toLowerCase().includes('series')
+        || (Array.isArray(movie.seasons) && movie.seasons.length > 0)
+      );
+      await publishReleaseAnnouncement({
+        movieId: movie.id,
+        title: movie.title,
+        releaseYear: movie.releaseYear,
+        originalCategory: movie.originalCategory || movie.displayCategory || 'Movie',
+        isSeries: isSeriesItem,
+        language: movie.language,
+        genre: movie.genre,
+        qualityBadge: getVisibleQualityBadge(movie) || '',
+        runtime: movie.runtime,
+        posterUrl: movie.posterUrl,
+        backdropUrl: movie.backdropUrl || movie.posterUrl,
+      });
+      showNotification('success', `🔔 Notification sent to all users for "${movie.title}"!`);
+    } catch (err: any) {
+      showNotification('error', `Failed to send notification: ${err?.message || 'Error'}`);
+    } finally {
+      setNotifyingMovieId(null);
+    }
   };
 
   // Universal Publish / Update / Save Draft Content (Movies, Web Series, Anime)
@@ -1963,44 +2322,33 @@ export default function AdminDashboard() {
             : seasons)
         : (editingMovie?.seasons || []);
 
-      // Track previously saved episodes when editing so ONLY genuinely new episodes get a 24h timestamp
+      // Only attach 24h New Episode timestamps when the admin explicitly enabled showInNewEpisodes
       const saveNowMs = Date.now();
-      const prevStreamTimestampMap = new Map<string, number>();
-      if (editingMovie && Array.isArray(editingMovie.seasons)) {
-        for (const prevSeason of editingMovie.seasons) {
-          for (const prevEp of prevSeason.episodes || []) {
-            const pUrl = String(prevEp?.streamUrl || '').trim();
-            if (!pUrl) continue;
-            const pTs = getTimestampMs((prevEp as any)?.addedAt) || getTimestampMs((prevEp as any)?.createdAt);
-            if (!prevStreamTimestampMap.has(pUrl)) {
-              prevStreamTimestampMap.set(pUrl, pTs > 0 ? pTs : -1);
-            }
-          }
-        }
-      }
-
       const resolvedSeasons = Array.isArray(rawSeasons)
         ? rawSeasons.map((season) => ({
             ...season,
             episodes: (season.episodes || []).map((ep: any) => {
-              const cleanUrl = String(ep?.streamUrl || '').trim();
-              if (!cleanUrl) return ep;
-
-              if (editingMovie) {
-                if (prevStreamTimestampMap.has(cleanUrl)) {
-                  const prevTs = prevStreamTimestampMap.get(cleanUrl)!;
-                  if (prevTs > 0) {
-                    return { ...ep, createdAt: prevTs, addedAt: prevTs };
-                  }
-                  const { createdAt: _c, addedAt: _a, ...restEp } = ep;
-                  return restEp;
-                }
-                const newTs = getTimestampMs(ep?.addedAt) || getTimestampMs(ep?.createdAt) || saveNowMs;
-                return { ...ep, createdAt: newTs, addedAt: newTs };
+              const activeNew = isEpisodeNewActive(ep, saveNowMs);
+              const {
+                newEpisodeEnabledAt: _dropEnabledAt,
+                createdAt: _dropCreatedAt,
+                addedAt: _dropAddedAt,
+                ...cleanEp
+              } = ep;
+              if (activeNew) {
+                const enabledAt = getTimestampMs(ep?.newEpisodeEnabledAt) || saveNowMs;
+                return {
+                  ...cleanEp,
+                  showInNewEpisodes: true,
+                  newEpisodeEnabledAt: enabledAt,
+                  createdAt: enabledAt,
+                  addedAt: enabledAt,
+                };
               }
-
-              const newTs = getTimestampMs(ep?.addedAt) || getTimestampMs(ep?.createdAt) || saveNowMs;
-              return { ...ep, createdAt: newTs, addedAt: newTs };
+              return {
+                ...cleanEp,
+                showInNewEpisodes: false,
+              };
             }),
           }))
         : [];
@@ -2059,7 +2407,27 @@ export default function AdminDashboard() {
           saveMovieLocally(updatedLocal);
           broadcastMoviesUpdated();
           setMovies((prev) => prev.map((m) => (m.id === editingMovie.id ? updatedLocal : m)));
-          showNotification('success', `✅ Updated "${moviePayload.title}" (Badge: ${qualityBadge === 'NONE' ? 'No Badge' : qualityBadge}).`);
+
+          if (!asDraft && notifyOnUpdate) {
+            await publishReleaseAnnouncement({
+              movieId: editingMovie.id,
+              title: moviePayload.title,
+              releaseYear: moviePayload.releaseYear,
+              originalCategory: moviePayload.originalCategory,
+              isSeries,
+              language: moviePayload.language,
+              genre: moviePayload.genre,
+              qualityBadge: moviePayload.qualityBadge !== 'NONE' ? moviePayload.qualityBadge : '',
+              runtime: moviePayload.runtime,
+              posterUrl: moviePayload.posterUrl,
+              backdropUrl: moviePayload.backdropUrl,
+            });
+          }
+
+          showNotification(
+            'success',
+            `✅ Updated "${moviePayload.title}"${!asDraft && notifyOnUpdate ? ' & notified all app users!' : ` (Badge: ${qualityBadge === 'NONE' ? 'No Badge' : qualityBadge}).`}`
+          );
           resetMovieForm();
           await fetchMovies();
         } catch (fsErr: any) {
@@ -2078,62 +2446,21 @@ export default function AdminDashboard() {
         });
         newDocId = docRef.id;
 
-        // Create a public announcement notification for all users to see
+        // Create a rich public release notification for all installed app users
         if (!asDraft) {
-          const announcementMsg = 'GO STREAM or DOWNLOAD NOW';
-          const announcementPayload = {
+          await publishReleaseAnnouncement({
+            movieId: newDocId,
             title: moviePayload.title,
             releaseYear: moviePayload.releaseYear,
-            category: moviePayload.originalCategory,
+            originalCategory: moviePayload.originalCategory,
+            isSeries,
+            language: moviePayload.language,
+            genre: moviePayload.genre,
+            qualityBadge: moviePayload.qualityBadge !== 'NONE' ? moviePayload.qualityBadge : '',
+            runtime: moviePayload.runtime,
             posterUrl: moviePayload.posterUrl,
-            backdropUrl: moviePayload.backdropUrl || moviePayload.posterUrl,
-            message: announcementMsg,
-            movieId: newDocId,
-            createdAt: serverTimestamp(),
-            expiresAt: new Date(Date.now() + 48 * 60 * 60 * 1000) // Visible for 48 hours
-          };
-
-          try {
-            await addDoc(collection(db, 'announcements'), announcementPayload);
-          } catch (annFsErr) {
-            console.warn('Firestore announcement write warning:', annFsErr);
-          }
-
-          // Broadcast announcement to all local tabs/clients
-          const broadcastPayload = {
-            id: `ann-${Date.now()}`,
-            title: moviePayload.title,
-            releaseYear: moviePayload.releaseYear,
-            category: moviePayload.originalCategory,
-            posterUrl: moviePayload.posterUrl,
-            backdropUrl: moviePayload.backdropUrl || moviePayload.posterUrl,
-            message: announcementMsg,
-            movieId: newDocId,
-            createdAt: { seconds: Math.floor(Date.now() / 1000) }
-          };
-
-          try {
-            localStorage.setItem('app_latest_announcement', JSON.stringify(broadcastPayload));
-            window.dispatchEvent(new CustomEvent('new_movie_release', { detail: broadcastPayload }));
-
-            if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-              const bc = new BroadcastChannel('movie_portal_updates');
-              bc.postMessage({ type: 'NEW_RELEASE', data: broadcastPayload });
-              bc.close();
-            }
-
-            if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-              new Notification('MOVIE PORTAL', {
-                body: `Watch Now : ${moviePayload.title} (${moviePayload.releaseYear}) Full ${isSeries ? 'Series' : 'Movie'} available now\nGO STREAM or DOWNLOAD NOW`,
-                icon: '/assets/icons/master_icon.jpg',
-                image: moviePayload.posterUrl || '/assets/icons/master_icon.jpg',
-                badge: '/assets/icons/master_icon.jpg',
-                tag: `movie-${newDocId}`
-              } as any);
-            }
-          } catch (bcErr) {
-            console.warn('Broadcast notification error:', bcErr);
-          }
+            backdropUrl: moviePayload.backdropUrl,
+          });
         }
 
         // Always persist to local cache as well
@@ -2730,14 +3057,14 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-                {firebaseUpdateVersion === '1.0.0' ? (
+                {firebaseUpdateVersion === CURRENT_VERSION_NAME ? (
                   <div className="mt-2.5 bg-emerald-950/60 border border-emerald-800/80 rounded-xl p-3 text-center animate-in fade-in">
                     <div className="flex items-center justify-center gap-1.5 text-emerald-400 font-black text-xs">
                       <CheckCircle2 size={16} />
-                      <span>No Update Popups Active (Disabled)</span>
+                      <span>All Users Prompted to Update (v{CURRENT_VERSION_NAME})</span>
                     </div>
                     <p className="text-[10px] text-gray-400 mt-1">
-                      Mandatory app update popups are turned off for all phones and Chrome.
+                      Older APKs will show the in-app update popup automatically.
                     </p>
                   </div>
                 ) : (
@@ -2751,7 +3078,7 @@ export default function AdminDashboard() {
                     <span>
                       {savingUpdateConfig
                         ? 'Syncing to Firebase...'
-                        : 'Disable Update Popups on All Old APKs'}
+                        : `Push v${CURRENT_VERSION_NAME} Update Popup to All Phones`}
                     </span>
                   </button>
                 )}
@@ -3557,11 +3884,11 @@ export default function AdminDashboard() {
                               type="button"
                               onClick={handleFilterExistingSeasonsTo1080p}
                               disabled={scanningRange}
-                              title="Remove all 480p, 720p & sticker links already in this series, keeping strictly 1080p (1 per episode)"
+                              title="Remove stickers, .txt/text & duplicate links; keeps 1080p (falls back to 720p if 1080p is missing or has no audio)"
                               className="bg-emerald-950/70 hover:bg-emerald-900/80 disabled:opacity-40 text-emerald-300 border border-emerald-700/60 font-bold text-[10px] px-2.5 py-1 rounded flex items-center gap-1 cursor-pointer"
                             >
                               {scanningRange ? <RefreshCw size={11} className="animate-spin" /> : <CheckCircle2 size={11} />}
-                              Clean to 1080p Only
+                              Smart Clean (1080p → 720p)
                             </button>
                           )}
                           {seasons.length > 1 && (
@@ -3691,17 +4018,17 @@ export default function AdminDashboard() {
 
                                 <div>
                                   <label className="block text-[10px] font-bold text-gray-300 mb-1">
-                                    Quality Filter (Skip 480p/720p)
+                                    Quality Filter (1080p → 720p Fallback + Audio)
                                   </label>
                                   <select
                                     value={scanQualityFilter}
                                     onChange={(e) => setScanQualityFilter(e.target.value as any)}
                                     className="w-full bg-neutral-950 border border-yellow-400/40 rounded p-2 text-white font-bold text-xs focus:border-yellow-400 focus:outline-none"
                                   >
-                                    <option value="1080p">1080p Only (Recommended)</option>
+                                    <option value="1080p">1080p (720p Fallback + Audio Check)</option>
                                     <option value="best">Best Available / Ep</option>
-                                    <option value="720p">720p Only</option>
-                                    <option value="480p">480p Only</option>
+                                    <option value="720p">720p Preferred</option>
+                                    <option value="480p">480p Preferred</option>
                                     <option value="all">All Qualities (No Filter)</option>
                                   </select>
                                 </div>
@@ -3757,26 +4084,33 @@ export default function AdminDashboard() {
                                 const activeScanKey = `${bulkStartUrl.trim()}|${bulkEndUrl.trim()}|${scanQualityFilter}`;
                                 const hasLiveData = !skipTelegramScan && liveBulkScan.key === activeScanKey && liveBulkScan.data;
                                 const isLiveLoading = !skipTelegramScan && liveBulkScan.key === activeScanKey && liveBulkScan.loading;
+                                const liveError = !skipTelegramScan && liveBulkScan.key === activeScanKey ? liveBulkScan.error : '';
                                 const foundCount = hasLiveData ? liveBulkScan.data!.videosFound : null;
                                 return (
-                                <div className="bg-emerald-950/50 border border-emerald-700/70 rounded-lg p-2.5 flex flex-wrap items-center justify-between gap-2">
-                                  <div className="text-[11px] text-emerald-300">
+                                <div className={`rounded-lg p-2.5 flex flex-wrap items-center justify-between gap-2 border ${liveError ? 'bg-red-950/50 border-red-700/70' : 'bg-emerald-950/50 border-emerald-700/70'}`}>
+                                  <div className={`text-[11px] ${liveError ? 'text-red-300' : 'text-emerald-300'}`}>
                                     {isLiveLoading ? (
                                       <span className="font-bold text-yellow-300 flex items-center gap-1.5">
                                         <RefreshCw size={12} className="animate-spin" />
-                                        Scanning {seasonRangeResult.count} posts (#{seasonRangeResult.startMsgId} → #{seasonRangeResult.endMsgId}) for {scanQualityFilter === '1080p' ? '1080p only' : 'videos'}...
+                                        Scanning {seasonRangeResult.count} posts (#{seasonRangeResult.startMsgId} → #{seasonRangeResult.endMsgId}) for {scanQualityFilter === '1080p' ? '1080p (720p fallback + audio)' : 'videos'}...
+                                      </span>
+                                    ) : liveError ? (
+                                      <span className="font-bold text-red-300">
+                                        ❌ Scan Error: {liveError}
                                       </span>
                                     ) : hasLiveData ? (
                                       <>
                                         <span className="font-black text-emerald-200">
-                                          ✅ Found: {foundCount} Episodes ({scanQualityFilter === '1080p' ? '1080p Only' : scanQualityFilter})
+                                          ✅ Found: {foundCount} Episodes ({scanQualityFilter === '1080p' ? '1080p / 720p Audio' : scanQualityFilter})
                                         </span>{' '}
                                         for <strong className="text-white">Season {bulkTargetSeasonNum}</strong>
                                         <span className="block text-[10px] text-yellow-300 mt-0.5">
                                           🛡️ {liveBulkScan.data!.totalScanned} posts checked •{' '}
-                                          {liveBulkScan.data!.skippedDuplicates ? `${liveBulkScan.data!.skippedDuplicates} 480p/720p skipped • ` : ''}
+                                          {liveBulkScan.data!.skippedDuplicates ? `${liveBulkScan.data!.skippedDuplicates} duplicates skipped • ` : ''}
+                                          {liveBulkScan.data!.fallbackCount ? `${liveBulkScan.data!.fallbackCount} 720p fallback • ` : ''}
+                                          {liveBulkScan.data!.silentSkippedCount ? `${liveBulkScan.data!.silentSkippedCount} silent 1080p→720p • ` : ''}
                                           {liveBulkScan.data!.skippedStickers ? `${liveBulkScan.data!.skippedStickers} stickers skipped • ` : ''}
-                                          {liveBulkScan.data!.skippedOther} text/other posts skipped
+                                          {liveBulkScan.data!.skippedOther} txt/other posts skipped
                                         </span>
                                       </>
                                     ) : (
@@ -3790,7 +4124,7 @@ export default function AdminDashboard() {
                                         </span>
                                         {!skipTelegramScan && (
                                           <span className="block text-[10px] text-yellow-300 mt-0.5">
-                                            🛡️ 480p/720p, stickers & text posts will be filtered out automatically.
+                                            🛡️ Stickers, .txt/text posts & silent 1080p skipped; 720p fallback with audio auto-selected.
                                           </span>
                                         )}
                                       </>
@@ -3802,7 +4136,7 @@ export default function AdminDashboard() {
                                       : foundCount !== null
                                       ? `${foundCount} Eps Ready`
                                       : scanQualityFilter === '1080p'
-                                      ? '1080p Only Scan'
+                                      ? '1080p → 720p Scan'
                                       : 'Smart Video Scan'}
                                   </span>
                                 </div>
@@ -4006,10 +4340,10 @@ export default function AdminDashboard() {
                                       onChange={(e) => setScanQualityFilter(e.target.value as any)}
                                       className="w-full bg-neutral-950 border border-yellow-400/40 rounded p-2 text-white font-bold text-[11px] focus:border-yellow-400 focus:outline-none"
                                     >
-                                      <option value="1080p">1080p Only</option>
+                                      <option value="1080p">1080p (720p Fallback + Audio Check)</option>
                                       <option value="best">Best Available / Ep</option>
-                                      <option value="720p">720p Only</option>
-                                      <option value="480p">480p Only</option>
+                                      <option value="720p">720p Preferred</option>
+                                      <option value="480p">480p Preferred</option>
                                       <option value="all">All Videos</option>
                                     </select>
                                   </div>
@@ -4196,13 +4530,16 @@ export default function AdminDashboard() {
                                       const activeKey = `${seasonBulkStartUrl.trim()}|${seasonBulkEndUrl.trim()}|${scanQualityFilter}`;
                                       const hasLive = !skipTelegramScan && livePerSeasonScan.key === activeKey && livePerSeasonScan.data;
                                       const isLoading = !skipTelegramScan && livePerSeasonScan.key === activeKey && livePerSeasonScan.loading;
+                                      const liveErr = !skipTelegramScan && livePerSeasonScan.key === activeKey ? livePerSeasonScan.error : '';
                                       return (
-                                        <p className="text-[10px] text-emerald-300 font-bold">
+                                        <p className={`text-[10px] font-bold ${liveErr ? 'text-red-400' : 'text-emerald-300'}`}>
                                           {isLoading
-                                            ? `🔍 Scanning ${perSeasonRangePreview.count} posts for 1080p episodes...`
+                                            ? `🔍 Scanning ${perSeasonRangePreview.count} posts for 1080p (720p fallback + audio check)...`
+                                            : liveErr
+                                            ? `❌ Scan Error: ${liveErr}`
                                             : hasLive
-                                            ? `✅ Found: ${livePerSeasonScan.data!.videosFound} Episodes (1080p Only) — ${livePerSeasonScan.data!.skippedCount} duplicates/stickers skipped`
-                                            : `Range: ${perSeasonRangePreview.count} Posts (#${perSeasonRangePreview.startMsgId} → #{perSeasonRangePreview.endMsgId}) — will filter to 1080p`}
+                                            ? `✅ Found: ${livePerSeasonScan.data!.videosFound} Episodes — ${livePerSeasonScan.data!.skippedCount} duplicates/stickers/txt skipped${livePerSeasonScan.data!.fallbackCount ? `, ${livePerSeasonScan.data!.fallbackCount} 720p fallback` : ''}${livePerSeasonScan.data!.silentSkippedCount ? `, ${livePerSeasonScan.data!.silentSkippedCount} silent 1080p→720p` : ''}`
+                                            : `Range: ${perSeasonRangePreview.count} Posts (#${perSeasonRangePreview.startMsgId} → #{perSeasonRangePreview.endMsgId}) — auto-skips stickers/txt, checks audio & falls back 1080p→720p`}
                                         </p>
                                       );
                                     })()}
@@ -4265,9 +4602,16 @@ export default function AdminDashboard() {
 
                             {isExpanded && (
                             <div className="space-y-2 pt-2 border-t border-neutral-800">
-                              {season.episodes.map((ep, eIdx) => (
+                              {season.episodes.map((ep, eIdx) => {
+                                const nowCheckMs = Date.now();
+                                const isNewEpOn = isEpisodeNewActive(ep, nowCheckMs);
+                                const enabledMs = getTimestampMs(ep.newEpisodeEnabledAt);
+                                const remainingHrs = isNewEpOn && enabledMs > 0
+                                  ? Math.max(1, Math.ceil((NEW_EPISODE_WINDOW_MS - (nowCheckMs - enabledMs)) / 3_600_000))
+                                  : 0;
+                                return (
                                 <div key={eIdx} className="flex flex-col gap-2 bg-neutral-950 p-2.5 rounded border border-neutral-800">
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex flex-wrap items-center gap-2">
                                     <span className="text-gray-400 font-mono font-bold w-10 flex-shrink-0 text-[11px]">
                                       E{ep.episodeNumber}
                                     </span>
@@ -4290,9 +4634,40 @@ export default function AdminDashboard() {
                                         );
                                       }}
                                       placeholder="Episode Title"
-                                      className="flex-grow bg-neutral-900 border border-neutral-800 rounded p-1.5 text-white text-[11px]"
+                                      className="flex-grow min-w-[120px] bg-neutral-900 border border-neutral-800 rounded p-1.5 text-white text-[11px]"
                                     />
-                                    <div className="flex items-center gap-1 flex-shrink-0">
+                                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                                      {/* New Episode Home Page 24h ON/OFF Toggle */}
+                                      <button
+                                        type="button"
+                                        onClick={() => handleToggleEpisodeNewFlag(sIdx, eIdx)}
+                                        title={
+                                          isNewEpOn
+                                            ? `New Episode ON (${remainingHrs}h left on Home Page) — Click to turn OFF`
+                                            : 'New Episode OFF (Default) — Click to show on Home Page for 24h'
+                                        }
+                                        className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[10px] font-black uppercase tracking-tight transition-all cursor-pointer active:scale-95 ${
+                                          isNewEpOn
+                                            ? 'bg-red-600/20 border-red-500 text-red-400 shadow-[0_0_10px_rgba(220,38,38,0.25)]'
+                                            : 'bg-neutral-900 border-neutral-700 text-gray-400 hover:text-white hover:border-neutral-500'
+                                        }`}
+                                      >
+                                        <span
+                                          className={`w-6 h-3.5 rounded-full relative transition-colors flex items-center px-0.5 ${
+                                            isNewEpOn ? 'bg-red-600' : 'bg-neutral-700'
+                                          }`}
+                                        >
+                                          <span
+                                            className={`w-2.5 h-2.5 rounded-full bg-white transition-transform ${
+                                              isNewEpOn ? 'translate-x-2.5' : 'translate-x-0'
+                                            }`}
+                                          />
+                                        </span>
+                                        <span>
+                                          {isNewEpOn ? `New Ep: ON (${remainingHrs}h)` : 'New Ep: OFF'}
+                                        </span>
+                                      </button>
+
                                       {season.episodes.length > 1 && (
                                         <button
                                           type="button"
@@ -4303,16 +4678,16 @@ export default function AdminDashboard() {
                                           <Trash2 size={14} />
                                         </button>
                                       )}
-                                        <button
-                                          type="button"
-                                          onClick={() => handleTestStream(ep.streamUrl, { sIdx, eIdx })}
-                                          title="Test Episode Stream"
-                                          className="p-1.5 text-yellow-400 hover:bg-yellow-400/20 rounded transition-colors"
-                                        >
-                                          <Play size={14} fill="currentColor" />
-                                        </button>
-                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleTestStream(ep.streamUrl, { sIdx, eIdx })}
+                                        title="Test Episode Stream"
+                                        className="p-1.5 text-yellow-400 hover:bg-yellow-400/20 rounded transition-colors"
+                                      >
+                                        <Play size={14} fill="currentColor" />
+                                      </button>
                                     </div>
+                                  </div>
                                     <div className="relative">
                                       <input
                                         type="text"
@@ -4373,7 +4748,8 @@ export default function AdminDashboard() {
                                       </button>
                                     </div>
                                   </div>
-                              ))}
+                                );
+                              })}
                             </div>
                             )}
                           </div>
@@ -4407,6 +4783,21 @@ export default function AdminDashboard() {
                     />
                     <span className="text-gray-300 font-semibold text-xs">Feature on Homepage Slider</span>
                   </label>
+
+                  {editingMovie && (
+                    <label className="flex items-center gap-2 cursor-pointer pt-1">
+                      <input
+                        type="checkbox"
+                        checked={notifyOnUpdate}
+                        onChange={(e) => setNotifyOnUpdate(e.target.checked)}
+                        className="accent-yellow-400 w-4 h-4 rounded"
+                      />
+                      <span className="text-yellow-300 font-semibold text-xs flex items-center gap-1.5">
+                        <Bell size={13} />
+                        Notify All App Users on Update (Push Alert)
+                      </span>
+                    </label>
+                  )}
                 </div>
 
                 {/* Single Universal PUBLISH / UPDATE Action & Draft Button */}
@@ -4620,6 +5011,23 @@ export default function AdminDashboard() {
                           >
                             <Pencil size={15} />
                           </button>
+
+                          {/* Send push release notification to all installed phone users */}
+                          {movie.published !== false && (
+                            <button
+                              type="button"
+                              onClick={() => handleManualSendNotification(movie)}
+                              disabled={notifyingMovieId === movie.id}
+                              title="Send Push Notification to All Phone Users"
+                              className="p-1.5 text-amber-400 hover:bg-amber-950/50 rounded transition-colors cursor-pointer disabled:opacity-50"
+                            >
+                              {notifyingMovieId === movie.id ? (
+                                <RefreshCw size={15} className="animate-spin" />
+                              ) : (
+                                <Bell size={15} />
+                              )}
+                            </button>
+                          )}
 
                           {/* Stream preview button if available */}
                           {movie.streamingUrl && (

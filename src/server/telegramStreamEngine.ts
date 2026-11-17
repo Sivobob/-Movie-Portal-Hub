@@ -79,6 +79,20 @@ function getCachedBlock(key: string): Buffer | undefined {
   return hit;
 }
 
+const dcSenderPromises = new Map<string, Promise<any>>();
+
+async function getDcSenderSafe(client: TelegramClient, dcId: number | undefined): Promise<any> {
+  const key = dcId !== undefined ? String(dcId) : 'default';
+  const existing = dcSenderPromises.get(key);
+  if (existing) return existing;
+
+  const p = client.getSender(dcId as any).finally(() => {
+    dcSenderPromises.delete(key);
+  });
+  dcSenderPromises.set(key, p);
+  return p;
+}
+
 async function fetchTelegramBlockRaw(
   client: TelegramClient,
   doc: Api.Document,
@@ -94,7 +108,7 @@ async function fetchTelegramBlockRaw(
   });
 
   let dcId: number | undefined = resolvedDcMap.get(docIdStr) ?? doc.dcId;
-  let sender = await client.getSender(dcId as any);
+  let sender = await getDcSenderSafe(client, dcId);
 
   const request = new Api.upload.GetFile({
     location,
@@ -106,7 +120,11 @@ async function fetchTelegramBlockRaw(
   while (attempts < 4) {
     attempts++;
     try {
-      const result: any = await client.invokeWithSender(request, sender);
+      const invokePromise = client.invokeWithSender(request, sender);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('TIMEOUT: Telegram GetFile timed out')), 12000)
+      );
+      const result: any = await Promise.race([invokePromise, timeoutPromise]);
       if (result instanceof Api.upload.FileCdnRedirect) {
         throw new Error('CDN redirect not supported for GetFile');
       }
@@ -119,19 +137,19 @@ async function fetchTelegramBlockRaw(
       if (err?.newDc) {
         dcId = Number(err.newDc);
         resolvedDcMap.set(docIdStr, dcId);
-        sender = await client.getSender(dcId as any);
+        sender = await getDcSenderSafe(client, dcId);
         continue;
       }
       const migrateMatch = msg.match(/FILE_MIGRATE_(\d+)/i);
       if (migrateMatch) {
         dcId = Number(migrateMatch[1]);
         resolvedDcMap.set(docIdStr, dcId);
-        sender = await client.getSender(dcId as any);
+        sender = await getDcSenderSafe(client, dcId);
         continue;
       }
       if (msg.includes('TIMEOUT') && attempts < 3) {
         await new Promise((r) => setTimeout(r, 400));
-        sender = await client.getSender(dcId as any);
+        sender = await getDcSenderSafe(client, dcId);
         continue;
       }
       const floodMatch = msg.match(/FLOOD_WAIT_(\d+)/i);
@@ -367,9 +385,13 @@ function fallbackProbeFromMetadata(docInfo: TelegramDocInfo): ProbeMediaResult {
 export async function probeTelegramMedia(
   localPort: string,
   telegramUrl: string,
-  docInfo: TelegramDocInfo
+  docInfo: TelegramDocInfo,
+  options?: { timeoutMs?: number; probesize?: number; analyzeduration?: number }
 ): Promise<ProbeMediaResult> {
   const localRawUrl = `http://127.0.0.1:${localPort}/api/stream?url=${encodeURIComponent(telegramUrl)}&raw=1`;
+  const timeoutMs = Math.max(3000, options?.timeoutMs ?? 14000);
+  const probesize = String(options?.probesize ?? 3000000);
+  const analyzeduration = String(options?.analyzeduration ?? 2500000);
 
   return new Promise<ProbeMediaResult>((resolve) => {
     const args = [
@@ -377,8 +399,8 @@ export async function probeTelegramMedia(
       '-print_format', 'json',
       '-show_format',
       '-show_streams',
-      '-probesize', '3000000',
-      '-analyzeduration', '2500000',
+      '-probesize', probesize,
+      '-analyzeduration', analyzeduration,
       localRawUrl,
     ];
 
@@ -395,7 +417,7 @@ export async function probeTelegramMedia(
         console.warn('[Probe] ffprobe timed out, falling back to safe metadata heuristic');
         resolve(fallbackProbeFromMetadata(docInfo));
       }
-    }, 14000);
+    }, timeoutMs);
 
     proc.stdout.on('data', (chunk: Buffer) => {
       stdout += chunk.toString('utf-8');
@@ -562,4 +584,152 @@ export async function probeTelegramMedia(
       }
     });
   });
+}
+
+function findSequence(buf: Buffer, seq: number[], from = 0, to = buf.length): number {
+  const end = Math.min(to, buf.length) - seq.length;
+  outer: for (let i = Math.max(0, from); i <= end; i++) {
+    for (let j = 0; j < seq.length; j++) {
+      if (buf[i + j] !== seq[j]) continue outer;
+    }
+    return i;
+  }
+  return -1;
+}
+
+function bufferContainsAnyAscii(buf: Buffer, needles: string[]): boolean {
+  for (const n of needles) {
+    if (buf.indexOf(n, 0, 'latin1') >= 0) return true;
+  }
+  return false;
+}
+
+function checkMp4MoovHasAudio(buf: Buffer): boolean | null {
+  const moovIdx = buf.indexOf('moov', 0, 'latin1');
+  if (moovIdx < 4) return null;
+  const moovSize = buf.readUInt32BE(moovIdx - 4);
+  const moovEnd = moovSize >= 8 ? moovIdx - 4 + moovSize : buf.length;
+  const slice = buf.subarray(moovIdx - 4, Math.min(buf.length, moovEnd));
+
+  if (
+    bufferContainsAnyAscii(slice, [
+      'soun',
+      'mp4a',
+      'ec-3',
+      'ac-3',
+      'dtsc',
+      'dtsh',
+      'dtse',
+      'Opus',
+      'fLaC',
+      '.mp3',
+      'samr',
+      'sawb',
+      'twos',
+      'sowt',
+      'alac',
+      'lpcm',
+    ])
+  ) {
+    return true;
+  }
+
+  // Only declare "no audio" if we saw the complete moov atom with trak/mvhd inside
+  if (moovEnd <= buf.length && slice.indexOf('trak', 0, 'latin1') >= 0) {
+    return false;
+  }
+  return null;
+}
+
+/**
+ * Fast, zero-ffprobe audio track detector.
+ * Reads ONLY 1-2 512KB Telegram blocks directly into RAM (which stay warm in blockCache)
+ * to inspect MKV/WebM EBML Tracks, MP4/MOV moov atoms, or AVI headers without spawning ffprobe.
+ * Returns true (has audio), false (confirmed silent/no audio), or null (indeterminate).
+ */
+export async function checkTelegramDocHasAudioFast(
+  client: TelegramClient,
+  docInfo: TelegramDocInfo
+): Promise<boolean | null> {
+  try {
+    const firstBlock = await fetchBlock(client, docInfo.document, 0);
+    if (!firstBlock || firstBlock.length < 16) return null;
+
+    // 1. Matroska / WebM (EBML header: 1A 45 DF A3)
+    if (
+      firstBlock[0] === 0x1a &&
+      firstBlock[1] === 0x45 &&
+      firstBlock[2] === 0xdf &&
+      firstBlock[3] === 0xa3
+    ) {
+      const tracksIdx = findSequence(firstBlock, [0x16, 0x54, 0xae, 0x6b]);
+      if (tracksIdx >= 0) {
+        const clusterIdx = findSequence(firstBlock, [0x1f, 0x43, 0xb6, 0x75], tracksIdx + 4);
+        const searchEnd = clusterIdx > tracksIdx ? clusterIdx : firstBlock.length;
+        const tracksSlice = firstBlock.subarray(tracksIdx, searchEnd);
+
+        const hasAudioCodec = bufferContainsAnyAscii(tracksSlice, [
+          'A_AAC',
+          'A_AC3',
+          'A_EAC3',
+          'A_DTS',
+          'A_TRUEHD',
+          'A_OPUS',
+          'A_VORBIS',
+          'A_MPEG/',
+          'A_FLAC',
+          'A_PCM',
+          'A_ALAC',
+          'A_MS/ACM',
+        ]);
+        if (hasAudioCodec) return true;
+
+        // TrackType = 2 (Audio): EBML ID 0x83, size 0x81, value 0x02
+        if (findSequence(tracksSlice, [0x83, 0x81, 0x02]) >= 0) {
+          return true;
+        }
+
+        // If we reached Cluster or end of small file, Tracks is complete with 0 audio tracks
+        if (clusterIdx > tracksIdx || docInfo.fileSize <= BLOCK_SIZE) {
+          return false;
+        }
+      }
+      return null;
+    }
+
+    // 2. MP4 / MOV / M4V (ftyp or moov box)
+    const ftyp = firstBlock.toString('latin1', 4, 8);
+    if (ftyp === 'ftyp' || firstBlock.indexOf('moov', 0, 'latin1') >= 0) {
+      const headRes = checkMp4MoovHasAudio(firstBlock);
+      if (headRes !== null) return headRes;
+
+      // moov is likely at the end of the file — fetch last block
+      if (docInfo.fileSize > BLOCK_SIZE) {
+        const lastBlockIdx = Math.floor((docInfo.fileSize - 1) / BLOCK_SIZE);
+        const lastBlock = await fetchBlock(client, docInfo.document, lastBlockIdx);
+        const tailRes = checkMp4MoovHasAudio(lastBlock);
+        if (tailRes !== null) return tailRes;
+
+        if (lastBlockIdx > 1) {
+          const prevLastBlock = await fetchBlock(client, docInfo.document, lastBlockIdx - 1);
+          const combinedTail = Buffer.concat([prevLastBlock, lastBlock]);
+          return checkMp4MoovHasAudio(combinedTail);
+        }
+      }
+      return null;
+    }
+
+    // 3. AVI (RIFF....AVI )
+    if (firstBlock.toString('latin1', 0, 4) === 'RIFF' && firstBlock.toString('latin1', 8, 12) === 'AVI ') {
+      if (firstBlock.indexOf('auds', 0, 'latin1') >= 0) return true;
+      if (firstBlock.indexOf('hdrl', 0, 'latin1') >= 0 && firstBlock.indexOf('vids', 0, 'latin1') >= 0) {
+        return false;
+      }
+      return null;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
 }

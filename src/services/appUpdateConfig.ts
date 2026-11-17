@@ -13,8 +13,8 @@ import { buildApiUrl } from '../utils/apiConfig';
 export const APP_UPDATE_COLLECTION = 'admins';
 export const APP_UPDATE_DOC_ID = 'android_update';
 
-export const CURRENT_VERSION_NAME = '3.5.226';
-export const CURRENT_VERSION_CODE = 3446;
+export const CURRENT_VERSION_NAME = '3.5.227';
+export const CURRENT_VERSION_CODE = 3447;
 
 export const OFFICIAL_APK_DIRECT_URL =
   'https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk';
@@ -134,9 +134,28 @@ export async function getInstalledAppVersion(): Promise<InstalledAppVersion> {
  * Evaluates whether the installed app fails the Firebase minimum required version check.
  */
 export function isAppUpdateRequired(
-  _installed: Pick<InstalledAppVersion, 'versionName' | 'versionCode'>,
-  _remote: RemoteUpdateConfig | null | undefined
+  installed: Pick<InstalledAppVersion, 'versionName' | 'versionCode'>,
+  remote: RemoteUpdateConfig | null | undefined
 ): boolean {
+  if (!remote) return false;
+  const targetVersion = String(remote.minimumRequiredVersion || remote.latestVersion || '').trim();
+  const targetCode = Number(remote.minimumRequiredVersionCode || remote.latestVersionCode || 0);
+
+  // Explicit kill-switch sentinel when admin sets version to 1.0.0
+  if (targetVersion === '1.0.0' && targetCode <= 1) {
+    return false;
+  }
+
+  if (targetVersion && installed.versionName) {
+    const cmp = compareVersions(installed.versionName, targetVersion);
+    if (cmp < 0) return true;
+    if (cmp > 0) return false;
+  }
+
+  if (targetCode > 0 && installed.versionCode > 0) {
+    return installed.versionCode < targetCode;
+  }
+
   return false;
 }
 

@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.226",
-  "minimumRequiredVersion": "3.5.226",
-  "latestVersionCode": 3446,
-  "minimumRequiredVersionCode": 3446,
+  "latestVersion": "3.5.227",
+  "minimumRequiredVersion": "3.5.227",
+  "latestVersionCode": 3447,
+  "minimumRequiredVersionCode": 3447,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Portal v3.5.226 update is ready! Includes 24-hour New Episodes list on Home & future update popups disabled.",
-  "releaseNotes": "v3.5.226: Added 24-hour New Episodes section on Home and disabled future forced update popups."
+  "updateMessage": "Movie Portal v3.5.227 update is ready! Includes rich phone status bar release notifications with posters, clean New Episodes filtering, and important fixes.",
+  "releaseNotes": "v3.5.227: Added rich Android notification bar movie/series alerts with images and details, background sync, and re-enabled in-app updates."
 }

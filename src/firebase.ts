@@ -1,22 +1,81 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
+import {
+  Firestore,
+  doc,
+  getDocFromServer,
+  getFirestore,
+  initializeFirestore,
+  memoryLocalCache,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+} from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore - only pass databaseId if it's explicitly set
+// Initialize Firestore with long-polling transport and safe multi-tab persistence
+// to avoid WebChannel [code=unavailable] failures inside iframes, proxies, and WebViews.
 const config = firebaseConfig as any;
-export const db = config.firestoreDatabaseId 
-  ? getFirestore(app, config.firestoreDatabaseId)
-  : getFirestore(app);
+const databaseId: string | undefined = config.firestoreDatabaseId || undefined;
+
+function createFirestoreInstance(): Firestore {
+  const isBrowser = typeof window !== 'undefined';
+  const transportSettings = isBrowser
+    ? { experimentalForceLongPolling: true, ignoreUndefinedProperties: true }
+    : { ignoreUndefinedProperties: true };
+
+  if (isBrowser) {
+    try {
+      return initializeFirestore(
+        app,
+        {
+          ...transportSettings,
+          localCache: persistentLocalCache({
+            tabManager: persistentMultipleTabManager(),
+          }),
+        },
+        databaseId
+      );
+    } catch {
+      try {
+        return initializeFirestore(
+          app,
+          {
+            ...transportSettings,
+            localCache: memoryLocalCache(),
+          },
+          databaseId
+        );
+      } catch {
+        return databaseId ? getFirestore(app, databaseId) : getFirestore(app);
+      }
+    }
+  }
+
+  try {
+    return initializeFirestore(app, transportSettings, databaseId);
+  } catch {
+    return databaseId ? getFirestore(app, databaseId) : getFirestore(app);
+  }
+}
+
+export const db: Firestore = createFirestoreInstance();
 
 export const auth = getAuth(app);
 
-// Enable persistence safely without console noise
-try {
-  enableIndexedDbPersistence(db).catch(() => {});
-} catch (e) {}
+// Validate Firestore connectivity on startup
+async function testConnection() {
+  if (typeof window === 'undefined') return;
+  try {
+    await getDocFromServer(doc(db, 'app_config', 'connection'));
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.warn('Firestore connection check: client is currently offline.');
+    }
+  }
+}
+testConnection();
 
 export enum OperationType {
   CREATE = 'create',

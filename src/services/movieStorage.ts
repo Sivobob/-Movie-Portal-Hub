@@ -37,11 +37,24 @@ export interface MovieData {
       durationSec?: number;
       createdAt?: any;
       addedAt?: any;
+      showInNewEpisodes?: boolean;
+      newEpisodeEnabledAt?: number;
     }>;
   }>;
 }
 
 export const NEW_EPISODE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+export function isEpisodeNewActive(
+  ep: { showInNewEpisodes?: boolean; newEpisodeEnabledAt?: any } | null | undefined,
+  nowMs: number = Date.now()
+): boolean {
+  if (!ep || ep.showInNewEpisodes !== true) return false;
+  const enabledAtMs = getTimestampMs(ep.newEpisodeEnabledAt);
+  if (enabledAtMs <= 0) return false;
+  const ageMs = nowMs - enabledAtMs;
+  return ageMs >= -60_000 && ageMs < NEW_EPISODE_WINDOW_MS;
+}
 
 export interface RecentEpisodeItem {
   key: string;
@@ -95,24 +108,21 @@ export function getNewEpisodesWithin24h(
 
       season.episodes.forEach((ep, eIdx) => {
         if (!ep || !ep.streamUrl || !String(ep.streamUrl).trim()) return;
-        const epTimeMs = getTimestampMs(ep.addedAt) || getTimestampMs(ep.createdAt);
-        if (epTimeMs <= 0) return;
+        if (!isEpisodeNewActive(ep, nowMs)) return;
 
-        const ageMs = nowMs - epTimeMs;
-        if (ageMs >= -60_000 && ageMs < NEW_EPISODE_WINDOW_MS) {
-          const epNum = Number(ep.episodeNumber) || eIdx + 1;
-          items.push({
-            key: `${movie.id}_s${seasonNum}_e${epNum}_${eIdx}`,
-            movie,
-            seasonIndex: sIdx,
-            episodeIndex: eIdx,
-            seasonNumber: seasonNum,
-            episodeNumber: epNum,
-            episodeTitle: ep.title?.trim() || `Episode ${epNum}`,
-            duration: ep.duration,
-            addedAtMs: epTimeMs,
-          });
-        }
+        const enabledAtMs = getTimestampMs(ep.newEpisodeEnabledAt);
+        const epNum = Number(ep.episodeNumber) || eIdx + 1;
+        items.push({
+          key: `${movie.id}_s${seasonNum}_e${epNum}_${eIdx}`,
+          movie,
+          seasonIndex: sIdx,
+          episodeIndex: eIdx,
+          seasonNumber: seasonNum,
+          episodeNumber: epNum,
+          episodeTitle: ep.title?.trim() || `Episode ${epNum}`,
+          duration: ep.duration,
+          addedAtMs: enabledAtMs,
+        });
       });
     });
   }

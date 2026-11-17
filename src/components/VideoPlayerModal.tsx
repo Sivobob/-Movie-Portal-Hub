@@ -33,6 +33,7 @@ import {
   probeWorkingBackendUrl,
 } from '../utils/apiConfig';
 import { formatClockTime, parseDurationToSeconds } from '../utils/duration';
+import { isEpisodeNewActive } from '../services/movieStorage';
 
 
 export interface VideoPlayerModalProps {
@@ -2137,7 +2138,7 @@ export default function VideoPlayerModal({
                             <div className="truncate min-w-0 flex items-center gap-1.5">
                               <span className="font-bold mr-1.5 text-neutral-400 flex-shrink-0">EP {ep.episodeNumber}:</span>
                               <span className="truncate">{ep.title}</span>
-                              {ep.createdAt && (Date.now() - Number(ep.createdAt) < 24 * 3600 * 1000) && (
+                              {isEpisodeNewActive(ep) && (
                                 <span className="bg-red-600 text-white font-black text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wider animate-pulse flex-shrink-0">
                                   NEW
                                 </span>

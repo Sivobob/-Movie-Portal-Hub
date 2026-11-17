@@ -20,7 +20,8 @@
         "published": { "type": "boolean" },
         "createdAt": { "type": "number" },
         "updatedAt": { "type": "number" },
-        "duration": { "type": "number" }
+        "duration": { "type": "number" },
+        "seasons": { "type": "array", "description": "Series seasons and episodes with optional showInNewEpisodes (boolean) and newEpisodeEnabledAt (number) 24h spotlight fields" }
       },
       "required": ["title", "posterUrl", "originalCategory", "displayCategory", "published"]
     },

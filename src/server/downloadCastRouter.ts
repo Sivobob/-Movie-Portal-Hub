@@ -4,6 +4,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import http from 'http';
 import https from 'https';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '../firebase.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -473,6 +475,120 @@ downloadCastRouter.get('/download/file', (req: Request, res: Response) => {
     if (!res.headersSent) {
       res.status(400).json({ error: 'Invalid download media URL' });
     }
+  }
+});
+
+function toMillisSafe(val: any): number {
+  if (!val) return 0;
+  if (typeof val === 'number') return val;
+  if (typeof val?.toMillis === 'function') {
+    try {
+      return val.toMillis();
+    } catch {
+      return 0;
+    }
+  }
+  if (typeof val?.seconds === 'number') return val.seconds * 1000;
+  if (typeof val === 'string') {
+    const num = Number(val);
+    if (Number.isFinite(num) && num > 0 && /^\d+$/.test(val.trim())) return num;
+    const parsed = Date.parse(val);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
+let cachedAnnouncements: { fetchedAt: number; items: any[] } = { fetchedAt: 0, items: [] };
+
+// Route 5: Latest active movie/series release announcements for Android background notifications
+downloadCastRouter.get('/announcements/latest', async (_req: Request, res: Response) => {
+  try {
+    const now = Date.now();
+    if (now - cachedAnnouncements.fetchedAt < 10_000 && cachedAnnouncements.items.length > 0) {
+      return res.json({ success: true, serverTimeMs: now, announcements: cachedAnnouncements.items });
+    }
+
+    const [annSnap, movieSnap] = await Promise.all([
+      getDocs(collection(db, 'announcements')),
+      getDocs(collection(db, 'movies')).catch(() => null),
+    ]);
+
+    const moviesById = new Map<string, any>();
+    if (movieSnap) {
+      for (const md of movieSnap.docs) {
+        moviesById.set(md.id, { id: md.id, ...md.data() });
+      }
+    }
+
+    const items = annSnap.docs
+      .map((d) => {
+        const raw: any = d.data() || {};
+        const linkedMovie = raw.movieId ? moviesById.get(String(raw.movieId)) : null;
+        if (linkedMovie && linkedMovie.published === false) return null;
+
+        const createdAtMs = toMillisSafe(raw.createdAtMs || raw.createdAt) || now;
+        const expiresAtMs = toMillisSafe(raw.expiresAt);
+        if (expiresAtMs > 0 && expiresAtMs < now) return null;
+
+        const title = String(raw.title || linkedMovie?.title || 'New Release').trim();
+        const releaseYear = String(raw.releaseYear || linkedMovie?.releaseYear || '').trim();
+        const category = String(raw.category || linkedMovie?.originalCategory || '').trim();
+        const isSeries = Boolean(
+          raw.isSeries ||
+            category.toLowerCase().includes('series') ||
+            linkedMovie?.contentType === 'series' ||
+            (Array.isArray(linkedMovie?.seasons) && linkedMovie.seasons.length > 0)
+        );
+        const language = String(raw.language || linkedMovie?.language || '').trim();
+        const genre = String(raw.genre || linkedMovie?.genre || '').trim();
+        const qualityBadge = String(raw.qualityBadge || linkedMovie?.qualityBadge || '').trim();
+        const runtime = String(raw.runtime || linkedMovie?.runtime || '').trim();
+        const posterUrl = String(raw.posterUrl || linkedMovie?.posterUrl || '').trim();
+        const backdropUrl = String(raw.backdropUrl || linkedMovie?.backdropUrl || posterUrl).trim();
+        const message = String(raw.message || 'GO STREAM or DOWNLOAD NOW').trim();
+
+        const yearPart = releaseYear && releaseYear !== '0' ? ` (${releaseYear})` : '';
+        const typeLabel = isSeries ? 'Full Series' : 'Full Movie';
+        const notificationTitle = `Watch Now : ${title}${yearPart} ${typeLabel} available now`;
+        const detailsParts = [
+          qualityBadge && qualityBadge.toUpperCase() !== 'NONE' ? qualityBadge : '',
+          language,
+          genre,
+          runtime,
+        ].filter(Boolean);
+        const notificationBody = detailsParts.length > 0 ? `${message} • ${detailsParts.join(' • ')}` : message;
+
+        return {
+          id: d.id,
+          movieId: String(raw.movieId || ''),
+          title,
+          releaseYear,
+          category,
+          isSeries,
+          language,
+          genre,
+          qualityBadge,
+          runtime,
+          posterUrl,
+          backdropUrl,
+          imageUrl: backdropUrl || posterUrl,
+          message,
+          notificationTitle,
+          notificationBody,
+          createdAtMs,
+          expiresAtMs,
+        };
+      })
+      .filter(Boolean)
+      .sort((a: any, b: any) => b.createdAtMs - a.createdAtMs)
+      .slice(0, 20);
+
+    cachedAnnouncements = { fetchedAt: now, items };
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.json({ success: true, serverTimeMs: now, announcements: items });
+  } catch (err: any) {
+    console.error('[Announcements Latest Error]', err?.message || err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch announcements' });
   }
 });
 

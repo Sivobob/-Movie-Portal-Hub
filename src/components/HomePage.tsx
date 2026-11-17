@@ -283,6 +283,44 @@ export default function HomePage() {
     };
   }, []);
 
+  // Open specific movie/series when user taps a push/release notification
+  useEffect(() => {
+    if (movies.length === 0) return;
+
+    const openMovieById = (rawId: string | null | undefined) => {
+      const targetId = String(rawId || '').trim();
+      if (!targetId) return;
+      const match = movies.find(
+        (m) => m.id === targetId || (m.imdbId && m.imdbId === targetId)
+      );
+      if (match) {
+        try {
+          sessionStorage.removeItem('mp_pending_open_movie_id');
+        } catch {}
+        setPlayingMovie(null);
+        setSelectedMovie(match);
+      }
+    };
+
+    try {
+      const pendingId = sessionStorage.getItem('mp_pending_open_movie_id');
+      if (pendingId) {
+        openMovieById(pendingId);
+      }
+    } catch {}
+
+    const handleOpenEvent = (e: Event) => {
+      const detailId = (e as CustomEvent)?.detail;
+      if (detailId) {
+        openMovieById(String(detailId));
+      }
+    };
+    window.addEventListener('movie_portal_open_movie', handleOpenEvent);
+    return () => {
+      window.removeEventListener('movie_portal_open_movie', handleOpenEvent);
+    };
+  }, [movies]);
+
   const resolvedSelectedMovie = useMemo(() => {
     if (!selectedMovie) return null;
     const live = movies.find(

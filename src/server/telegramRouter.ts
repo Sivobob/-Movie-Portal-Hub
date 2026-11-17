@@ -10,6 +10,7 @@ import {
   getCachedAccessHash
 } from '../utils/channelRegistry.ts';
 import {
+  checkTelegramDocHasAudioFast,
   probeTelegramMedia,
   ProbeMediaResult,
   streamTelegramRange,
@@ -293,25 +294,25 @@ function parseEpisodeIdentity(caption: string, fileName: string): { key: string 
   let epNum: number | null = null;
   let absEpNum: number | null = null;
 
-  // Detect any standalone 3-4 digit absolute episode number (e.g. "S17E08 369" or "Episode 369" or "erisode - 369")
+  // Detect any standalone 3-4 digit absolute episode number (e.g. "S17E08 369" or "Episode 369" or "S14_E297")
   const absMatch =
-    combined.match(/(?:e[pr]isode|ep)\s*[:\-_.\s]*0*([1-9]\d{2,3})\b/i) ||
-    combined.match(/\bS\d{1,2}E\d{1,2}\s+([1-9]\d{2,3})\b/i);
+    combined.match(/(?:e[pr]isode|ep)\s*[:\-_.\s]*0*([1-9]\d{2,3})(?=$|[^0-9])/i) ||
+    combined.match(/(?:^|[^a-z0-9])S\d{1,2}E\d{1,2}\s+([1-9]\d{2,3})(?=$|[^0-9])/i);
   if (absMatch) {
     absEpNum = parseInt(absMatch[1], 10);
   }
 
   const capEpMatch =
-    normCap.match(/e[pr]isode\s*[:\-]?\s*0*(\d{1,4})\b/i) ||
-    normCap.match(/episode\s*[:\-]?\s*0*(\d{1,4})\b/i);
-  const capSeasonMatch = normCap.match(/season\s*[:\-]?\s*0*(\d{1,2})\b/i);
+    normCap.match(/e[pr]isode\s*[:\-]?\s*0*(\d{1,4})(?=$|[^0-9])/i) ||
+    normCap.match(/episode\s*[:\-]?\s*0*(\d{1,4})(?=$|[^0-9])/i);
+  const capSeasonMatch = normCap.match(/season\s*[:\-]?\s*0*(\d{1,2})(?=$|[^0-9])/i);
 
   if (capEpMatch) {
     epNum = parseInt(capEpMatch[1], 10);
     if (capSeasonMatch) seasonNum = parseInt(capSeasonMatch[1], 10);
   } else {
-    const seMatch = combined.match(/\bS(?:eason)?\s*0*(\d{1,2})\s*[-_.\s]*E(?:p|pisode)?\s*0*(\d{1,4})\b/i);
-    const esMatch = combined.match(/\bE(?:p|pisode)?\s*[-_.\s]*0*(\d{1,4})[-_.\s]+S(?:eason)?\s*0*(\d{1,2})\b/i);
+    const seMatch = combined.match(/(?:^|[^a-z0-9])S(?:eason)?\s*0*(\d{1,2})\s*[-_.\s]*E(?:p|pisode)?\s*0*(\d{1,4})(?=$|[^0-9])/i);
+    const esMatch = combined.match(/(?:^|[^a-z0-9])E(?:p|pisode)?\s*[-_.\s]*0*(\d{1,4})[-_.\s]+S(?:eason)?\s*0*(\d{1,2})(?=$|[^0-9])/i);
     if (seMatch) {
       seasonNum = parseInt(seMatch[1], 10);
       epNum = parseInt(seMatch[2], 10);
@@ -319,7 +320,7 @@ function parseEpisodeIdentity(caption: string, fileName: string): { key: string 
       epNum = parseInt(esMatch[1], 10);
       seasonNum = parseInt(esMatch[2], 10);
     } else {
-      const fnEpMatch = normFn.match(/(?:^|[\s_\-\[])E(?:p|pisode)?\s*[:\-_.\s]*0*(\d{1,4})\b/i);
+      const fnEpMatch = normFn.match(/(?:^|[\s_\-\[])E(?:p|pisode)?\s*[:\-_.\s]*0*(\d{1,4})(?=$|[^0-9])/i);
       if (fnEpMatch) {
         epNum = parseInt(fnEpMatch[1], 10);
       }
@@ -336,11 +337,310 @@ function parseEpisodeIdentity(caption: string, fileName: string): { key: string 
   return { key, epNum, absEpNum: null };
 }
 
+type ClassifiedDocMedia =
+  | { kind: 'sticker'; mime: string; fileName: string; sizeBytes: number }
+  | { kind: 'other'; mime: string; fileName: string; sizeBytes: number }
+  | {
+      kind: 'video';
+      doc: any;
+      mime: string;
+      fileName: string;
+      sizeBytes: number;
+      durationSec: number;
+      width: number;
+      height: number;
+      caption: string;
+      hasExplicitNoSound: boolean;
+    };
+
+const NON_VIDEO_FILE_EXT_RE =
+  /\.(txt|text|log|md|csv|json|xml|html?|pdf|zip|rar|7z|tar|gz|apk|exe|tgs|webp|png|jpe?g|gif|bmp|svg|ico|mp3|wav|aac|flac|ogg|m4a|opus|srt|ass|ssa|vtt|nfo|sub|idx)$/i;
+
+function classifyTelegramDocMedia(msg: any): ClassifiedDocMedia {
+  if (!msg || !msg.id) {
+    return { kind: 'other', mime: '', fileName: '', sizeBytes: 0 };
+  }
+  const media: any = msg.media;
+  const doc: any = media?.document || msg.document;
+  if (!doc || !doc.id) {
+    return { kind: 'other', mime: '', fileName: '', sizeBytes: 0 };
+  }
+
+  const attrs: any[] = Array.isArray(doc.attributes) ? doc.attributes : [];
+  const mime = String(doc.mimeType || '').toLowerCase();
+  const fnAttr = attrs.find(
+    (a) => a instanceof Api.DocumentAttributeFilename || a?.className === 'DocumentAttributeFilename'
+  );
+  const fileName = String(fnAttr?.fileName || '');
+  const lowerFileName = fileName.toLowerCase();
+  const vidAttr = attrs.find(
+    (a) => a instanceof Api.DocumentAttributeVideo || a?.className === 'DocumentAttributeVideo'
+  );
+  const sizeBytes = Number(doc.size || 0);
+
+  const isSticker =
+    mime === 'application/x-tgsticker' ||
+    mime === 'image/webp' ||
+    lowerFileName === 'sticker.webm' ||
+    /\.(tgs|webp)$/i.test(lowerFileName) ||
+    attrs.some(
+      (a) =>
+        a instanceof Api.DocumentAttributeSticker ||
+        a?.className === 'DocumentAttributeSticker' ||
+        a?.className === 'DocumentAttributeCustomEmoji'
+    ) ||
+    (mime === 'video/webm' && Boolean(vidAttr?.nosound) && sizeBytes > 0 && sizeBytes < 2 * 1024 * 1024);
+
+  if (isSticker) {
+    return { kind: 'sticker', mime, fileName, sizeBytes };
+  }
+
+  const isAnimatedGif = attrs.some(
+    (a) => a instanceof Api.DocumentAttributeAnimated || a?.className === 'DocumentAttributeAnimated'
+  );
+  const isRoundNote = Boolean(vidAttr?.roundMessage);
+  const isBlockedMime =
+    mime.startsWith('text/') ||
+    mime.startsWith('image/') ||
+    mime.startsWith('audio/') ||
+    mime === 'application/pdf' ||
+    mime === 'application/json' ||
+    mime === 'application/zip' ||
+    mime === 'application/x-rar-compressed' ||
+    mime === 'application/x-7z-compressed' ||
+    mime === 'application/vnd.android.package-archive';
+
+  if (isAnimatedGif || isRoundNote || isBlockedMime || NON_VIDEO_FILE_EXT_RE.test(lowerFileName)) {
+    return { kind: 'other', mime, fileName, sizeBytes };
+  }
+
+  const isVideo =
+    mime.startsWith('video/') ||
+    Boolean(vidAttr) ||
+    (/\.(mp4|mkv|avi|mov|webm|m4v|ts|flv)$/i.test(lowerFileName) && sizeBytes > 100 * 1024);
+
+  if (!isVideo) {
+    return { kind: 'other', mime, fileName, sizeBytes };
+  }
+
+  const caption = String(msg.message || '');
+  const durationSec = Math.max(0, Math.round(Number(vidAttr?.duration || 0)));
+  const width = Number(vidAttr?.w || 0);
+  const height = Number(vidAttr?.h || 0);
+  const hasExplicitNoSound =
+    Boolean(vidAttr?.nosound) ||
+    /\b(no[\s_-]*audio|without[\s_-]*audio|muted|silent|video[\s_-]*only)\b/i.test(`${caption} ${fileName}`);
+
+  return {
+    kind: 'video',
+    doc,
+    mime,
+    fileName,
+    sizeBytes,
+    durationSec,
+    width,
+    height,
+    caption,
+    hasExplicitNoSound,
+  };
+}
+
+function getQualityRankForFilter(quality: string, qFilter: string): number {
+  const q = quality.toLowerCase();
+  if (qFilter === '1080p') {
+    if (q === '1080p') return 5;
+    if (q === '720p') return 4;
+    if (q === '480p') return 3;
+    if (q === '4k') return 2;
+    if (q === '360p') return 1;
+    return 0;
+  }
+  if (qFilter === '720p') {
+    if (q === '720p') return 5;
+    if (q === '1080p') return 4;
+    if (q === '480p') return 3;
+    if (q === '4k') return 2;
+    if (q === '360p') return 1;
+    return 0;
+  }
+  if (qFilter === '480p') {
+    if (q === '480p') return 5;
+    if (q === '720p') return 4;
+    if (q === '1080p') return 3;
+    if (q === '4k') return 2;
+    if (q === '360p') return 1;
+    return 0;
+  }
+  // 'best'
+  if (q === '4k') return 5;
+  if (q === '1080p') return 4;
+  if (q === '720p') return 3;
+  if (q === '480p') return 2;
+  if (q === '360p') return 1;
+  return 0;
+}
+
+function primeMediaCacheFromTelegramDoc(
+  streamUrl: string,
+  doc: any,
+  fileName: string,
+  durationSec: number,
+  rawMime: string
+): CachedMediaEntry | null {
+  const parsed = parseTelegramUrl(streamUrl);
+  if (!parsed.isValid || !parsed.chatId || !parsed.messageId || !doc) return null;
+  const cacheKey = `${parsed.chatId}:${parsed.messageId}`;
+  const existing = mediaCache.get(cacheKey);
+  if (existing && Date.now() - existing.cachedAt <= MEDIA_CACHE_TTL_MS) {
+    return existing;
+  }
+  const lowerName = fileName.toLowerCase();
+  const isWebm = lowerName.endsWith('.webm') || rawMime.includes('webm');
+  const entry: CachedMediaEntry = {
+    docInfo: {
+      document: doc,
+      fileSize: Number(doc.size || 0),
+      durationSec,
+      fileName,
+      rawMime,
+    },
+    mimeType: isWebm ? 'video/webm' : 'video/mp4',
+    cachedAt: Date.now(),
+  };
+  mediaCache.set(cacheKey, entry);
+  return entry;
+}
+
+async function checkCandidateHasAudio(
+  candidate: {
+    streamUrl: string;
+    doc: any;
+    mime: string;
+    fileName: string;
+    durationSec: number;
+    hasExplicitNoSound: boolean;
+  },
+  client: any
+): Promise<boolean> {
+  if (candidate.hasExplicitNoSound) {
+    return false;
+  }
+  try {
+    const entry = primeMediaCacheFromTelegramDoc(
+      candidate.streamUrl,
+      candidate.doc,
+      candidate.fileName,
+      candidate.durationSec,
+      candidate.mime
+    );
+    if (!entry) return true;
+    if (typeof entry.hasAudio === 'boolean') {
+      return entry.hasAudio;
+    }
+    if (entry.probe?.probedByFfprobe) {
+      const has = entry.probe.audioTracks.length > 0;
+      entry.hasAudio = has;
+      return has;
+    }
+
+    const fastAudio = await checkTelegramDocHasAudioFast(client, entry.docInfo);
+    if (fastAudio !== null) {
+      entry.hasAudio = fastAudio;
+      return fastAudio;
+    }
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<R>,
+  shouldAbort?: () => boolean
+): Promise<R[]> {
+  if (items.length === 0) return [];
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      if (shouldAbort?.()) break;
+      const idx = cursor++;
+      results[idx] = await worker(items[idx]);
+    }
+  });
+  await Promise.all(runners);
+  return results;
+}
+
+async function selectBestCandidateForGroup<
+  T extends {
+    streamUrl: string;
+    doc: any;
+    mime: string;
+    fileName: string;
+    durationSec: number;
+    quality: string;
+    sizeBytes: number;
+    hasExplicitNoSound: boolean;
+  }
+>(
+  arr: T[],
+  qFilter: string,
+  client: any,
+  shouldAbort?: () => boolean
+): Promise<{
+  chosen: T;
+  switchedForAudio: boolean;
+  fellBackQuality: boolean;
+}> {
+  if (arr.length === 1) {
+    const only = arr[0];
+    const fellBackQuality =
+      (qFilter === '1080p' || qFilter === '720p' || qFilter === '480p') &&
+      Boolean(only.quality) &&
+      only.quality.toLowerCase() !== qFilter;
+    return { chosen: only, switchedForAudio: false, fellBackQuality };
+  }
+
+  const sorted = [...arr].sort((a, b) => {
+    const rankDiff = getQualityRankForFilter(b.quality, qFilter) - getQualityRankForFilter(a.quality, qFilter);
+    if (rankDiff !== 0) return rankDiff;
+    return b.sizeBytes - a.sizeBytes;
+  });
+
+  let skippedNoAudioCount = 0;
+  for (let i = 0; i < sorted.length; i++) {
+    if (shouldAbort?.()) break;
+    const candidate = sorted[i];
+    const hasAudio = await checkCandidateHasAudio(candidate, client);
+    if (hasAudio) {
+      const switchedForAudio = skippedNoAudioCount > 0;
+      const fellBackQuality =
+        (qFilter === '1080p' || qFilter === '720p' || qFilter === '480p') &&
+        Boolean(candidate.quality) &&
+        candidate.quality.toLowerCase() !== qFilter;
+      return { chosen: candidate, switchedForAudio, fellBackQuality };
+    }
+    skippedNoAudioCount++;
+  }
+
+  // If all copies are silent (or scan aborted), return the top-ranked quality rather than dropping the episode
+  const fallbackTop = sorted[0];
+  const fellBackQuality =
+    (qFilter === '1080p' || qFilter === '720p' || qFilter === '480p') &&
+    Boolean(fallbackTop.quality) &&
+    fallbackTop.quality.toLowerCase() !== qFilter;
+  return { chosen: fallbackTop, switchedForAudio: false, fellBackQuality };
+}
+
 /**
  * POST /api/telegram/scan-range
  * Scans a range of Telegram message IDs in a channel and returns ONLY real video episodes,
- * automatically skipping stickers (.webp/.tgs/.webm), GIFs, photos, audio, text, and deleted posts.
- * Supports optional qualityFilter ('all' | 'best' | '1080p' | '720p' | '480p') for multi-quality channels.
+ * automatically skipping stickers (.webp/.tgs/.webm), GIFs, photos, audio, .txt/text posts, and deleted posts.
+ * Supports qualityFilter ('1080p' | 'best' | '720p' | '480p' | 'all') with 1080p -> 720p fallback
+ * and automatic audio verification (switches to 720p with audio if 1080p has no audio).
  */
 router.post('/scan-range', async (req: Request, res: Response) => {
   const { startUrl, endUrl, count, qualityFilter } = req.body || {};
@@ -427,12 +727,15 @@ router.post('/scan-range', async (req: Request, res: Response) => {
     const rawVideos: Array<{
       msgId: number;
       streamUrl: string;
+      doc: any;
+      mime: string;
       durationSec: number;
       duration: string;
       fileName: string;
       sizeBytes: number;
       quality: string;
       qualityScore: number;
+      hasExplicitNoSound: boolean;
       episodeKey: string | null;
       epNum: number | null;
       absEpNum: number | null;
@@ -481,20 +784,8 @@ router.post('/scan-range', async (req: Request, res: Response) => {
           continue;
         }
 
-        const attrs: any[] = Array.isArray(doc.attributes) ? doc.attributes : [];
-        const mime = String(doc.mimeType || '').toLowerCase();
-
-        const isSticker =
-          mime === 'application/x-tgsticker' ||
-          mime === 'image/webp' ||
-          attrs.some(
-            (a) =>
-              a instanceof Api.DocumentAttributeSticker ||
-              a?.className === 'DocumentAttributeSticker' ||
-              a?.className === 'DocumentAttributeCustomEmoji'
-          );
-
-        if (isSticker) {
+        const classified = classifyTelegramDocMedia(msg);
+        if (classified.kind === 'sticker') {
           skippedStickers++;
           activeHeaderEpNum = null;
           if (lastMsgWasVideo) {
@@ -503,44 +794,22 @@ router.post('/scan-range', async (req: Request, res: Response) => {
           }
           continue;
         }
-
-        const isAnimatedGif = attrs.some(
-          (a) => a instanceof Api.DocumentAttributeAnimated || a?.className === 'DocumentAttributeAnimated'
-        );
-        if (isAnimatedGif || mime.startsWith('image/') || mime.startsWith('audio/')) {
+        if (classified.kind !== 'video') {
           skippedOther++;
           continue;
         }
 
-        const fnAttr = attrs.find(
-          (a) => a instanceof Api.DocumentAttributeFilename || a?.className === 'DocumentAttributeFilename'
-        );
-        const fileName = String(fnAttr?.fileName || '');
-        const vidAttr = attrs.find(
-          (a) => a instanceof Api.DocumentAttributeVideo || a?.className === 'DocumentAttributeVideo'
-        );
-        const sizeBytes = Number(doc.size || 0);
-
-        const isVideo =
-          mime.startsWith('video/') ||
-          Boolean(vidAttr) ||
-          (/\.(mp4|mkv|avi|mov|webm|m4v|ts|flv)$/i.test(fileName) && sizeBytes > 100 * 1024);
-
-        if (!isVideo) {
-          skippedOther++;
-          continue;
-        }
-
-        const durationSec = Math.max(0, Math.round(Number(vidAttr?.duration || 0)));
         const streamUrl = publicUsername
           ? `https://t.me/${publicUsername}/${msg.id}`
           : `https://t.me/c/${startParsed.rawChannelId}/${msg.id}`;
 
-        const caption = String(msg.message || '');
-        const vidW = Number(vidAttr?.w || 0);
-        const vidH = Number(vidAttr?.h || 0);
-        const { quality, score } = parseQualityScore(caption, fileName, vidW, vidH);
-        const { key: parsedKey, epNum, absEpNum } = parseEpisodeIdentity(caption, fileName);
+        const { quality, score } = parseQualityScore(
+          classified.caption,
+          classified.fileName,
+          classified.width,
+          classified.height
+        );
+        const { key: parsedKey, epNum, absEpNum } = parseEpisodeIdentity(classified.caption, classified.fileName);
 
         // If header announced a different episode >= 100 than this video's >= 100 episode, clear stale header
         if (activeHeaderEpNum !== null && absEpNum !== null && activeHeaderEpNum >= 100 && absEpNum !== activeHeaderEpNum) {
@@ -562,12 +831,15 @@ router.post('/scan-range', async (req: Request, res: Response) => {
         rawVideos.push({
           msgId: Number(msg.id),
           streamUrl,
-          durationSec,
-          duration: durationSec > 0 ? formatDuration(durationSec) : '',
-          fileName: fileName || `Episode_Msg_${msg.id}`,
-          sizeBytes,
+          doc: classified.doc,
+          mime: classified.mime,
+          durationSec: classified.durationSec,
+          duration: classified.durationSec > 0 ? formatDuration(classified.durationSec) : '',
+          fileName: classified.fileName || `Episode_Msg_${msg.id}`,
+          sizeBytes: classified.sizeBytes,
           quality,
           qualityScore: score,
+          hasExplicitNoSound: classified.hasExplicitNoSound,
           episodeKey,
           epNum,
           absEpNum,
@@ -625,6 +897,13 @@ router.post('/scan-range', async (req: Request, res: Response) => {
 
     let filteredVideos = rawVideos;
     let skippedDuplicates = 0;
+    let fallbackCount = 0;
+    let silentSkippedCount = 0;
+
+    let aborted = false;
+    res.on('close', () => {
+      if (!res.writableEnded) aborted = true;
+    });
 
     if (qFilter === '1080p' || qFilter === '720p' || qFilter === '480p' || qFilter === 'best') {
       // Group videos by episodeKey (or unique msgId if untitled standalone video)
@@ -636,36 +915,41 @@ router.post('/scan-range', async (req: Request, res: Response) => {
         groups.set(gKey, arr);
       }
 
-      const pickBestFromGroup = (arr: typeof rawVideos) => {
-        if (arr.length === 1) return arr[0];
+      const selections = await mapWithConcurrency(
+        Array.from(groups.values()),
+        4,
+        (arr) => selectBestCandidateForGroup(arr, qFilter, client, () => aborted),
+        () => aborted
+      );
 
-        if (qFilter === '1080p' || qFilter === '720p' || qFilter === '480p') {
-          const exact = arr.filter((v) => v.quality.toLowerCase() === qFilter);
-          if (exact.length > 0) {
-            return exact.reduce((best, cur) => (cur.sizeBytes > best.sizeBytes ? cur : best));
-          }
-          // Preferred quality wasn't uploaded for this episode -> fall back to best available quality
-          // so the episode itself is NEVER dropped from the season!
-        }
+      if (aborted) return;
 
-        return arr.reduce((best, cur) => {
-          if (cur.qualityScore !== best.qualityScore) {
-            return cur.qualityScore > best.qualityScore ? cur : best;
-          }
-          return cur.sizeBytes > best.sizeBytes ? cur : best;
-        });
-      };
+      for (const sel of selections) {
+        if (!sel) continue;
+        if (sel.switchedForAudio) silentSkippedCount++;
+        if (sel.fellBackQuality) fallbackCount++;
+      }
 
-      filteredVideos = Array.from(groups.values())
-        .map(pickBestFromGroup)
-        .sort((a, b) => a.msgId - b.msgId);
+      filteredVideos = selections.filter(Boolean).map((s) => s.chosen).sort((a, b) => a.msgId - b.msgId);
       skippedDuplicates = rawVideos.length - filteredVideos.length;
     }
 
-    const episodes = filteredVideos.map(({ qualityScore: _qs, episodeKey: _ek, absEpNum: _ae, headerEpNum: _he, burstId: _bi, ...rest }) => rest);
+    const episodes = filteredVideos.map(
+      ({
+        doc: _doc,
+        mime: _mime,
+        qualityScore: _qs,
+        hasExplicitNoSound: _ns,
+        episodeKey: _ek,
+        absEpNum: _ae,
+        headerEpNum: _he,
+        burstId: _bi,
+        ...rest
+      }) => rest
+    );
 
     console.log(
-      `[TelegramScanRange] Channel "${channelTitle}" (${startMsgId}-${endMsgId}, filter=${qFilter}): ${episodes.length} videos found, ${skippedStickers} stickers skipped, ${skippedDuplicates} extra quality copies skipped, ${skippedOther} other posts skipped.`
+      `[TelegramScanRange] Channel "${channelTitle}" (${startMsgId}-${endMsgId}, filter=${qFilter}): ${episodes.length} videos found, ${skippedStickers} stickers skipped, ${skippedDuplicates} extra quality copies skipped, ${fallbackCount} quality fallbacks, ${silentSkippedCount} silent-audio switches, ${skippedOther} text/other posts skipped.`
     );
 
     return res.json({
@@ -676,6 +960,8 @@ router.post('/scan-range', async (req: Request, res: Response) => {
       skippedStickers,
       skippedDuplicates,
       skippedOther,
+      fallbackCount,
+      silentSkippedCount,
       skippedCount: skippedStickers + skippedDuplicates + skippedOther,
       episodes,
     });
@@ -689,15 +975,28 @@ router.post('/scan-range', async (req: Request, res: Response) => {
 
 /**
  * POST /api/telegram/filter-urls
- * Filters an existing list of Telegram URLs already in Admin Panel, keeping ONLY the requested quality
- * (default '1080p') and removing 480p/720p/360p duplicates and stickers.
+ * Filters an existing or pasted list of Telegram URLs:
+ * - Removes stickers (.webp/.tgs/.webm), GIFs, photos, audio, and .txt/text posts
+ * - Groups multi-quality copies per episode
+ * - Prefers requested quality (default '1080p'), falling back to '720p' (or best available) if missing
+ * - Checks audio presence and switches silent 1080p -> 720p with audio
  */
 router.post('/filter-urls', async (req: Request, res: Response) => {
   const urls: string[] = Array.isArray(req.body?.urls) ? req.body.urls.map((u: any) => String(u || '').trim()) : [];
   const qFilter = String(req.body?.qualityFilter || '1080p').toLowerCase();
 
   if (urls.length === 0) {
-    return res.json({ success: true, keptUrls: [], removedCount: 0, totalChecked: 0 });
+    return res.json({
+      success: true,
+      keptUrls: [],
+      keptItems: [],
+      removedCount: 0,
+      totalChecked: 0,
+      skippedStickers: 0,
+      skippedOther: 0,
+      fallbackCount: 0,
+      silentSkippedCount: 0,
+    });
   }
 
   try {
@@ -719,7 +1018,9 @@ router.post('/filter-urls', async (req: Request, res: Response) => {
     urls.forEach((url, idx) => {
       const parsed = parseTelegramUrl(url);
       if (!parsed.isValid || parsed.isInviteLink || !parsed.messageId) {
-        nonTelegramIndices.add(idx);
+        if (/^https?:\/\//i.test(url) && !NON_VIDEO_FILE_EXT_RE.test(url.split('?')[0])) {
+          nonTelegramIndices.add(idx);
+        }
         return;
       }
       const cleanId = parsed.rawChannelId ? parsed.rawChannelId.replace('-100', '') : parsed.chatId;
@@ -739,11 +1040,17 @@ router.post('/filter-urls', async (req: Request, res: Response) => {
 
     interface MetaRecord {
       idx: number;
-      url: string;
+      channelKey: string;
+      msgId: number;
+      streamUrl: string;
+      doc: any;
+      mime: string;
+      fileName: string;
       isVideo: boolean;
       isSticker: boolean;
       quality: string;
       qualityScore: number;
+      hasExplicitNoSound: boolean;
       episodeKey: string | null;
       sizeBytes: number;
       durationSec: number;
@@ -751,6 +1058,8 @@ router.post('/filter-urls', async (req: Request, res: Response) => {
     }
 
     const recordsByIdx = new Map<number, MetaRecord>();
+    let skippedStickers = 0;
+    let skippedOther = 0;
 
     for (const [channelKey, items] of byChannel.entries()) {
       let peer: any = null;
@@ -786,15 +1095,23 @@ router.post('/filter-urls', async (req: Request, res: Response) => {
 
         for (const item of slice) {
           const msg = msgMap.get(item.msgId);
-          const doc: any = msg?.media?.document || msg?.document;
-          if (!msg || !doc || !doc.id) {
+          const classified = classifyTelegramDocMedia(msg);
+          if (classified.kind !== 'video') {
+            if (classified.kind === 'sticker') skippedStickers++;
+            else skippedOther++;
             recordsByIdx.set(item.idx, {
               idx: item.idx,
-              url: item.url,
+              channelKey,
+              msgId: item.msgId,
+              streamUrl: item.url,
+              doc: null,
+              mime: '',
+              fileName: classified.fileName || '',
               isVideo: false,
-              isSticker: false,
+              isSticker: classified.kind === 'sticker',
               quality: '',
               qualityScore: 0,
+              hasExplicitNoSound: false,
               episodeKey: null,
               sizeBytes: 0,
               durationSec: 0,
@@ -803,83 +1120,96 @@ router.post('/filter-urls', async (req: Request, res: Response) => {
             continue;
           }
 
-          const attrs: any[] = Array.isArray(doc.attributes) ? doc.attributes : [];
-          const mime = String(doc.mimeType || '').toLowerCase();
-          const isSticker =
-            mime === 'application/x-tgsticker' ||
-            mime === 'image/webp' ||
-            attrs.some(
-              (a) =>
-                a instanceof Api.DocumentAttributeSticker ||
-                a?.className === 'DocumentAttributeSticker' ||
-                a?.className === 'DocumentAttributeCustomEmoji'
-            );
-
-          const isAnimated = attrs.some(
-            (a) => a instanceof Api.DocumentAttributeAnimated || a?.className === 'DocumentAttributeAnimated'
+          const { quality, score } = parseQualityScore(
+            classified.caption,
+            classified.fileName,
+            classified.width,
+            classified.height
           );
-          const fnAttr = attrs.find(
-            (a) => a instanceof Api.DocumentAttributeFilename || a?.className === 'DocumentAttributeFilename'
-          );
-          const fileName = String(fnAttr?.fileName || '');
-          const vidAttr = attrs.find(
-            (a) => a instanceof Api.DocumentAttributeVideo || a?.className === 'DocumentAttributeVideo'
-          );
-          const sizeBytes = Number(doc.size || 0);
-          const isVideo =
-            !isSticker &&
-            !isAnimated &&
-            !mime.startsWith('image/') &&
-            !mime.startsWith('audio/') &&
-            (mime.startsWith('video/') ||
-              Boolean(vidAttr) ||
-              (/\.(mp4|mkv|avi|mov|webm|m4v|ts|flv)$/i.test(fileName) && sizeBytes > 100 * 1024));
-
-          const durationSec = Math.max(0, Math.round(Number(vidAttr?.duration || 0)));
-          const caption = String(msg.message || '');
-          const { quality, score } = parseQualityScore(caption, fileName, Number(vidAttr?.w || 0), Number(vidAttr?.h || 0));
-          const { key: episodeKey } = parseEpisodeIdentity(caption, fileName);
+          const { key: episodeKey } = parseEpisodeIdentity(classified.caption, classified.fileName);
 
           recordsByIdx.set(item.idx, {
             idx: item.idx,
-            url: item.url,
-            isVideo,
-            isSticker,
+            channelKey,
+            msgId: item.msgId,
+            streamUrl: item.url,
+            doc: classified.doc,
+            mime: classified.mime,
+            fileName: classified.fileName || `Episode_Msg_${item.msgId}`,
+            isVideo: true,
+            isSticker: false,
             quality,
             qualityScore: score,
+            hasExplicitNoSound: classified.hasExplicitNoSound,
             episodeKey,
-            sizeBytes,
-            durationSec,
-            duration: durationSec > 0 ? formatDuration(durationSec) : '',
+            sizeBytes: classified.sizeBytes,
+            durationSec: classified.durationSec,
+            duration: classified.durationSec > 0 ? formatDuration(classified.durationSec) : '',
           });
         }
       }
     }
 
-    const validVideos = Array.from(recordsByIdx.values()).filter((r) => r.isVideo);
-    const hasAnyQualityLabel = validVideos.some((v) => Boolean(v.quality));
+    const validVideos = Array.from(recordsByIdx.values())
+      .filter((r) => r.isVideo)
+      .sort((a, b) => a.idx - b.idx);
+
     const keptIndices = new Set<number>(nonTelegramIndices);
+    let fallbackCount = 0;
+    let silentSkippedCount = 0;
 
-    let candidates = validVideos;
-    if (qFilter === '1080p' || qFilter === '720p' || qFilter === '480p') {
-      candidates = hasAnyQualityLabel
-        ? validVideos.filter((v) => v.quality.toLowerCase() === qFilter)
-        : validVideos;
-    }
-
-    const bestByEp = new Map<string, MetaRecord>();
-    for (const v of candidates) {
-      if (!v.episodeKey) {
+    if (qFilter === 'all') {
+      for (const v of validVideos) {
         keptIndices.add(v.idx);
-        continue;
       }
-      const prev = bestByEp.get(v.episodeKey);
-      if (!prev || v.qualityScore > prev.qualityScore || (v.qualityScore === prev.qualityScore && v.sizeBytes > prev.sizeBytes)) {
-        bestByEp.set(v.episodeKey, v);
+    } else {
+      // Pair adjacent untitled videos from the same channel if they have different qualities & matching duration
+      for (let i = 0; i < validVideos.length; i++) {
+        const curr = validVideos[i];
+        if (curr.episodeKey) continue;
+        const prev = i > 0 ? validVideos[i - 1] : null;
+        if (
+          prev &&
+          prev.channelKey === curr.channelKey &&
+          Math.abs(curr.msgId - prev.msgId) <= 3 &&
+          prev.quality &&
+          curr.quality &&
+          prev.quality !== curr.quality &&
+          (curr.durationSec === 0 || prev.durationSec === 0 || Math.abs(curr.durationSec - prev.durationSec) <= 15)
+        ) {
+          if (!prev.episodeKey) prev.episodeKey = `pair-${prev.channelKey}-${prev.msgId}`;
+          curr.episodeKey = prev.episodeKey;
+        }
       }
-    }
-    for (const v of bestByEp.values()) {
-      keptIndices.add(v.idx);
+
+      const groups = new Map<string, MetaRecord[]>();
+      for (const v of validVideos) {
+        const gKey = v.episodeKey ? `${v.channelKey}:${v.episodeKey}` : `single:${v.idx}`;
+        const arr = groups.get(gKey) || [];
+        arr.push(v);
+        groups.set(gKey, arr);
+      }
+
+      let aborted = false;
+      res.on('close', () => {
+        if (!res.writableEnded) aborted = true;
+      });
+
+      const selections = await mapWithConcurrency(
+        Array.from(groups.values()),
+        4,
+        (arr) => selectBestCandidateForGroup(arr, qFilter, client, () => aborted),
+        () => aborted
+      );
+
+      if (aborted) return;
+
+      for (const sel of selections) {
+        if (!sel) continue;
+        if (sel.switchedForAudio) silentSkippedCount++;
+        if (sel.fellBackQuality) fallbackCount++;
+        keptIndices.add(sel.chosen.idx);
+      }
     }
 
     const keptUrls = urls
@@ -889,6 +1219,7 @@ router.post('/filter-urls', async (req: Request, res: Response) => {
         url: x.url,
         duration: x.rec?.duration || '',
         durationSec: x.rec?.durationSec || 0,
+        quality: x.rec?.quality || '',
       }));
 
     return res.json({
@@ -896,6 +1227,10 @@ router.post('/filter-urls', async (req: Request, res: Response) => {
       totalChecked: urls.length,
       keptCount: keptUrls.length,
       removedCount: urls.length - keptUrls.length,
+      skippedStickers,
+      skippedOther,
+      fallbackCount,
+      silentSkippedCount,
       keptItems: keptUrls,
     });
   } catch (err: any) {
@@ -1063,6 +1398,7 @@ router.post('/verify', async (req: Request, res: Response) => {
 interface CachedMediaEntry {
   docInfo: TelegramDocInfo;
   mimeType: string;
+  hasAudio?: boolean;
   probe?: ProbeMediaResult;
   probePromise?: Promise<ProbeMediaResult>;
   cachedAt: number;
@@ -1149,13 +1485,14 @@ async function resolveAndCacheDocument(
 
 async function ensureMediaProbed(
   entry: CachedMediaEntry,
-  telegramUrl: string
+  telegramUrl: string,
+  probeOptions?: { timeoutMs?: number; probesize?: number; analyzeduration?: number }
 ): Promise<ProbeMediaResult> {
   if (entry.probe) return entry.probe;
   if (entry.probePromise) return entry.probePromise;
 
   const localPort = process.env.INTERNAL_APP_PORT || process.env.APP_PORT || '3000';
-  entry.probePromise = probeTelegramMedia(localPort, telegramUrl, entry.docInfo)
+  entry.probePromise = probeTelegramMedia(localPort, telegramUrl, entry.docInfo, probeOptions)
     .then((result) => {
       entry.probe = result;
       if (result.durationSec > 0) {

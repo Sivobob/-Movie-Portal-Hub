@@ -29,6 +29,7 @@ import {
   parseDurationToSeconds,
   probeTelegramDurationSec,
 } from '../utils/duration';
+import { isEpisodeNewActive } from '../services/movieStorage';
 
 interface MovieDetailsModalProps {
   movie: any | null;
@@ -758,7 +759,7 @@ export default function MovieDetailsModal({
                           <div className="flex-1 min-w-0 text-left">
                             <h4 className="text-xs sm:text-sm font-bold text-white truncate group-hover:text-red-400 transition-colors flex items-center gap-2">
                               <span className="truncate">{ep.title}</span>
-                              {ep.createdAt && (Date.now() - Number(ep.createdAt) < 24 * 3600 * 1000) && (
+                              {isEpisodeNewActive(ep) && (
                                 <span className="bg-red-600 text-white font-black text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wider animate-pulse flex-shrink-0">
                                   NEW
                                 </span>
