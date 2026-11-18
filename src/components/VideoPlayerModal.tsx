@@ -451,10 +451,28 @@ export default function VideoPlayerModal({
     }
   };
 
+  const viewportLastTapRef = useRef<{ time: number; side: 'left' | 'right' | null }>({ time: 0, side: null });
+  const viewportSingleTapTimerRef = useRef<any>(null);
+  const [seekFeedback, setSeekFeedback] = useState<{ side: 'left' | 'right'; label: string } | null>(null);
+  const seekFeedbackTimerRef = useRef<any>(null);
+
+  const triggerDoubleTapSeek = (direction: 'forward' | 'rewind') => {
+    ensureUnmutedOnInteraction();
+    if (direction === 'forward') {
+      handleSkip(10);
+      setSeekFeedback({ side: 'right', label: '+10s' });
+    } else {
+      handleSkip(-10);
+      setSeekFeedback({ side: 'left', label: '-10s' });
+    }
+    if (seekFeedbackTimerRef.current) clearTimeout(seekFeedbackTimerRef.current);
+    seekFeedbackTimerRef.current = setTimeout(() => setSeekFeedback(null), 700);
+  };
+
   // Screen Tap Handler:
-  // When locked: toggle visibility of unlock prompt for 3s
-  // When hidden: tap anywhere on video area reveals controls and starts 3s timer
-  // When visible: tap on video area hides controls immediately without interrupting playback
+  // When double tapped on right: +10s forward
+  // When double tapped on left: -10s rewind
+  // When single tapped: toggle controls visibility
   const handleViewportTap = (e: React.MouseEvent<HTMLDivElement>) => {
     e.stopPropagation();
     ensureUnmutedOnInteraction();
@@ -466,11 +484,27 @@ export default function VideoPlayerModal({
       }, 3000);
       return;
     }
-    if (!showControlsRef.current) {
-      showControlsWithTimer();
-    } else {
-      hideControlsNow();
+
+    const now = Date.now();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const tapSide: 'left' | 'right' = (e.clientX - rect.left) > rect.width / 2 ? 'right' : 'left';
+
+    if (now - viewportLastTapRef.current.time < 350 && viewportLastTapRef.current.side === tapSide) {
+      if (viewportSingleTapTimerRef.current) clearTimeout(viewportSingleTapTimerRef.current);
+      viewportLastTapRef.current = { time: 0, side: null };
+      triggerDoubleTapSeek(tapSide === 'right' ? 'forward' : 'rewind');
+      return;
     }
+
+    viewportLastTapRef.current = { time: now, side: tapSide };
+    if (viewportSingleTapTimerRef.current) clearTimeout(viewportSingleTapTimerRef.current);
+    viewportSingleTapTimerRef.current = setTimeout(() => {
+      if (!showControlsRef.current) {
+        showControlsWithTimer();
+      } else {
+        hideControlsNow();
+      }
+    }, 250);
   };
 
   // Resolve playable stream URL & preflight metadata (once per movie/episode or manual Retry)
@@ -594,6 +628,12 @@ export default function VideoPlayerModal({
         if (!cancelled) {
           userPickedQualityRef.current = false;
           setSelectedQuality('Offline');
+          if (initialTime > 0) {
+            const targetSec = Math.floor(initialTime);
+            resumeOffsetRef.current = targetSec;
+            setCurrentTime(targetSec);
+            currentTimeRef.current = targetSec;
+          }
           setPlayableUrl(trimmed);
         }
         return;
@@ -619,6 +659,12 @@ export default function VideoPlayerModal({
         streamFallbackModeRef.current = 'direct';
         setStreamStartOffset(0);
         streamStartOffsetRef.current = 0;
+        if (initialTime > 0) {
+          const targetSec = Math.floor(initialTime);
+          resumeOffsetRef.current = targetSec;
+          setCurrentTime(targetSec);
+          currentTimeRef.current = targetSec;
+        }
         setPreflightReadyKey((k) => k + 1);
         return;
       }
@@ -791,11 +837,20 @@ export default function VideoPlayerModal({
 
       if (cancelled) return;
 
-      // Apply saved resume position upfront when opening in remux/transcode or native direct
-      if (episodeResumeKey) {
+      // Apply initialTime directly when transitioning from inline small screen, or fallback to saved resume position
+      if (initialTime > 0) {
+        const targetSec = Math.floor(initialTime);
+        if (chosenMode !== 'direct') {
+          initialStart = targetSec;
+        } else {
+          resumeOffsetRef.current = targetSec;
+          setCurrentTime(targetSec);
+          currentTimeRef.current = targetSec;
+        }
+      } else if (episodeResumeKey) {
         try {
-          const savedPos = initialTime > 0 ? initialTime : parseFloat(localStorage.getItem(`resume_pos_${episodeResumeKey}`) || '0');
-          if (savedPos > 5 && (!probedDuration || savedPos < probedDuration - 20)) {
+          const savedPos = parseFloat(localStorage.getItem(`resume_pos_${episodeResumeKey}`) || '0');
+          if (savedPos > 3 && (!probedDuration || savedPos < probedDuration - 20)) {
             if (chosenMode !== 'direct') {
               initialStart = Math.floor(savedPos);
             } else {
@@ -869,12 +924,12 @@ export default function VideoPlayerModal({
 
     if (effectiveMode === 'remux') {
       params += `&remux=1`;
-      if (streamStartOffset > 1) params += `&start=${Math.floor(streamStartOffset)}`;
+      if (streamStartOffset >= 1) params += `&start=${Math.floor(streamStartOffset)}`;
       if (selectedAudioIdx > 0) params += `&audioIdx=${selectedAudioIdx}`;
     } else if (effectiveMode === 'transcode') {
       params += `&transcode=1`;
       if (isExplicitTier) params += `&quality=${qTier}`;
-      if (streamStartOffset > 1) params += `&start=${Math.floor(streamStartOffset)}`;
+      if (streamStartOffset >= 1) params += `&start=${Math.floor(streamStartOffset)}`;
       if (selectedAudioIdx > 0) params += `&audioIdx=${selectedAudioIdx}`;
     }
 
@@ -1635,7 +1690,7 @@ export default function VideoPlayerModal({
       }
 
       // Resume pending quality switch position OR saved episode position for direct streams
-      if (resumeOffsetRef.current > 1 && streamFallbackModeRef.current === 'direct') {
+      if (resumeOffsetRef.current > 0.5 && streamFallbackModeRef.current === 'direct') {
         const target = resumeOffsetRef.current;
         resumeOffsetRef.current = 0;
         const knownDur = (vidDuration && isFinite(vidDuration) ? vidDuration : durationRef.current);
@@ -2238,6 +2293,24 @@ export default function VideoPlayerModal({
                   disablePictureInPicture
                   className={`w-full h-full ${objectFitClass} pointer-events-none bg-black transition-all`}
                 />
+              )}
+
+              {/* Double-Tap / Double-Click Seek Ripple Feedback (+10s / -10s) */}
+              {seekFeedback && (
+                <div
+                  className={`absolute top-1/2 -translate-y-1/2 z-45 flex flex-col items-center justify-center pointer-events-none animate-in fade-in zoom-in-75 duration-150 ${
+                    seekFeedback.side === 'right' ? 'right-12 sm:right-24' : 'left-12 sm:left-24'
+                  }`}
+                >
+                  <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-black/70 border border-white/20 backdrop-blur-md flex flex-col items-center justify-center text-white shadow-2xl">
+                    {seekFeedback.side === 'right' ? (
+                      <Forward10Icon className="w-8 h-8 sm:w-10 sm:h-10 text-[#00d664]" />
+                    ) : (
+                      <Rewind10Icon className="w-8 h-8 sm:w-10 sm:h-10 text-[#00d664]" />
+                    )}
+                    <span className="text-xs sm:text-sm font-black text-white mt-0.5">{seekFeedback.label}</span>
+                  </div>
+                </div>
               )}
 
               {/* Loading Indicator (White only, never stacked over center play-slot spinner) */}

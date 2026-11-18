@@ -419,6 +419,7 @@ export default function SearchPage() {
           episodeIndex={playingMovie.episodeIndex ?? 0}
           language={playingMovie.language}
           initialDuration={playingMovie.initialDuration || playingMovie.duration || 0}
+          initialTime={playingMovie.currentTime || 0}
           onEpisodeChange={(sIdx) => setActiveSeasonIndex(sIdx)}
         />
       )}

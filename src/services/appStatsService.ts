@@ -123,7 +123,7 @@ export async function registerActiveDeviceInstall(versionName?: string): Promise
           {
             deviceId,
             platform,
-            versionName: versionName || '3.5.234',
+            versionName: versionName || '3.5.235',
             lastActiveAt: serverTimestamp(),
             userAgent,
             updatedAt: Date.now(),
@@ -133,7 +133,7 @@ export async function registerActiveDeviceInstall(versionName?: string): Promise
 
         // 2. Increment global active install counter if new device
         const statsPayload: Record<string, any> = {
-          lastInstalledVersion: versionName || '3.5.234',
+          lastInstalledVersion: versionName || '3.5.235',
           lastActiveAt: serverTimestamp(),
           updatedAt: Date.now(),
         };
@@ -162,7 +162,7 @@ export async function registerActiveDeviceInstall(versionName?: string): Promise
         body: JSON.stringify({
           deviceId,
           platform,
-          versionName: versionName || '3.5.234',
+          versionName: versionName || '3.5.235',
           isNew: !alreadyCounted,
         }),
       }).catch(() => {});

@@ -481,6 +481,23 @@ export default function MovieDetailsModal({
   const inlineVideoRef = useRef<HTMLVideoElement | null>(null);
   const [inlineLoaded, setInlineLoaded] = useState(false);
   const [inlineMuted, setInlineMuted] = useState(false);
+  const mutedByAutoplayRef = useRef(false);
+  const inlineLastTapRef = useRef<{ time: number; side: 'left' | 'right' | null }>({ time: 0, side: null });
+  const inlineSingleTapTimerRef = useRef<any>(null);
+  const [inlineSeekFeedback, setInlineSeekFeedback] = useState<{ side: 'left' | 'right'; label: string } | null>(null);
+  const inlineSeekFeedbackTimerRef = useRef<any>(null);
+
+  const handleInlineSkip = (seconds: number) => {
+    if (!inlineVideoRef.current) return;
+    const current = inlineVideoRef.current.currentTime;
+    const dur = inlineVideoRef.current.duration || 999999;
+    const nextTime = Math.max(0, Math.min(dur, current + seconds));
+    inlineVideoRef.current.currentTime = nextTime;
+    const isFwd = seconds > 0;
+    setInlineSeekFeedback({ side: isFwd ? 'right' : 'left', label: isFwd ? '+10s' : '-10s' });
+    if (inlineSeekFeedbackTimerRef.current) clearTimeout(inlineSeekFeedbackTimerRef.current);
+    inlineSeekFeedbackTimerRef.current = setTimeout(() => setInlineSeekFeedback(null), 700);
+  };
 
   useEffect(() => {
     const videoEl = inlineVideoRef.current;
@@ -504,9 +521,13 @@ export default function MovieDetailsModal({
 
     const handleCanPlay = () => {
       setInlineLoaded(true);
-      videoEl.play().catch(() => {
+      videoEl.play().then(() => {
+        mutedByAutoplayRef.current = false;
+        setInlineMuted(videoEl.muted);
+      }).catch(() => {
         // Fallback to muted if browser blocks unmuted autoplay
         videoEl.muted = true;
+        mutedByAutoplayRef.current = true;
         setInlineMuted(true);
         videoEl.play().catch(() => {});
       });
@@ -521,12 +542,14 @@ export default function MovieDetailsModal({
     videoEl.addEventListener('playing', handlePlaying);
     videoEl.addEventListener('loadeddata', handleCanPlay);
 
+    mutedByAutoplayRef.current = false;
     videoEl.play().then(() => {
       setInlineLoaded(true);
       setInlineMuted(videoEl.muted);
     }).catch(() => {
-      // Browser autoplay policy prevented unmuted autoplay, try muted
+      // Browser autoplay policy prevented unmuted autoplay, try muted and auto-unmute on first touch/click
       videoEl.muted = true;
+      mutedByAutoplayRef.current = true;
       setInlineMuted(true);
       videoEl.play().then(() => setInlineLoaded(true)).catch(() => {});
     });
@@ -548,6 +571,13 @@ export default function MovieDetailsModal({
   const modalContent = (
     <div
       className="fixed inset-0 z-[90] w-full h-[100dvh] bg-[#111317] text-white flex flex-col overflow-hidden select-none"
+      onPointerDown={() => {
+        if (mutedByAutoplayRef.current && inlineVideoRef.current) {
+          inlineVideoRef.current.muted = false;
+          mutedByAutoplayRef.current = false;
+          setInlineMuted(false);
+        }
+      }}
       onClick={() => {
         if (isSeasonDropdownOpen) setIsSeasonDropdownOpen(false);
         if (isAudioDropdownOpen) setIsAudioDropdownOpen(false);
@@ -579,42 +609,56 @@ export default function MovieDetailsModal({
                 setInlineLoaded(true);
                 if (inlineVideoRef.current) setInlineMuted(inlineVideoRef.current.muted);
               }}
-              onClick={() => {
-                if (inlineVideoRef.current) {
-                  if (inlineVideoRef.current.muted) {
-                    inlineVideoRef.current.muted = false;
-                    setInlineMuted(false);
-                  } else {
-                    if (inlineVideoRef.current.paused) {
+              onClick={(e) => {
+                const now = Date.now();
+                const rect = e.currentTarget.getBoundingClientRect();
+                const tapSide: 'left' | 'right' = (e.clientX - rect.left) > rect.width / 2 ? 'right' : 'left';
+
+                if (now - inlineLastTapRef.current.time < 350 && inlineLastTapRef.current.side === tapSide) {
+                  if (inlineSingleTapTimerRef.current) clearTimeout(inlineSingleTapTimerRef.current);
+                  inlineLastTapRef.current = { time: 0, side: null };
+                  handleInlineSkip(tapSide === 'right' ? 10 : -10);
+                  return;
+                }
+
+                inlineLastTapRef.current = { time: now, side: tapSide };
+                if (inlineSingleTapTimerRef.current) clearTimeout(inlineSingleTapTimerRef.current);
+                inlineSingleTapTimerRef.current = setTimeout(() => {
+                  if (inlineVideoRef.current) {
+                    if (inlineVideoRef.current.muted) {
+                      inlineVideoRef.current.muted = false;
+                      mutedByAutoplayRef.current = false;
+                      setInlineMuted(false);
+                    } else if (inlineVideoRef.current.paused) {
                       inlineVideoRef.current.play().catch(() => {});
                     } else {
                       inlineVideoRef.current.pause();
                     }
                   }
-                }
+                }, 250);
               }}
             />
+
+            {/* Double-Tap / Double-Click Seek Ripple Feedback on Inline Banner (+10s / -10s) */}
+            {inlineSeekFeedback && (
+              <div
+                className={`absolute top-1/2 -translate-y-1/2 z-45 flex flex-col items-center justify-center pointer-events-none animate-in fade-in zoom-in-75 duration-150 ${
+                  inlineSeekFeedback.side === 'right' ? 'right-8 sm:right-16' : 'left-8 sm:left-16'
+                }`}
+              >
+                <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-black/70 border border-white/20 backdrop-blur-md flex flex-col items-center justify-center text-white shadow-2xl">
+                  <span className="text-xs sm:text-sm font-black text-[#00d664]">{inlineSeekFeedback.label}</span>
+                </div>
+              </div>
+            )}
 
             {/* Clean White Loading Spinner & Text while buffering */}
             {!inlineLoaded && (
               <div 
-                className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center gap-2.5 z-20 cursor-pointer"
-                onClick={() => {
-                  if (inlineVideoRef.current) {
-                    inlineVideoRef.current.muted = false;
-                    setInlineMuted(false);
-                    inlineVideoRef.current.play().then(() => setInlineLoaded(true)).catch(() => {
-                      if (inlineVideoRef.current) {
-                        inlineVideoRef.current.muted = true;
-                        setInlineMuted(true);
-                        inlineVideoRef.current.play().then(() => setInlineLoaded(true)).catch(() => {});
-                      }
-                    });
-                  }
-                }}
+                className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center gap-2.5 z-20 pointer-events-none"
               >
                 <div className="w-8 h-8 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-                <span className="text-white text-xs font-semibold tracking-wide">Loading... (Tap to Play with Sound)</span>
+                <span className="text-white text-xs font-semibold tracking-wide">Loading...</span>
               </div>
             )}
 
@@ -638,6 +682,7 @@ export default function MovieDetailsModal({
                 if (inlineVideoRef.current) {
                   const nextMuted = !inlineVideoRef.current.muted;
                   inlineVideoRef.current.muted = nextMuted;
+                  mutedByAutoplayRef.current = false;
                   setInlineMuted(nextMuted);
                   if (inlineVideoRef.current.paused) {
                     inlineVideoRef.current.play().catch(() => {});
@@ -650,7 +695,7 @@ export default function MovieDetailsModal({
               {inlineMuted ? (
                 <>
                   <VolumeX size={15} className="text-red-400" />
-                  <span className="text-[11px] font-semibold text-gray-200">Tap for Sound</span>
+                  <span className="text-[11px] font-semibold text-gray-200">Sound Off</span>
                 </>
               ) : (
                 <>
@@ -663,14 +708,21 @@ export default function MovieDetailsModal({
             {/* Bottom Right Expand / Fullscreen button */}
             <button
               type="button"
-              onClick={() =>
+              onClick={() => {
+                const currentSec = inlineVideoRef.current ? Math.max(0, Math.floor(inlineVideoRef.current.currentTime)) : 0;
+                inlineVideoRef.current?.pause();
+                const enriched = enrichMovieWithResolvedDuration(safeSeasonIndex, primaryEpIdx);
                 onWatchNow(
-                  enrichMovieWithResolvedDuration(safeSeasonIndex, primaryEpIdx),
+                  {
+                    ...enriched,
+                    ...(!hasRealSeasons && !enriched?.streamingUrl && rawStreamUrl ? { streamingUrl: rawStreamUrl } : {}),
+                    currentTime: currentSec,
+                  },
                   safeSeasonIndex,
                   primaryEpIdx,
                   selectedLanguage
-                )
-              }
+                );
+              }}
               className="absolute bottom-3 right-3 z-30 w-9 h-9 rounded-full bg-black/70 hover:bg-black/90 text-white flex items-center justify-center backdrop-blur-md border border-white/20 shadow-lg cursor-pointer transition-transform active:scale-90"
               aria-label="Expand Fullscreen"
             >

@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.234",
-  "minimumRequiredVersion": "3.5.234",
-  "latestVersionCode": 3454,
-  "minimumRequiredVersionCode": 3454,
+  "latestVersion": "3.5.235",
+  "minimumRequiredVersion": "3.5.235",
+  "latestVersionCode": 3455,
+  "minimumRequiredVersionCode": 3455,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Portal v3.5.234 is ready! Instant audio playback on movie details screen, streamlined multi-quality downloads, and clean player UI.",
-  "releaseNotes": "v3.5.234: Instant audio/sound playback in movie details screen with quick tap-to-unmute control, direct proxy streaming, and updated APK release."
+  "updateMessage": "Movie Portal v3.5.235 is ready! Double-tap +10s/-10s seek, seamless fullscreen timestamp resume, clean loading screen, and enhanced audio playback.",
+  "releaseNotes": "v3.5.235: Double-click/tap +10s forward & -10s rewind seeking with visual feedback, seamless transition from small inline screen to full screen without losing position, clean loading indicator, and reliable audio."
 }
