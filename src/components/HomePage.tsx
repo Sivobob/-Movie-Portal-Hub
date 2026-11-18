@@ -613,7 +613,11 @@ export default function HomePage() {
       const eIdx = Math.max(0, Math.min(episodeIndex, episodes.length - 1));
       const ep = episodes[eIdx];
 
-      if (ep && ep.streamUrl) {
+      const epStream = String(
+        ep?.streamUrl || ep?.videoQualities?.['720p'] || ep?.videoQualities?.['1080p'] || ''
+      ).trim();
+
+      if (ep && epStream) {
         setActiveSeasonIndex(sIdx);
         const epDurationSec =
           (typeof ep.durationSec === 'number' && ep.durationSec > 0 ? ep.durationSec : 0) ||
@@ -623,9 +627,11 @@ export default function HomePage() {
           saveWatchProgress(uid, movie, resumeTime, epDurationSec).catch(() => {});
         }
         pushPlayerHistory();
+        const sLabel = String(season.seasonNumber || sIdx + 1).padStart(2, '0');
+        const eLabel = String(ep.episodeNumber || eIdx + 1).padStart(2, '0');
         const nextPlaying = {
-          title: `${movie.title} - S0${season.seasonNumber || sIdx + 1}E0${ep.episodeNumber || eIdx + 1}: ${ep.title}`,
-          streamingUrl: ep.streamUrl.trim(),
+          title: `${movie.title} - S${sLabel}E${eLabel}: ${ep.title}`,
+          streamingUrl: epStream,
           displayCategory: movie.displayCategory,
           posterUrl: movie.posterUrl,
           movie: movie,
@@ -745,8 +751,45 @@ export default function HomePage() {
     );
   });
 
+  const folderTabs: { label: string; value: string | null }[] = [
+    { label: 'All', value: null },
+    { label: 'Bollywood', value: 'Bollywood' },
+    { label: 'Hollywood', value: 'Hollywood' },
+    { label: 'Series', value: 'Series' },
+  ];
+
+  const renderFolderTabRow = (overHero: boolean) => (
+    <div
+      className={
+        overHero
+          ? 'absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-black via-black/70 to-transparent px-4 sm:px-6 pt-1 pb-5 pointer-events-auto'
+          : 'sticky top-0 z-30 bg-black/95 backdrop-blur-md px-4 sm:px-6 py-1.5 border-b border-white/[0.06]'
+      }
+    >
+      <div className="max-w-7xl mx-auto flex items-center gap-6 sm:gap-8 overflow-x-auto scrollbar-none">
+        {folderTabs.map((tab) => {
+          const isActive = category === tab.value;
+          return (
+            <button
+              key={tab.label}
+              type="button"
+              onClick={() => setCategory(tab.value)}
+              className={`min-h-[40px] flex items-center cursor-pointer whitespace-nowrap flex-shrink-0 transition-all tracking-tight drop-shadow-[0_1px_6px_rgba(0,0,0,0.85)] ${
+                isActive
+                  ? 'text-white font-bold text-[17px] sm:text-[18px]'
+                  : 'text-[#b4b9c2] hover:text-white font-normal text-[16px] sm:text-[17px]'
+              }`}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+
   return (
-    <div className={`relative flex-1 w-full max-w-full bg-black text-white flex flex-col select-none touch-pan-y pt-[calc(4.75rem+env(safe-area-inset-top))] pb-[calc(5.75rem+env(safe-area-inset-bottom))]`}>
+    <div className="relative flex-1 w-full max-w-full bg-black text-white flex flex-col select-none touch-pan-y pt-0 pb-[calc(5.75rem+env(safe-area-inset-bottom))]">
 
       {toastMessage && (
         <div className="fixed top-[max(4.25rem,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-[120] bg-neutral-900/95 border border-red-600/50 text-white text-xs font-bold px-4 py-2.5 rounded-full shadow-2xl backdrop-blur-md max-w-[90vw] truncate">
@@ -754,60 +797,12 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Top Category Tabs Bar: All, Bollywood, Hollywood, Series */}
-      <div className="sticky top-[calc(4.25rem+env(safe-area-inset-top))] z-30 bg-black/95 backdrop-blur-md px-3 sm:px-6 py-2.5 border-b border-white/[0.08] shadow-md">
-        <div className="flex items-center gap-3 overflow-x-auto scrollbar-none py-1">
-          <button
-            type="button"
-            onClick={() => setCategory(null)}
-            className={`px-4 py-1.5 rounded-full text-xs sm:text-sm font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap ${
-              !category
-                ? 'bg-red-600 text-white shadow-md shadow-red-600/30'
-                : 'bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800'
-            }`}
-          >
-            All
-          </button>
-          <button
-            type="button"
-            onClick={() => setCategory('Bollywood')}
-            className={`px-4 py-1.5 rounded-full text-xs sm:text-sm font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap ${
-              category === 'Bollywood'
-                ? 'bg-red-600 text-white shadow-md shadow-red-600/30'
-                : 'bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800'
-            }`}
-          >
-            Bollywood
-          </button>
-          <button
-            type="button"
-            onClick={() => setCategory('Hollywood')}
-            className={`px-4 py-1.5 rounded-full text-xs sm:text-sm font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap ${
-              category === 'Hollywood'
-                ? 'bg-red-600 text-white shadow-md shadow-red-600/30'
-                : 'bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800'
-            }`}
-          >
-            Hollywood
-          </button>
-          <button
-            type="button"
-            onClick={() => setCategory('Series')}
-            className={`px-4 py-1.5 rounded-full text-xs sm:text-sm font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap ${
-              category === 'Series'
-                ? 'bg-red-600 text-white shadow-md shadow-red-600/30'
-                : 'bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800'
-            }`}
-          >
-            Series
-          </button>
-        </div>
-      </div>
+      {(category || !currentFeatured) && renderFolderTabRow(false)}
 
       {category ? (
         <div className="flex-grow pt-3 touch-pan-y">
           <div className="flex items-center justify-between gap-2 px-3 sm:px-4 mb-4">
-            <h2 className="text-red-500 font-black text-lg sm:text-xl tracking-wide uppercase truncate">
+            <h2 className="text-white font-black text-lg sm:text-xl tracking-wide uppercase truncate">
               {category}
             </h2>
           </div>
@@ -894,9 +889,9 @@ export default function HomePage() {
         </div>
       ) : (
         <div className="flex flex-col w-full">
-          {/* Cinematic Hero Banner Matching Reference Screenshot */}
+          {/* Cinematic Hero Banner with Folder Tabs Overlaid on Top Gradient Edge (Matching Reference Screenshot) */}
           <div
-            className="relative w-full h-[28dvh] sm:h-[36dvh] flex flex-col justify-end overflow-hidden select-none touch-pan-y"
+            className="relative w-full h-[32dvh] sm:h-[40dvh] flex flex-col justify-end overflow-hidden select-none touch-pan-y"
             onTouchStart={handleTouchStart}
             onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}
@@ -904,6 +899,7 @@ export default function HomePage() {
             onMouseMove={handleTouchMove}
             onMouseUp={handleTouchEnd}
           >
+            {renderFolderTabRow(true)}
             <AnimatePresence initial={false} custom={slideDirection}>
               <motion.div
                 key={currentFeatured.id || activeSlideIndex}
@@ -934,7 +930,7 @@ export default function HomePage() {
             </AnimatePresence>
 
             {/* Hero Banner Overlay Title & Clean Right Layout */}
-            <div className="relative z-10 p-3 sm:p-5 flex items-end justify-between">
+            <div className="relative z-10 p-3 sm:p-5 pt-12 flex items-end justify-between">
               <div className="max-w-[70%]">
                 <span className="bg-red-600 text-white font-extrabold text-[9px] px-2 py-0.5 rounded uppercase tracking-wider mb-1 inline-block">
                   Featured

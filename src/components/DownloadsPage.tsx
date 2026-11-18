@@ -282,7 +282,11 @@ export default function DownloadsPage() {
       const eIdx = Math.max(0, Math.min(episodeIndex, episodes.length - 1));
       const ep = episodes[eIdx];
 
-      if (ep && ep.streamUrl) {
+      const epStream = String(
+        ep?.streamUrl || ep?.videoQualities?.['720p'] || ep?.videoQualities?.['1080p'] || ''
+      ).trim();
+
+      if (ep && epStream) {
         setActiveSeasonIndex(sIdx);
         const epDurationSec =
           (typeof ep.durationSec === 'number' && ep.durationSec > 0 ? ep.durationSec : 0) ||
@@ -292,9 +296,11 @@ export default function DownloadsPage() {
           saveWatchProgress(uid, movie, resumeTime, epDurationSec).catch(() => {});
         }
         pushPlayerHistory();
+        const sLabel = String(season.seasonNumber || sIdx + 1).padStart(2, '0');
+        const eLabel = String(ep.episodeNumber || eIdx + 1).padStart(2, '0');
         const nextPlaying = {
-          title: `${movie.title} - S0${season.seasonNumber || sIdx + 1}E0${ep.episodeNumber || eIdx + 1}: ${ep.title}`,
-          streamingUrl: ep.streamUrl.trim(),
+          title: `${movie.title} - S${sLabel}E${eLabel}: ${ep.title}`,
+          streamingUrl: epStream,
           displayCategory: movie.displayCategory,
           posterUrl: movie.posterUrl,
           movie,

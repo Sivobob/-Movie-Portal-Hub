@@ -1157,9 +1157,10 @@ public class MainActivity extends BridgeActivity {
                     );
 
                     MediaItem mediaItem = MediaItem.fromUri(Uri.parse(url));
-                    exoPlayer.setMediaItem(mediaItem);
-                    if (startSec > 0.5) {
-                        exoPlayer.seekTo((long) (startSec * 1000.0));
+                    if (startSec > 0.25) {
+                        exoPlayer.setMediaItem(mediaItem, (long) (startSec * 1000.0));
+                    } else {
+                        exoPlayer.setMediaItem(mediaItem);
                     }
                     exoPlayer.setPlaybackSpeed(speed > 0 ? (float) speed : 1.0f);
                     exoPlayer.prepare();
@@ -1846,7 +1847,7 @@ public class MainActivity extends BridgeActivity {
                             conn.setConnectTimeout(25000);
                             conn.setReadTimeout(60000);
                             conn.setRequestMethod("GET");
-                            conn.setRequestProperty("User-Agent", "MoviePortal/3.5.235 AndroidDownloader");
+                            conn.setRequestProperty("User-Agent", "MoviePortal/3.5.236 AndroidDownloader");
                             conn.setRequestProperty("Accept-Encoding", "identity");
                             if (existingOffset > 0L && task.totalBytes > existingOffset) {
                                 conn.setRequestProperty("Range", "bytes=" + existingOffset + "-" + (task.totalBytes - 1L));

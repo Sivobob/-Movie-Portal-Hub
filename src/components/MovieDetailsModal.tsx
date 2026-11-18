@@ -478,23 +478,36 @@ export default function MovieDetailsModal({
     ? 1
     : 0;
 
+  const inlineEpisodeResumeKey = hasRealSeasons && currentEpisodeObj
+    ? `${movie.title} - S${String(currentSeason?.seasonNumber || safeSeasonIndex + 1).padStart(2, '0')}E${String(currentEpisodeObj.episodeNumber || primaryEpIdx + 1).padStart(2, '0')}: ${currentEpisodeObj.title}`
+    : String(movie.title || '').replace(/\s*\(Official Trailer\)/i, '');
+
   const inlineVideoRef = useRef<HTMLVideoElement | null>(null);
   const [inlineLoaded, setInlineLoaded] = useState(false);
   const [inlineMuted, setInlineMuted] = useState(false);
   const mutedByAutoplayRef = useRef(false);
   const inlineLastTapRef = useRef<{ time: number; side: 'left' | 'right' | null }>({ time: 0, side: null });
+  const inlineSeekBurstRef = useRef<{ time: number; side: 'left' | 'right' | null; total: number }>({ time: 0, side: null, total: 0 });
   const inlineSingleTapTimerRef = useRef<any>(null);
   const [inlineSeekFeedback, setInlineSeekFeedback] = useState<{ side: 'left' | 'right'; label: string } | null>(null);
   const inlineSeekFeedbackTimerRef = useRef<any>(null);
 
-  const handleInlineSkip = (seconds: number) => {
+  const handleInlineSkip = (seconds: number, burstDelta?: number) => {
     if (!inlineVideoRef.current) return;
-    const current = inlineVideoRef.current.currentTime;
-    const dur = inlineVideoRef.current.duration || 999999;
+    const current = inlineVideoRef.current.currentTime || 0;
+    const dur = (inlineVideoRef.current.duration && isFinite(inlineVideoRef.current.duration))
+      ? inlineVideoRef.current.duration
+      : 999999;
     const nextTime = Math.max(0, Math.min(dur, current + seconds));
     inlineVideoRef.current.currentTime = nextTime;
+    if (inlineEpisodeResumeKey && nextTime > 2) {
+      try {
+        localStorage.setItem(`resume_pos_${inlineEpisodeResumeKey}`, String(nextTime));
+      } catch {}
+    }
     const isFwd = seconds > 0;
-    setInlineSeekFeedback({ side: isFwd ? 'right' : 'left', label: isFwd ? '+10s' : '-10s' });
+    const displayAbs = Math.abs(burstDelta ?? seconds);
+    setInlineSeekFeedback({ side: isFwd ? 'right' : 'left', label: isFwd ? `+${displayAbs}s` : `-${displayAbs}s` });
     if (inlineSeekFeedbackTimerRef.current) clearTimeout(inlineSeekFeedbackTimerRef.current);
     inlineSeekFeedbackTimerRef.current = setTimeout(() => setInlineSeekFeedback(null), 700);
   };
@@ -503,14 +516,50 @@ export default function MovieDetailsModal({
     const videoEl = inlineVideoRef.current;
     if (!videoEl || !primaryDownloadUrl) return;
 
+    let cancelled = false;
     let hlsInstance: Hls | null = null;
     const isHls = primaryDownloadUrl.includes('.m3u8');
+
+    let savedResumeSec = 0;
+    if (inlineEpisodeResumeKey) {
+      try {
+        const parsed = parseFloat(localStorage.getItem(`resume_pos_${inlineEpisodeResumeKey}`) || '0');
+        if (!isNaN(parsed) && parsed > 2) {
+          savedResumeSec = parsed;
+        }
+      } catch {}
+    }
+    let pendingResumeSec: number | null = savedResumeSec > 2 ? savedResumeSec : null;
+    let resumeAttempts = 0;
+
+    const tryApplyInlineResume = () => {
+      if (cancelled || pendingResumeSec === null || !videoEl) return;
+      const vidDur = videoEl.duration && isFinite(videoEl.duration) ? videoEl.duration : 0;
+      if (vidDur > 0 && pendingResumeSec >= vidDur - 15) {
+        pendingResumeSec = null;
+        return;
+      }
+      if (Math.abs(videoEl.currentTime - pendingResumeSec) <= 1.2) {
+        pendingResumeSec = null;
+        return;
+      }
+      if (resumeAttempts < 5) {
+        resumeAttempts += 1;
+        try {
+          videoEl.currentTime = pendingResumeSec;
+        } catch {}
+      } else {
+        pendingResumeSec = null;
+      }
+    };
 
     videoEl.muted = false;
     setInlineMuted(false);
 
     if (isHls && Hls.isSupported()) {
-      hlsInstance = new Hls();
+      hlsInstance = new Hls({
+        startPosition: pendingResumeSec !== null ? pendingResumeSec : -1,
+      });
       hlsInstance.loadSource(primaryDownloadUrl);
       hlsInstance.attachMedia(videoEl);
     } else {
@@ -519,13 +568,16 @@ export default function MovieDetailsModal({
 
     setInlineLoaded(false);
 
-    const handleCanPlay = () => {
-      setInlineLoaded(true);
+    const startPlayback = () => {
+      if (cancelled) return;
+      tryApplyInlineResume();
       videoEl.play().then(() => {
+        if (cancelled) return;
         mutedByAutoplayRef.current = false;
         setInlineMuted(videoEl.muted);
       }).catch(() => {
-        // Fallback to muted if browser blocks unmuted autoplay
+        if (cancelled) return;
+        // Fallback to muted autoplay so video never stops on "Tap to play"
         videoEl.muted = true;
         mutedByAutoplayRef.current = true;
         setInlineMuted(true);
@@ -533,40 +585,69 @@ export default function MovieDetailsModal({
       });
     };
 
+    const handleLoadedMetadata = () => {
+      tryApplyInlineResume();
+      startPlayback();
+    };
+
+    const handleCanPlay = () => {
+      tryApplyInlineResume();
+      if (videoEl.readyState >= 3 || !videoEl.paused) {
+        setInlineLoaded(true);
+      }
+      startPlayback();
+    };
+
     const handlePlaying = () => {
+      tryApplyInlineResume();
       setInlineLoaded(true);
       setInlineMuted(videoEl.muted);
     };
 
+    const handleWaiting = () => {
+      if (!cancelled) {
+        setInlineLoaded(false);
+      }
+    };
+
+    const handleTimeUpdate = () => {
+      if (cancelled) return;
+      const cur = videoEl.currentTime || 0;
+      if (cur > 2 && inlineEpisodeResumeKey && pendingResumeSec === null) {
+        try {
+          localStorage.setItem(`resume_pos_${inlineEpisodeResumeKey}`, String(cur));
+        } catch {}
+      }
+    };
+
+    videoEl.addEventListener('loadedmetadata', handleLoadedMetadata);
+    videoEl.addEventListener('loadeddata', handleCanPlay);
     videoEl.addEventListener('canplay', handleCanPlay);
     videoEl.addEventListener('playing', handlePlaying);
-    videoEl.addEventListener('loadeddata', handleCanPlay);
+    videoEl.addEventListener('waiting', handleWaiting);
+    videoEl.addEventListener('timeupdate', handleTimeUpdate);
 
-    mutedByAutoplayRef.current = false;
-    videoEl.play().then(() => {
-      setInlineLoaded(true);
-      setInlineMuted(videoEl.muted);
-    }).catch(() => {
-      // Browser autoplay policy prevented unmuted autoplay, try muted and auto-unmute on first touch/click
-      videoEl.muted = true;
-      mutedByAutoplayRef.current = true;
-      setInlineMuted(true);
-      videoEl.play().then(() => setInlineLoaded(true)).catch(() => {});
-    });
+    startPlayback();
 
     return () => {
+      cancelled = true;
+      if (inlineSingleTapTimerRef.current) clearTimeout(inlineSingleTapTimerRef.current);
+      if (inlineSeekFeedbackTimerRef.current) clearTimeout(inlineSeekFeedbackTimerRef.current);
       if (hlsInstance) {
         hlsInstance.destroy();
       }
       if (videoEl) {
+        videoEl.removeEventListener('loadedmetadata', handleLoadedMetadata);
+        videoEl.removeEventListener('loadeddata', handleCanPlay);
         videoEl.removeEventListener('canplay', handleCanPlay);
         videoEl.removeEventListener('playing', handlePlaying);
-        videoEl.removeEventListener('loadeddata', handleCanPlay);
+        videoEl.removeEventListener('waiting', handleWaiting);
+        videoEl.removeEventListener('timeupdate', handleTimeUpdate);
         videoEl.pause();
         videoEl.src = '';
       }
     };
-  }, [primaryDownloadUrl]);
+  }, [primaryDownloadUrl, inlineEpisodeResumeKey]);
 
   const modalContent = (
     <div
@@ -598,13 +679,13 @@ export default function MovieDetailsModal({
           className="overflow-y-auto overscroll-y-contain touch-pan-y flex-1 w-full pb-[calc(2rem+env(safe-area-inset-bottom))]"
         >
           {/* Top 16:9 Inline Video Playback Area */}
-          <div className="relative w-full aspect-[16/9] sm:h-[42dvh] sm:min-h-[260px] sm:max-h-[420px] bg-black overflow-hidden flex-shrink-0 group">
+          <div className="relative w-full aspect-[16/9] sm:h-[42dvh] sm:min-h-[260px] sm:max-h-[420px] bg-black overflow-hidden flex-shrink-0 group touch-manipulation">
             <video
               ref={inlineVideoRef}
               playsInline
               autoPlay
               muted={inlineMuted}
-              className="w-full h-full object-cover cursor-pointer"
+              className="w-full h-full object-cover cursor-pointer touch-manipulation"
               onPlaying={() => {
                 setInlineLoaded(true);
                 if (inlineVideoRef.current) setInlineMuted(inlineVideoRef.current.muted);
@@ -613,11 +694,24 @@ export default function MovieDetailsModal({
                 const now = Date.now();
                 const rect = e.currentTarget.getBoundingClientRect();
                 const tapSide: 'left' | 'right' = (e.clientX - rect.left) > rect.width / 2 ? 'right' : 'left';
+                const delta = tapSide === 'right' ? 10 : -10;
 
-                if (now - inlineLastTapRef.current.time < 350 && inlineLastTapRef.current.side === tapSide) {
+                // Continuation burst tap (triple/quadruple tap)
+                if (now - inlineSeekBurstRef.current.time < 550 && inlineSeekBurstRef.current.side === tapSide) {
+                  if (inlineSingleTapTimerRef.current) clearTimeout(inlineSingleTapTimerRef.current);
+                  const nextTotal = inlineSeekBurstRef.current.total + delta;
+                  inlineSeekBurstRef.current = { time: now, side: tapSide, total: nextTotal };
+                  inlineLastTapRef.current = { time: 0, side: null };
+                  handleInlineSkip(delta, nextTotal);
+                  return;
+                }
+
+                // Double-click / double-tap within 340ms -> +10s / -10s
+                if (now - inlineLastTapRef.current.time < 340 && inlineLastTapRef.current.side === tapSide) {
                   if (inlineSingleTapTimerRef.current) clearTimeout(inlineSingleTapTimerRef.current);
                   inlineLastTapRef.current = { time: 0, side: null };
-                  handleInlineSkip(tapSide === 'right' ? 10 : -10);
+                  inlineSeekBurstRef.current = { time: now, side: tapSide, total: delta };
+                  handleInlineSkip(delta, delta);
                   return;
                 }
 
@@ -635,7 +729,7 @@ export default function MovieDetailsModal({
                       inlineVideoRef.current.pause();
                     }
                   }
-                }, 250);
+                }, 355);
               }}
             />
 
@@ -652,10 +746,10 @@ export default function MovieDetailsModal({
               </div>
             )}
 
-            {/* Clean White Loading Spinner & Text while buffering */}
+            {/* Clean White Loading Spinner & Text while buffering (no Tap to Play overlay) */}
             {!inlineLoaded && (
-              <div 
-                className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center gap-2.5 z-20 pointer-events-none"
+              <div
+                className="absolute inset-0 bg-black/85 flex flex-col items-center justify-center gap-2.5 z-20 pointer-events-none"
               >
                 <div className="w-8 h-8 border-2 border-white/20 border-t-white rounded-full animate-spin" />
                 <span className="text-white text-xs font-semibold tracking-wide">Loading...</span>
@@ -667,7 +761,10 @@ export default function MovieDetailsModal({
             {/* Top-Left Back Button */}
             <button
               type="button"
-              onClick={onClose}
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose();
+              }}
               className="fixed top-[max(0.85rem,env(safe-area-inset-top))] left-3 z-40 w-9 h-9 rounded-full bg-black/60 hover:bg-black/85 text-white flex items-center justify-center backdrop-blur-md border border-white/15 shadow-lg cursor-pointer transition-transform active:scale-90"
               aria-label="Back"
             >
@@ -708,25 +805,34 @@ export default function MovieDetailsModal({
             {/* Bottom Right Expand / Fullscreen button */}
             <button
               type="button"
-              onClick={() => {
-                const currentSec = inlineVideoRef.current ? Math.max(0, Math.floor(inlineVideoRef.current.currentTime)) : 0;
+              onClick={(e) => {
+                e.stopPropagation();
+                if (inlineSingleTapTimerRef.current) clearTimeout(inlineSingleTapTimerRef.current);
+                const exactSec = inlineVideoRef.current
+                  ? Math.max(0, Number((inlineVideoRef.current.currentTime || 0).toFixed(2)))
+                  : 0;
+                if (inlineEpisodeResumeKey && exactSec > 0.3) {
+                  try {
+                    localStorage.setItem(`resume_pos_${inlineEpisodeResumeKey}`, String(exactSec));
+                  } catch {}
+                }
                 inlineVideoRef.current?.pause();
                 const enriched = enrichMovieWithResolvedDuration(safeSeasonIndex, primaryEpIdx);
                 onWatchNow(
                   {
                     ...enriched,
                     ...(!hasRealSeasons && !enriched?.streamingUrl && rawStreamUrl ? { streamingUrl: rawStreamUrl } : {}),
-                    currentTime: currentSec,
+                    currentTime: exactSec,
                   },
                   safeSeasonIndex,
                   primaryEpIdx,
                   selectedLanguage
                 );
               }}
-              className="absolute bottom-3 right-3 z-30 w-9 h-9 rounded-full bg-black/70 hover:bg-black/90 text-white flex items-center justify-center backdrop-blur-md border border-white/20 shadow-lg cursor-pointer transition-transform active:scale-90"
+              className="absolute bottom-3 right-3 z-30 w-10 h-10 rounded-full bg-black/75 hover:bg-black/95 text-white flex items-center justify-center backdrop-blur-md border border-white/25 shadow-lg cursor-pointer transition-transform active:scale-90"
               aria-label="Expand Fullscreen"
             >
-              <Maximize size={16} />
+              <Maximize size={17} />
             </button>
           </div>
 

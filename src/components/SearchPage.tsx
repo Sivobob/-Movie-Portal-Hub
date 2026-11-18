@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Search, X, ArrowLeft, Film } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { collection, getDocs, getDocsFromServer } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -23,7 +23,9 @@ const GENRES = [
 
 export default function SearchPage() {
   const { user } = useAuth();
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchParams] = useSearchParams();
+  const initialQuery = searchParams.get('q') || '';
+  const [searchQuery, setSearchQuery] = useState(initialQuery);
   const [results, setResults] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
@@ -31,6 +33,13 @@ export default function SearchPage() {
   const [selectedMovie, setSelectedMovie] = useState<any | null>(null);
   const [activeSeasonIndex, setActiveSeasonIndex] = useState(0);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const urlQuery = searchParams.get('q') || '';
+    if (urlQuery && urlQuery !== searchQuery) {
+      setSearchQuery(urlQuery);
+    }
+  }, [searchParams]);
 
   const selectedMovieRef = useRef(selectedMovie);
   const playingMovieRef = useRef(playingMovie);
@@ -169,7 +178,11 @@ export default function SearchPage() {
       const eIdx = Math.max(0, Math.min(episodeIndex, episodes.length - 1));
       const ep = episodes[eIdx];
 
-      if (ep && ep.streamUrl) {
+      const epStream = String(
+        ep?.streamUrl || ep?.videoQualities?.['720p'] || ep?.videoQualities?.['1080p'] || ''
+      ).trim();
+
+      if (ep && epStream) {
         setActiveSeasonIndex(sIdx);
         const epDurationSec =
           (typeof ep.durationSec === 'number' && ep.durationSec > 0 ? ep.durationSec : 0) ||
@@ -179,9 +192,11 @@ export default function SearchPage() {
           saveWatchProgress(uid, movie, resumeTime, epDurationSec).catch(() => {});
         }
         pushPlayerHistory();
+        const sLabel = String(season.seasonNumber || sIdx + 1).padStart(2, '0');
+        const eLabel = String(ep.episodeNumber || eIdx + 1).padStart(2, '0');
         const nextPlaying = {
-          title: `${movie.title} - S0${season.seasonNumber || sIdx + 1}E0${ep.episodeNumber || eIdx + 1}: ${ep.title}`,
-          streamingUrl: ep.streamUrl.trim(),
+          title: `${movie.title} - S${sLabel}E${eLabel}: ${ep.title}`,
+          streamingUrl: epStream,
           displayCategory: movie.displayCategory,
           posterUrl: movie.posterUrl,
           movie: movie,
@@ -217,7 +232,7 @@ export default function SearchPage() {
   };
 
   useEffect(() => {
-    if (searchQuery.trim().length < 2 && selectedGenres.length === 0) {
+    if (searchQuery.trim().length < 1 && selectedGenres.length === 0) {
       setResults([]);
       return;
     }
@@ -286,7 +301,7 @@ export default function SearchPage() {
   };
 
   return (
-    <div className="min-h-[100dvh] w-full max-w-full overflow-x-hidden bg-black text-white px-3 sm:px-4 pt-3 pb-[calc(5.5rem+env(safe-area-inset-bottom))] select-none">
+    <div className="min-h-[100dvh] w-full max-w-full overflow-x-hidden bg-black text-white px-3 sm:px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-[calc(5.5rem+env(safe-area-inset-bottom))] select-none">
       <div className="flex items-center gap-2.5 sm:gap-3 bg-neutral-900 border border-neutral-800 px-3 py-2.5 rounded-xl mb-5 shadow-lg sticky top-2 z-20 min-w-0">
         <button
           type="button"
@@ -299,6 +314,7 @@ export default function SearchPage() {
         <Search className="text-gray-500 flex-shrink-0" size={18} />
         <input
           type="text"
+          autoFocus
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search movies, series, anime..."
@@ -316,22 +332,27 @@ export default function SearchPage() {
         )}
       </div>
 
-      {/* Genre Chips */}
-      <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-6 max-h-32 overflow-y-auto pr-1">
-        {GENRES.map((genre) => (
-          <button
-            key={genre}
-            type="button"
-            onClick={() => toggleGenre(genre)}
-            className={`px-2.5 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all border cursor-pointer ${
-              selectedGenres.includes(genre)
-                ? 'bg-yellow-400 text-black border-yellow-400 shadow-lg shadow-yellow-400/20'
-                : 'bg-neutral-900 text-gray-400 border-neutral-800 hover:border-gray-600'
-            }`}
-          >
-            {genre}
-          </button>
-        ))}
+      {/* All Genres Visible Immediately */}
+      <div className="mb-6">
+        <h2 className="text-[11px] font-black text-gray-400 uppercase tracking-widest mb-2.5">
+          All Genres
+        </h2>
+        <div className="flex flex-wrap gap-1.5 sm:gap-2">
+          {GENRES.map((genre) => (
+            <button
+              key={genre}
+              type="button"
+              onClick={() => toggleGenre(genre)}
+              className={`px-3 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-wider transition-all border cursor-pointer ${
+                selectedGenres.includes(genre)
+                  ? 'bg-yellow-400 text-black border-yellow-400 shadow-lg shadow-yellow-400/20'
+                  : 'bg-neutral-900 text-gray-300 border-neutral-800 hover:border-gray-600'
+              }`}
+            >
+              {genre}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Search Results */}
@@ -341,7 +362,7 @@ export default function SearchPage() {
             ? 'Searching...'
             : results.length > 0
             ? `Results (${results.length})`
-            : searchQuery.trim().length >= 2 || selectedGenres.length > 0
+            : searchQuery.trim().length >= 1 || selectedGenres.length > 0
             ? 'No results found'
             : 'Type or pick genre to search'}
         </h3>
@@ -356,7 +377,7 @@ export default function SearchPage() {
           ))}
         </div>
 
-        {!isLoading && results.length === 0 && searchQuery.trim().length < 2 && selectedGenres.length === 0 && (
+        {!isLoading && results.length === 0 && searchQuery.trim().length < 1 && selectedGenres.length === 0 && (
           <div className="py-16 text-center text-neutral-800 flex flex-col items-center">
             <Film size={56} className="mb-4 opacity-20" />
             <p className="text-xs sm:text-sm font-bold uppercase tracking-widest opacity-40">

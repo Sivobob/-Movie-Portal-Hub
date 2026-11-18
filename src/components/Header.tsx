@@ -1,14 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
-import { ShieldCheck, Settings, Lock, Eye, EyeOff, X, KeyRound, LogOut, Download, Smartphone, Bookmark } from 'lucide-react';
+import { ShieldCheck, Lock, Eye, EyeOff, X, KeyRound, LogOut, Download, Smartphone, Search } from 'lucide-react';
 import { isNativeAndroid, isInstalledPhoneApp, downloadOfficialApk, OFFICIAL_APK_DOWNLOAD_URL } from '../utils/platform';
 import { CURRENT_VERSION_NAME } from '../services/appUpdateConfig';
-import MyListModal from './MyListModal';
-
-interface HeaderProps {
-  onOpenMyList?: () => void;
-}
 
 export default function Header() {
   const { handleLogout } = useAuth();
@@ -18,12 +13,12 @@ export default function Header() {
   const isAndroid = isNativeAndroid();
 
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [showMyListModal, setShowMyListModal] = useState(false);
   const [showInstallGuide, setShowInstallGuide] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
   const [showPasswordText, setShowPasswordText] = useState(false);
   const [passwordError, setPasswordError] = useState('');
   const [isSuccessUnlocked, setIsSuccessUnlocked] = useState(false);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const activeCategory = searchParams.get('category');
   const isUnlockedSession = typeof window !== 'undefined' && localStorage.getItem('admin_unlocked_session') === '20180020511';
@@ -90,6 +85,21 @@ export default function Header() {
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     };
   }, [isAndroid]);
+
+  const startLogoLongPress = () => {
+    if (isInstalled) return;
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = setTimeout(() => {
+      handleSettingsClick();
+    }, 650);
+  };
+
+  const cancelLogoLongPress = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
 
   const settingsModal = showSettingsModal ? (
     <div
@@ -219,13 +229,13 @@ export default function Header() {
 
   return (
     <>
-      <div
-        className={`fixed top-0 left-0 right-0 z-40 pointer-events-none transition-all duration-300 ${
-          isAndroid && !showTopHeader ? '-translate-y-full opacity-0' : 'translate-y-0 opacity-100'
+      <header
+        className={`sticky top-0 left-0 right-0 z-40 w-full bg-black transition-all duration-300 ${
+          isAndroid && !showTopHeader ? '-translate-y-full opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'
         }`}
       >
         {showPromoBar && (
-          <div className="pointer-events-auto w-full bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 text-black px-2.5 sm:px-4 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] flex items-center justify-between gap-2 shadow-lg">
+          <div className="w-full bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 text-black px-3 sm:px-4 py-1.5 pt-[max(0.45rem,env(safe-area-inset-top))] flex items-center justify-between gap-2 shadow-lg">
             <div className="flex items-center gap-2 min-w-0 flex-1">
               <div className="w-7 h-7 rounded-lg overflow-hidden bg-black flex items-center justify-center flex-shrink-0 shadow">
                 <img src="/assets/icons/master_icon.png" alt="Movie Portal" className="w-full h-full object-cover" />
@@ -260,72 +270,49 @@ export default function Header() {
           </div>
         )}
 
-        {/* Top Header Bar: Original Movie Portal App Icon on left + Search trigger + Action icons */}
+        {/* Top Bar Matching Screenshot: Blue/Cyan Play-Download Icon + Full-Width Charcoal Search Bar with Green Search Text */}
         <div
-          className={`max-w-7xl mx-auto flex items-center justify-between gap-2.5 px-3 sm:px-6 pointer-events-auto ${
-            showPromoBar ? 'pt-2.5' : 'pt-[max(0.75rem,env(safe-area-inset-top))]'
+          className={`max-w-7xl mx-auto flex items-center gap-3 px-3.5 sm:px-6 pb-2 bg-black ${
+            showPromoBar ? 'pt-2' : 'pt-[max(0.65rem,env(safe-area-inset-top))]'
           }`}
         >
-          {/* Original Movie Box / Movie Portal App Icon + Search Bar */}
-          <div className="flex items-center gap-2.5 flex-1 min-w-0">
-            <button
-              type="button"
-              onClick={() => navigate('/')}
-              className="flex items-center cursor-pointer active:scale-95 transition-transform flex-shrink-0 rounded-xl overflow-hidden shadow-lg border border-white/15"
-              aria-label="Movie Portal Home"
-            >
-              <img
-                src="/assets/icons/master_icon.png"
-                alt="Movie Portal"
-                className="w-9 h-9 sm:w-10 sm:h-10 object-cover"
-              />
-            </button>
+          <button
+            type="button"
+            onClick={() => navigate('/')}
+            onDoubleClick={() => {
+              if (!isInstalled) handleSettingsClick();
+            }}
+            onTouchStart={startLogoLongPress}
+            onTouchEnd={cancelLogoLongPress}
+            onTouchCancel={cancelLogoLongPress}
+            className="flex items-center justify-center flex-shrink-0 cursor-pointer active:scale-95 transition-transform rounded-xl overflow-hidden shadow-lg border border-white/15"
+            aria-label="Movie Portal Home"
+          >
+            <img
+              src="/assets/icons/master_icon.png"
+              alt="Movie Portal"
+              className="w-9 h-9 object-cover"
+            />
+          </button>
 
-            <button
-              type="button"
-              onClick={() => navigate('/search')}
-              className="flex-1 max-w-md flex items-center justify-between gap-2 bg-neutral-900 border border-white/15 rounded-xl px-3.5 py-2 text-left text-xs text-neutral-300 backdrop-blur-md shadow-md cursor-pointer transition-colors min-w-0"
-              aria-label="Search movies and series"
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                <svg className="w-4 h-4 text-neutral-400 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24">
-                  <circle cx="11" cy="11" r="8" />
-                  <path d="m21 21-4.3-4.3" />
-                </svg>
-                <span className="truncate text-neutral-400">Search movies, series...</span>
-              </div>
-              <span className="bg-emerald-500 hover:bg-emerald-600 text-black font-black px-2.5 py-1 rounded-lg text-[11px] flex-shrink-0 shadow">
-                Search
+          <button
+            type="button"
+            onClick={() => navigate('/search')}
+            aria-label="Search movies and series"
+            className="flex-1 flex items-center justify-between gap-2.5 h-[42px] bg-[#2a2d30] hover:bg-[#313538] active:bg-[#35393e] rounded-lg px-3.5 transition-colors min-w-0 cursor-pointer text-left"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <Search size={19} className="text-[#c5c9cf] flex-shrink-0 stroke-[2]" />
+              <span className="truncate text-[15px] font-normal text-[#c5c9cf]">
+                Search movies, series...
               </span>
-            </button>
-          </div>
-
-          {/* Right Action Icons: My List + Settings Gear */}
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <button
-              type="button"
-              onClick={() => setShowMyListModal(true)}
-              className="p-2.5 rounded-full bg-neutral-900/80 text-white border border-neutral-700/80 shadow-lg cursor-pointer active:scale-90 transition-all hover:bg-neutral-800 flex items-center gap-1.5"
-              aria-label="My List"
-              title="My List"
-            >
-              <Bookmark size={17} className="text-red-500" />
-            </button>
-
-            {!isInstalled && (
-              <button
-                type="button"
-                onClick={handleSettingsClick}
-                className="p-2.5 rounded-full bg-neutral-900/80 text-gray-300 border border-neutral-700/80 shadow-lg cursor-pointer active:scale-90 transition-all hover:bg-neutral-800"
-                aria-label="Settings / Admin"
-                title="Settings / Admin"
-              >
-                <Settings size={17} className="transition-transform hover:rotate-90 duration-300" />
-              </button>
-            )}
-          </div>
+            </div>
+            <span className="text-[#2de38a] font-semibold text-[15px] tracking-tight whitespace-nowrap flex-shrink-0">
+              Search
+            </span>
+          </button>
         </div>
-      </div>
+      </header>
 
       {!isInstalled && settingsModal}
       {showInstallGuide && !isInstalled && (
@@ -374,30 +361,6 @@ export default function Header() {
           </div>
         </div>
       )}
-      <MyListModal
-        isOpen={showMyListModal}
-        onClose={() => setShowMyListModal(false)}
-        onSelectMovie={(movie) => {
-          const targetId = movie?.id || movie?.imdbId;
-          if (targetId) {
-            try {
-              sessionStorage.setItem('mp_pending_open_movie_id', String(targetId));
-            } catch {}
-            window.dispatchEvent(new CustomEvent('movie_portal_open_movie', { detail: String(targetId) }));
-          }
-          navigate('/');
-        }}
-        onPlayMovie={(movie) => {
-          const targetId = movie?.id || movie?.imdbId;
-          if (targetId) {
-            try {
-              sessionStorage.setItem('mp_pending_open_movie_id', String(targetId));
-            } catch {}
-            window.dispatchEvent(new CustomEvent('movie_portal_open_movie', { detail: String(targetId) }));
-          }
-          navigate('/');
-        }}
-      />
     </>
   );
 }

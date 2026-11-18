@@ -222,6 +222,8 @@ export default function VideoPlayerModal({
   const knownDurationRef = useRef(initialDuration || 0);
   const currentTimeRef = useRef(0);
   const resumeOffsetRef = useRef(0);
+  const isInitialOpenStreamRef = useRef(true);
+  const hasExplicitInitialTimeRef = useRef(false);
   const fallbackStageRef = useRef(fallbackStage);
   fallbackStageRef.current = fallbackStage;
   const streamFallbackModeRef = useRef(streamFallbackMode);
@@ -452,27 +454,30 @@ export default function VideoPlayerModal({
   };
 
   const viewportLastTapRef = useRef<{ time: number; side: 'left' | 'right' | null }>({ time: 0, side: null });
+  const viewportSeekBurstRef = useRef<{ time: number; side: 'left' | 'right' | null; total: number }>({ time: 0, side: null, total: 0 });
   const viewportSingleTapTimerRef = useRef<any>(null);
   const [seekFeedback, setSeekFeedback] = useState<{ side: 'left' | 'right'; label: string } | null>(null);
   const seekFeedbackTimerRef = useRef<any>(null);
 
-  const triggerDoubleTapSeek = (direction: 'forward' | 'rewind') => {
+  const triggerDoubleTapSeek = (direction: 'forward' | 'rewind', burstTotal?: number) => {
     ensureUnmutedOnInteraction();
     if (direction === 'forward') {
       handleSkip(10);
-      setSeekFeedback({ side: 'right', label: '+10s' });
+      const absLabel = Math.abs(burstTotal ?? 10);
+      setSeekFeedback({ side: 'right', label: `+${absLabel}s` });
     } else {
       handleSkip(-10);
-      setSeekFeedback({ side: 'left', label: '-10s' });
+      const absLabel = Math.abs(burstTotal ?? 10);
+      setSeekFeedback({ side: 'left', label: `-${absLabel}s` });
     }
     if (seekFeedbackTimerRef.current) clearTimeout(seekFeedbackTimerRef.current);
     seekFeedbackTimerRef.current = setTimeout(() => setSeekFeedback(null), 700);
   };
 
   // Screen Tap Handler:
-  // When double tapped on right: +10s forward
-  // When double tapped on left: -10s rewind
-  // When single tapped: toggle controls visibility
+  // When double tapped/clicked on right: +10s forward (supports rapid +20s, +30s bursts)
+  // When double tapped/clicked on left: -10s rewind (supports rapid -20s, -30s bursts)
+  // When single tapped: toggle controls visibility (delayed past double-tap window so Tap 1 never spawns overlays before Tap 2)
   const handleViewportTap = (e: React.MouseEvent<HTMLDivElement>) => {
     e.stopPropagation();
     ensureUnmutedOnInteraction();
@@ -488,11 +493,24 @@ export default function VideoPlayerModal({
     const now = Date.now();
     const rect = e.currentTarget.getBoundingClientRect();
     const tapSide: 'left' | 'right' = (e.clientX - rect.left) > rect.width / 2 ? 'right' : 'left';
+    const delta = tapSide === 'right' ? 10 : -10;
 
-    if (now - viewportLastTapRef.current.time < 350 && viewportLastTapRef.current.side === tapSide) {
+    // Rapid consecutive burst taps after a double-tap (triple/quadruple tap)
+    if (now - viewportSeekBurstRef.current.time < 550 && viewportSeekBurstRef.current.side === tapSide) {
+      if (viewportSingleTapTimerRef.current) clearTimeout(viewportSingleTapTimerRef.current);
+      const nextTotal = viewportSeekBurstRef.current.total + delta;
+      viewportSeekBurstRef.current = { time: now, side: tapSide, total: nextTotal };
+      viewportLastTapRef.current = { time: 0, side: null };
+      triggerDoubleTapSeek(tapSide === 'right' ? 'forward' : 'rewind', nextTotal);
+      return;
+    }
+
+    // Double-click / double-tap within 340ms -> seek +/-10s
+    if (now - viewportLastTapRef.current.time < 340 && viewportLastTapRef.current.side === tapSide) {
       if (viewportSingleTapTimerRef.current) clearTimeout(viewportSingleTapTimerRef.current);
       viewportLastTapRef.current = { time: 0, side: null };
-      triggerDoubleTapSeek(tapSide === 'right' ? 'forward' : 'rewind');
+      viewportSeekBurstRef.current = { time: now, side: tapSide, total: delta };
+      triggerDoubleTapSeek(tapSide === 'right' ? 'forward' : 'rewind', delta);
       return;
     }
 
@@ -504,7 +522,7 @@ export default function VideoPlayerModal({
       } else {
         hideControlsNow();
       }
-    }, 250);
+    }, 355);
   };
 
   // Resolve playable stream URL & preflight metadata (once per movie/episode or manual Retry)
@@ -623,16 +641,17 @@ export default function VideoPlayerModal({
       const trimmed = activeSource.trim();
       const isOfflineLocal = /^(file:|blob:)/i.test(trimmed);
       const isTelegram = /t\.me|telegram\.me/i.test(trimmed);
+      const effectiveInitialTime = (isInitialOpenStreamRef.current && initialTime > 0) ? initialTime : 0;
+      hasExplicitInitialTimeRef.current = isInitialOpenStreamRef.current && initialTime > 0;
 
       if (isOfflineLocal) {
         if (!cancelled) {
           userPickedQualityRef.current = false;
           setSelectedQuality('Offline');
-          if (initialTime > 0) {
-            const targetSec = Math.floor(initialTime);
-            resumeOffsetRef.current = targetSec;
-            setCurrentTime(targetSec);
-            currentTimeRef.current = targetSec;
+          if (effectiveInitialTime > 0.25) {
+            resumeOffsetRef.current = effectiveInitialTime;
+            setCurrentTime(effectiveInitialTime);
+            currentTimeRef.current = effectiveInitialTime;
           }
           setPlayableUrl(trimmed);
         }
@@ -659,11 +678,10 @@ export default function VideoPlayerModal({
         streamFallbackModeRef.current = 'direct';
         setStreamStartOffset(0);
         streamStartOffsetRef.current = 0;
-        if (initialTime > 0) {
-          const targetSec = Math.floor(initialTime);
-          resumeOffsetRef.current = targetSec;
-          setCurrentTime(targetSec);
-          currentTimeRef.current = targetSec;
+        if (effectiveInitialTime > 0.25) {
+          resumeOffsetRef.current = effectiveInitialTime;
+          setCurrentTime(effectiveInitialTime);
+          currentTimeRef.current = effectiveInitialTime;
         }
         setPreflightReadyKey((k) => k + 1);
         return;
@@ -838,23 +856,22 @@ export default function VideoPlayerModal({
       if (cancelled) return;
 
       // Apply initialTime directly when transitioning from inline small screen, or fallback to saved resume position
-      if (initialTime > 0) {
-        const targetSec = Math.floor(initialTime);
+      if (effectiveInitialTime > 0.25) {
         if (chosenMode !== 'direct') {
-          initialStart = targetSec;
+          initialStart = Math.max(0, Math.floor(effectiveInitialTime));
         } else {
-          resumeOffsetRef.current = targetSec;
-          setCurrentTime(targetSec);
-          currentTimeRef.current = targetSec;
+          resumeOffsetRef.current = effectiveInitialTime;
+          setCurrentTime(effectiveInitialTime);
+          currentTimeRef.current = effectiveInitialTime;
         }
-      } else if (episodeResumeKey) {
+      } else if (!hasExplicitInitialTimeRef.current && episodeResumeKey) {
         try {
           const savedPos = parseFloat(localStorage.getItem(`resume_pos_${episodeResumeKey}`) || '0');
-          if (savedPos > 3 && (!probedDuration || savedPos < probedDuration - 20)) {
+          if (savedPos > 2 && (!probedDuration || savedPos < probedDuration - 20)) {
             if (chosenMode !== 'direct') {
               initialStart = Math.floor(savedPos);
             } else {
-              resumeOffsetRef.current = Math.floor(savedPos);
+              resumeOffsetRef.current = savedPos;
             }
           }
         } catch {}
@@ -963,8 +980,13 @@ export default function VideoPlayerModal({
 
   // Initial Autohide timer on open, playback orientation lock & cleanup (only runs when isOpen changes)
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      isInitialOpenStreamRef.current = true;
+      hasExplicitInitialTimeRef.current = false;
+      return;
+    }
 
+    isInitialOpenStreamRef.current = true;
     isInteractingRef.current = false;
     showControlsWithTimer();
     setSelectedAudio(verifiedLanguageRef.current);
@@ -1135,12 +1157,12 @@ export default function VideoPlayerModal({
     let resumeSec = resumeOffsetRef.current || 0;
     resumeOffsetRef.current = 0;
 
-    if (resumeSec <= 0 && streamFallbackModeRef.current === 'direct' && episodeResumeKey) {
+    if (resumeSec <= 0.25 && !hasExplicitInitialTimeRef.current && streamFallbackModeRef.current === 'direct' && episodeResumeKey) {
       try {
         const saved = parseFloat(localStorage.getItem(`resume_pos_${episodeResumeKey}`) || '0');
         const knownDur = durationRef.current || knownDurationRef.current;
-        if (saved > 15 && (!knownDur || saved < knownDur - 45)) {
-          resumeSec = Math.floor(saved);
+        if (saved > 2 && (!knownDur || saved < knownDur - 20)) {
+          resumeSec = saved;
         }
       } catch {}
     }
@@ -1357,7 +1379,7 @@ export default function VideoPlayerModal({
 
         if (effectiveTime > 1) {
           onProgress?.(effectiveTime, durationRef.current);
-          if (effectiveTime > 10 && episodeResumeKey) {
+          if (effectiveTime > 2 && episodeResumeKey) {
             try {
               localStorage.setItem(`resume_pos_${episodeResumeKey}`, String(effectiveTime));
             } catch {}
@@ -1419,17 +1441,117 @@ export default function VideoPlayerModal({
     let hlsInstance: Hls | null = null;
     const isHlsUrl = /\.m3u8/i.test(playableUrl);
 
+    // Determine exact initial seek position before starting HTML5/HLS playback
+    let pendingSeekTarget: number | null =
+      resumeOffsetRef.current > 0.25 && streamFallbackModeRef.current === 'direct'
+        ? resumeOffsetRef.current
+        : null;
+    resumeOffsetRef.current = 0;
+
+    if (
+      pendingSeekTarget === null &&
+      !hasExplicitInitialTimeRef.current &&
+      streamFallbackModeRef.current === 'direct' &&
+      episodeResumeKey
+    ) {
+      try {
+        const savedPos = parseFloat(localStorage.getItem(`resume_pos_${episodeResumeKey}`) || '0');
+        const knownDur = durationRef.current || knownDurationRef.current;
+        if (savedPos > 2 && (!knownDur || savedPos < knownDur - 20)) {
+          pendingSeekTarget = savedPos;
+        }
+      } catch {}
+    }
+
+    let seekAttempts = 0;
+    let seekConfirmed = pendingSeekTarget === null;
+    let playAttemptStarted = false;
+
+    const tryApplyPendingSeek = () => {
+      if (cancelled || seekConfirmed || pendingSeekTarget === null || streamFallbackModeRef.current !== 'direct') {
+        return;
+      }
+      const vidDuration = video.duration;
+      const knownDur = vidDuration && isFinite(vidDuration) ? vidDuration : durationRef.current;
+      if (knownDur > 0 && pendingSeekTarget >= knownDur - 2) {
+        seekConfirmed = true;
+        pendingSeekTarget = null;
+        return;
+      }
+      if (Math.abs(video.currentTime - pendingSeekTarget) <= 1.2) {
+        seekConfirmed = true;
+        pendingSeekTarget = null;
+        return;
+      }
+      if (seekAttempts < 6) {
+        seekAttempts += 1;
+        try {
+          video.currentTime = pendingSeekTarget;
+          setCurrentTime(pendingSeekTarget);
+          currentTimeRef.current = pendingSeekTarget;
+        } catch {}
+      } else {
+        seekConfirmed = true;
+        pendingSeekTarget = null;
+      }
+    };
+
+    const startHtml5Playback = () => {
+      if (cancelled || playAttemptStarted) return;
+      playAttemptStarted = true;
+      video.muted = false;
+      wasMutedByAutoplayRef.current = false;
+      const playPromise = video.play();
+      if (playPromise !== undefined) {
+        playPromise.then(() => {
+          if (!cancelled) {
+            tryApplyPendingSeek();
+            setIsPlaying(true);
+            if (video.readyState >= 3 && pendingSeekTarget === null) {
+              setIsLoading(false);
+            }
+          }
+        }).catch(() => {
+          if (cancelled) return;
+          // Fallback muted autoplay if WebView blocks unmuted autoplay; unmutes on first user tap
+          video.muted = true;
+          wasMutedByAutoplayRef.current = true;
+          video.play().then(() => {
+            if (!cancelled) {
+              tryApplyPendingSeek();
+              setIsPlaying(true);
+              if (video.readyState >= 3 && pendingSeekTarget === null) {
+                setIsLoading(false);
+              }
+            }
+          }).catch((playErr: any) => {
+            if (!cancelled) {
+              video.muted = false;
+              wasMutedByAutoplayRef.current = false;
+              playAttemptStarted = false;
+              if (playErr?.name !== 'AbortError') {
+                setIsLoading(false);
+              }
+              setIsPlaying(false);
+            }
+          });
+        });
+      }
+    };
+
     if (isHlsUrl && Hls.isSupported()) {
       hlsInstance = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
+        startPosition: pendingSeekTarget !== null ? pendingSeekTarget : -1,
       });
       hlsRef.current = hlsInstance;
       hlsInstance.loadSource(playableUrl);
       hlsInstance.attachMedia(video);
 
       hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
-        setIsLoading(false);
+        if (cancelled) return;
+        tryApplyPendingSeek();
         if (hlsInstance && hlsInstance.audioTracks && hlsInstance.audioTracks.length > 0) {
           const tracks = normalizePlayerTrackList(
             hlsInstance.audioTracks.map((t, idx) => ({
@@ -1456,20 +1578,7 @@ export default function VideoPlayerModal({
           setRealSubtitleTracks(subTracks);
         }
 
-        video.muted = false;
-        wasMutedByAutoplayRef.current = false;
-        video.play().catch(() => {
-          if (cancelled) return;
-          video.muted = true;
-          wasMutedByAutoplayRef.current = true;
-          video.play().catch(() => {
-            if (!cancelled) {
-              video.muted = false;
-              wasMutedByAutoplayRef.current = false;
-              setIsPlaying(false);
-            }
-          });
-        });
+        startHtml5Playback();
       });
 
       hlsInstance.on(Hls.Events.ERROR, (_event, data) => {
@@ -1527,7 +1636,7 @@ export default function VideoPlayerModal({
 
       if (effectiveTime > 1) {
         onProgress?.(effectiveTime, durationRef.current);
-        if (effectiveTime > 10 && episodeResumeKey) {
+        if (effectiveTime > 2 && episodeResumeKey && pendingSeekTarget === null) {
           try {
             localStorage.setItem(`resume_pos_${episodeResumeKey}`, effectiveTime.toString());
           } catch (e) {}
@@ -1651,9 +1760,7 @@ export default function VideoPlayerModal({
     };
 
     const onLoadedMetadata = () => {
-      const vidDuration = video.duration;
       syncDurationFallback();
-      setIsLoading(false);
 
       // Detect HTML5 Audio Tracks if browser exposes them (preserve server-probed tracks if already populated)
       const audioTracksApi = (video as any).audioTracks;
@@ -1689,41 +1796,46 @@ export default function VideoPlayerModal({
         setRealSubtitleTracks(subs);
       }
 
-      // Resume pending quality switch position OR saved episode position for direct streams
-      if (resumeOffsetRef.current > 0.5 && streamFallbackModeRef.current === 'direct') {
-        const target = resumeOffsetRef.current;
-        resumeOffsetRef.current = 0;
-        const knownDur = (vidDuration && isFinite(vidDuration) ? vidDuration : durationRef.current);
-        if (!knownDur || target < knownDur - 5) {
-          video.currentTime = target;
-          setCurrentTime(target);
-          currentTimeRef.current = target;
-        }
-      } else if (streamFallbackMode === 'direct' && episodeResumeKey) {
-        try {
-          const savedPos = parseFloat(localStorage.getItem(`resume_pos_${episodeResumeKey}`) || '0');
-          const knownDur = (vidDuration && isFinite(vidDuration) ? vidDuration : durationRef.current);
-          if (savedPos > 15 && (!knownDur || savedPos < knownDur - 45)) {
-            video.currentTime = savedPos;
-            setCurrentTime(savedPos);
-            currentTimeRef.current = savedPos;
-          }
-        } catch (e) {}
+      tryApplyPendingSeek();
+      if (!isHlsUrl && playableUrl) {
+        startHtml5Playback();
       }
     };
 
     const onWaiting = () => {
-      if (video.currentTime > 0.5) setIsLoading(true);
+      if (video.currentTime > 0.2) setIsLoading(true);
     };
 
     const onPlaying = () => {
+      tryApplyPendingSeek();
       setIsLoading(false);
       setIsPlaying(true);
       if (showControlsRef.current) scheduleAutoHideTimer();
     };
 
-    const onCanPlay = () => setIsLoading(false);
-    const onLoadedData = () => setIsLoading(false);
+    const onCanPlay = () => {
+      tryApplyPendingSeek();
+      if (pendingSeekTarget === null) {
+        setIsLoading(false);
+      }
+      if (!isHlsUrl && playableUrl && video.paused) {
+        startHtml5Playback();
+      }
+    };
+
+    const onLoadedData = () => {
+      tryApplyPendingSeek();
+      if (pendingSeekTarget === null && video.readyState >= 3) {
+        setIsLoading(false);
+      }
+    };
+
+    const onSeeked = () => {
+      if (pendingSeekTarget !== null && Math.abs(video.currentTime - pendingSeekTarget) <= 1.5) {
+        seekConfirmed = true;
+        pendingSeekTarget = null;
+      }
+    };
     const onEnded = () => {
       if (episodeResumeKey) {
         try {
@@ -1804,50 +1916,35 @@ export default function VideoPlayerModal({
     video.addEventListener('suspend', onStalled);
     video.addEventListener('playing', onPlaying);
     video.addEventListener('canplay', onCanPlay);
+    video.addEventListener('seeked', onSeeked);
     video.addEventListener('ended', onEnded);
     video.addEventListener('error', onError);
     document.addEventListener('visibilitychange', onVisibilityChange);
 
+    // If no pending seek offset, kick off playback right away; if resuming from small screen, start after metadata so browser seeks before playing frame 0
     if (!isHlsUrl && playableUrl) {
-      video.muted = false;
-      wasMutedByAutoplayRef.current = false;
-      const playPromise = video.play();
-      if (playPromise !== undefined) {
-        playPromise.then(() => {
-          if (!cancelled) {
-            setIsLoading(false);
-            setIsPlaying(true);
-          }
-        }).catch(() => {
-          if (cancelled) return;
-          // Fallback muted autoplay if WebView blocks unmuted autoplay; unmutes on first user tap
-          video.muted = true;
-          wasMutedByAutoplayRef.current = true;
-          video.play().then(() => {
-            if (!cancelled) {
-              setIsLoading(false);
-              setIsPlaying(true);
-            }
-          }).catch((playErr: any) => {
-            if (!cancelled) {
-              video.muted = false;
-              wasMutedByAutoplayRef.current = false;
-              if (playErr?.name !== 'AbortError') {
-                setIsLoading(false);
-              }
-              setIsPlaying(false);
-            }
-          });
-        });
+      if (pendingSeekTarget === null) {
+        startHtml5Playback();
+      } else if (video.readyState >= 1) {
+        tryApplyPendingSeek();
+        startHtml5Playback();
       }
     }
 
+    const seekFallbackTimer = setTimeout(() => {
+      if (!cancelled && !isHlsUrl && playableUrl && !playAttemptStarted) {
+        tryApplyPendingSeek();
+        startHtml5Playback();
+      }
+    }, 1500);
+
     const safetyTimer = setTimeout(() => {
       if (!cancelled) setIsLoading(false);
-    }, streamFallbackMode === 'direct' ? 10000 : 20000);
+    }, streamFallbackMode === 'direct' ? 12000 : 22000);
 
     return () => {
       cancelled = true;
+      clearTimeout(seekFallbackTimer);
       clearTimeout(safetyTimer);
       if (hlsInstance) {
         hlsInstance.destroy();
@@ -1860,8 +1957,12 @@ export default function VideoPlayerModal({
       video.removeEventListener('loadedmetadata', onLoadedMetadata);
       video.removeEventListener('loadeddata', onLoadedData);
       video.removeEventListener('waiting', onWaiting);
+      video.removeEventListener('waiting', onStallWaiting);
+      video.removeEventListener('stalled', onStalled);
+      video.removeEventListener('suspend', onStalled);
       video.removeEventListener('playing', onPlaying);
       video.removeEventListener('canplay', onCanPlay);
+      video.removeEventListener('seeked', onSeeked);
       video.removeEventListener('ended', onEnded);
       video.removeEventListener('error', onError);
       document.removeEventListener('visibilitychange', onVisibilityChange);
@@ -2034,9 +2135,21 @@ export default function VideoPlayerModal({
 
     const vid = videoRef.current;
     const wasPlaying = Boolean(vid && !vid.paused);
+    const preFsTime = vid && isFinite(vid.currentTime) ? vid.currentTime : 0;
     const docAny = document as any;
     const elAny = target as any;
     const activeFs = Boolean(document.fullscreenElement || docAny.webkitFullscreenElement || isFullscreen);
+
+    const preserveTimeAfterFs = () => {
+      if (vid && preFsTime > 0.5 && Math.abs(vid.currentTime - preFsTime) > 1.5) {
+        try {
+          vid.currentTime = preFsTime;
+        } catch {}
+      }
+      if (wasPlaying && vid && vid.paused) {
+        vid.play().catch(() => {});
+      }
+    };
 
     if (!activeFs) {
       if (!Capacitor.isNativePlatform()) {
@@ -2062,9 +2175,7 @@ export default function VideoPlayerModal({
               (window as any).AndroidPlayerBridge?.setPlaybackFullscreen?.(true);
             } catch {}
           }
-          if (wasPlaying && vid && vid.paused) {
-            vid.play().catch(() => {});
-          }
+          preserveTimeAfterFs();
         })
         .catch(() => {
           if (Capacitor.isNativePlatform()) {
@@ -2081,7 +2192,7 @@ export default function VideoPlayerModal({
     } else {
       const exitPromise = (document.fullscreenElement && document.exitFullscreen)
         ? document.exitFullscreen()
-        : (docAny.webkitFullscreenElement && docAny.webkitExitFullscreen)
+        : (docAny.webkitFullscreenElement && (docAny as any).webkitExitFullscreen)
           ? Promise.resolve(docAny.webkitExitFullscreen())
           : Promise.resolve();
 
@@ -2097,9 +2208,7 @@ export default function VideoPlayerModal({
               (screen as any).orientation?.unlock?.();
             } catch {}
           }
-          if (wasPlaying && vid && vid.paused) {
-            vid.play().catch(() => {});
-          }
+          preserveTimeAfterFs();
         })
         .catch(() => {
           if (Capacitor.isNativePlatform()) {
@@ -2215,6 +2324,8 @@ export default function VideoPlayerModal({
   const handleSelectSeason = (sIdx: number) => {
     resetAutoHideTimer();
     setShowSeasonDropdown(false);
+    isInitialOpenStreamRef.current = false;
+    hasExplicitInitialTimeRef.current = false;
     setActiveSeasonIdx(sIdx);
 
     const targetSeason = seasonsList[sIdx];
@@ -2236,6 +2347,8 @@ export default function VideoPlayerModal({
   const handleSelectEpisode = (eIdx: number) => {
     resetAutoHideTimer();
     setShowEpisodeDropdown(false);
+    isInitialOpenStreamRef.current = false;
+    hasExplicitInitialTimeRef.current = false;
     setActiveEpisodeIdx(eIdx);
 
     const ep = episodesList[eIdx];
@@ -2276,7 +2389,7 @@ export default function VideoPlayerModal({
 
         {/* Video Screen Viewport */}
         <div
-          className={`relative w-full h-full ${exoModeActive ? 'bg-transparent' : 'bg-black'} flex items-center justify-center overflow-hidden cursor-pointer`}
+          className={`relative w-full h-full ${exoModeActive ? 'bg-transparent' : 'bg-black'} flex items-center justify-center overflow-hidden cursor-pointer touch-manipulation select-none`}
           onClick={handleViewportTap}
         >
           {!isYouTube ? (
@@ -2313,11 +2426,11 @@ export default function VideoPlayerModal({
                 </div>
               )}
 
-              {/* Loading Indicator (White only, never stacked over center play-slot spinner) */}
-              {isLoading && !(showControls && !isLocked && !isPlaying) && (
-                <div className="absolute inset-0 m-auto w-20 h-20 flex flex-col items-center justify-center gap-1.5 bg-black/55 backdrop-blur-sm rounded-2xl z-25 pointer-events-none">
+              {/* Loading Indicator (White only, stays cleanly visible during loading/buffering without "Tap to Play" prompt) */}
+              {isLoading && !error && (
+                <div className="absolute inset-0 m-auto w-24 h-24 flex flex-col items-center justify-center gap-2 bg-black/65 backdrop-blur-sm rounded-2xl z-30 pointer-events-none">
                   <RefreshCw className="animate-spin text-white" size={28} />
-                  <span className="text-[11px] text-white/90 font-semibold tracking-wide">Loading</span>
+                  <span className="text-[11px] text-white/95 font-semibold tracking-wide">Loading...</span>
                 </div>
               )}
 
@@ -2634,20 +2747,24 @@ export default function VideoPlayerModal({
 
         {/* CENTER CONTROLS: 10s Rewind, Solid White Play/Pause, 10s Forward */}
         <div
-          onClick={(e) => { e.stopPropagation(); resetAutoHideTimer(); }}
-          onPointerDown={handleControlInteractionStart}
-          onPointerUp={handleControlInteractionEnd}
-          onPointerCancel={handleControlInteractionEnd}
-          className={`absolute inset-0 m-auto w-fit h-fit flex items-center justify-center gap-12 sm:gap-20 z-40 transition-opacity duration-300 ${
-            showControls && !isLocked ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+          className={`absolute inset-0 m-auto w-fit h-fit flex items-center justify-center gap-12 sm:gap-20 z-40 transition-opacity duration-300 pointer-events-none ${
+            showControls && !isLocked && !isLoading ? 'opacity-100' : 'opacity-0'
           }`}
         >
           {/* 10-Second Rewind Button */}
           <button
             type="button"
-            onClick={() => handleSkip(-10)}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleSkip(-10);
+            }}
+            onPointerDown={handleControlInteractionStart}
+            onPointerUp={handleControlInteractionEnd}
+            onPointerCancel={handleControlInteractionEnd}
             title="Rewind 10 seconds"
-            className="text-white hover:text-white/80 flex items-center justify-center transition-transform hover:scale-110 active:scale-90 cursor-pointer drop-shadow-xl"
+            className={`text-white hover:text-white/80 flex items-center justify-center transition-transform hover:scale-110 active:scale-90 cursor-pointer drop-shadow-xl ${
+              showControls && !isLocked && !isLoading ? 'pointer-events-auto' : 'pointer-events-none'
+            }`}
           >
             <Rewind10Icon className="w-10 h-10 sm:w-12 sm:h-12" />
           </button>
@@ -2655,13 +2772,19 @@ export default function VideoPlayerModal({
           {/* Large Center Solid White Play / Pause Button */}
           <button
             type="button"
-            onClick={togglePlay}
+            onClick={(e) => {
+              e.stopPropagation();
+              togglePlay();
+            }}
+            onPointerDown={handleControlInteractionStart}
+            onPointerUp={handleControlInteractionEnd}
+            onPointerCancel={handleControlInteractionEnd}
             title={isPlaying ? "Pause" : "Play"}
-            className="text-white hover:text-white/80 flex items-center justify-center transition-transform hover:scale-110 active:scale-90 cursor-pointer drop-shadow-2xl"
+            className={`text-white hover:text-white/80 flex items-center justify-center transition-transform hover:scale-110 active:scale-90 cursor-pointer drop-shadow-2xl ${
+              showControls && !isLocked && !isLoading ? 'pointer-events-auto' : 'pointer-events-none'
+            }`}
           >
-            {isLoading && !isPlaying ? (
-              <RefreshCw size={40} className="animate-spin text-white" />
-            ) : isPlaying ? (
+            {isPlaying ? (
               <Pause size={44} className="fill-white stroke-none" />
             ) : (
               <Play size={44} className="fill-white stroke-none ml-1" />
@@ -2671,9 +2794,17 @@ export default function VideoPlayerModal({
           {/* 10-Second Forward Button */}
           <button
             type="button"
-            onClick={() => handleSkip(10)}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleSkip(10);
+            }}
+            onPointerDown={handleControlInteractionStart}
+            onPointerUp={handleControlInteractionEnd}
+            onPointerCancel={handleControlInteractionEnd}
             title="Forward 10 seconds"
-            className="text-white hover:text-white/80 flex items-center justify-center transition-transform hover:scale-110 active:scale-90 cursor-pointer drop-shadow-xl"
+            className={`text-white hover:text-white/80 flex items-center justify-center transition-transform hover:scale-110 active:scale-90 cursor-pointer drop-shadow-xl ${
+              showControls && !isLocked && !isLoading ? 'pointer-events-auto' : 'pointer-events-none'
+            }`}
           >
             <Forward10Icon className="w-10 h-10 sm:w-12 sm:h-12" />
           </button>
