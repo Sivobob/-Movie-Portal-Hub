@@ -576,7 +576,14 @@ export default function HomePage() {
       : categoryMovies;
 
   const handleMovieClick = (movie: any) => {
-    handleWatchNow(movie);
+    setActiveSeasonIndex(0);
+    selectedMovieRef.current = movie;
+    setSelectedMovie(movie);
+    if (window.history.state?.appModal !== 'movie_detail') {
+      try {
+        window.history.pushState({ ...(window.history.state || {}), appModal: 'movie_detail' }, '');
+      } catch (e) {}
+    }
   };
 
   const handleWatchNow = (
