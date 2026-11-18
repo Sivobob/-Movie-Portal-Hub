@@ -1984,6 +1984,15 @@ export default function VideoPlayerModal({
     const activeFs = Boolean(document.fullscreenElement || docAny.webkitFullscreenElement || isFullscreen);
 
     if (!activeFs) {
+      if (!Capacitor.isNativePlatform()) {
+        try {
+          const ori = (screen as any).orientation;
+          if (ori && typeof ori.lock === 'function') {
+            ori.lock('landscape').catch(() => {});
+          }
+        } catch {}
+      }
+
       const enterPromise = target.requestFullscreen
         ? target.requestFullscreen({ navigationUI: 'hide' } as any).catch(() => target.requestFullscreen())
         : elAny.webkitRequestFullscreen
@@ -1996,13 +2005,6 @@ export default function VideoPlayerModal({
           if (Capacitor.isNativePlatform()) {
             try {
               (window as any).AndroidPlayerBridge?.setPlaybackFullscreen?.(true);
-            } catch {}
-          } else {
-            try {
-              const ori = (screen as any).orientation;
-              if (ori && typeof ori.lock === 'function' && /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)) {
-                ori.lock('landscape').catch(() => {});
-              }
             } catch {}
           }
           if (wasPlaying && vid && vid.paused) {

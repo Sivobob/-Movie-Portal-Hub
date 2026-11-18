@@ -823,12 +823,6 @@ export default function MovieDetailsModal({
                           type="button"
                           onClick={() => {
                             setSelectedEpisodeIdx(eIdx);
-                            onWatchNow(
-                              enrichMovieWithResolvedDuration(safeSeasonIndex, eIdx),
-                              safeSeasonIndex,
-                              eIdx,
-                              selectedLanguage
-                            );
                           }}
                           className={`relative flex-shrink-0 min-w-[48px] h-11 px-3 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
                             isSelected
