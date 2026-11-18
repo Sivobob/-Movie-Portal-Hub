@@ -23,6 +23,7 @@ import {
   Maximize,
 } from 'lucide-react';
 import DownloadOptionsModal from './DownloadOptionsModal';
+import { buildApiUrl } from '../utils/apiConfig';
 import { useDownloads } from '../hooks/useDownloads';
 import { upgradePosterUrl } from '../utils/posterUrl';
 import {
@@ -440,7 +441,7 @@ export default function MovieDetailsModal({
     hasRealSeasons && currentEpisodeObj
       ? Number(currentEpisodeObj.episodeNumber || primaryEpIdx + 1)
       : undefined;
-  const primaryDownloadUrl = hasRealSeasons
+  const rawStreamUrl = hasRealSeasons
     ? String(
         currentEpisodeObj?.streamUrl ||
           currentEpisodeObj?.videoQualities?.['720p'] ||
@@ -453,6 +454,12 @@ export default function MovieDetailsModal({
           movie.videoQualities?.['1080p'] ||
           ''
       ).trim();
+
+  const primaryDownloadUrl = rawStreamUrl
+    ? (rawStreamUrl.startsWith('http') && !rawStreamUrl.includes('/api/stream')
+        ? buildApiUrl(`/api/stream?url=${encodeURIComponent(rawStreamUrl)}&ext=.mp4`)
+        : rawStreamUrl)
+    : '';
 
   const currentDownloadMatch = getDownloadMatch(
     currentMovieId,
