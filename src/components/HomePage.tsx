@@ -29,6 +29,7 @@ import {
 import { upgradePosterUrl, normalizeMoviePosters } from '../utils/posterUrl';
 import { getVisibleQualityBadge } from '../utils/qualityBadge';
 import { parseDurationToSeconds } from '../utils/duration';
+import { getAppPreferences, isMatureContent } from '../services/userPreferencesService';
 
 const slideVariants = {
   enter: (direction: number) => ({
@@ -50,9 +51,32 @@ const slideVariants = {
 export default function HomePage() {
   const { user } = useAuth();
   const initialLocal = sortMoviesList(getLocalMovies().filter((m: any) => m.published !== false));
-  const initialFeatured = initialLocal.filter((m: any) => m.featured);
-  const [movies, setMovies] = useState<any[]>(initialLocal);
-  const [featuredMovies, setFeaturedMovies] = useState<any[]>(initialFeatured.length > 0 ? initialFeatured : initialLocal);
+  const [rawMovies, setRawMovies] = useState<any[]>(initialLocal);
+  const [familyMode, setFamilyMode] = useState<boolean>(() => getAppPreferences().familyMode);
+
+  useEffect(() => {
+    const onPrefs = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (detail && typeof detail.familyMode === 'boolean') {
+        setFamilyMode(detail.familyMode);
+      } else {
+        setFamilyMode(getAppPreferences().familyMode);
+      }
+    };
+    window.addEventListener('mp_preferences_updated', onPrefs);
+    return () => window.removeEventListener('mp_preferences_updated', onPrefs);
+  }, []);
+
+  const movies = useMemo(
+    () => (familyMode ? rawMovies.filter((m) => !isMatureContent(m)) : rawMovies),
+    [rawMovies, familyMode]
+  );
+
+  const featuredMovies = useMemo(() => {
+    const featuredOnly = movies.filter((m: any) => m.featured);
+    return featuredOnly.length > 0 ? featuredOnly : movies;
+  }, [movies]);
+
   const [searchParams, setSearchParams] = useSearchParams();
   const category = searchParams.get('category');
 
@@ -257,9 +281,7 @@ export default function HomePage() {
         return;
       }
       setIsLoading(false);
-      setMovies(list);
-      const featuredOnly = list.filter((m) => m.featured);
-      setFeaturedMovies(featuredOnly.length > 0 ? featuredOnly : list);
+      setRawMovies(list);
       saveLocalMovies(list);
     };
 
@@ -724,7 +746,7 @@ export default function HomePage() {
   });
 
   return (
-    <div className={`relative flex-1 w-full max-w-full bg-black text-white flex flex-col select-none touch-pan-y ${category ? 'pb-[calc(5.75rem+env(safe-area-inset-bottom))] pt-0' : 'pb-[calc(5.75rem+env(safe-area-inset-bottom))] pt-0'}`}>
+    <div className={`relative flex-1 w-full max-w-full bg-black text-white flex flex-col select-none touch-pan-y pt-[calc(4.75rem+env(safe-area-inset-top))] pb-[calc(5.75rem+env(safe-area-inset-bottom))]`}>
 
       {toastMessage && (
         <div className="fixed top-[max(4.25rem,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-[120] bg-neutral-900/95 border border-red-600/50 text-white text-xs font-bold px-4 py-2.5 rounded-full shadow-2xl backdrop-blur-md max-w-[90vw] truncate">
@@ -732,8 +754,58 @@ export default function HomePage() {
         </div>
       )}
 
+      {/* Top Category Tabs Bar: All, Bollywood, Hollywood, Series */}
+      <div className="sticky top-[calc(4.25rem+env(safe-area-inset-top))] z-30 bg-black/95 backdrop-blur-md px-3 sm:px-6 py-2.5 border-b border-white/[0.08] shadow-md">
+        <div className="flex items-center gap-3 overflow-x-auto scrollbar-none py-1">
+          <button
+            type="button"
+            onClick={() => setCategory(null)}
+            className={`px-4 py-1.5 rounded-full text-xs sm:text-sm font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap ${
+              !category
+                ? 'bg-red-600 text-white shadow-md shadow-red-600/30'
+                : 'bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800'
+            }`}
+          >
+            All
+          </button>
+          <button
+            type="button"
+            onClick={() => setCategory('Bollywood')}
+            className={`px-4 py-1.5 rounded-full text-xs sm:text-sm font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap ${
+              category === 'Bollywood'
+                ? 'bg-red-600 text-white shadow-md shadow-red-600/30'
+                : 'bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800'
+            }`}
+          >
+            Bollywood
+          </button>
+          <button
+            type="button"
+            onClick={() => setCategory('Hollywood')}
+            className={`px-4 py-1.5 rounded-full text-xs sm:text-sm font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap ${
+              category === 'Hollywood'
+                ? 'bg-red-600 text-white shadow-md shadow-red-600/30'
+                : 'bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800'
+            }`}
+          >
+            Hollywood
+          </button>
+          <button
+            type="button"
+            onClick={() => setCategory('Series')}
+            className={`px-4 py-1.5 rounded-full text-xs sm:text-sm font-bold tracking-tight transition-all cursor-pointer whitespace-nowrap ${
+              category === 'Series'
+                ? 'bg-red-600 text-white shadow-md shadow-red-600/30'
+                : 'bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800'
+            }`}
+          >
+            Series
+          </button>
+        </div>
+      </div>
+
       {category ? (
-        <div className="flex-grow pt-[max(4.75rem,calc(env(safe-area-inset-top)+4rem))] touch-pan-y">
+        <div className="flex-grow pt-3 touch-pan-y">
           <div className="flex items-center justify-between gap-2 px-3 sm:px-4 mb-4">
             <h2 className="text-red-500 font-black text-lg sm:text-xl tracking-wide uppercase truncate">
               {category}
@@ -822,9 +894,9 @@ export default function HomePage() {
         </div>
       ) : (
         <div className="flex flex-col w-full">
-          {/* Cinematic Hero Banner Matching First Screenshot */}
+          {/* Cinematic Hero Banner Matching Reference Screenshot */}
           <div
-            className="relative w-full h-[62dvh] sm:h-[68dvh] flex flex-col justify-end overflow-hidden select-none touch-pan-y"
+            className="relative w-full h-[28dvh] sm:h-[36dvh] flex flex-col justify-end overflow-hidden select-none touch-pan-y"
             onTouchStart={handleTouchStart}
             onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}
@@ -852,66 +924,30 @@ export default function HomePage() {
                 }}
               >
                 <img
-                  src={upgradePosterUrl(currentFeatured.posterUrl || currentFeatured.backdropUrl, 1200) || currentFeatured.posterUrl || currentFeatured.backdropUrl}
+                  src={upgradePosterUrl(currentFeatured.backdropUrl || currentFeatured.posterUrl, 1600) || currentFeatured.backdropUrl || currentFeatured.posterUrl}
                   alt={currentFeatured.title}
                   draggable={false}
-                  className="absolute inset-0 w-full h-full object-cover object-center"
+                  className="absolute inset-0 w-full h-full object-cover object-center brightness-105 contrast-105"
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-black via-black/35 to-black/45" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black via-black/35 to-transparent" />
               </motion.div>
             </AnimatePresence>
 
-            {/* Hero Banner Overlay Content (Title, Genre bullet tags, Play & My List Buttons) */}
-            <div className="relative z-10 p-4 sm:p-6 text-center pb-6 flex flex-col items-center">
-              <h1 className="text-2xl sm:text-4xl font-black tracking-tight uppercase text-white drop-shadow-xl mb-1.5 font-sans">
-                {currentFeatured.title}
-              </h1>
-
-              {/* Tagline / Subtitle bullet tags */}
-              <p className="text-xs sm:text-sm font-semibold text-gray-200 mb-4 drop-shadow flex items-center justify-center gap-1.5 flex-wrap">
-                {String(currentFeatured.genre || currentFeatured.displayCategory || 'Movie')
-                  .split(/[,/•|]+/)
-                  .map((t, idx, arr) => (
-                    <React.Fragment key={idx}>
-                      <span>{t.trim()}</span>
-                      {idx < arr.length - 1 && <span className="text-neutral-500">•</span>}
-                    </React.Fragment>
-                  ))}
-              </p>
-
-              {/* Action Buttons: Play + My List */}
-              <div className="flex items-center gap-3 w-full max-w-xs justify-center">
-                <button
-                  type="button"
-                  onClick={() => handleWatchNow(currentFeatured)}
-                  className="flex-1 bg-white hover:bg-neutral-200 text-black font-black text-xs sm:text-sm py-3 px-4 rounded-xl flex items-center justify-center gap-2 shadow-2xl transition-all active:scale-95 cursor-pointer uppercase tracking-wider"
-                >
-                  <Play size={16} fill="black" />
-                  <span>Play</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => toggleMyList(e, currentFeatured)}
-                  className="flex-1 bg-neutral-900/85 hover:bg-neutral-800 text-white border border-neutral-700/80 font-bold text-xs sm:text-sm py-3 px-4 rounded-xl flex items-center justify-center gap-2 shadow-2xl transition-all active:scale-95 cursor-pointer uppercase tracking-wider backdrop-blur-sm"
-                >
-                  {myListIds.has(currentFeatured.id || currentFeatured.imdbId) ? (
-                    <>
-                      <Check size={16} className="text-red-500 stroke-[3]" />
-                      <span>My List</span>
-                    </>
-                  ) : (
-                    <>
-                      <Plus size={16} />
-                      <span>My List</span>
-                    </>
-                  )}
-                </button>
+            {/* Hero Banner Overlay Title & Clean Right Layout */}
+            <div className="relative z-10 p-3 sm:p-5 flex items-end justify-between">
+              <div className="max-w-[70%]">
+                <span className="bg-red-600 text-white font-extrabold text-[9px] px-2 py-0.5 rounded uppercase tracking-wider mb-1 inline-block">
+                  Featured
+                </span>
+                <h1 className="text-2xl sm:text-4xl font-black tracking-tighter uppercase text-white drop-shadow-2xl font-sans line-clamp-1">
+                  {currentFeatured.title}
+                </h1>
               </div>
 
               {/* Slider Dots */}
               {featuredMovies.length > 1 && (
-                <div className="flex items-center justify-center gap-1.5 mt-3.5">
-                  {featuredMovies.slice(0, 6).map((_, idx) => (
+                <div className="flex items-center gap-1.5 pb-2">
+                  {featuredMovies.slice(0, 5).map((_, idx) => (
                     <button
                       key={idx}
                       type="button"
@@ -920,12 +956,48 @@ export default function HomePage() {
                         setActiveSlideIndex(idx);
                       }}
                       className={`h-1.5 rounded-full transition-all cursor-pointer ${
-                        idx === activeSlideIndex ? 'w-6 bg-red-600' : 'w-2 bg-white/30'
+                        idx === activeSlideIndex ? 'w-5 bg-red-600' : 'w-1.5 bg-white/40'
                       }`}
                     />
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* Reference Screenshot Style Mini Preview Card Below Banner */}
+          <div className="px-3 sm:px-6 -mt-3 relative z-20">
+            <div
+              onClick={() => handleWatchNow(currentFeatured)}
+              className="bg-neutral-900/95 hover:bg-neutral-900 border border-neutral-800 hover:border-red-600/50 rounded-2xl p-2.5 sm:p-3 flex items-center justify-between gap-3 shadow-xl cursor-pointer group transition-all"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-12 h-14 sm:w-14 sm:h-16 rounded-xl overflow-hidden bg-neutral-950 flex-shrink-0 border border-white/10 shadow">
+                  <img
+                    src={upgradePosterUrl(currentFeatured.posterUrl || currentFeatured.backdropUrl, 300) || currentFeatured.posterUrl}
+                    alt={currentFeatured.title}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                  />
+                </div>
+                <div className="min-w-0">
+                  <h4 className="text-xs sm:text-sm font-black text-white uppercase tracking-tight truncate group-hover:text-red-500 transition-colors">
+                    {currentFeatured.title}
+                  </h4>
+                  <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-400 mt-0.5">
+                    <span className="bg-neutral-800 text-gray-300 px-1.5 py-0.2 rounded text-[10px]">
+                      {currentFeatured.displayCategory || currentFeatured.originalCategory || 'Movie'}
+                    </span>
+                    <span>•</span>
+                    <span>{currentFeatured.year || '2026'}</span>
+                    <span>•</span>
+                    <span className="text-red-400 truncate">{currentFeatured.genre || 'Action'}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/20 group-hover:scale-105 transition-all">
+                <Play size={18} fill="black" className="ml-0.5" />
+              </div>
             </div>
           </div>
 

@@ -11,13 +11,29 @@ import {
   persistentMultipleTabManager,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
+import { isFirestoreWriteAllowed } from './services/firestoreQuotaService';
 
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore with long-polling transport and safe multi-tab persistence
-// to avoid WebChannel [code=unavailable] failures inside iframes, proxies, and WebViews.
+// Initialize Firestore with long-polling transport and memory-first cache
+// to avoid WebChannel failures and prevent stale mutation retry loops when quota is exceeded.
 const config = firebaseConfig as any;
 const databaseId: string | undefined = config.firestoreDatabaseId || undefined;
+
+// Cleanup any old failed IndexedDB mutation queues from previous sessions
+if (typeof window !== 'undefined' && window.indexedDB && !isFirestoreWriteAllowed()) {
+  try {
+    if (window.indexedDB.databases) {
+      window.indexedDB.databases().then((dbs) => {
+        dbs.forEach((d) => {
+          if (d.name && (d.name.includes('firestore') || d.name.includes('firebase') || d.name.includes('[DEFAULT]'))) {
+            try { window.indexedDB.deleteDatabase(d.name); } catch {}
+          }
+        });
+      }).catch(() => {});
+    }
+  } catch {}
+}
 
 function createFirestoreInstance(): Firestore {
   const isBrowser = typeof window !== 'undefined';
@@ -26,30 +42,19 @@ function createFirestoreInstance(): Firestore {
     : { ignoreUndefinedProperties: true };
 
   if (isBrowser) {
+    // When quota is exhausted, always use memoryLocalCache so that failed writes are not persisted
+    // into IndexedDB to replay repeatedly across page refreshes.
     try {
       return initializeFirestore(
         app,
         {
           ...transportSettings,
-          localCache: persistentLocalCache({
-            tabManager: persistentMultipleTabManager(),
-          }),
+          localCache: memoryLocalCache(),
         },
         databaseId
       );
     } catch {
-      try {
-        return initializeFirestore(
-          app,
-          {
-            ...transportSettings,
-            localCache: memoryLocalCache(),
-          },
-          databaseId
-        );
-      } catch {
-        return databaseId ? getFirestore(app, databaseId) : getFirestore(app);
-      }
+      return databaseId ? getFirestore(app, databaseId) : getFirestore(app);
     }
   }
 
@@ -64,9 +69,9 @@ export const db: Firestore = createFirestoreInstance();
 
 export const auth = getAuth(app);
 
-// Validate Firestore connectivity on startup
+// Validate Firestore connectivity on startup only if write quota is normal
 async function testConnection() {
-  if (typeof window === 'undefined') return;
+  if (typeof window === 'undefined' || !isFirestoreWriteAllowed()) return;
   try {
     await getDocFromServer(doc(db, 'app_config', 'connection'));
   } catch (error) {
@@ -109,8 +114,31 @@ export function handleFirestoreError(
   path: string | null,
   shouldThrow: boolean = false
 ) {
+  const errMsg = error instanceof Error ? error.message : String(error);
+  const isQuota =
+    errMsg.includes('resource-exhausted') ||
+    errMsg.includes('Quota limit exceeded') ||
+    errMsg.includes('quota') ||
+    errMsg.includes('exhausted');
+
+  if (isQuota && typeof window !== 'undefined' && window.localStorage) {
+    try {
+      const now = new Date();
+      const nextUtcMidnight = Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate() + 1,
+        1, 0, 0
+      );
+      const expiry = Math.max(Date.now() + 12 * 3600 * 1000, nextUtcMidnight);
+      localStorage.setItem('mp_firestore_write_quota_exceeded_until_v1', String(expiry));
+    } catch {}
+    console.warn('[Firestore Quota Notice] Free daily write quota reached. Switched to offline/local fallback.');
+    return;
+  }
+
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errMsg,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
@@ -130,3 +158,4 @@ export function handleFirestoreError(
     throw new Error(JSON.stringify(errInfo));
   }
 }
+

@@ -16,6 +16,10 @@ import { CURRENT_VERSION_NAME } from './services/appUpdateConfig';
 import { ensureAndroidStreamBridge } from './utils/apiConfig';
 import AndroidBottomNav from './components/AndroidBottomNav';
 import ReleaseNotificationBridge from './components/ReleaseNotificationBridge';
+import DownloadsPage from './components/DownloadsPage';
+import MePage from './components/MePage';
+import SettingsPage from './components/SettingsPage';
+import { syncAppPreferencesFromFirestore } from './services/userPreferencesService';
 
 function AdminRoute({ children }: { children: React.ReactElement }) {
   const [unlocked, setUnlocked] = useState(() => {
@@ -86,6 +90,11 @@ function AdminRoute({ children }: { children: React.ReactElement }) {
 
 function AppContent() {
   const [showSplash, setShowSplash] = useState(false);
+  const { user } = useAuth();
+
+  useEffect(() => {
+    syncAppPreferencesFromFirestore(user?.uid).catch(() => {});
+  }, [user?.uid]);
 
   return (
     <>
@@ -99,6 +108,9 @@ function AppContent() {
           <main className="flex-1 w-full flex flex-col">
             <Routes>
               <Route path="/" element={<HomePage />} />
+              <Route path="/downloads" element={<DownloadsPage />} />
+              <Route path="/me" element={<MePage />} />
+              <Route path="/settings" element={<SettingsPage />} />
               <Route
                 path="/admin"
                 element={

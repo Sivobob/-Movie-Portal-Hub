@@ -1,10 +1,15 @@
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { Home, Tv, Film, Layers } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { Home, Download, User } from 'lucide-react';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../firebase';
 
 interface AndroidBottomNavProps {
   activeCategory?: string | null;
   onSelectCategory?: (category: string | null) => void;
 }
+
+const MESSAGES_SEEN_AT_KEY = 'mp_messages_last_seen_ms';
 
 export default function AndroidBottomNav({
   activeCategory: _activeCategory,
@@ -12,102 +17,102 @@ export default function AndroidBottomNav({
 }: AndroidBottomNavProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const currentCategory = searchParams.get('category');
+  const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
 
   const pathname = location.pathname;
-  if (pathname === '/admin') return null;
 
-  const isHome = pathname === '/' && !currentCategory;
-  const isBollywood = pathname === '/' && currentCategory === 'Bollywood';
-  const isHollywood = pathname === '/' && currentCategory === 'Hollywood';
-  const isSeries = pathname === '/' && currentCategory === 'Series';
+  useEffect(() => {
+    let active = true;
+    const checkUnread = async () => {
+      try {
+        const lastSeen = Number(localStorage.getItem(MESSAGES_SEEN_AT_KEY) || '0');
+        const snap = await getDoc(doc(db, 'admins', 'latest_release_notification'));
+        if (!active || !snap.exists()) return;
+        const data = snap.data();
+        const latestMs = Number(data?.createdAtMs || 0);
+        setHasUnreadMessages(latestMs > lastSeen);
+      } catch {
+        // Ignore silent background unread check errors
+      }
+    };
+    checkUnread();
+    const onRead = () => setHasUnreadMessages(false);
+    window.addEventListener('mp_messages_read', onRead);
+    return () => {
+      active = false;
+      window.removeEventListener('mp_messages_read', onRead);
+    };
+  }, [pathname]);
 
-  const goToHome = () => {
+  // Hide bottom bar on Admin, Settings, Search routes
+  if (pathname === '/admin' || pathname === '/settings' || pathname === '/search') {
+    return null;
+  }
+
+  const isHome = pathname === '/';
+  const isDownloads = pathname === '/downloads';
+  const isMe = pathname === '/me';
+
+  const goHome = () => {
     if (onSelectCategory) onSelectCategory(null);
     navigate('/');
   };
 
-  const goToCategory = (cat: string) => {
-    if (onSelectCategory) onSelectCategory(cat);
-    navigate(`/?category=${cat}`);
-  };
-
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-black/95 border-t border-neutral-900/90 backdrop-blur-xl px-2 py-2 safe-bottom select-none">
-      <div className="max-w-md mx-auto grid grid-cols-5 items-center text-center">
+    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-[#121418]/95 border-t border-white/[0.08] backdrop-blur-xl px-4 py-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] select-none">
+      <div className="max-w-lg mx-auto grid grid-cols-3 items-center text-center">
         {/* 1. Home */}
         <button
           type="button"
-          onClick={goToHome}
-          className={`flex flex-col items-center justify-center py-1 px-1 rounded-2xl transition-all cursor-pointer active:scale-95 ${
-            isHome ? 'text-red-600 font-black' : 'text-gray-400 hover:text-gray-200'
+          onClick={goHome}
+          className={`flex flex-col items-center justify-center min-h-[46px] py-1 px-2 rounded-xl transition-colors cursor-pointer active:scale-95 ${
+            isHome ? 'text-[#00d664]' : 'text-neutral-400 hover:text-neutral-200'
           }`}
+          aria-label="Home"
         >
-          <Home size={22} className={isHome ? 'stroke-[2.5]' : 'stroke-2'} />
-          <span className="text-[10px] mt-1 tracking-tight font-bold">Home</span>
-          {isHome && <span className="w-1.5 h-1.5 bg-red-600 rounded-full mt-0.5"></span>}
-        </button>
-
-        {/* 2. Bollywood */}
-        <button
-          type="button"
-          onClick={() => goToCategory('Bollywood')}
-          className={`flex flex-col items-center justify-center py-1 px-1 rounded-2xl transition-all cursor-pointer active:scale-95 ${
-            isBollywood ? 'text-red-600 font-black' : 'text-gray-400 hover:text-gray-200'
-          }`}
-        >
-          <Tv size={22} className={isBollywood ? 'stroke-[2.5]' : 'stroke-2'} />
-          <span className="text-[10px] mt-1 tracking-tight font-bold">Bollywood</span>
-          {isBollywood && <span className="w-1.5 h-1.5 bg-red-600 rounded-full mt-0.5"></span>}
-        </button>
-
-        {/* 3. Center M Logo */}
-        <button
-          type="button"
-          onClick={goToHome}
-          className="flex flex-col items-center justify-center py-0.5 px-1 group cursor-pointer active:scale-95"
-          aria-label="Movie Portal Home"
-        >
-          <div className="w-9 h-9 rounded-full bg-neutral-900 border border-red-600/50 flex items-center justify-center shadow-[0_0_15px_rgba(229,9,20,0.4)] group-hover:border-red-600 transition-all">
-            <span
-              style={{
-                fontFamily: "'Bangers', cursive, system-ui",
-                color: '#E50914',
-                WebkitTextStroke: '1px #000000',
-              }}
-              className="text-xl font-black uppercase tracking-tight"
-            >
-              M
-            </span>
+          <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${isHome ? 'bg-[#00d664]/15' : ''}`}>
+            <Home size={20} className={isHome ? 'stroke-[2.5]' : 'stroke-[1.9]'} />
           </div>
-          <span className="text-[9px] mt-0.5 tracking-tight font-bold text-red-500">Portal</span>
+          <span className={`text-[11px] mt-0.5 tracking-tight ${isHome ? 'font-bold text-[#00d664]' : 'font-medium'}`}>
+            Home
+          </span>
         </button>
 
-        {/* 4. Hollywood */}
+        {/* 2. Downloads */}
         <button
           type="button"
-          onClick={() => goToCategory('Hollywood')}
-          className={`flex flex-col items-center justify-center py-1 px-1 rounded-2xl transition-all cursor-pointer active:scale-95 ${
-            isHollywood ? 'text-red-600 font-black' : 'text-gray-400 hover:text-gray-200'
+          onClick={() => navigate('/downloads')}
+          className={`flex flex-col items-center justify-center min-h-[46px] py-1 px-2 rounded-xl transition-colors cursor-pointer active:scale-95 ${
+            isDownloads ? 'text-[#00d664]' : 'text-neutral-400 hover:text-neutral-200'
           }`}
+          aria-label="Downloads"
         >
-          <Film size={22} className={isHollywood ? 'stroke-[2.5]' : 'stroke-2'} />
-          <span className="text-[10px] mt-1 tracking-tight font-bold">Hollywood</span>
-          {isHollywood && <span className="w-1.5 h-1.5 bg-red-600 rounded-full mt-0.5"></span>}
+          <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${isDownloads ? 'bg-[#00d664]/15' : ''}`}>
+            <Download size={20} className={isDownloads ? 'stroke-[2.5]' : 'stroke-[1.9]'} />
+          </div>
+          <span className={`text-[11px] mt-0.5 tracking-tight ${isDownloads ? 'font-bold text-[#00d664]' : 'font-medium'}`}>
+            Downloads
+          </span>
         </button>
 
-        {/* 5. Series */}
+        {/* 3. Me */}
         <button
           type="button"
-          onClick={() => goToCategory('Series')}
-          className={`flex flex-col items-center justify-center py-1 px-1 rounded-2xl transition-all cursor-pointer active:scale-95 ${
-            isSeries ? 'text-red-600 font-black' : 'text-gray-400 hover:text-gray-200'
+          onClick={() => navigate('/me')}
+          className={`flex flex-col items-center justify-center min-h-[46px] py-1 px-2 rounded-xl transition-colors cursor-pointer active:scale-95 ${
+            isMe ? 'text-[#00d664]' : 'text-neutral-400 hover:text-neutral-200'
           }`}
+          aria-label="Me"
         >
-          <Layers size={22} className={isSeries ? 'stroke-[2.5]' : 'stroke-2'} />
-          <span className="text-[10px] mt-1 tracking-tight font-bold">Series</span>
-          {isSeries && <span className="w-1.5 h-1.5 bg-red-600 rounded-full mt-0.5"></span>}
+          <div className={`relative w-7 h-7 rounded-lg flex items-center justify-center ${isMe ? 'bg-[#00d664]/15' : ''}`}>
+            <User size={20} className={isMe ? 'stroke-[2.5]' : 'stroke-[1.9]'} />
+            {hasUnreadMessages && (
+              <span className="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-red-500 ring-2 ring-[#121418]" />
+            )}
+          </div>
+          <span className={`text-[11px] mt-0.5 tracking-tight ${isMe ? 'font-bold text-[#00d664]' : 'font-medium'}`}>
+            Me
+          </span>
         </button>
       </div>
     </nav>

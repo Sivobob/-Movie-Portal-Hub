@@ -203,6 +203,20 @@ export default function Header() {
 
   const showPromoBar = !isInstalled && isOnHome && (!isAndroid || showTopHeader);
 
+  if (
+    location.pathname === '/downloads' ||
+    location.pathname === '/me' ||
+    location.pathname === '/settings' ||
+    location.pathname === '/search' ||
+    location.pathname === '/admin'
+  ) {
+    return (
+      <>
+        {!isInstalled && settingsModal}
+      </>
+    );
+  }
+
   return (
     <>
       <div
@@ -213,8 +227,8 @@ export default function Header() {
         {showPromoBar && (
           <div className="pointer-events-auto w-full bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 text-black px-2.5 sm:px-4 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] flex items-center justify-between gap-2 shadow-lg">
             <div className="flex items-center gap-2 min-w-0 flex-1">
-              <div className="w-7 h-7 rounded-lg bg-black text-yellow-400 flex items-center justify-center flex-shrink-0 shadow">
-                <Smartphone size={15} />
+              <div className="w-7 h-7 rounded-lg overflow-hidden bg-black flex items-center justify-center flex-shrink-0 shadow">
+                <img src="/assets/icons/master_icon.png" alt="Movie Portal" className="w-full h-full object-cover" />
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5 min-w-0">
@@ -246,31 +260,48 @@ export default function Header() {
           </div>
         )}
 
-        {/* Top Header Bar: Red M Branding on left, My List icon + Settings gear on right */}
+        {/* Top Header Bar: Original Movie Portal App Icon on left + Search trigger + Action icons */}
         <div
-          className={`max-w-7xl mx-auto flex items-center justify-between px-3 sm:px-6 pointer-events-auto ${
+          className={`max-w-7xl mx-auto flex items-center justify-between gap-2.5 px-3 sm:px-6 pointer-events-auto ${
             showPromoBar ? 'pt-2.5' : 'pt-[max(0.75rem,env(safe-area-inset-top))]'
           }`}
         >
-          {/* Red M Branding */}
-          <div
-            onClick={() => navigate('/')}
-            className="flex items-center gap-1.5 cursor-pointer active:scale-95 transition-transform"
-          >
-            <span
-              style={{
-                fontFamily: "'Bangers', cursive, system-ui",
-                color: '#E50914',
-                textShadow: '0 0 15px rgba(229,9,20,0.5)',
-              }}
-              className="text-4xl sm:text-5xl font-black tracking-tighter"
+          {/* Original Movie Box / Movie Portal App Icon + Search Bar */}
+          <div className="flex items-center gap-2.5 flex-1 min-w-0">
+            <button
+              type="button"
+              onClick={() => navigate('/')}
+              className="flex items-center cursor-pointer active:scale-95 transition-transform flex-shrink-0 rounded-xl overflow-hidden shadow-lg border border-white/15"
+              aria-label="Movie Portal Home"
             >
-              M
-            </span>
+              <img
+                src="/assets/icons/master_icon.png"
+                alt="Movie Portal"
+                className="w-9 h-9 sm:w-10 sm:h-10 object-cover"
+              />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => navigate('/search')}
+              className="flex-1 max-w-md flex items-center justify-between gap-2 bg-neutral-900 border border-white/15 rounded-xl px-3.5 py-2 text-left text-xs text-neutral-300 backdrop-blur-md shadow-md cursor-pointer transition-colors min-w-0"
+              aria-label="Search movies and series"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <svg className="w-4 h-4 text-neutral-400 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24">
+                  <circle cx="11" cy="11" r="8" />
+                  <path d="m21 21-4.3-4.3" />
+                </svg>
+                <span className="truncate text-neutral-400">Search movies, series...</span>
+              </div>
+              <span className="bg-emerald-500 hover:bg-emerald-600 text-black font-black px-2.5 py-1 rounded-lg text-[11px] flex-shrink-0 shadow">
+                Search
+              </span>
+            </button>
           </div>
 
           {/* Right Action Icons: My List + Settings Gear */}
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2 flex-shrink-0">
             <button
               type="button"
               onClick={() => setShowMyListModal(true)}
@@ -347,9 +378,23 @@ export default function Header() {
         isOpen={showMyListModal}
         onClose={() => setShowMyListModal(false)}
         onSelectMovie={(movie) => {
+          const targetId = movie?.id || movie?.imdbId;
+          if (targetId) {
+            try {
+              sessionStorage.setItem('mp_pending_open_movie_id', String(targetId));
+            } catch {}
+            window.dispatchEvent(new CustomEvent('movie_portal_open_movie', { detail: String(targetId) }));
+          }
           navigate('/');
         }}
         onPlayMovie={(movie) => {
+          const targetId = movie?.id || movie?.imdbId;
+          if (targetId) {
+            try {
+              sessionStorage.setItem('mp_pending_open_movie_id', String(targetId));
+            } catch {}
+            window.dispatchEvent(new CustomEvent('movie_portal_open_movie', { detail: String(targetId) }));
+          }
           navigate('/');
         }}
       />

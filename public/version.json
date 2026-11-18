@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.229",
-  "minimumRequiredVersion": "3.5.229",
-  "latestVersionCode": 3449,
-  "minimumRequiredVersionCode": 3449,
+  "latestVersion": "3.5.230",
+  "minimumRequiredVersion": "3.5.230",
+  "latestVersionCode": 3450,
+  "minimumRequiredVersionCode": 3450,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Portal v3.5.229 update is ready! Removed Recently Added badges, fixed 1-press Back while watching episodes, and improved notification permission prompt.",
-  "releaseNotes": "v3.5.229: Single-press Back returns to Episode List/previous page instead of Home, removed Recently Added badges, and delayed Android 13/14 notification permission prompt."
+  "updateMessage": "Movie Portal v3.5.230 update is ready! Updated compact Hero banner, clean episode number tiles, fullscreen/fit player controls, and quota-safe offline caching.",
+  "releaseNotes": "v3.5.230: Compact Hero carousel, updated video player with fullscreen & fit zoom controls, simplified episode number tiles in MovieDetailsModal, and Firestore quota fallback."
 }

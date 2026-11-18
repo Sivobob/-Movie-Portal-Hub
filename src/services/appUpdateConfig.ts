@@ -9,12 +9,13 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { buildApiUrl } from '../utils/apiConfig';
+import { checkAndHandleQuotaError } from './firestoreQuotaService';
 
 export const APP_UPDATE_COLLECTION = 'admins';
 export const APP_UPDATE_DOC_ID = 'android_update';
 
-export const CURRENT_VERSION_NAME = '3.5.229';
-export const CURRENT_VERSION_CODE = 3449;
+export const CURRENT_VERSION_NAME = '3.5.230';
+export const CURRENT_VERSION_CODE = 3450;
 
 export const OFFICIAL_APK_DIRECT_URL =
   'https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk';
@@ -322,6 +323,11 @@ export async function saveRemoteUpdateConfig(
     updatedAt: serverTimestamp(),
   };
 
-  await setDoc(doc(db, APP_UPDATE_COLLECTION, APP_UPDATE_DOC_ID), payload, { merge: true });
+  try {
+    await setDoc(doc(db, APP_UPDATE_COLLECTION, APP_UPDATE_DOC_ID), payload, { merge: true });
+  } catch (err) {
+    checkAndHandleQuotaError(err);
+    console.warn('Could not sync update config to Firestore (saved locally):', err);
+  }
   return normalized;
 }

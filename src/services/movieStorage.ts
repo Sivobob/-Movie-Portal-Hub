@@ -1,6 +1,7 @@
 import { db } from '../firebase';
 import { collection, getDocs, getDocsFromServer, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { normalizeMoviePosters } from '../utils/posterUrl';
+import { checkAndHandleQuotaError } from './firestoreQuotaService';
 
 export interface MovieData {
   id: string;
@@ -171,8 +172,9 @@ export async function saveMovieToFirestore(movie: MovieData): Promise<void> {
     await setDoc(doc(db, COLLECTION_NAME, normalized.id), normalized);
     saveMovieLocally(normalized);
   } catch (e) {
-    console.error('Error saving movie to Firestore', e);
-    throw e;
+    checkAndHandleQuotaError(e);
+    console.warn('Error saving movie to Firestore (saved locally):', e);
+    saveMovieLocally(movie);
   }
 }
 
@@ -181,8 +183,9 @@ export async function deleteMovieFromFirestore(id: string): Promise<void> {
     await deleteDoc(doc(db, COLLECTION_NAME, id));
     deleteMovieLocally(id);
   } catch (e) {
-    console.error('Error deleting movie from Firestore', e);
-    throw e;
+    checkAndHandleQuotaError(e);
+    console.warn('Error deleting movie from Firestore (deleted locally):', e);
+    deleteMovieLocally(id);
   }
 }
 

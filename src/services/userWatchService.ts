@@ -23,6 +23,20 @@ export interface MyListItem {
   movieData?: any;
 }
 
+import {
+  isFirestoreWriteAllowed,
+  markFirestoreQuotaExhausted,
+  checkAndHandleQuotaError,
+} from './firestoreQuotaService';
+
+let isFirestoreQuotaExceeded = !isFirestoreWriteAllowed();
+
+function checkQuotaError(e: any) {
+  if (checkAndHandleQuotaError(e)) {
+    isFirestoreQuotaExceeded = true;
+  }
+}
+
 export async function saveWatchProgress(userId: string, movie: any, currentTime: number, duration: number) {
   if (!userId || !movie) return;
   const movieId = movie.id || movie.imdbId || 'unknown';
@@ -41,11 +55,13 @@ export async function saveWatchProgress(userId: string, movie: any, currentTime:
     movieData: movie,
   };
 
-  try {
-    const ref = doc(db, 'users', userId, 'watch_history', movieId);
-    await setDoc(ref, payload, { merge: true });
-  } catch (e) {
-    console.warn('Failed to save watch progress to Firestore:', e);
+  if (!isFirestoreQuotaExceeded) {
+    try {
+      const ref = doc(db, 'users', userId, 'watch_history', movieId);
+      await setDoc(ref, payload, { merge: true });
+    } catch (e) {
+      checkQuotaError(e);
+    }
   }
 
   // Also save locally as fallback
@@ -60,15 +76,17 @@ export async function saveWatchProgress(userId: string, movie: any, currentTime:
 
 export async function fetchWatchHistory(userId: string): Promise<WatchHistoryItem[]> {
   if (!userId) return [];
-  try {
-    const ref = collection(db, 'users', userId, 'watch_history');
-    const q = query(ref, orderBy('updatedAt', 'desc'));
-    const snap = await getDocs(q);
-    if (!snap.empty) {
-      return snap.docs.map((d) => d.data() as WatchHistoryItem);
+  if (!isFirestoreQuotaExceeded) {
+    try {
+      const ref = collection(db, 'users', userId, 'watch_history');
+      const q = query(ref, orderBy('updatedAt', 'desc'));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        return snap.docs.map((d) => d.data() as WatchHistoryItem);
+      }
+    } catch (e) {
+      checkQuotaError(e);
     }
-  } catch (e) {
-    console.warn('Failed to fetch watch history from Firestore:', e);
   }
 
   // Fallback to local storage
@@ -82,11 +100,13 @@ export async function fetchWatchHistory(userId: string): Promise<WatchHistoryIte
 
 export async function removeWatchHistoryItem(userId: string, movieId: string) {
   if (!userId || !movieId) return;
-  try {
-    const ref = doc(db, 'users', userId, 'watch_history', movieId);
-    await deleteDoc(ref);
-  } catch (e) {
-    console.warn('Failed to delete watch history item from Firestore:', e);
+  if (!isFirestoreQuotaExceeded) {
+    try {
+      const ref = doc(db, 'users', userId, 'watch_history', movieId);
+      await deleteDoc(ref);
+    } catch (e: any) {
+      checkQuotaError(e);
+    }
   }
 
   try {
@@ -109,11 +129,13 @@ export async function addToMyList(userId: string, movie: any) {
     movieData: movie,
   };
 
-  try {
-    const ref = doc(db, 'users', userId, 'my_list', movieId);
-    await setDoc(ref, payload, { merge: true });
-  } catch (e) {
-    console.warn('Failed to add to My List in Firestore:', e);
+  if (!isFirestoreQuotaExceeded) {
+    try {
+      const ref = doc(db, 'users', userId, 'my_list', movieId);
+      await setDoc(ref, payload, { merge: true });
+    } catch (e: any) {
+      checkQuotaError(e);
+    }
   }
 
   try {
@@ -128,11 +150,13 @@ export async function addToMyList(userId: string, movie: any) {
 
 export async function removeFromMyList(userId: string, movieId: string) {
   if (!userId || !movieId) return;
-  try {
-    const ref = doc(db, 'users', userId, 'my_list', movieId);
-    await deleteDoc(ref);
-  } catch (e) {
-    console.warn('Failed to remove from My List in Firestore:', e);
+  if (!isFirestoreQuotaExceeded) {
+    try {
+      const ref = doc(db, 'users', userId, 'my_list', movieId);
+      await deleteDoc(ref);
+    } catch (e: any) {
+      checkQuotaError(e);
+    }
   }
 
   try {
@@ -145,14 +169,16 @@ export async function removeFromMyList(userId: string, movieId: string) {
 
 export async function fetchMyList(userId: string): Promise<MyListItem[]> {
   if (!userId) return [];
-  try {
-    const ref = collection(db, 'users', userId, 'my_list');
-    const snap = await getDocs(ref);
-    if (!snap.empty) {
-      return snap.docs.map((d) => d.data() as MyListItem);
+  if (!isFirestoreQuotaExceeded) {
+    try {
+      const ref = collection(db, 'users', userId, 'my_list');
+      const snap = await getDocs(ref);
+      if (!snap.empty) {
+        return snap.docs.map((d) => d.data() as MyListItem);
+      }
+    } catch (e) {
+      checkQuotaError(e);
     }
-  } catch (e) {
-    console.warn('Failed to fetch My List from Firestore:', e);
   }
 
   try {
@@ -171,11 +197,13 @@ export async function saveUserRating(userId: string, movieId: string, rating: nu
     updatedAt: serverTimestamp(),
   };
 
-  try {
-    const ref = doc(db, 'users', userId, 'ratings', movieId);
-    await setDoc(ref, payload, { merge: true });
-  } catch (e) {
-    console.warn('Failed to save rating to Firestore:', e);
+  if (!isFirestoreQuotaExceeded) {
+    try {
+      const ref = doc(db, 'users', userId, 'ratings', movieId);
+      await setDoc(ref, payload, { merge: true });
+    } catch (e) {
+      checkQuotaError(e);
+    }
   }
 
   try {
@@ -185,14 +213,16 @@ export async function saveUserRating(userId: string, movieId: string, rating: nu
 
 export async function getUserRating(userId: string, movieId: string): Promise<number | null> {
   if (!userId || !movieId) return null;
-  try {
-    const ref = doc(db, 'users', userId, 'ratings', movieId);
-    const snap = await getDoc(ref);
-    if (snap.exists()) {
-      return (snap.data() as any).rating ?? null;
+  if (!isFirestoreQuotaExceeded) {
+    try {
+      const ref = doc(db, 'users', userId, 'ratings', movieId);
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        return (snap.data() as any).rating ?? null;
+      }
+    } catch (e) {
+      checkQuotaError(e);
     }
-  } catch (e) {
-    console.warn('Failed to load rating from Firestore:', e);
   }
 
   try {
@@ -219,10 +249,12 @@ export async function submitContentReport(
     status: 'pending',
   };
 
-  try {
-    await addDoc(collection(db, 'reports'), payload);
-  } catch (e) {
-    console.warn('Failed to submit report to Firestore:', e);
+  if (!isFirestoreQuotaExceeded) {
+    try {
+      await addDoc(collection(db, 'reports'), payload);
+    } catch (e) {
+      checkQuotaError(e);
+    }
   }
 
   try {
@@ -232,3 +264,100 @@ export async function submitContentReport(
   } catch (e) {}
 }
 
+export interface MyLikeItem {
+  movieId: string;
+  title: string;
+  posterUrl: string;
+  displayCategory?: string;
+  likedAt?: any;
+  movieData?: any;
+}
+
+export async function addToMyLikes(userId: string, movie: any) {
+  if (!userId || !movie) return;
+  const movieId = movie.id || movie.imdbId || 'unknown';
+  const payload = {
+    movieId,
+    title: movie.title || 'Untitled',
+    posterUrl: movie.posterUrl || movie.backdropUrl || '',
+    displayCategory: movie.displayCategory || movie.originalCategory || 'Movie',
+    likedAt: serverTimestamp(),
+    movieData: movie,
+  };
+
+  if (!isFirestoreQuotaExceeded) {
+    try {
+      const ref = doc(db, 'users', userId, 'likes', movieId);
+      await setDoc(ref, payload, { merge: true });
+    } catch (e) {
+      checkQuotaError(e);
+    }
+  }
+
+  try {
+    const localKey = `movie_portal_likes_${userId}`;
+    const existing = JSON.parse(localStorage.getItem(localKey) || '[]');
+    if (!existing.some((item: any) => item.movieId === movieId)) {
+      existing.unshift(payload);
+      localStorage.setItem(localKey, JSON.stringify(existing));
+    }
+  } catch (e) {}
+}
+
+export async function removeFromMyLikes(userId: string, movieId: string) {
+  if (!userId || !movieId) return;
+  if (!isFirestoreQuotaExceeded) {
+    try {
+      const ref = doc(db, 'users', userId, 'likes', movieId);
+      await deleteDoc(ref);
+    } catch (e) {
+      checkQuotaError(e);
+    }
+  }
+
+  try {
+    const localKey = `movie_portal_likes_${userId}`;
+    const existing = JSON.parse(localStorage.getItem(localKey) || '[]');
+    const filtered = existing.filter((item: any) => item.movieId !== movieId);
+    localStorage.setItem(localKey, JSON.stringify(filtered));
+  } catch (e) {}
+}
+
+export async function fetchMyLikes(userId: string): Promise<MyLikeItem[]> {
+  if (!userId) return [];
+  if (!isFirestoreQuotaExceeded) {
+    try {
+      const ref = collection(db, 'users', userId, 'likes');
+      const snap = await getDocs(ref);
+      if (!snap.empty) {
+        return snap.docs.map((d) => d.data() as MyLikeItem);
+      }
+    } catch (e) {
+      checkQuotaError(e);
+    }
+  }
+
+  try {
+    const localKey = `movie_portal_likes_${userId}`;
+    return JSON.parse(localStorage.getItem(localKey) || '[]');
+  } catch (e) {
+    return [];
+  }
+}
+
+export async function clearWatchHistory(userId: string) {
+  if (!userId) return;
+  if (!isFirestoreQuotaExceeded) {
+    try {
+      const ref = collection(db, 'users', userId, 'watch_history');
+      const snap = await getDocs(ref);
+      await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
+    } catch (e) {
+      checkQuotaError(e);
+    }
+  }
+
+  try {
+    localStorage.removeItem(`movie_portal_history_${userId}`);
+  } catch (e) {}
+}

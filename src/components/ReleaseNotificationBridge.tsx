@@ -6,6 +6,7 @@ import { PRE_BACKEND_URL, probeWorkingBackendUrl } from '../utils/apiConfig';
 import { upgradePosterUrl } from '../utils/posterUrl';
 import { isNativeAndroid } from '../utils/platform';
 import { getTimestampMs } from '../services/movieStorage';
+import { getAppPreferences } from '../services/userPreferencesService';
 
 const NOTIFIED_STORAGE_KEY = 'mp_notified_announcements_v1';
 const SEEDED_STORAGE_KEY = 'mp_notified_seeded_v1';
@@ -95,6 +96,9 @@ function formatRichNotificationPayload(id: string, raw: any) {
 function dispatchNotificationToDevice(
   payload: ReturnType<typeof formatRichNotificationPayload>
 ): boolean {
+  if (!getAppPreferences().notificationsEnabled) {
+    return false;
+  }
   // 1. Native Android APK: show rich BigPictureStyle notification ONLY if permission is already granted
   if (isNativeAndroid()) {
     try {

@@ -12,6 +12,7 @@ import { normalizeMoviePosters } from '../utils/posterUrl';
 import { parseDurationToSeconds } from '../utils/duration';
 import { saveWatchProgress } from '../services/userWatchService';
 import { useAuth } from '../context/AuthContext';
+import { getAppPreferences, isMatureContent } from '../services/userPreferencesService';
 
 const GENRES = [
   "Action", "Adult", "Adventure", "Animation", "Animated Series", "Anime", "Biography", "Ceremony",
@@ -265,6 +266,10 @@ export default function SearchPage() {
         );
       }
 
+      if (getAppPreferences().familyMode) {
+        list = list.filter((m: any) => !isMatureContent(m));
+      }
+
       setResults(list);
     } catch (err: any) {
       console.warn('Search error handled:', err?.message || err);
@@ -388,6 +393,7 @@ export default function SearchPage() {
           isOpen={Boolean(selectedMovie)}
           onClose={closeMovieDetails}
           movie={selectedMovie}
+          userId={user?.uid || 'guest_user'}
           onWatchNow={(m, sIdx, eIdx, lang) => handleWatchNow(m, sIdx, eIdx, lang)}
           onSelectMovie={(m) => {
             setActiveSeasonIndex(0);

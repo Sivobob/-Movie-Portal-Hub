@@ -17,10 +17,10 @@ export default function SplashScreen({ onFinish }: { onFinish: () => void }) {
         className="flex flex-col items-center"
       >
         <img
-          src="/assets/movie_portal_mascot_v2.jpg"
-          alt="MOVIE PORTAL Mascot"
-          className="w-32 h-32 mb-6"
-          style={{ filter: "drop-shadow(0 0 15px rgba(255, 255, 0, 0.5))" }}
+          src="/assets/icons/master_icon.png"
+          alt="Movie Portal"
+          className="w-28 h-28 mb-6 rounded-3xl object-cover"
+          style={{ filter: "drop-shadow(0 0 18px rgba(229, 9, 20, 0.45))" }}
         />
         <motion.h1
           initial={{ opacity: 0, y: 10 }}
