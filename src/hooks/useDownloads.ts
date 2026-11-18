@@ -12,6 +12,7 @@ import {
   formatBytesLabel,
   saveOfflineVideoBlob,
 } from '../services/offlineStorage';
+import { QualitySizeEstimate, VideoQualityTier } from '../utils/videoQuality';
 
 export interface ActiveDownload {
   id: string;
@@ -61,6 +62,7 @@ export interface StartDownloadParams {
   posterUrl: string;
   videoUrl: string;
   quality?: string;
+  qualityTier?: VideoQualityTier | 'original';
   releaseYear?: number;
   originalCategory?: string;
   estimatedSizeMb?: number;
@@ -251,9 +253,40 @@ interface WebRunner {
 
 const webRunners = new Map<string, WebRunner>();
 
+async function fetchDownloadStreamInfo(
+  infoUrl: string
+): Promise<{
+  fileSize: number;
+  height: number;
+  recommendedMode: 'direct' | 'remux' | 'transcode';
+  qualityEstimates: QualitySizeEstimate[];
+} | null> {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 6500);
+    const infoRes = await fetch(infoUrl, { cache: 'no-store', signal: ctrl.signal }).finally(() =>
+      clearTimeout(timer)
+    );
+    if (!infoRes.ok) return null;
+    const info = await infoRes.json();
+    return {
+      fileSize: Number(info?.fileSize) || 0,
+      height: Number(info?.height) || 0,
+      recommendedMode:
+        info?.recommendedMode === 'remux' || info?.recommendedMode === 'transcode'
+          ? info.recommendedMode
+          : 'direct',
+      qualityEstimates: Array.isArray(info?.qualityEstimates) ? info.qualityEstimates : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function resolveDownloadUrls(
   rawUrl: string,
-  estimatedSizeMb: number
+  estimatedSizeMb: number,
+  qualityTier?: VideoQualityTier | 'original'
 ): Promise<{
   primaryUrl: string;
   fallbackUrl: string;
@@ -262,23 +295,86 @@ async function resolveDownloadUrls(
   const trimmed = String(rawUrl || '').trim();
   const isTelegram = /t\.me|telegram\.me/i.test(trimmed);
   const estBytes = Math.max(0, Math.round(estimatedSizeMb * 1024 * 1024));
+  const isNative = Capacitor.isNativePlatform();
+
+  let localBase = '';
+  let remoteBase = '';
+  if (isNative) {
+    if (isTelegram) {
+      const localUrl = await ensureAndroidStreamBridge().catch(() => '');
+      localBase = localUrl || getNativeLocalBridgeUrl();
+    }
+    await probeWorkingBackendUrl().catch(() => null);
+    remoteBase = getRemoteTranscodeBackendUrl();
+  }
+
+  const infoUrl = isNative
+    ? (remoteBase || localBase ? `${remoteBase || localBase}/api/telegram/stream-info?url=${encodeURIComponent(trimmed)}` : '')
+    : buildApiUrl(`/api/telegram/stream-info?url=${encodeURIComponent(trimmed)}`);
+  const info = infoUrl ? await fetchDownloadStreamInfo(infoUrl) : null;
+
+  const probedHeight = info?.height || 0;
+  const probedFileSize = info?.fileSize || 0;
+  const recommendedMode = info?.recommendedMode || 'direct';
+
+  const wantsDownscale =
+    qualityTier === '480p' ||
+    qualityTier === '360p' ||
+    (qualityTier === '720p' && (probedHeight <= 0 || probedHeight > 780));
+
+  let resolvedBytes = estBytes;
+  if (info?.qualityEstimates && qualityTier && qualityTier !== 'original') {
+    const matched = info.qualityEstimates.find((q) => q.tier === qualityTier);
+    if (matched && matched.sizeBytes > 0) {
+      resolvedBytes = matched.sizeBytes;
+    }
+  }
+  if (resolvedBytes <= 0 || (!wantsDownscale && probedFileSize > 0)) {
+    resolvedBytes = probedFileSize > 0 ? probedFileSize : estBytes;
+  }
+
+  const hasTranscodeBackend = !isNative || Boolean(remoteBase);
+  const makeTranscodeUrl = (pathAndQuery: string) =>
+    isNative ? `${remoteBase}${pathAndQuery}` : buildApiUrl(pathAndQuery);
 
   if (!isTelegram) {
     const proxyUrl = buildApiUrl(
       `/api/download/file?url=${encodeURIComponent(trimmed)}&filename=video.mp4`
     );
+    if (wantsDownscale && hasTranscodeBackend) {
+      return {
+        primaryUrl: makeTranscodeUrl(
+          `/api/stream?url=${encodeURIComponent(trimmed)}&ext=.mp4&quality=${qualityTier}&transcode=1&download=1`
+        ),
+        fallbackUrl: trimmed,
+        estimatedTotalBytes: resolvedBytes,
+      };
+    }
     return {
       primaryUrl: trimmed,
       fallbackUrl: proxyUrl,
-      estimatedTotalBytes: estBytes,
+      estimatedTotalBytes: resolvedBytes,
     };
   }
 
-  if (Capacitor.isNativePlatform()) {
-    const localUrl = await ensureAndroidStreamBridge().catch(() => '');
-    await probeWorkingBackendUrl().catch(() => null);
-    const remoteBase = getRemoteTranscodeBackendUrl();
-    const localBase = localUrl || getNativeLocalBridgeUrl();
+  if (wantsDownscale && hasTranscodeBackend) {
+    const localStreamUrl = localBase
+      ? `${localBase}/api/stream?url=${encodeURIComponent(trimmed)}&ext=.mp4`
+      : '';
+    const remoteRawUrl = remoteBase
+      ? `${remoteBase}/api/stream?url=${encodeURIComponent(trimmed)}&raw=1`
+      : '';
+
+    return {
+      primaryUrl: makeTranscodeUrl(
+        `/api/stream?url=${encodeURIComponent(trimmed)}&ext=.mp4&quality=${qualityTier}&transcode=1&download=1`
+      ),
+      fallbackUrl: localStreamUrl || remoteRawUrl || buildApiUrl(`/api/stream?url=${encodeURIComponent(trimmed)}&raw=1`),
+      estimatedTotalBytes: resolvedBytes,
+    };
+  }
+
+  if (isNative) {
     const localStreamUrl = localBase
       ? `${localBase}/api/stream?url=${encodeURIComponent(trimmed)}&ext=.mp4`
       : '';
@@ -289,44 +385,19 @@ async function resolveDownloadUrls(
     return {
       primaryUrl: localStreamUrl || remoteStreamUrl || buildApiUrl(`/api/stream?url=${encodeURIComponent(trimmed)}&raw=1`),
       fallbackUrl: remoteStreamUrl || localStreamUrl || '',
-      estimatedTotalBytes: estBytes,
+      estimatedTotalBytes: resolvedBytes,
     };
   }
-
-  // Web browser: check stream-info to choose direct raw MP4 vs transcoded browser-compatible MP4 + get real fileSize
-  let totalBytes = estBytes;
-  let recommendedMode: 'direct' | 'remux' | 'transcode' = 'direct';
-  try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 5000);
-    const infoRes = await fetch(
-      buildApiUrl(`/api/telegram/stream-info?url=${encodeURIComponent(trimmed)}`),
-      { cache: 'no-store', signal: ctrl.signal }
-    ).finally(() => clearTimeout(timer));
-    if (infoRes.ok) {
-      const info = await infoRes.json();
-      if (info?.fileSize && Number(info.fileSize) > 0) {
-        totalBytes = Number(info.fileSize);
-      }
-      if (
-        info?.recommendedMode === 'remux' ||
-        info?.recommendedMode === 'transcode' ||
-        info?.recommendedMode === 'direct'
-      ) {
-        recommendedMode = info.recommendedMode;
-      }
-    }
-  } catch {}
 
   const streamUrl =
     recommendedMode === 'direct'
       ? buildApiUrl(`/api/stream?url=${encodeURIComponent(trimmed)}&raw=1`)
-      : buildApiUrl(`/api/stream?url=${encodeURIComponent(trimmed)}&ext=.mp4`);
+      : buildApiUrl(`/api/stream?url=${encodeURIComponent(trimmed)}&ext=.mp4&download=1`);
 
   return {
     primaryUrl: streamUrl,
     fallbackUrl: buildApiUrl(`/api/stream?url=${encodeURIComponent(trimmed)}&raw=1`),
-    estimatedTotalBytes: totalBytes,
+    estimatedTotalBytes: resolvedBytes,
   };
 }
 
@@ -695,6 +766,7 @@ export async function startGlobalDownload(params: StartDownloadParams): Promise<
     posterUrl,
     videoUrl,
     quality = 'HD',
+    qualityTier,
     releaseYear = new Date().getFullYear(),
     originalCategory = 'Movie',
     estimatedSizeMb = 750,
@@ -763,7 +835,7 @@ export async function startGlobalDownload(params: StartDownloadParams): Promise<
   upsertActiveTask(initialTask);
   setGlobalNotification(`Starting download: "${displayTitle}"`);
 
-  const resolved = await resolveDownloadUrls(cleanUrl, estimatedSizeMb);
+  const resolved = await resolveDownloadUrls(cleanUrl, estimatedSizeMb, qualityTier);
   const estTotal = resolved.estimatedTotalBytes || initialEstBytes;
 
   const meta: PendingTaskMeta = {

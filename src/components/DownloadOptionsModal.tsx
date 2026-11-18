@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Capacitor } from '@capacitor/core';
 import {
   X,
   Download,
@@ -18,9 +19,22 @@ import {
 import { upgradePosterUrl } from '../utils/posterUrl';
 import { isEpisodeNewActive } from '../services/movieStorage';
 import { StartDownloadParams, useDownloads } from '../hooks/useDownloads';
+import {
+  buildApiUrl,
+  getRemoteTranscodeBackendUrl,
+  probeWorkingBackendUrl,
+} from '../utils/apiConfig';
+import { parseDurationToSeconds } from '../utils/duration';
+import {
+  buildQualitySizeEstimates,
+  formatVideoSizeLabel,
+  QualitySizeEstimate,
+  VideoQualityTier,
+} from '../utils/videoQuality';
 
 export interface DownloadQualityOption {
   id: string;
+  tier: VideoQualityTier | 'original';
   label: string;
   resolution: string;
   sizeLabel: string;
@@ -30,51 +44,13 @@ export interface DownloadQualityOption {
   url: string;
 }
 
-const QUALITY_PRESETS: Record<
-  string,
-  { label: string; resolution: string; sizeLabel: string; sizeMb: number; badge: string; description: string }
-> = {
-  '2160p': {
-    label: '4K Ultra HD',
-    resolution: '3840×2160',
-    sizeLabel: '~2.8 GB',
-    sizeMb: 2800,
-    badge: '4K UHD',
-    description: 'Maximum clarity master stream for large screens',
-  },
-  '1080p': {
-    label: '1080p Full HD',
-    resolution: '1920×1080',
-    sizeLabel: '~1.4 GB',
-    sizeMb: 1400,
-    badge: 'FULL HD',
-    description: 'Crisp cinema detail, high-bitrate audio',
-  },
-  '720p': {
-    label: '720p HD',
-    resolution: '1280×720',
-    sizeLabel: '~820 MB',
-    sizeMb: 820,
-    badge: 'RECOMMENDED',
-    description: 'Balanced speed, sharpness and offline storage',
-  },
-  '480p': {
-    label: '480p SD',
-    resolution: '854×480',
-    sizeLabel: '~420 MB',
-    sizeMb: 420,
-    badge: 'FAST',
-    description: 'Fast download, smooth mobile playback',
-  },
-  '360p': {
-    label: '360p Data Saver',
-    resolution: '640×360',
-    sizeLabel: '~220 MB',
-    sizeMb: 220,
-    badge: 'DATA SAVER',
-    description: 'Smallest file size for low mobile data',
-  },
-};
+interface ProbedStreamMeta {
+  fileSize: number;
+  durationSec: number;
+  width: number;
+  height: number;
+  qualityEstimates: QualitySizeEstimate[];
+}
 
 interface DownloadOptionsModalProps {
   isOpen: boolean;
@@ -103,11 +79,14 @@ export default function DownloadOptionsModal({
 
   const [selectedSeasonIdx, setSelectedSeasonIdx] = useState<number>(initialSeasonIndex);
   const [selectedEpisodeIdx, setSelectedEpisodeIdx] = useState<number>(initialEpisodeIndex);
-  const [selectedQualityId, setSelectedQualityId] = useState<string>('auto');
+  const [selectedQualityId, setSelectedQualityId] = useState<string>('720p');
   const [isStarting, setIsStarting] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
   const [startedBatchCount, setStartedBatchCount] = useState<number>(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isProbingSize, setIsProbingSize] = useState(false);
+  const [probeTick, setProbeTick] = useState(0);
+  const streamProbeCacheRef = useRef<Map<string, ProbedStreamMeta>>(new Map());
 
   useEffect(() => {
     if (!isOpen || !movie) return;
@@ -145,82 +124,165 @@ export default function DownloadOptionsModal({
     return movie.title || 'Untitled';
   }, [movie, isSeries, currentEpisode, seasonEpisodeLabel]);
 
-  // Build dynamic quality list strictly backed by real URLs from episode or movie
-  const qualityOptions = useMemo<DownloadQualityOption[]>(() => {
-    if (!movie) return [];
-    const list: DownloadQualityOption[] = [];
-    const rawQualities: Record<string, string> =
-      (isSeries ? currentEpisode?.videoQualities : movie.videoQualities) || {};
+  const rawQualitiesMap: Record<string, string> = useMemo(
+    () => ((isSeries ? currentEpisode?.videoQualities : movie?.videoQualities) || {}),
+    [isSeries, currentEpisode, movie]
+  );
 
-    const orderedKeys = ['2160p', '4k', '1080p', '720p', '480p', '360p'];
-    const seenUrls = new Set<string>();
-
-    for (const key of orderedKeys) {
-      const matchedKey = Object.keys(rawQualities).find(
-        (k) => k.toLowerCase() === key.toLowerCase()
-      );
-      const urlVal = matchedKey ? String(rawQualities[matchedKey] || '').trim() : '';
-      if (!urlVal) continue;
-      seenUrls.add(urlVal);
-      const preset = QUALITY_PRESETS[key === '4k' ? '2160p' : key] || {
-        label: `${key.toUpperCase()} HD`,
-        resolution: key.toUpperCase(),
-        sizeLabel: '~850 MB',
-        sizeMb: 850,
-        badge: 'HD',
-        description: 'Direct MP4 download for offline viewing',
-      };
-      list.push({
-        id: key,
-        ...preset,
-        url: urlVal,
-      });
-    }
-
-    // Any extra custom quality keys
-    for (const [k, v] of Object.entries(rawQualities)) {
-      const urlVal = String(v || '').trim();
-      if (!urlVal || seenUrls.has(urlVal)) continue;
-      seenUrls.add(urlVal);
-      list.push({
-        id: k,
-        label: `${k} Stream`,
-        resolution: k,
-        sizeLabel: '~750 MB',
-        sizeMb: 750,
-        badge: 'DIRECT',
-        description: 'Direct offline download stream',
-        url: urlVal,
-      });
-    }
-
-    // Always include the main real streaming URL if not already represented
-    const primaryUrl = String(
+  const primaryStreamUrl = useMemo(() => {
+    if (!movie) return '';
+    return String(
       (isSeries ? currentEpisode?.streamUrl : movie.streamingUrl) ||
+        rawQualitiesMap['1080p'] ||
+        rawQualitiesMap['720p'] ||
+        rawQualitiesMap['480p'] ||
         movie.streamingUrl ||
         ''
     ).trim();
+  }, [movie, isSeries, currentEpisode, rawQualitiesMap]);
 
-    if (primaryUrl && !seenUrls.has(primaryUrl)) {
-      const badgeText = String(movie.qualityBadge || 'HD').toUpperCase();
-      list.unshift({
-        id: 'primary',
-        label: `${badgeText} Direct MP4`,
-        resolution: badgeText.includes('1080')
-          ? '1920×1080'
-          : badgeText.includes('4K')
-          ? '3840×2160'
-          : '720p–1080p',
-        sizeLabel: isSeries ? '~450 MB' : '~850 MB',
-        sizeMb: isSeries ? 450 : 850,
-        badge: 'ORIGINAL',
-        description: 'Direct original source saved for zero-network playback',
-        url: primaryUrl,
+  const metadataDurationSec = useMemo(() => {
+    if (!movie) return 0;
+    if (isSeries && currentEpisode) {
+      if (typeof currentEpisode.durationSec === 'number' && currentEpisode.durationSec > 0) {
+        return currentEpisode.durationSec;
+      }
+      if (typeof currentEpisode.duration === 'number' && currentEpisode.duration > 0) {
+        return currentEpisode.duration;
+      }
+      const parsedEp = parseDurationToSeconds(currentEpisode.duration || currentEpisode.runtime);
+      if (parsedEp > 0) return parsedEp;
+    }
+    if (typeof movie.duration === 'number' && movie.duration > 0) return movie.duration;
+    return parseDurationToSeconds(movie.runtime);
+  }, [movie, isSeries, currentEpisode]);
+
+  // Probe real file size, resolution & duration per selected movie/episode
+  useEffect(() => {
+    if (!isOpen || !primaryStreamUrl) {
+      setIsProbingSize(false);
+      return;
+    }
+    if (streamProbeCacheRef.current.has(primaryStreamUrl)) {
+      setIsProbingSize(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsProbingSize(true);
+
+    const runProbe = async () => {
+      try {
+        let endpoint = '';
+        if (Capacitor.isNativePlatform()) {
+          await probeWorkingBackendUrl().catch(() => null);
+          const remoteBase = getRemoteTranscodeBackendUrl();
+          if (remoteBase) {
+            endpoint = `${remoteBase}/api/telegram/stream-info?url=${encodeURIComponent(primaryStreamUrl)}`;
+          }
+        } else {
+          endpoint = buildApiUrl(`/api/telegram/stream-info?url=${encodeURIComponent(primaryStreamUrl)}`);
+        }
+
+        if (!endpoint) {
+          if (!cancelled) setIsProbingSize(false);
+          return;
+        }
+
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 9000);
+        const res = await fetch(endpoint, { cache: 'no-store', signal: ctrl.signal }).finally(() =>
+          clearTimeout(timer)
+        );
+        if (!res.ok) {
+          if (!cancelled) setIsProbingSize(false);
+          return;
+        }
+        const data = await res.json();
+        if (cancelled) return;
+
+        const meta: ProbedStreamMeta = {
+          fileSize: Number(data?.fileSize) || 0,
+          durationSec: Number(data?.durationSec) || metadataDurationSec || 0,
+          width: Number(data?.width) || 0,
+          height: Number(data?.height) || 0,
+          qualityEstimates: Array.isArray(data?.qualityEstimates) ? data.qualityEstimates : [],
+        };
+        streamProbeCacheRef.current.set(primaryStreamUrl, meta);
+        setProbeTick((t) => t + 1);
+      } catch {
+      } finally {
+        if (!cancelled) setIsProbingSize(false);
+      }
+    };
+
+    runProbe();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, primaryStreamUrl, metadataDurationSec]);
+
+  // Build per-movie / per-episode quality options using probed sizes & real links
+  const qualityOptions = useMemo<DownloadQualityOption[]>(() => {
+    if (!movie || !primaryStreamUrl) return [];
+    const list: DownloadQualityOption[] = [];
+    const probed = streamProbeCacheRef.current.get(primaryStreamUrl);
+
+    const effectiveDurationSec = probed?.durationSec || metadataDurationSec || 0;
+    const effectiveHeight = probed?.height || 0;
+    const effectiveFileSize = probed?.fileSize || 0;
+
+    const estimates: QualitySizeEstimate[] =
+      probed?.qualityEstimates &&
+      probed.qualityEstimates.length > 0 &&
+      (effectiveFileSize > 0 || effectiveDurationSec > 0)
+        ? probed.qualityEstimates
+        : buildQualitySizeEstimates({
+            fileSizeBytes: effectiveFileSize,
+            durationSec: effectiveDurationSec,
+            sourceHeight: effectiveHeight,
+          });
+
+    // Include any 4K/2160p dedicated URL if admin provided one
+    const url4k = String(rawQualitiesMap['2160p'] || rawQualitiesMap['4k'] || '').trim();
+    if (url4k) {
+      const est4kBytes = effectiveFileSize > 0 ? Math.round(effectiveFileSize * 1.9) : 0;
+      list.push({
+        id: '2160p',
+        tier: 'original',
+        label: '4K Ultra HD',
+        resolution: '3840×2160',
+        sizeLabel: est4kBytes > 0 ? formatVideoSizeLabel(est4kBytes, true) : 'Master File',
+        sizeMb: est4kBytes > 0 ? Math.max(1, Math.round(est4kBytes / (1024 * 1024))) : 2400,
+        badge: '4K UHD',
+        description: 'Direct 4K master link for large screens',
+        url: url4k,
+      });
+    }
+
+    for (const est of estimates) {
+      const matchedKey = Object.keys(rawQualitiesMap).find(
+        (k) => k.toLowerCase() === est.tier.toLowerCase()
+      );
+      const dedicatedUrl = matchedKey ? String(rawQualitiesMap[matchedKey] || '').trim() : '';
+      const hasDedicated = Boolean(dedicatedUrl);
+      const targetUrl = dedicatedUrl || primaryStreamUrl;
+
+      list.push({
+        id: est.tier,
+        tier: hasDedicated || est.isOriginal ? 'original' : est.tier,
+        label: est.label,
+        resolution: est.resolution,
+        sizeLabel: est.sizeLabel,
+        sizeMb: est.sizeMb,
+        badge: est.badge,
+        description: est.description,
+        url: targetUrl,
       });
     }
 
     return list;
-  }, [movie, isSeries, currentEpisode]);
+  }, [movie, primaryStreamUrl, rawQualitiesMap, metadataDurationSec, probeTick]);
 
   useEffect(() => {
     if (qualityOptions.length === 0) return;
@@ -228,7 +290,7 @@ export default function DownloadOptionsModal({
     if (!stillValid) {
       const rec =
         qualityOptions.find((q) => q.id === '720p') ||
-        qualityOptions.find((q) => q.id === 'primary') ||
+        qualityOptions.find((q) => q.id === '1080p') ||
         qualityOptions[0];
       if (rec) setSelectedQualityId(rec.id);
     }
@@ -272,6 +334,7 @@ export default function DownloadOptionsModal({
         posterUrl: posterSrc,
         videoUrl: activeQualityObj.url,
         quality: activeQualityObj.label,
+        qualityTier: activeQualityObj.tier,
         releaseYear: Number(movie.releaseYear) || new Date().getFullYear(),
         originalCategory: movie.displayCategory || movie.originalCategory || (isSeries ? 'Series' : 'Movies'),
         estimatedSizeMb: activeQualityObj.sizeMb,
@@ -295,9 +358,13 @@ export default function DownloadOptionsModal({
   const handleDownloadEntireSeason = async () => {
     if (!isSeries || episodes.length === 0) return;
     setErrorMsg(null);
+    const desiredTier = activeQualityObj?.tier || '720p';
+    const desiredId = activeQualityObj?.id || '720p';
+
     const downloadable = episodes.filter((ep) => {
       const url = String(
-        ep?.streamUrl ||
+        ep?.videoQualities?.[desiredId] ||
+          ep?.streamUrl ||
           ep?.videoQualities?.['720p'] ||
           ep?.videoQualities?.['1080p'] ||
           ep?.videoQualities?.['480p'] ||
@@ -320,16 +387,32 @@ export default function DownloadOptionsModal({
       for (let i = 0; i < episodes.length; i++) {
         const ep = episodes[i];
         const epNum = Number(ep?.episodeNumber || i + 1);
-        const url = String(
-          ep?.streamUrl ||
-            ep?.videoQualities?.['720p'] ||
-            ep?.videoQualities?.['1080p'] ||
-            ep?.videoQualities?.['480p'] ||
-            ''
-        ).trim();
+        const dedicatedEpUrl = String(ep?.videoQualities?.[desiredId] || '').trim();
+        const url =
+          dedicatedEpUrl ||
+          String(
+            ep?.streamUrl ||
+              ep?.videoQualities?.['720p'] ||
+              ep?.videoQualities?.['1080p'] ||
+              ep?.videoQualities?.['480p'] ||
+              ''
+          ).trim();
         if (!url) continue;
         const match = getDownloadMatch(movieId, url, currentSeasonNumber, epNum);
         if (match.active || match.completed) continue;
+
+        const epProbed = streamProbeCacheRef.current.get(url);
+        const epDur =
+          epProbed?.durationSec ||
+          (typeof ep?.durationSec === 'number' ? ep.durationSec : 0) ||
+          parseDurationToSeconds(ep?.duration || ep?.runtime);
+        const epEst =
+          epProbed?.qualityEstimates?.find((q) => q.tier === desiredId) ||
+          buildQualitySizeEstimates({
+            fileSizeBytes: epProbed?.fileSize || 0,
+            durationSec: epDur,
+            sourceHeight: epProbed?.height || 0,
+          }).find((q) => q.tier === desiredId);
 
         const seLabel = `S${String(currentSeasonNumber).padStart(2, '0')}E${String(epNum).padStart(2, '0')}`;
         const epTitle = ep?.title ? `: ${ep.title}` : '';
@@ -338,10 +421,11 @@ export default function DownloadOptionsModal({
           title: `${movie.title} - ${seLabel}${epTitle}`,
           posterUrl: posterSrc,
           videoUrl: url,
-          quality: activeQualityObj?.label || 'HD MP4',
+          quality: activeQualityObj?.label || '720p HD',
+          qualityTier: dedicatedEpUrl ? 'original' : desiredTier,
           releaseYear: Number(movie.releaseYear) || new Date().getFullYear(),
           originalCategory: movie.displayCategory || movie.originalCategory || 'Series',
-          estimatedSizeMb: activeQualityObj?.sizeMb || 450,
+          estimatedSizeMb: epEst?.sizeMb || activeQualityObj?.sizeMb || 0,
           seasonNumber: currentSeasonNumber,
           episodeNumber: epNum,
           seasonEpisodeLabel: seLabel,
@@ -583,7 +667,14 @@ export default function DownloadOptionsModal({
                 <Sparkles size={14} className="text-[#00d664]" />
                 <span>Video Source & Quality</span>
               </label>
-              <span className="text-[11px] text-neutral-400">Saved in Downloads</span>
+              {isProbingSize ? (
+                <span className="text-[11px] text-amber-400 flex items-center gap-1">
+                  <Loader2 size={11} className="animate-spin" />
+                  <span>Calculating size...</span>
+                </span>
+              ) : (
+                <span className="text-[11px] text-neutral-400">Saved in Downloads</span>
+              )}
             </div>
 
             {qualityOptions.length > 0 ? (

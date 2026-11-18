@@ -187,7 +187,8 @@ export default function VideoPlayerModal({
   surfaceModeRef.current = surfaceMode;
   const streamStartOffsetRef = useRef(streamStartOffset);
   streamStartOffsetRef.current = streamStartOffset;
-  const preflightCacheRef = useRef<{ url: string; recommendedMode: 'direct' | 'remux' | 'transcode'; durationSec: number } | null>(null);
+  const preflightCacheRef = useRef<{ url: string; recommendedMode: 'direct' | 'remux' | 'transcode'; durationSec: number; sourceHeight?: number } | null>(null);
+  const userPickedQualityRef = useRef<boolean>(false);
 
   // Runtime Android device and decoder capabilities from native bridge
   const deviceCapabilities = useMemo(() => {
@@ -225,7 +226,7 @@ export default function VideoPlayerModal({
   const [showLockPrompt, setShowLockPrompt] = useState(false);
   const lockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [videoFit, setVideoFit] = useState<'contain' | 'cover' | 'fill'>('contain');
-  const [selectedQuality, setSelectedQuality] = useState<string>('1080P');
+  const [selectedQuality, setSelectedQuality] = useState<string>('Auto');
   const [showLanguageMenu, setShowLanguageMenu] = useState(false);
   const [showQualityMenu, setShowQualityMenu] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
@@ -506,9 +507,17 @@ export default function VideoPlayerModal({
     setDuration(resetDur);
     durationRef.current = resetDur;
     knownDurationRef.current = resetDur;
+    if (manualRetryNonce === 0) {
+      userPickedQualityRef.current = false;
+      setSelectedQuality('Auto');
+    }
     setPlayableUrl('');
     setStreamSourceKey(`${activeStreamUrl}|${manualRetryNonce}`);
   }, [isOpen, activeStreamUrl, manualRetryNonce]);
+
+  useEffect(() => {
+    userPickedQualityRef.current = false;
+  }, [isOpen, activeStreamUrl]);
 
   // Step 1: Run pre-flight stream inspection once per stream source to get real duration, codec mode & audio tracks
   useEffect(() => {
@@ -530,10 +539,39 @@ export default function VideoPlayerModal({
       }
 
       const trimmed = activeSource.trim();
+      const isOfflineLocal = /^(file:|blob:)/i.test(trimmed);
       const isTelegram = /t\.me|telegram\.me/i.test(trimmed);
 
+      if (isOfflineLocal) {
+        if (!cancelled) {
+          userPickedQualityRef.current = false;
+          setSelectedQuality('Offline');
+          setPlayableUrl(trimmed);
+        }
+        return;
+      }
+
       if (!isTelegram) {
-        if (!cancelled) setPlayableUrl(trimmed);
+        if (Capacitor.isNativePlatform()) {
+          await probeWorkingBackendUrl(manualRetryNonce > 0).catch(() => null);
+        }
+        if (cancelled) return;
+        preflightCacheRef.current = {
+          url: trimmed,
+          recommendedMode: 'direct',
+          durationSec: knownDurationRef.current,
+          sourceHeight: 0,
+        };
+        if (!userPickedQualityRef.current) {
+          setSelectedQuality('Auto');
+        }
+        setFallbackStage('level1_hw');
+        fallbackStageRef.current = 'level1_hw';
+        setStreamFallbackMode('direct');
+        streamFallbackModeRef.current = 'direct';
+        setStreamStartOffset(0);
+        streamStartOffsetRef.current = 0;
+        setPreflightReadyKey((k) => k + 1);
         return;
       }
 
@@ -554,6 +592,7 @@ export default function VideoPlayerModal({
       let chosenStage: 'level1_hw' | 'level2_sw' | 'level2_surface' | 'level2_remux' | 'level3_transcode' = 'level1_hw';
       let initialPreferSw = false;
       let probedDuration = knownDurationRef.current;
+      let probedHeight = 0;
       let initialStart = 0;
 
       const bridgeRef = (window as any).AndroidPlayerBridge;
@@ -576,6 +615,14 @@ export default function VideoPlayerModal({
               knownDurationRef.current = info.durationSec;
               durationRef.current = info.durationSec;
               setDuration(info.durationSec);
+            }
+            if (typeof info.height === 'number' && info.height > 0) {
+              probedHeight = info.height;
+              if (!userPickedQualityRef.current) {
+                setSelectedQuality(
+                  info.height <= 520 ? '480P' : info.height <= 780 ? '720P' : '1080P'
+                );
+              }
             }
 
             if (!exoCapable) {
@@ -716,6 +763,7 @@ export default function VideoPlayerModal({
         url: trimmed,
         recommendedMode: chosenMode,
         durationSec: probedDuration,
+        sourceHeight: probedHeight,
       };
       setFallbackStage(chosenStage);
       fallbackStageRef.current = chosenStage;
@@ -740,20 +788,46 @@ export default function VideoPlayerModal({
     };
   }, [isOpen, streamSourceKey, useLocalBridgeFallback, deviceCapabilities]);
 
-  // Step 2: Build playableUrl whenever mode, seek offset, or audio track changes
+  // Step 2: Build playableUrl whenever quality, mode, seek offset, or audio track changes
   useEffect(() => {
     if (!isOpen || !preflightCacheRef.current || preflightReadyKey === 0) return;
     const trimmed = preflightCacheRef.current.url;
-    if (!/t\.me|telegram\.me/i.test(trimmed)) return;
+    if (!trimmed || /^(file:|blob:)/i.test(trimmed)) return;
 
-    let params = `?url=${encodeURIComponent(trimmed)}&ext=.mp4`;
-    const isServerPipe = streamFallbackMode === 'remux' || streamFallbackMode === 'transcode';
-    if (streamFallbackMode === 'remux') {
+    const qTier = (selectedQuality || 'Auto').trim().toLowerCase();
+    const isExplicitTier = qTier === '1080p' || qTier === '720p' || qTier === '480p' || qTier === '360p';
+
+    // 1. Check if admin uploaded a dedicated link for this chosen quality
+    const explicitUrl =
+      isExplicitTier &&
+      (videoQualities?.[qTier] || videoQualities?.[selectedQuality] || '');
+    const sourceUrl = String(explicitUrl || trimmed).trim();
+    const isTelegram = /t\.me|telegram\.me/i.test(sourceUrl);
+    const sourceHeight = preflightCacheRef.current.sourceHeight || 0;
+
+    // 2. If using the single uploaded stream link and user requested scaled resolution (720P/480P/360P)
+    const needsScaledTranscode =
+      !explicitUrl &&
+      (qTier === '480p' ||
+        qTier === '360p' ||
+        (qTier === '720p' && (sourceHeight <= 0 || sourceHeight > 780)));
+
+    if (!isTelegram && !needsScaledTranscode && streamFallbackMode === 'direct') {
+      setPlayableUrl(sourceUrl);
+      return;
+    }
+
+    let params = `?url=${encodeURIComponent(sourceUrl)}&ext=.mp4`;
+    const effectiveMode = needsScaledTranscode ? 'transcode' : streamFallbackMode;
+    const isServerPipe = effectiveMode === 'remux' || effectiveMode === 'transcode';
+
+    if (effectiveMode === 'remux') {
       params += `&remux=1`;
       if (streamStartOffset > 1) params += `&start=${Math.floor(streamStartOffset)}`;
       if (selectedAudioIdx > 0) params += `&audioIdx=${selectedAudioIdx}`;
-    } else if (streamFallbackMode === 'transcode') {
+    } else if (effectiveMode === 'transcode') {
       params += `&transcode=1`;
+      if (isExplicitTier) params += `&quality=${qTier}`;
       if (streamStartOffset > 1) params += `&start=${Math.floor(streamStartOffset)}`;
       if (selectedAudioIdx > 0) params += `&audioIdx=${selectedAudioIdx}`;
     }
@@ -762,8 +836,9 @@ export default function VideoPlayerModal({
     if (Capacitor.isNativePlatform() && isServerPipe) {
       const remoteBase = getRemoteTranscodeBackendUrl();
       if (!remoteBase) {
-        // Native Android app fallback: stream raw MKV/HEVC directly through local bridge to ExoPlayer
-        apiUrl = buildApiUrl(`/api/stream?url=${encodeURIComponent(trimmed)}&ext=.mp4`);
+        apiUrl = isTelegram
+          ? buildApiUrl(`/api/stream?url=${encodeURIComponent(sourceUrl)}&ext=.mp4`)
+          : sourceUrl;
       } else {
         apiUrl = `${remoteBase}/api/stream${params}`;
       }
@@ -771,7 +846,15 @@ export default function VideoPlayerModal({
       apiUrl = buildApiUrl(`/api/stream${params}`);
     }
     setPlayableUrl(apiUrl);
-  }, [isOpen, streamFallbackMode, streamStartOffset, selectedAudioIdx, streamSourceKey, preflightReadyKey]);
+  }, [
+    isOpen,
+    streamFallbackMode,
+    streamStartOffset,
+    selectedAudioIdx,
+    selectedQuality,
+    streamSourceKey,
+    preflightReadyKey,
+  ]);
 
   useEffect(() => {
     isPlayingRef.current = isPlaying;
@@ -961,7 +1044,8 @@ export default function VideoPlayerModal({
       } catch {}
     }
 
-    const exoStartOffset = streamFallbackModeRef.current === 'direct' ? resumeSec : 0;
+    const isServerPipedUrl = /[?&](transcode|remux)=1/i.test(playableUrl);
+    const exoStartOffset = !isServerPipedUrl ? resumeSec : 0;
 
     setError(null);
     setErrorDetail(null);
@@ -1464,8 +1548,17 @@ export default function VideoPlayerModal({
         setRealSubtitleTracks(subs);
       }
 
-      // Resume position for direct streams
-      if (streamFallbackMode === 'direct' && episodeResumeKey) {
+      // Resume pending quality switch position OR saved episode position for direct streams
+      if (resumeOffsetRef.current > 1 && streamFallbackModeRef.current === 'direct') {
+        const target = resumeOffsetRef.current;
+        resumeOffsetRef.current = 0;
+        const knownDur = (vidDuration && isFinite(vidDuration) ? vidDuration : durationRef.current);
+        if (!knownDur || target < knownDur - 5) {
+          video.currentTime = target;
+          setCurrentTime(target);
+          currentTimeRef.current = target;
+        }
+      } else if (streamFallbackMode === 'direct' && episodeResumeKey) {
         try {
           const savedPos = parseFloat(localStorage.getItem(`resume_pos_${episodeResumeKey}`) || '0');
           const knownDur = (vidDuration && isFinite(vidDuration) ? vidDuration : durationRef.current);
@@ -2648,27 +2741,87 @@ export default function VideoPlayerModal({
                 </button>
 
                 {showQualityMenu && (
-                  <div className="absolute bottom-full right-0 mb-3 bg-neutral-900/95 border border-neutral-700 rounded-xl shadow-2xl py-1 min-w-[120px] backdrop-blur-xl z-50 text-white">
+                  <div className="absolute bottom-full right-0 mb-3 bg-neutral-900/95 border border-neutral-700 rounded-xl shadow-2xl py-1 min-w-[140px] backdrop-blur-xl z-50 text-white">
                     <div className="px-3 py-1.5 text-[10px] font-bold text-neutral-400 uppercase tracking-wider border-b border-neutral-800">
-                      Quality
+                      Video Quality
                     </div>
-                    {['1080P', '720P', '480P', 'Auto'].map((q) => (
-                      <button
-                        key={q}
-                        type="button"
-                        onClick={() => {
-                          setSelectedQuality(q);
-                          setShowQualityMenu(false);
-                          resetAutoHideTimer();
-                        }}
-                        className={`w-full text-left px-3 py-2 text-xs hover:bg-emerald-500 hover:text-black transition-colors flex items-center justify-between cursor-pointer ${
-                          selectedQuality === q ? 'text-emerald-400 font-bold bg-white/5' : 'text-white'
-                        }`}
-                      >
-                        <span>{q}</span>
-                        {selectedQuality === q && <Check size={14} className="stroke-[3]" />}
-                      </button>
-                    ))}
+                    {/^(file:|blob:)/i.test(playableUrl) ? (
+                      <div className="px-3 py-2 text-xs text-emerald-400 font-semibold">
+                        Offline Local File
+                      </div>
+                    ) : (
+                      ['1080P', '720P', '480P', '360P', 'Auto'].map((q) => (
+                        <button
+                          key={q}
+                          type="button"
+                          onClick={() => {
+                            const qLower = q.toLowerCase();
+                            const curPos = Math.max(0, Math.floor(currentTimeRef.current || 0));
+                            userPickedQualityRef.current = true;
+                            setSelectedQuality(q);
+                            setShowQualityMenu(false);
+                            resetAutoHideTimer();
+
+                            const srcH = preflightCacheRef.current?.sourceHeight || 0;
+                            const explicit =
+                              qLower !== 'auto' &&
+                              (videoQualities?.[qLower] || videoQualities?.[q] || '');
+                            const scaled =
+                              !explicit &&
+                              (qLower === '480p' ||
+                                qLower === '360p' ||
+                                (qLower === '720p' && (srcH <= 0 || srcH > 780)));
+
+                            if (scaled) {
+                              if (Capacitor.isNativePlatform() && !hasRemoteTranscodeBackend()) {
+                                setFitNotice('Quality scaling needs server connection; playing native quality');
+                                setTimeout(() => setFitNotice(null), 2200);
+                                return;
+                              }
+                              resumeOffsetRef.current = curPos;
+                              setStreamFallbackMode('transcode');
+                              streamFallbackModeRef.current = 'transcode';
+                              setStreamStartOffset(curPos);
+                              streamStartOffsetRef.current = curPos;
+                              setIsLoading(true);
+                              setFitNotice(`Switching to ${q}...`);
+                              setTimeout(() => setFitNotice(null), 1800);
+                            } else {
+                              const baseRec = preflightCacheRef.current?.recommendedMode || 'direct';
+                              resumeOffsetRef.current = curPos;
+                              setStreamFallbackMode(baseRec);
+                              streamFallbackModeRef.current = baseRec;
+                              if (baseRec !== 'direct') {
+                                setStreamStartOffset(curPos);
+                                streamStartOffsetRef.current = curPos;
+                              } else {
+                                setStreamStartOffset(0);
+                                streamStartOffsetRef.current = 0;
+                              }
+                              setIsLoading(true);
+                              setFitNotice(`Quality: ${q}`);
+                              setTimeout(() => setFitNotice(null), 1600);
+                            }
+                          }}
+                          className={`w-full text-left px-3 py-2 text-xs hover:bg-emerald-500 hover:text-black transition-colors flex items-center justify-between cursor-pointer ${
+                            selectedQuality === q ? 'text-emerald-400 font-bold bg-white/5' : 'text-white'
+                          }`}
+                        >
+                          <span>
+                            {q === '480P'
+                              ? '480P SD'
+                              : q === '720P'
+                              ? '720P HD'
+                              : q === '1080P'
+                              ? '1080P FHD'
+                              : q === '360P'
+                              ? '360P Data Saver'
+                              : 'Auto'}
+                          </span>
+                          {selectedQuality === q && <Check size={14} className="stroke-[3]" />}
+                        </button>
+                      ))
+                    )}
                   </div>
                 )}
               </div>

@@ -16,6 +16,251 @@ import {
   streamTelegramRange,
   TelegramDocInfo,
 } from './telegramStreamEngine.ts';
+import { buildQualitySizeEstimates, VideoQualityTier } from '../utils/videoQuality.ts';
+
+interface DirectHttpProbeInfo {
+  fileSize: number;
+  durationSec: number;
+  width: number;
+  height: number;
+  cachedAt: number;
+}
+
+const directHttpProbeCache = new Map<string, DirectHttpProbeInfo>();
+
+async function probeDirectHttpInfo(targetUrl: string): Promise<DirectHttpProbeInfo> {
+  const cached = directHttpProbeCache.get(targetUrl);
+  if (cached && Date.now() - cached.cachedAt < 5 * 60 * 1000) {
+    return cached;
+  }
+
+  let fileSize = 0;
+  let durationSec = 0;
+  let width = 0;
+  let height = 0;
+
+  // 1. HEAD request to fetch exact Content-Length
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const headRes = await fetch(targetUrl, {
+      method: 'HEAD',
+      redirect: 'follow',
+      signal: controller.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36' },
+    }).finally(() => clearTimeout(timer));
+    const cl = Number(headRes.headers.get('content-length') || 0);
+    if (Number.isFinite(cl) && cl > 0) fileSize = cl;
+  } catch {}
+
+  // 2. Range 0-0 fallback if HEAD didn't give Content-Length
+  if (fileSize <= 0) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5000);
+      const rngRes = await fetch(targetUrl, {
+        method: 'GET',
+        redirect: 'follow',
+        signal: controller.signal,
+        headers: {
+          Range: 'bytes=0-0',
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36',
+        },
+      }).finally(() => clearTimeout(timer));
+      const cr = rngRes.headers.get('content-range') || '';
+      const m = cr.match(/bytes\s+\d+-\d+\/(\d+)/i);
+      if (m && m[1]) {
+        const total = Number(m[1]);
+        if (Number.isFinite(total) && total > 0) fileSize = total;
+      } else {
+        const cl = Number(rngRes.headers.get('content-length') || 0);
+        if (Number.isFinite(cl) && cl > 1024) fileSize = cl;
+      }
+      try {
+        await rngRes.body?.cancel();
+      } catch {}
+    } catch {}
+  }
+
+  // 3. Fast ffprobe for exact duration & source dimensions
+  try {
+    const probeJson = await new Promise<any>((resolve) => {
+      const proc = spawn(
+        'ffprobe',
+        [
+          '-v', 'quiet',
+          '-print_format', 'json',
+          '-probesize', '1500000',
+          '-analyzeduration', '1500000',
+          '-show_format',
+          '-show_streams',
+          targetUrl,
+        ],
+        { stdio: ['ignore', 'pipe', 'ignore'] }
+      );
+      let out = '';
+      const timer = setTimeout(() => {
+        try { proc.kill('SIGKILL'); } catch {}
+        resolve(null);
+      }, 6000);
+      proc.stdout.on('data', (d: Buffer) => {
+        out += d.toString();
+      });
+      proc.on('close', () => {
+        clearTimeout(timer);
+        try {
+          resolve(out ? JSON.parse(out) : null);
+        } catch {
+          resolve(null);
+        }
+      });
+      proc.on('error', () => {
+        clearTimeout(timer);
+        resolve(null);
+      });
+    });
+
+    if (probeJson) {
+      const dur = Number(probeJson.format?.duration || 0);
+      if (Number.isFinite(dur) && dur > 0) durationSec = Math.round(dur);
+      if (fileSize <= 0) {
+        const fmtSize = Number(probeJson.format?.size || 0);
+        if (Number.isFinite(fmtSize) && fmtSize > 0) fileSize = fmtSize;
+      }
+      const vStream = Array.isArray(probeJson.streams)
+        ? probeJson.streams.find((s: any) => s.codec_type === 'video')
+        : null;
+      if (vStream) {
+        width = Number(vStream.width || 0);
+        height = Number(vStream.height || 0);
+      }
+    }
+  } catch {}
+
+  const info: DirectHttpProbeInfo = {
+    fileSize,
+    durationSec,
+    width,
+    height,
+    cachedAt: Date.now(),
+  };
+  directHttpProbeCache.set(targetUrl, info);
+  return info;
+}
+
+function normalizeRequestedQuality(raw: unknown): VideoQualityTier | '' {
+  const s = String(raw || '').trim().toLowerCase();
+  if (s === '1080p' || s === '1080') return '1080p';
+  if (s === '720p' || s === '720') return '720p';
+  if (s === '480p' || s === '480') return '480p';
+  if (s === '360p' || s === '360') return '360p';
+  return '';
+}
+
+function getFfmpegQualityArgs(quality: VideoQualityTier | '', isDownload: boolean): string[] {
+  const args: string[] = [];
+  if (quality === '360p') {
+    args.push(
+      '-vf', "scale='min(640,iw)':'min(360,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      ...(isDownload ? [] : ['-tune', 'zerolatency']),
+      '-threads', '0',
+      '-pix_fmt', 'yuv420p',
+      '-profile:v', 'main',
+      '-level', '3.1',
+      '-vsync', 'cfr',
+      '-b:v', '280k',
+      '-maxrate', '360k',
+      '-bufsize', '720k',
+      '-g', '48',
+      '-keyint_min', '48',
+      '-sc_threshold', '0',
+      '-c:a', 'aac',
+      '-ac', '2',
+      '-ar', '44100',
+      '-b:a', '64k'
+    );
+    return args;
+  }
+
+  if (quality === '480p') {
+    args.push(
+      '-vf', "scale='min(854,iw)':'min(480,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      ...(isDownload ? [] : ['-tune', 'zerolatency']),
+      '-threads', '0',
+      '-pix_fmt', 'yuv420p',
+      '-profile:v', 'main',
+      '-level', '3.1',
+      '-vsync', 'cfr',
+      '-b:v', '520k',
+      '-maxrate', '650k',
+      '-bufsize', '1300k',
+      '-g', '48',
+      '-keyint_min', '48',
+      '-sc_threshold', '0',
+      '-c:a', 'aac',
+      '-ac', '2',
+      '-ar', '48000',
+      '-b:a', '96k'
+    );
+    return args;
+  }
+
+  if (quality === '720p') {
+    args.push(
+      '-vf', "scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      ...(isDownload ? [] : ['-tune', 'zerolatency']),
+      '-threads', '0',
+      '-pix_fmt', 'yuv420p',
+      '-profile:v', 'main',
+      '-level', '4.0',
+      '-vsync', 'cfr',
+      '-b:v', '1050k',
+      '-maxrate', '1300k',
+      '-bufsize', '2600k',
+      '-g', '48',
+      '-keyint_min', '48',
+      '-sc_threshold', '0',
+      '-c:a', 'aac',
+      '-ac', '2',
+      '-ar', '48000',
+      '-b:a', '128k'
+    );
+    return args;
+  }
+
+  // Default 1080p high quality
+  args.push(
+    '-vf', "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
+    '-c:v', 'libx264',
+    '-preset', 'ultrafast',
+    ...(isDownload ? [] : ['-tune', 'zerolatency']),
+    '-threads', '0',
+    '-pix_fmt', 'yuv420p',
+    '-profile:v', 'main',
+    '-level', '4.0',
+    '-color_primaries', 'bt709',
+    '-color_trc', 'bt709',
+    '-colorspace', 'bt709',
+    '-vsync', 'cfr',
+    '-crf', '22',
+    '-maxrate', '3400k',
+    '-bufsize', '6800k',
+    '-g', '48',
+    '-keyint_min', '48',
+    '-sc_threshold', '0',
+    '-c:a', 'aac',
+    '-ac', '2',
+    '-ar', '48000',
+    '-b:a', '160k'
+  );
+  return args;
+}
 
 const router = Router();
 
@@ -1519,14 +1764,39 @@ router.get('/stream-info', async (req: Request, res: Response) => {
   if (!urlParam) return res.status(400).json({ error: 'URL required' });
 
   if (!urlParam.includes('t.me') && !urlParam.includes('telegram.me')) {
-    return res.json({
-      status: 'ok',
-      isTelegram: false,
-      recommendedMode: 'direct',
-      durationSec: 0,
-      audioTracks: [],
-      subtitleTracks: [],
-    });
+    try {
+      const info = await probeDirectHttpInfo(urlParam);
+      const qualityEstimates = buildQualitySizeEstimates({
+        fileSizeBytes: info.fileSize,
+        durationSec: info.durationSec,
+        sourceHeight: info.height,
+      });
+      return res.json({
+        status: 'ok',
+        isTelegram: false,
+        recommendedMode: 'direct',
+        fileSize: info.fileSize,
+        durationSec: info.durationSec,
+        width: info.width,
+        height: info.height,
+        qualityEstimates,
+        audioTracks: [],
+        subtitleTracks: [],
+      });
+    } catch {
+      return res.json({
+        status: 'ok',
+        isTelegram: false,
+        recommendedMode: 'direct',
+        fileSize: 0,
+        durationSec: 0,
+        width: 0,
+        height: 0,
+        qualityEstimates: buildQualitySizeEstimates({}),
+        audioTracks: [],
+        subtitleTracks: [],
+      });
+    }
   }
 
   const parsed = parseTelegramUrl(urlParam);
@@ -1547,12 +1817,19 @@ router.get('/stream-info', async (req: Request, res: Response) => {
     }
 
     const probe = await ensureMediaProbed(entry, urlParam);
+    const resolvedDuration = probe.durationSec || entry.docInfo.durationSec || 0;
+    const qualityEstimates = buildQualitySizeEstimates({
+      fileSizeBytes: entry.docInfo.fileSize,
+      durationSec: resolvedDuration,
+      sourceHeight: probe.height,
+    });
+
     return res.json({
       status: 'ok',
       isTelegram: true,
       fileName: entry.docInfo.fileName,
       fileSize: entry.docInfo.fileSize,
-      durationSec: probe.durationSec || entry.docInfo.durationSec || 0,
+      durationSec: resolvedDuration,
       recommendedMode: probe.recommendedMode,
       container: probe.container,
       videoCodec: probe.videoCodec,
@@ -1566,6 +1843,7 @@ router.get('/stream-info', async (req: Request, res: Response) => {
       audioTracks: probe.audioTracks,
       subtitleTracks: probe.subtitleTracks,
       probedByFfprobe: probe.probedByFfprobe,
+      qualityEstimates,
     });
   } catch (err: any) {
     console.error('[StreamInfo] Error:', err?.message || err);
@@ -1575,6 +1853,168 @@ router.get('/stream-info', async (req: Request, res: Response) => {
 
 const MAX_CONCURRENT_FFMPEG = Math.max(1, Number(process.env.MAX_CONCURRENT_FFMPEG) || 4);
 const activeFfmpegProcs = new Set<ReturnType<typeof spawn>>();
+
+function pipeFfmpegMp4Stream(opts: {
+  inputUrl: string;
+  modeLabel: string;
+  startSec: number;
+  audioIdx: number;
+  remuxOnly: boolean;
+  canCopyAudio: boolean;
+  requestedQuality: VideoQualityTier | '';
+  isDownload: boolean;
+  commonHeaders: Record<string, string>;
+  req: Request;
+  res: Response;
+}) {
+  const {
+    inputUrl,
+    modeLabel,
+    startSec,
+    audioIdx,
+    remuxOnly,
+    canCopyAudio,
+    requestedQuality,
+    isDownload,
+    commonHeaders,
+    req,
+    res,
+  } = opts;
+
+  if (activeFfmpegProcs.size >= MAX_CONCURRENT_FFMPEG) {
+    console.warn(`[Stream] Active FFmpeg limit reached (${activeFfmpegProcs.size}/${MAX_CONCURRENT_FFMPEG})`);
+    return res.status(503).json({ error: 'Transcoding server is busy. Please retry in a moment.' });
+  }
+
+  const ffArgs: string[] = [
+    '-probesize', '2000000',
+    '-analyzeduration', '2000000',
+    '-fflags', '+genpts+discardcorrupt',
+    '-reconnect', '1',
+    '-reconnect_streamed', '1',
+    '-reconnect_delay_max', '2',
+  ];
+  if (startSec > 0) {
+    ffArgs.push('-ss', startSec.toString());
+  }
+  ffArgs.push(
+    '-i', inputUrl,
+    '-sn',
+    '-dn',
+    '-map_chapters', '-1',
+    '-map', '0:V:0',
+    '-map', `0:a:${audioIdx}?`
+  );
+
+  if (remuxOnly && !requestedQuality) {
+    ffArgs.push('-c:v', 'copy');
+    if (canCopyAudio) {
+      ffArgs.push('-c:a', 'copy');
+    } else {
+      ffArgs.push('-c:a', 'aac', '-ac', '2', '-ar', '48000', '-b:a', '192k');
+    }
+  } else {
+    ffArgs.push(...getFfmpegQualityArgs(requestedQuality, isDownload));
+  }
+
+  ffArgs.push(
+    '-avoid_negative_ts', 'make_zero',
+    '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+    '-frag_duration', '1000000',
+    '-f', 'mp4',
+    'pipe:1'
+  );
+
+  const ffProc = spawn('ffmpeg', ffArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+  activeFfmpegProcs.add(ffProc);
+  let procClosed = false;
+  let headersCommitted = false;
+  let clientClosed = false;
+  let lastErrLine = '';
+
+  const killFf = () => {
+    clientClosed = true;
+    if (!procClosed) {
+      try {
+        ffProc.kill('SIGTERM');
+        setTimeout(() => {
+          if (!procClosed) {
+            try { ffProc.kill('SIGKILL'); } catch {}
+          }
+        }, 500);
+      } catch {}
+    }
+  };
+
+  const startupTimer = setTimeout(() => {
+    if (!headersCommitted && !procClosed) {
+      console.warn(`[FFmpeg ${modeLabel}] Startup timeout before first output byte`);
+      killFf();
+      if (!res.headersSent && !res.writableEnded) {
+        res.status(504).json({ error: 'Stream transcode startup timed out' });
+      }
+    }
+  }, 25000);
+
+  ffProc.stdout.on('data', (chunk: Buffer) => {
+    if (clientClosed || res.writableEnded) return;
+    if (!headersCommitted) {
+      headersCommitted = true;
+      clearTimeout(startupTimer);
+      res.writeHead(200, {
+        ...commonHeaders,
+        'Content-Type': 'video/mp4',
+      });
+      (res as any).flushHeaders?.();
+    }
+    const ok = res.write(chunk);
+    if (!ok) {
+      ffProc.stdout.pause();
+      res.once('drain', () => {
+        if (!procClosed && !clientClosed) ffProc.stdout.resume();
+      });
+    }
+  });
+
+  ffProc.stderr.on('data', (chunk: Buffer) => {
+    const msg = chunk.toString().trim();
+    if (msg) {
+      lastErrLine = msg;
+      if (msg.toLowerCase().includes('error')) {
+        console.warn(`[FFmpeg ${modeLabel}]`, msg);
+      }
+    }
+  });
+
+  ffProc.on('error', (err) => {
+    clearTimeout(startupTimer);
+    activeFfmpegProcs.delete(ffProc);
+    procClosed = true;
+    console.error('[FFmpeg] Spawn error:', err.message);
+    if (!headersCommitted && !res.headersSent) {
+      res.status(502).json({ error: 'FFmpeg failed to start: ' + err.message });
+    } else if (!res.writableEnded) {
+      res.end();
+    }
+  });
+
+  ffProc.on('close', (code) => {
+    clearTimeout(startupTimer);
+    activeFfmpegProcs.delete(ffProc);
+    procClosed = true;
+    if (!headersCommitted && !clientClosed && !res.headersSent) {
+      res.status(502).json({
+        error: `FFmpeg exited (${code}) before streaming${lastErrLine ? ': ' + lastErrLine.slice(-180) : ''}`,
+      });
+    } else if (!res.writableEnded) {
+      res.end();
+    }
+  });
+
+  req.on('close', killFf);
+  res.on('close', killFf);
+  res.on('error', killFf);
+}
 
 /**
  * GET/HEAD /api/telegram/stream & /api/stream
@@ -1586,14 +2026,54 @@ export async function handleStream(req: Request, res: Response) {
   const isTranscodeParam = req.query.transcode === '1';
   const isCastParam = req.query.cast === '1';
   const isRawParam = req.query.raw === '1';
+  const isDownloadParam = req.query.download === '1';
+  const requestedQuality = normalizeRequestedQuality(req.query.quality);
   const startSecParam = req.query.start ? Math.max(0, parseFloat(req.query.start as string) || 0) : 0;
   const audioIdxParam = req.query.audioIdx !== undefined ? Math.max(0, parseInt(req.query.audioIdx as string, 10) || 0) : 0;
 
   if (!urlParam) return res.status(400).send('URL required');
 
-  // 1. Handle Direct Non-Telegram URLs: Redirect directly
+  // 1. Handle Direct Non-Telegram URLs
   if (!urlParam.includes('t.me') && !urlParam.includes('telegram.me')) {
-    return res.redirect(urlParam);
+    const needsScaledTranscode =
+      requestedQuality === '720p' ||
+      requestedQuality === '480p' ||
+      requestedQuality === '360p' ||
+      isTranscodeParam;
+
+    if (!needsScaledTranscode) {
+      return res.redirect(urlParam);
+    }
+
+    const commonHeaders: Record<string, string> = {
+      'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length, X-Video-Duration, X-Stream-Mode, Content-Type',
+      'X-Stream-Mode': `transcode-${requestedQuality || '1080p'}`,
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Connection': 'keep-alive',
+    };
+    if (isDownloadParam) {
+      commonHeaders['Content-Disposition'] = `attachment; filename="Movie_Portal_${requestedQuality || 'HD'}.mp4"`;
+    }
+
+    if (req.method === 'HEAD') {
+      res.writeHead(200, { ...commonHeaders, 'Content-Type': 'video/mp4' });
+      return res.end();
+    }
+
+    return pipeFfmpegMp4Stream({
+      inputUrl: urlParam,
+      modeLabel: `http-${requestedQuality || '1080p'}`,
+      startSec: startSecParam,
+      audioIdx: audioIdxParam,
+      remuxOnly: false,
+      canCopyAudio: false,
+      requestedQuality: requestedQuality || '1080p',
+      isDownload: isDownloadParam,
+      commonHeaders,
+      req,
+      res,
+    });
   }
 
   // 2. Parse Telegram URL
@@ -1626,7 +2106,12 @@ export async function handleStream(req: Request, res: Response) {
       const durationSec = probe.durationSec || docInfo.durationSec || 0;
 
       let effectiveMode: 'direct' | 'remux' | 'transcode' = probe.recommendedMode;
-      if (isTranscodeParam) {
+      const shouldDownscaleQuality =
+        requestedQuality === '480p' ||
+        requestedQuality === '360p' ||
+        (requestedQuality === '720p' && (probe.height <= 0 || probe.height > 780));
+
+      if (isTranscodeParam || shouldDownscaleQuality) {
         effectiveMode = 'transcode';
       } else if (isRemuxParam) {
         effectiveMode = probe.recommendedMode === 'transcode' ? 'transcode' : 'remux';
@@ -1656,11 +2141,14 @@ export async function handleStream(req: Request, res: Response) {
       const commonHeaders: Record<string, string> = {
         'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length, X-Video-Duration, X-Stream-Mode, Content-Type',
         'X-Video-Duration': durationSec.toString(),
-        'X-Stream-Mode': effectiveMode,
+        'X-Stream-Mode': requestedQuality ? `${effectiveMode}-${requestedQuality}` : effectiveMode,
         'Access-Control-Allow-Origin': '*',
         'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Connection': 'keep-alive',
       };
+      if (isDownloadParam && effectiveMode !== 'direct') {
+        commonHeaders['Content-Disposition'] = `attachment; filename="Movie_Portal_${requestedQuality || 'HD'}.mp4"`;
+      }
 
       if (req.method === 'HEAD') {
         res.writeHead(200, {
@@ -1672,173 +2160,27 @@ export async function handleStream(req: Request, res: Response) {
       }
 
       if (effectiveMode === 'remux' || effectiveMode === 'transcode') {
-        if (activeFfmpegProcs.size >= MAX_CONCURRENT_FFMPEG) {
-          console.warn(`[Stream] Active FFmpeg limit reached (${activeFfmpegProcs.size}/${MAX_CONCURRENT_FFMPEG})`);
-          return res.status(503).json({ error: 'Transcoding server is busy. Please retry in a moment.' });
-        }
-
         const localPort = process.env.INTERNAL_APP_PORT || process.env.APP_PORT || '3000';
         const localSourceUrl = `http://127.0.0.1:${localPort}/api/stream?url=${encodeURIComponent(urlParam)}&raw=1`;
-
-        const ffArgs: string[] = [
-          '-probesize', '2000000',
-          '-analyzeduration', '2000000',
-          '-fflags', '+genpts+discardcorrupt',
-          '-reconnect', '1',
-          '-reconnect_streamed', '1',
-          '-reconnect_delay_max', '2',
-        ];
-        if (startSecParam > 0) {
-          ffArgs.push('-ss', startSecParam.toString());
-        }
-        ffArgs.push(
-          '-i', localSourceUrl,
-          '-sn',
-          '-dn',
-          '-map_chapters', '-1',
-          '-map', '0:V:0',
-          '-map', `0:a:${audioIdxParam}?`
-        );
-
         const selectedAudioTrack = probe.audioTracks[audioIdxParam] || probe.audioTracks[0];
         const selectedAudioCodec = selectedAudioTrack?.codec || probe.audioCodec || '';
         const selectedChannels = selectedAudioTrack?.channels || 2;
         const canCopyAudio =
           (selectedAudioCodec === 'aac' || selectedAudioCodec === 'mp3') && selectedChannels <= 2;
 
-        if (effectiveMode === 'remux') {
-          ffArgs.push('-c:v', 'copy');
-          if (canCopyAudio) {
-            ffArgs.push('-c:a', 'copy');
-          } else {
-            ffArgs.push('-c:a', 'aac', '-ac', '2', '-ar', '48000', '-b:a', '192k');
-          }
-        } else {
-          // Universal H.264 Main 8-bit <=1080p Level 4.0 + AAC stereo fragmented MP4 (100% Android & Chrome compatible)
-          ffArgs.push(
-            '-vf', "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
-            '-c:v', 'libx264',
-            '-preset', 'ultrafast',
-            '-tune', 'zerolatency',
-            '-threads', '0',
-            '-pix_fmt', 'yuv420p',
-            '-profile:v', 'main',
-            '-level', '4.0',
-            '-color_primaries', 'bt709',
-            '-color_trc', 'bt709',
-            '-colorspace', 'bt709',
-            '-vsync', 'cfr',
-            '-crf', '23',
-            '-maxrate', '3500k',
-            '-bufsize', '7000k',
-            '-g', '48',
-            '-keyint_min', '48',
-            '-sc_threshold', '0',
-            '-c:a', 'aac',
-            '-ac', '2',
-            '-ar', '48000',
-            '-b:a', '160k'
-          );
-        }
-
-        ffArgs.push(
-          '-avoid_negative_ts', 'make_zero',
-          '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
-          '-frag_duration', '1000000',
-          '-f', 'mp4',
-          'pipe:1'
-        );
-
-        const ffProc = spawn('ffmpeg', ffArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
-        activeFfmpegProcs.add(ffProc);
-        let procClosed = false;
-        let headersCommitted = false;
-        let clientClosed = false;
-        let lastErrLine = '';
-
-        const killFf = () => {
-          clientClosed = true;
-          if (!procClosed) {
-            try {
-              ffProc.kill('SIGTERM');
-              setTimeout(() => {
-                if (!procClosed) {
-                  try { ffProc.kill('SIGKILL'); } catch {}
-                }
-              }, 500);
-            } catch {}
-          }
-        };
-
-        const startupTimer = setTimeout(() => {
-          if (!headersCommitted && !procClosed) {
-            console.warn(`[FFmpeg ${effectiveMode}] Startup timeout before first output byte`);
-            killFf();
-            if (!res.headersSent && !res.writableEnded) {
-              res.status(504).json({ error: 'Stream transcode startup timed out' });
-            }
-          }
-        }, 25000);
-
-        ffProc.stdout.on('data', (chunk: Buffer) => {
-          if (clientClosed || res.writableEnded) return;
-          if (!headersCommitted) {
-            headersCommitted = true;
-            clearTimeout(startupTimer);
-            res.writeHead(200, {
-              ...commonHeaders,
-              'Content-Type': 'video/mp4',
-            });
-            (res as any).flushHeaders?.();
-          }
-          const ok = res.write(chunk);
-          if (!ok) {
-            ffProc.stdout.pause();
-            res.once('drain', () => {
-              if (!procClosed && !clientClosed) ffProc.stdout.resume();
-            });
-          }
+        return pipeFfmpegMp4Stream({
+          inputUrl: localSourceUrl,
+          modeLabel: `${effectiveMode}${requestedQuality ? '-' + requestedQuality : ''}`,
+          startSec: startSecParam,
+          audioIdx: audioIdxParam,
+          remuxOnly: effectiveMode === 'remux',
+          canCopyAudio,
+          requestedQuality,
+          isDownload: isDownloadParam,
+          commonHeaders,
+          req,
+          res,
         });
-
-        ffProc.stderr.on('data', (chunk: Buffer) => {
-          const msg = chunk.toString().trim();
-          if (msg) {
-            lastErrLine = msg;
-            if (msg.toLowerCase().includes('error')) {
-              console.warn(`[FFmpeg ${effectiveMode}]`, msg);
-            }
-          }
-        });
-
-        ffProc.on('error', (err) => {
-          clearTimeout(startupTimer);
-          activeFfmpegProcs.delete(ffProc);
-          procClosed = true;
-          console.error('[FFmpeg] Spawn error:', err.message);
-          if (!headersCommitted && !res.headersSent) {
-            res.status(502).json({ error: 'FFmpeg failed to start: ' + err.message });
-          } else if (!res.writableEnded) {
-            res.end();
-          }
-        });
-
-        ffProc.on('close', (code) => {
-          clearTimeout(startupTimer);
-          activeFfmpegProcs.delete(ffProc);
-          procClosed = true;
-          if (!headersCommitted && !clientClosed && !res.headersSent) {
-            res.status(502).json({
-              error: `FFmpeg exited (${code}) before streaming${lastErrLine ? ': ' + lastErrLine.slice(-180) : ''}`,
-            });
-          } else if (!res.writableEnded) {
-            res.end();
-          }
-        });
-
-        req.on('close', killFf);
-        res.on('close', killFf);
-        res.on('error', killFf);
-        return;
       }
     }
 

@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.231",
-  "minimumRequiredVersion": "3.5.231",
-  "latestVersionCode": 3451,
-  "minimumRequiredVersionCode": 3451,
+  "latestVersion": "3.5.232",
+  "minimumRequiredVersion": "3.5.232",
+  "latestVersionCode": 3452,
+  "minimumRequiredVersionCode": 3452,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Portal v3.5.231 is ready! Full offline downloads for movies & series episodes, live % progress in the notification bar, and zero-network offline playback.",
-  "releaseNotes": "v3.5.231: Real offline video downloads for movies and series episodes, live % in Android notification bar & top app bar, pause/resume/retry support, and offline zero-network ExoPlayer & browser playback."
+  "updateMessage": "Movie Portal v3.5.232 is ready! Real server-scaled 1080p/720p/480p/360p playback & downloads, plus accurate per-movie and per-episode file sizes.",
+  "releaseNotes": "v3.5.232: Genuine multi-quality transcoding (1080p/720p/480p/360p) from single stream URLs for both streaming and offline downloads, plus live per-title file size probing in Download Options."
 }
