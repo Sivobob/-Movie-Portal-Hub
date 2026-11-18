@@ -14,8 +14,8 @@ import { checkAndHandleQuotaError } from './firestoreQuotaService';
 export const APP_UPDATE_COLLECTION = 'admins';
 export const APP_UPDATE_DOC_ID = 'android_update';
 
-export const CURRENT_VERSION_NAME = '3.5.233';
-export const CURRENT_VERSION_CODE = 3453;
+export const CURRENT_VERSION_NAME = '3.5.234';
+export const CURRENT_VERSION_CODE = 3454;
 
 export const OFFICIAL_APK_DIRECT_URL =
   'https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk';
@@ -45,9 +45,9 @@ export interface InstalledAppVersion {
 
 export const DEFAULT_REMOTE_UPDATE_CONFIG: RemoteUpdateConfig = {
   latestVersion: CURRENT_VERSION_NAME,
-  minimumRequiredVersion: '1.0.0',
+  minimumRequiredVersion: CURRENT_VERSION_NAME,
   latestVersionCode: CURRENT_VERSION_CODE,
-  minimumRequiredVersionCode: 1,
+  minimumRequiredVersionCode: CURRENT_VERSION_CODE,
   apkDownloadUrl: OFFICIAL_APK_DIRECT_URL,
   updateMessage: DEFAULT_UPDATE_MESSAGE,
 };

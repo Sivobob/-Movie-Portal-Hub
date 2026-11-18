@@ -21,6 +21,8 @@ import {
   Download,
   Loader2,
   Maximize,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import DownloadOptionsModal from './DownloadOptionsModal';
 import { buildApiUrl } from '../utils/apiConfig';
@@ -478,7 +480,7 @@ export default function MovieDetailsModal({
 
   const inlineVideoRef = useRef<HTMLVideoElement | null>(null);
   const [inlineLoaded, setInlineLoaded] = useState(false);
-  const [inlineMuted, setInlineMuted] = useState(true);
+  const [inlineMuted, setInlineMuted] = useState(false);
 
   useEffect(() => {
     const videoEl = inlineVideoRef.current;
@@ -487,7 +489,8 @@ export default function MovieDetailsModal({
     let hlsInstance: Hls | null = null;
     const isHls = primaryDownloadUrl.includes('.m3u8');
 
-    videoEl.muted = true;
+    videoEl.muted = false;
+    setInlineMuted(false);
 
     if (isHls && Hls.isSupported()) {
       hlsInstance = new Hls();
@@ -501,11 +504,17 @@ export default function MovieDetailsModal({
 
     const handleCanPlay = () => {
       setInlineLoaded(true);
-      videoEl.play().catch(() => {});
+      videoEl.play().catch(() => {
+        // Fallback to muted if browser blocks unmuted autoplay
+        videoEl.muted = true;
+        setInlineMuted(true);
+        videoEl.play().catch(() => {});
+      });
     };
 
     const handlePlaying = () => {
       setInlineLoaded(true);
+      setInlineMuted(videoEl.muted);
     };
 
     videoEl.addEventListener('canplay', handleCanPlay);
@@ -514,8 +523,12 @@ export default function MovieDetailsModal({
 
     videoEl.play().then(() => {
       setInlineLoaded(true);
+      setInlineMuted(videoEl.muted);
     }).catch(() => {
-      // Will play on user interaction or canplay
+      // Browser autoplay policy prevented unmuted autoplay, try muted
+      videoEl.muted = true;
+      setInlineMuted(true);
+      videoEl.play().then(() => setInlineLoaded(true)).catch(() => {});
     });
 
     return () => {
@@ -561,14 +574,22 @@ export default function MovieDetailsModal({
               playsInline
               autoPlay
               muted={inlineMuted}
-              className="w-full h-full object-cover"
-              onPlaying={() => setInlineLoaded(true)}
+              className="w-full h-full object-cover cursor-pointer"
+              onPlaying={() => {
+                setInlineLoaded(true);
+                if (inlineVideoRef.current) setInlineMuted(inlineVideoRef.current.muted);
+              }}
               onClick={() => {
                 if (inlineVideoRef.current) {
-                  if (inlineVideoRef.current.paused) {
-                    inlineVideoRef.current.play();
+                  if (inlineVideoRef.current.muted) {
+                    inlineVideoRef.current.muted = false;
+                    setInlineMuted(false);
                   } else {
-                    inlineVideoRef.current.pause();
+                    if (inlineVideoRef.current.paused) {
+                      inlineVideoRef.current.play().catch(() => {});
+                    } else {
+                      inlineVideoRef.current.pause();
+                    }
                   }
                 }
               }}
@@ -580,13 +601,20 @@ export default function MovieDetailsModal({
                 className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center gap-2.5 z-20 cursor-pointer"
                 onClick={() => {
                   if (inlineVideoRef.current) {
-                    inlineVideoRef.current.muted = true;
-                    inlineVideoRef.current.play().then(() => setInlineLoaded(true)).catch(() => {});
+                    inlineVideoRef.current.muted = false;
+                    setInlineMuted(false);
+                    inlineVideoRef.current.play().then(() => setInlineLoaded(true)).catch(() => {
+                      if (inlineVideoRef.current) {
+                        inlineVideoRef.current.muted = true;
+                        setInlineMuted(true);
+                        inlineVideoRef.current.play().then(() => setInlineLoaded(true)).catch(() => {});
+                      }
+                    });
                   }
                 }}
               >
                 <div className="w-8 h-8 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-                <span className="text-white text-xs font-semibold tracking-wide">Loading... (Tap to Play)</span>
+                <span className="text-white text-xs font-semibold tracking-wide">Loading... (Tap to Play with Sound)</span>
               </div>
             )}
 
@@ -600,6 +628,36 @@ export default function MovieDetailsModal({
               aria-label="Back"
             >
               <ArrowLeft size={20} />
+            </button>
+
+            {/* Bottom Left Sound Toggle Button */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (inlineVideoRef.current) {
+                  const nextMuted = !inlineVideoRef.current.muted;
+                  inlineVideoRef.current.muted = nextMuted;
+                  setInlineMuted(nextMuted);
+                  if (inlineVideoRef.current.paused) {
+                    inlineVideoRef.current.play().catch(() => {});
+                  }
+                }
+              }}
+              className="absolute bottom-3 left-3 z-30 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/75 hover:bg-black/90 text-white backdrop-blur-md border border-white/20 shadow-lg cursor-pointer transition-transform active:scale-95"
+              aria-label={inlineMuted ? "Unmute audio" : "Mute audio"}
+            >
+              {inlineMuted ? (
+                <>
+                  <VolumeX size={15} className="text-red-400" />
+                  <span className="text-[11px] font-semibold text-gray-200">Tap for Sound</span>
+                </>
+              ) : (
+                <>
+                  <Volume2 size={15} className="text-[#00d664]" />
+                  <span className="text-[11px] font-semibold text-gray-200">Audio On</span>
+                </>
+              )}
             </button>
 
             {/* Bottom Right Expand / Fullscreen button */}

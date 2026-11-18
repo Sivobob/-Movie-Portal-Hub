@@ -1846,7 +1846,7 @@ public class MainActivity extends BridgeActivity {
                             conn.setConnectTimeout(25000);
                             conn.setReadTimeout(60000);
                             conn.setRequestMethod("GET");
-                            conn.setRequestProperty("User-Agent", "MoviePortal/3.5.233 AndroidDownloader");
+                            conn.setRequestProperty("User-Agent", "MoviePortal/3.5.234 AndroidDownloader");
                             conn.setRequestProperty("Accept-Encoding", "identity");
                             if (existingOffset > 0L && task.totalBytes > existingOffset) {
                                 conn.setRequestProperty("Range", "bytes=" + existingOffset + "-" + (task.totalBytes - 1L));
@@ -2571,11 +2571,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.233");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.234");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.233\",\"versionCode\":3453}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.234\",\"versionCode\":3454}";
             }
         }
 
