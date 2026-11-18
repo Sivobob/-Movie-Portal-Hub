@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import Hls from 'hls.js';
 import {
   ArrowLeft,
   ChevronRight,
@@ -19,6 +20,7 @@ import {
   X,
   Download,
   Loader2,
+  Maximize,
 } from 'lucide-react';
 import DownloadOptionsModal from './DownloadOptionsModal';
 import { useDownloads } from '../hooks/useDownloads';
@@ -467,6 +469,45 @@ export default function MovieDetailsModal({
     ? 1
     : 0;
 
+  const inlineVideoRef = useRef<HTMLVideoElement | null>(null);
+  const [inlineLoaded, setInlineLoaded] = useState(false);
+  const [inlineMuted, setInlineMuted] = useState(false);
+
+  useEffect(() => {
+    const videoEl = inlineVideoRef.current;
+    if (!videoEl || !primaryDownloadUrl) return;
+
+    let hlsInstance: Hls | null = null;
+    const isHls = primaryDownloadUrl.includes('.m3u8');
+
+    if (isHls && Hls.isSupported()) {
+      hlsInstance = new Hls();
+      hlsInstance.loadSource(primaryDownloadUrl);
+      hlsInstance.attachMedia(videoEl);
+    } else {
+      videoEl.src = primaryDownloadUrl;
+    }
+
+    setInlineLoaded(false);
+    videoEl.play().then(() => {
+      setInlineLoaded(true);
+    }).catch(() => {
+      setInlineMuted(true);
+      videoEl.muted = true;
+      videoEl.play().then(() => setInlineLoaded(true)).catch(() => {});
+    });
+
+    return () => {
+      if (hlsInstance) {
+        hlsInstance.destroy();
+      }
+      if (videoEl) {
+        videoEl.pause();
+        videoEl.src = '';
+      }
+    };
+  }, [primaryDownloadUrl]);
+
   const modalContent = (
     <div
       className="fixed inset-0 z-[90] w-full h-[100dvh] bg-[#111317] text-white flex flex-col overflow-hidden select-none"
@@ -489,19 +530,41 @@ export default function MovieDetailsModal({
           ref={scrollContainerRef}
           className="overflow-y-auto overscroll-y-contain touch-pan-y flex-1 w-full pb-[calc(2rem+env(safe-area-inset-bottom))]"
         >
-          {/* Top 16:9 Backdrop / Video Preview Area */}
-          <div className="relative w-full aspect-[16/9] sm:h-[42dvh] sm:min-h-[260px] sm:max-h-[420px] bg-black overflow-hidden flex-shrink-0">
-            <img
-              src={
-                upgradePosterUrl(movie.backdropUrl || movie.posterUrl, 1280) ||
-                movie.backdropUrl ||
-                movie.posterUrl
-              }
-              alt={movie.title}
-              draggable={false}
+          {/* Top 16:9 Inline Video Playback Area */}
+          <div className="relative w-full aspect-[16/9] sm:h-[42dvh] sm:min-h-[260px] sm:max-h-[420px] bg-black overflow-hidden flex-shrink-0 group">
+            <video
+              ref={inlineVideoRef}
+              playsInline
+              autoPlay
+              muted={inlineMuted}
               className="w-full h-full object-cover"
+              onPlaying={() => setInlineLoaded(true)}
+              onClick={() => {
+                if (inlineVideoRef.current) {
+                  if (inlineVideoRef.current.paused) {
+                    inlineVideoRef.current.play();
+                  } else {
+                    inlineVideoRef.current.pause();
+                  }
+                }
+              }}
             />
-            <div className="absolute inset-0 bg-gradient-to-t from-[#111317] via-black/20 to-black/45" />
+
+            {/* Fallback backdrop poster before video starts playing */}
+            {!inlineLoaded && (
+              <img
+                src={
+                  upgradePosterUrl(movie.backdropUrl || movie.posterUrl, 1280) ||
+                  movie.backdropUrl ||
+                  movie.posterUrl
+                }
+                alt={movie.title}
+                draggable={false}
+                className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+              />
+            )}
+
+            <div className="absolute inset-0 bg-gradient-to-t from-[#111317] via-transparent to-black/40 pointer-events-none" />
 
             {/* Top-Left Back Button */}
             <button
@@ -513,36 +576,22 @@ export default function MovieDetailsModal({
               <ArrowLeft size={20} />
             </button>
 
-            {/* Center Play Button */}
-            <div className="absolute inset-0 flex items-center justify-center">
-              <button
-                type="button"
-                onClick={() =>
-                  onWatchNow(
-                    enrichMovieWithResolvedDuration(safeSeasonIndex, primaryEpIdx),
-                    safeSeasonIndex,
-                    primaryEpIdx,
-                    selectedLanguage
-                  )
-                }
-                className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-black/55 hover:bg-black/75 border-2 border-[#00d664] backdrop-blur-md flex items-center justify-center shadow-2xl transition-transform hover:scale-105 active:scale-95 cursor-pointer"
-                aria-label="Play"
-              >
-                <Play size={26} fill="white" className="ml-0.5 text-white" />
-              </button>
-            </div>
-
-            {/* Trailer pill (only if real trailerUrl exists) */}
-            {movie.trailerUrl && (
-              <button
-                type="button"
-                onClick={handlePlayTrailer}
-                className="absolute bottom-3 left-3.5 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/65 hover:bg-black/85 backdrop-blur-md border border-white/20 text-white text-xs font-semibold cursor-pointer active:scale-95"
-              >
-                <Clapperboard size={13} className="text-[#00d664]" />
-                <span>Trailer</span>
-              </button>
-            )}
+            {/* Bottom Right Expand / Fullscreen button */}
+            <button
+              type="button"
+              onClick={() =>
+                onWatchNow(
+                  enrichMovieWithResolvedDuration(safeSeasonIndex, primaryEpIdx),
+                  safeSeasonIndex,
+                  primaryEpIdx,
+                  selectedLanguage
+                )
+              }
+              className="absolute bottom-3 right-3 z-30 w-9 h-9 rounded-full bg-black/70 hover:bg-black/90 text-white flex items-center justify-center backdrop-blur-md border border-white/20 shadow-lg cursor-pointer transition-transform active:scale-90"
+              aria-label="Expand Fullscreen"
+            >
+              <Maximize size={16} />
+            </button>
           </div>
 
           {/* Main Details Body */}
