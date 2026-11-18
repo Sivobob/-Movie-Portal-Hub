@@ -550,18 +550,12 @@ export default function MovieDetailsModal({
               }}
             />
 
-            {/* Fallback backdrop poster before video starts playing */}
+            {/* Clean White Loading Spinner & Text while buffering */}
             {!inlineLoaded && (
-              <img
-                src={
-                  upgradePosterUrl(movie.backdropUrl || movie.posterUrl, 1280) ||
-                  movie.backdropUrl ||
-                  movie.posterUrl
-                }
-                alt={movie.title}
-                draggable={false}
-                className="absolute inset-0 w-full h-full object-cover pointer-events-none"
-              />
+              <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center gap-2.5 z-20">
+                <div className="w-8 h-8 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                <span className="text-white text-xs font-semibold tracking-wide">Loading...</span>
+              </div>
             )}
 
             <div className="absolute inset-0 bg-gradient-to-t from-[#111317] via-transparent to-black/40 pointer-events-none" />
