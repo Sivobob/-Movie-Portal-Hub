@@ -21,6 +21,7 @@ import {
 import { getAppPreferences, isMatureContent } from '../services/userPreferencesService';
 import { upgradePosterUrl } from '../utils/posterUrl';
 import { parseDurationToSeconds } from '../utils/duration';
+import { getOfflineVideoPlayableUrl } from '../services/offlineStorage';
 
 type DownloadTab = 'moviebox' | 'local' | 'received';
 
@@ -58,6 +59,7 @@ export default function DownloadsPage() {
   const [selectedMovie, setSelectedMovie] = useState<any | null>(null);
   const [playingMovie, setPlayingMovie] = useState<any | null>(null);
   const [activeSeasonIndex, setActiveSeasonIndex] = useState<number>(0);
+  const [offlineAlert, setOfflineAlert] = useState<string | null>(null);
 
   const selectedMovieRef = useRef(selectedMovie);
   const playingMovieRef = useRef(playingMovie);
@@ -387,10 +389,43 @@ export default function DownloadsPage() {
     e.target.value = '';
   };
 
+  const handlePlayOfflineItem = async (item: any) => {
+    setOfflineAlert(null);
+    const offlineKey = item?.offlineKey || item?.id;
+    const offlinePlayableUrl = await getOfflineVideoPlayableUrl(offlineKey, item?.localUri).catch(() => null);
+
+    if (offlinePlayableUrl) {
+      handleWatchNow({
+        ...item,
+        seasons: undefined,
+        videoQualities: undefined,
+        streamingUrl: offlinePlayableUrl,
+      });
+      return;
+    }
+
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setOfflineAlert(`"${item?.title || 'Video'}" is not cached for offline playback yet. Connect to the internet to re-download or stream.`);
+      setTimeout(() => setOfflineAlert(null), 4500);
+      return;
+    }
+
+    handleWatchNow({
+      ...item,
+      seasons: undefined,
+      streamingUrl: item.videoUrl || item.streamingUrl || '',
+    });
+  };
+
   const hasDownloads = activeDownloads.length > 0 || downloads.length > 0;
 
   return (
     <div className="min-h-[100dvh] w-full bg-[#111317] text-white px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[calc(6rem+env(safe-area-inset-bottom))] select-none">
+      {offlineAlert && (
+        <div className="fixed top-[max(0.75rem,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-[125] w-[calc(100%-2rem)] max-w-md bg-red-950/95 border border-red-500/40 text-red-200 text-xs font-semibold px-4 py-3 rounded-2xl shadow-2xl">
+          {offlineAlert}
+        </div>
+      )}
       <div className="max-w-2xl mx-auto space-y-5">
         {/* Top Bar: Downloads title ONLY (Transfer button intentionally removed) */}
         <header className="flex items-center justify-between pt-1">
@@ -450,12 +485,7 @@ export default function DownloadsPage() {
                 <DownloadsView
                   activeDownloads={activeDownloads}
                   completedDownloads={downloads}
-                  onPlayMovie={(item) =>
-                    handleWatchNow({
-                      ...item,
-                      streamingUrl: item.videoUrl || item.streamingUrl,
-                    })
-                  }
+                  onPlayMovie={(item) => handlePlayOfflineItem(item)}
                   onRemoveCompleted={removeDownload}
                   onCancelActive={cancelActiveDownload}
                   onPauseActive={pauseActiveDownload}

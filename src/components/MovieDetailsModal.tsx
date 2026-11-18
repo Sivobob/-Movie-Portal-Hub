@@ -17,7 +17,11 @@ import {
   CheckCircle2,
   AlertTriangle,
   X,
+  Download,
+  Loader2,
 } from 'lucide-react';
+import DownloadOptionsModal from './DownloadOptionsModal';
+import { useDownloads } from '../hooks/useDownloads';
 import { upgradePosterUrl } from '../utils/posterUrl';
 import {
   saveUserRating,
@@ -82,6 +86,9 @@ export default function MovieDetailsModal({
   const tabsSectionRef = useRef<HTMLDivElement | null>(null);
   const [probedMovieDurationSec, setProbedMovieDurationSec] = useState<number>(0);
   const [probedEpisodeDurations, setProbedEpisodeDurations] = useState<Record<string, number>>({});
+  const [showDownloadModal, setShowDownloadModal] = useState(false);
+
+  const { activeDownloads, downloads, startDownload, getDownloadMatch } = useDownloads();
 
   const seasonsList = Array.isArray(movie?.seasons) ? movie.seasons : [];
   const isSeries = Boolean(
@@ -107,6 +114,7 @@ export default function MovieDetailsModal({
       setIsAudioDropdownOpen(false);
       setProbedMovieDurationSec(0);
       setProbedEpisodeDurations({});
+      setShowDownloadModal(false);
       scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'auto' });
     }
   }, [movie?.id, initialSeasonIndex]);
@@ -421,6 +429,44 @@ export default function MovieDetailsModal({
       ? selectedEpisodeIdx
       : 0;
 
+  const currentMovieId = movie.id || movie.imdbId;
+  const currentSeasonNumber = hasRealSeasons
+    ? Number(currentSeason?.seasonNumber || safeSeasonIndex + 1)
+    : undefined;
+  const currentEpisodeObj = hasRealSeasons ? episodeList[primaryEpIdx] : null;
+  const currentEpisodeNumber =
+    hasRealSeasons && currentEpisodeObj
+      ? Number(currentEpisodeObj.episodeNumber || primaryEpIdx + 1)
+      : undefined;
+  const primaryDownloadUrl = hasRealSeasons
+    ? String(
+        currentEpisodeObj?.streamUrl ||
+          currentEpisodeObj?.videoQualities?.['720p'] ||
+          currentEpisodeObj?.videoQualities?.['1080p'] ||
+          ''
+      ).trim()
+    : String(
+        movie.streamingUrl ||
+          movie.videoQualities?.['720p'] ||
+          movie.videoQualities?.['1080p'] ||
+          ''
+      ).trim();
+
+  const currentDownloadMatch = getDownloadMatch(
+    currentMovieId,
+    primaryDownloadUrl,
+    currentSeasonNumber,
+    currentEpisodeNumber
+  );
+  const activeDownloadForTitle = hasRealSeasons
+    ? activeDownloads.find((d) => d.movieId === currentMovieId && d.status !== 'error')
+    : currentDownloadMatch.active;
+  const completedCountForTitle = hasRealSeasons
+    ? downloads.filter((d) => d.movieId === currentMovieId).length
+    : currentDownloadMatch.completed
+    ? 1
+    : 0;
+
   const modalContent = (
     <div
       className="fixed inset-0 z-[90] w-full h-[100dvh] bg-[#111317] text-white flex flex-col overflow-hidden select-none"
@@ -568,8 +614,41 @@ export default function MovieDetailsModal({
               </div>
             </div>
 
-            {/* Action Pills Row (NO Download button — Add to list, Share, Like, Rate, Report) */}
+            {/* Action Pills Row (Download FIRST before Add to list, Share, Like, Rate, Report) */}
             <div className="flex items-center gap-2 overflow-x-auto scrollbar-none pb-0.5">
+              <button
+                type="button"
+                onClick={() => setShowDownloadModal(true)}
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-semibold whitespace-nowrap border transition-colors cursor-pointer active:scale-95 ${
+                  activeDownloadForTitle
+                    ? 'bg-amber-400/15 border-amber-400/60 text-amber-300'
+                    : completedCountForTitle > 0
+                    ? 'bg-[#00d664]/15 border-[#00d664]/60 text-[#00d664]'
+                    : 'bg-[#1e222b] hover:bg-[#262b36] border-white/10 text-neutral-100'
+                }`}
+              >
+                {activeDownloadForTitle ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    <span>{activeDownloadForTitle.progress}%</span>
+                  </>
+                ) : completedCountForTitle > 0 ? (
+                  <>
+                    <Check size={14} className="stroke-[2.5]" />
+                    <span>
+                      {hasRealSeasons
+                        ? `Download (${completedCountForTitle})`
+                        : 'Downloaded'}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <Download size={14} />
+                    <span>Download</span>
+                  </>
+                )}
+              </button>
+
               <button
                 type="button"
                 onClick={handleToggleList}
@@ -1040,6 +1119,21 @@ export default function MovieDetailsModal({
           </div>
         </div>
       )}
+      {/* DOWNLOAD OPTIONS MODAL (Movies & Series Episodes, z-[110]) */}
+      <DownloadOptionsModal
+        isOpen={showDownloadModal}
+        onClose={() => setShowDownloadModal(false)}
+        movie={movie}
+        initialSeasonIndex={safeSeasonIndex}
+        initialEpisodeIndex={primaryEpIdx}
+        audioLanguage={selectedLanguage}
+        onConfirmDownload={(opts) => startDownload(opts)}
+        onViewDownloads={() => {
+          setShowDownloadModal(false);
+          onClose();
+          window.dispatchEvent(new CustomEvent('movie_portal_open_downloads'));
+        }}
+      />
     </div>
   );
 

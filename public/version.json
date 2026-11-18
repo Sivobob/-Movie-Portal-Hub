@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.230",
-  "minimumRequiredVersion": "3.5.230",
-  "latestVersionCode": 3450,
-  "minimumRequiredVersionCode": 3450,
+  "latestVersion": "3.5.231",
+  "minimumRequiredVersion": "3.5.231",
+  "latestVersionCode": 3451,
+  "minimumRequiredVersionCode": 3451,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Portal v3.5.230 update is ready! Updated compact Hero banner, clean episode number tiles, fullscreen/fit player controls, and quota-safe offline caching.",
-  "releaseNotes": "v3.5.230: Compact Hero carousel, updated video player with fullscreen & fit zoom controls, simplified episode number tiles in MovieDetailsModal, and Firestore quota fallback."
+  "updateMessage": "Movie Portal v3.5.231 is ready! Full offline downloads for movies & series episodes, live % progress in the notification bar, and zero-network offline playback.",
+  "releaseNotes": "v3.5.231: Real offline video downloads for movies and series episodes, live % in Android notification bar & top app bar, pause/resume/retry support, and offline zero-network ExoPlayer & browser playback."
 }

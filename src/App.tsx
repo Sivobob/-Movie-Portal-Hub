@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Link } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Link, useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar } from '@capacitor/status-bar';
 import { handleRedirectResult } from './services/authService';
@@ -16,6 +16,7 @@ import { CURRENT_VERSION_NAME } from './services/appUpdateConfig';
 import { ensureAndroidStreamBridge } from './utils/apiConfig';
 import AndroidBottomNav from './components/AndroidBottomNav';
 import ReleaseNotificationBridge from './components/ReleaseNotificationBridge';
+import DownloadNotificationBar from './components/DownloadNotificationBar';
 import DownloadsPage from './components/DownloadsPage';
 import MePage from './components/MePage';
 import SettingsPage from './components/SettingsPage';
@@ -91,10 +92,21 @@ function AdminRoute({ children }: { children: React.ReactElement }) {
 function AppContent() {
   const [showSplash, setShowSplash] = useState(false);
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   useEffect(() => {
     syncAppPreferencesFromFirestore(user?.uid).catch(() => {});
   }, [user?.uid]);
+
+  useEffect(() => {
+    const onOpenDownloads = () => {
+      navigate('/downloads');
+    };
+    window.addEventListener('movie_portal_open_downloads', onOpenDownloads);
+    return () => {
+      window.removeEventListener('movie_portal_open_downloads', onOpenDownloads);
+    };
+  }, [navigate]);
 
   return (
     <>
@@ -105,6 +117,7 @@ function AppContent() {
           <Header />
           <UpdateNotification />
           <ReleaseNotificationBridge />
+          <DownloadNotificationBar />
           <main className="flex-1 w-full flex flex-col">
             <Routes>
               <Route path="/" element={<HomePage />} />

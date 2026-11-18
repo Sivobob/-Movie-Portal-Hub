@@ -2,6 +2,9 @@ package com.moviebox.stream.app;
 
 import android.app.ActivityManager;
 import android.app.DownloadManager;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
@@ -26,6 +29,8 @@ import android.media.MediaCodecInfo;
 import android.media.MediaCodecList;
 import android.media.MediaFormat;
 import java.util.Locale;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
@@ -39,6 +44,8 @@ import android.Manifest;
 import android.widget.FrameLayout;
 import androidx.activity.OnBackPressedCallback;
 import androidx.core.app.ActivityCompat;
+import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 import androidx.core.view.WindowCompat;
@@ -55,6 +62,7 @@ import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.Tracks;
 import androidx.media3.common.VideoSize;
+import androidx.media3.datasource.DefaultDataSource;
 import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.exoplayer.DecoderCounters;
 import androidx.media3.exoplayer.DefaultLoadControl;
@@ -179,7 +187,44 @@ public class MainActivity extends BridgeActivity {
     private volatile boolean exoActiveDecoderIsSoftware = false;
     private volatile String exoAudioTracksJson = "[]";
     private volatile String exoSubtitleTracksJson = "[]";
+    private volatile int exoResizeMode = 0; // 0 = fit, 4 = zoom/cover, 3 = stretch/fill
     private volatile String cachedExoStateJson = "{\"active\":false,\"state\":1,\"isPlaying\":false,\"isBuffering\":false,\"ended\":false,\"seekable\":false,\"currentTime\":0,\"duration\":0,\"bufferedPosition\":0,\"videoWidth\":0,\"videoHeight\":0,\"firstFrameRendered\":false,\"renderedFrames\":0,\"droppedFrames\":0,\"preferSoftware\":false,\"isSoftwareDecoder\":false,\"decoderName\":\"\",\"surfaceMode\":\"texture\",\"error\":\"\",\"audioTracks\":[],\"subtitleTracks\":[]}";
+
+    private static final String VIDEO_DOWNLOAD_CHANNEL_ID = "movie_box_video_downloads";
+    private static final String VIDEO_DOWNLOAD_DONE_CHANNEL_ID = "movie_box_video_downloads_done";
+    private final ConcurrentHashMap<String, NativeVideoDownloadTask> nativeVideoDownloads = new ConcurrentHashMap<>();
+    private final ExecutorService videoDownloadExecutor = Executors.newFixedThreadPool(2);
+
+    private static class NativeVideoDownloadTask {
+        final String id;
+        final String title;
+        final String primaryUrl;
+        final String fallbackUrl;
+        final int notifId;
+        final File targetFile;
+        final File partFile;
+        final AtomicBoolean paused = new AtomicBoolean(false);
+        final AtomicBoolean cancelled = new AtomicBoolean(false);
+        final AtomicBoolean running = new AtomicBoolean(false);
+        volatile int progress = 0;
+        volatile long receivedBytes = 0L;
+        volatile long totalBytes = 0L;
+        volatile String speed = "Connecting...";
+        volatile String eta = "Starting...";
+        volatile String status = "downloading";
+        volatile String localUri = "";
+        volatile String errorMessage = "";
+
+        NativeVideoDownloadTask(String id, String title, String primaryUrl, String fallbackUrl, File targetFile, File partFile) {
+            this.id = id;
+            this.title = title;
+            this.primaryUrl = primaryUrl;
+            this.fallbackUrl = fallbackUrl;
+            this.notifId = 30000 + Math.abs(id.hashCode() % 100000);
+            this.targetFile = targetFile;
+            this.partFile = partFile;
+        }
+    }
 
     private final Runnable exoStateTicker = new Runnable() {
         @Override
@@ -251,7 +296,24 @@ public class MainActivity extends BridgeActivity {
             if (movieId != null && !movieId.trim().isEmpty()) {
                 pendingOpenMovieId = movieId.trim();
             }
+            String openTab = intent.getStringExtra("openTab");
+            if ("downloads".equalsIgnoreCase(openTab)) {
+                dispatchOpenDownloadsToWebView();
+            }
         } catch (Exception ignored) {}
+    }
+
+    private void dispatchOpenDownloadsToWebView() {
+        runOnUiThread(() -> {
+            try {
+                if (getBridge() != null && getBridge().getWebView() != null) {
+                    getBridge().getWebView().evaluateJavascript(
+                        "window.dispatchEvent(new CustomEvent('movie_portal_open_downloads'));",
+                        null
+                    );
+                }
+            } catch (Exception ignored) {}
+        });
     }
 
     private void dispatchOpenMovieToWebView(final String movieId) {
@@ -384,6 +446,29 @@ public class MainActivity extends BridgeActivity {
 
     private void createNotificationChannel() {
         ReleaseNotificationHelper.createNotificationChannel(this);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                NotificationManager manager = getSystemService(NotificationManager.class);
+                if (manager != null) {
+                    NotificationChannel dlChannel = new NotificationChannel(
+                        VIDEO_DOWNLOAD_CHANNEL_ID,
+                        "Video Downloads Progress",
+                        NotificationManager.IMPORTANCE_LOW
+                    );
+                    dlChannel.setDescription("Live percentage progress for offline movie and episode downloads");
+                    dlChannel.setShowBadge(false);
+                    manager.createNotificationChannel(dlChannel);
+
+                    NotificationChannel doneChannel = new NotificationChannel(
+                        VIDEO_DOWNLOAD_DONE_CHANNEL_ID,
+                        "Completed Downloads",
+                        NotificationManager.IMPORTANCE_DEFAULT
+                    );
+                    doneChannel.setDescription("Notifications when offline movies or episodes finish downloading");
+                    manager.createNotificationChannel(doneChannel);
+                }
+            } catch (Exception ignored) {}
+        }
     }
 
     private void configureWebView() {
@@ -588,15 +673,31 @@ public class MainActivity extends BridgeActivity {
         int targetW = cw;
         int targetH = ch;
 
-        if (vw > 0 && vh > 0) {
+        if (exoResizeMode == 3) {
+            // Stretch / Fill exact container dimensions
+            targetW = cw;
+            targetH = ch;
+        } else if (vw > 0 && vh > 0) {
             float videoRatio = (float) vw / (float) vh;
             float containerRatio = (float) cw / (float) ch;
-            if (videoRatio > containerRatio) {
-                targetW = cw;
-                targetH = Math.max(1, Math.round(cw / videoRatio));
+            if (exoResizeMode == 4) {
+                // Zoom / Cover (crop edges to fill screen without black bars)
+                if (videoRatio > containerRatio) {
+                    targetH = ch;
+                    targetW = Math.max(1, Math.round(ch * videoRatio));
+                } else {
+                    targetW = cw;
+                    targetH = Math.max(1, Math.round(cw / videoRatio));
+                }
             } else {
-                targetH = ch;
-                targetW = Math.max(1, Math.round(ch * videoRatio));
+                // Fit (original aspect ratio)
+                if (videoRatio > containerRatio) {
+                    targetW = cw;
+                    targetH = Math.max(1, Math.round(cw / videoRatio));
+                } else {
+                    targetH = ch;
+                    targetW = Math.max(1, Math.round(ch * videoRatio));
+                }
             }
         }
 
@@ -761,10 +862,12 @@ public class MainActivity extends BridgeActivity {
             renderersFactory.setMediaCodecSelector(swFirstSelector);
         }
 
+        DefaultDataSource.Factory dataSourceFactory = new DefaultDataSource.Factory(this, httpFactory);
+
         exoPlayer = new ExoPlayer.Builder(this, renderersFactory)
             .setMediaSourceFactory(
                 new DefaultMediaSourceFactory(this)
-                    .setDataSourceFactory(httpFactory)
+                    .setDataSourceFactory(dataSourceFactory)
                     .setLoadErrorHandlingPolicy(new DefaultLoadErrorHandlingPolicy(4))
             )
             .setLoadControl(loadControl)
@@ -1466,6 +1569,283 @@ public class MainActivity extends BridgeActivity {
         }, "MoviePortalApkUpdater").start();
     }
 
+    // --- OFFLINE VIDEO DOWNLOAD MANAGER WITH NOTIFICATION BAR PROGRESS ---
+    private File resolveOfflineMoviesDir() {
+        File dir = new File(getFilesDir(), "offline_movies");
+        if (!dir.exists()) {
+            dir.mkdirs();
+        }
+        return dir;
+    }
+
+    private boolean canPostVideoNotifications() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            return ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                == PackageManager.PERMISSION_GRANTED;
+        }
+        return true;
+    }
+
+    private PendingIntent buildOpenDownloadsPendingIntent(int requestCode) {
+        Intent intent = new Intent(this, MainActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
+        intent.putExtra("openTab", "downloads");
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT
+            | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0);
+        return PendingIntent.getActivity(this, requestCode, intent, flags);
+    }
+
+    private String formatBytesReadable(long bytes) {
+        if (bytes <= 0L) return "0 MB";
+        double mb = bytes / (1024.0 * 1024.0);
+        if (mb >= 1024.0) {
+            return String.format(Locale.US, "%.2f GB", mb / 1024.0);
+        }
+        return String.format(Locale.US, "%.1f MB", mb);
+    }
+
+    private String formatSpeedReadable(double bytesPerSec) {
+        if (bytesPerSec <= 0) return "0 KB/s";
+        double mb = bytesPerSec / (1024.0 * 1024.0);
+        if (mb >= 1.0) {
+            return String.format(Locale.US, "%.1f MB/s", mb);
+        }
+        return String.format(Locale.US, "%.0f KB/s", Math.max(1.0, bytesPerSec / 1024.0));
+    }
+
+    private String formatEtaReadable(long remainingBytes, double bytesPerSec) {
+        if (bytesPerSec <= 1024.0 || remainingBytes <= 0L) return "Calculating...";
+        long secs = Math.max(1L, Math.round(remainingBytes / bytesPerSec));
+        long mins = secs / 60L;
+        long remSecs = secs % 60L;
+        if (mins > 0) return mins + "m " + remSecs + "s";
+        return remSecs + "s";
+    }
+
+    private void updateVideoDownloadNotification(NativeVideoDownloadTask task, boolean isDone, boolean isError) {
+        if (!canPostVideoNotifications()) return;
+        try {
+            NotificationManagerCompat nm = NotificationManagerCompat.from(this);
+            if (task.cancelled.get()) {
+                nm.cancel(task.notifId);
+                return;
+            }
+            PendingIntent pi = buildOpenDownloadsPendingIntent(task.notifId);
+            if (isDone) {
+                NotificationCompat.Builder b = new NotificationCompat.Builder(this, VIDEO_DOWNLOAD_DONE_CHANNEL_ID)
+                    .setSmallIcon(R.drawable.ic_stat_movie_portal)
+                    .setColor(Color.parseColor("#00D664"))
+                    .setContentTitle("Downloaded: " + task.title)
+                    .setContentText(formatBytesReadable(task.totalBytes > 0 ? task.totalBytes : task.receivedBytes) + " • Tap to watch offline")
+                    .setAutoCancel(true)
+                    .setOngoing(false)
+                    .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                    .setContentIntent(pi);
+                nm.notify(task.notifId, b.build());
+            } else if (isError) {
+                NotificationCompat.Builder b = new NotificationCompat.Builder(this, VIDEO_DOWNLOAD_DONE_CHANNEL_ID)
+                    .setSmallIcon(R.drawable.ic_stat_movie_portal)
+                    .setColor(Color.parseColor("#EF4444"))
+                    .setContentTitle("Download failed: " + task.title)
+                    .setContentText(task.errorMessage != null && !task.errorMessage.isEmpty() ? task.errorMessage : "Tap to retry")
+                    .setAutoCancel(true)
+                    .setOngoing(false)
+                    .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                    .setContentIntent(pi);
+                nm.notify(task.notifId, b.build());
+            } else {
+                boolean indet = task.totalBytes <= 0L;
+                String sub = task.paused.get()
+                    ? ("Paused at " + task.progress + "%")
+                    : (task.progress + "% • " + formatBytesReadable(task.receivedBytes)
+                        + (task.totalBytes > 0 ? (" / " + formatBytesReadable(task.totalBytes)) : "")
+                        + " • " + task.speed);
+                NotificationCompat.Builder b = new NotificationCompat.Builder(this, VIDEO_DOWNLOAD_CHANNEL_ID)
+                    .setSmallIcon(R.drawable.ic_stat_movie_portal)
+                    .setColor(Color.parseColor("#00D664"))
+                    .setContentTitle(task.paused.get() ? ("Paused: " + task.title) : ("Downloading " + task.progress + "% • " + task.title))
+                    .setContentText(sub)
+                    .setProgress(100, task.progress, indet)
+                    .setOngoing(!task.paused.get())
+                    .setOnlyAlertOnce(true)
+                    .setPriority(NotificationCompat.PRIORITY_LOW)
+                    .setContentIntent(pi);
+                nm.notify(task.notifId, b.build());
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void executeNativeVideoDownloadTask(final NativeVideoDownloadTask task) {
+        if (!task.running.compareAndSet(false, true)) return;
+        videoDownloadExecutor.execute(() -> {
+            HttpURLConnection conn = null;
+            try {
+                task.status = "downloading";
+                task.errorMessage = "";
+                updateVideoDownloadNotification(task, false, false);
+
+                String activeUrl = task.primaryUrl;
+                long existingOffset = task.partFile.exists() ? task.partFile.length() : 0L;
+
+                for (int attempt = 0; attempt < 2; attempt++) {
+                    if (task.cancelled.get() || task.paused.get()) return;
+                    if (attempt == 1) {
+                        if (task.fallbackUrl == null || task.fallbackUrl.trim().isEmpty() || task.fallbackUrl.equals(activeUrl)) {
+                            throw new IOException("Stream source failed");
+                        }
+                        activeUrl = task.fallbackUrl;
+                        existingOffset = task.partFile.exists() ? task.partFile.length() : 0L;
+                    }
+
+                    try {
+                        String currentUrl = activeUrl;
+                        for (int hops = 0; hops < 8; hops++) {
+                            URL urlObj = new URL(currentUrl);
+                            conn = (HttpURLConnection) urlObj.openConnection();
+                            conn.setInstanceFollowRedirects(false);
+                            conn.setConnectTimeout(25000);
+                            conn.setReadTimeout(60000);
+                            conn.setRequestMethod("GET");
+                            conn.setRequestProperty("User-Agent", "MoviePortal/3.5.231 AndroidDownloader");
+                            conn.setRequestProperty("Accept-Encoding", "identity");
+                            if (existingOffset > 0L && task.totalBytes > existingOffset) {
+                                conn.setRequestProperty("Range", "bytes=" + existingOffset + "-" + (task.totalBytes - 1L));
+                            }
+                            conn.connect();
+
+                            int code = conn.getResponseCode();
+                            if (code == HttpURLConnection.HTTP_MOVED_PERM
+                                || code == HttpURLConnection.HTTP_MOVED_TEMP
+                                || code == HttpURLConnection.HTTP_SEE_OTHER
+                                || code == 307 || code == 308) {
+                                String loc = conn.getHeaderField("Location");
+                                conn.disconnect();
+                                conn = null;
+                                if (loc == null || loc.trim().isEmpty()) {
+                                    throw new IOException("Redirect without Location");
+                                }
+                                currentUrl = new URL(urlObj, loc.trim()).toString();
+                                continue;
+                            }
+                            if (code < 200 || code >= 300) {
+                                conn.disconnect();
+                                conn = null;
+                                throw new IOException("HTTP " + code);
+                            }
+                            break;
+                        }
+
+                        if (conn == null) throw new IOException("Connection failed");
+
+                        int respCode = conn.getResponseCode();
+                        boolean appendMode = (respCode == 206 && existingOffset > 0L);
+                        if (!appendMode) {
+                            existingOffset = 0L;
+                        }
+
+                        long contentLength = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N
+                            ? conn.getContentLengthLong()
+                            : (long) conn.getContentLength();
+                        if (contentLength > 0L) {
+                            task.totalBytes = existingOffset + contentLength;
+                        }
+                        task.receivedBytes = existingOffset;
+
+                        long speedStartMs = System.currentTimeMillis();
+                        long speedBytes = 0L;
+                        long lastNotifMs = 0L;
+                        double curBps = 0.0;
+                        byte[] buf = new byte[65536];
+
+                        try (InputStream in = new BufferedInputStream(conn.getInputStream(), 65536);
+                             FileOutputStream out = new FileOutputStream(task.partFile, appendMode)) {
+                            int n;
+                            while ((n = in.read(buf)) != -1) {
+                                if (task.cancelled.get()) {
+                                    out.flush();
+                                    return;
+                                }
+                                if (task.paused.get()) {
+                                    out.flush();
+                                    task.status = "paused";
+                                    task.speed = "Paused";
+                                    task.eta = "Paused";
+                                    updateVideoDownloadNotification(task, false, false);
+                                    return;
+                                }
+                                out.write(buf, 0, n);
+                                task.receivedBytes += n;
+                                speedBytes += n;
+
+                                long now = System.currentTimeMillis();
+                                long elapsed = now - speedStartMs;
+                                if (elapsed >= 500L) {
+                                    curBps = (speedBytes * 1000.0) / elapsed;
+                                    speedStartMs = now;
+                                    speedBytes = 0L;
+                                }
+                                if (now - lastNotifMs >= 450L) {
+                                    lastNotifMs = now;
+                                    int pct = task.totalBytes > 0L
+                                        ? (int) Math.max(1, Math.min(99, (task.receivedBytes * 100L) / task.totalBytes))
+                                        : (int) Math.min(95, Math.max(2, task.receivedBytes / (5L * 1024L * 1024L)));
+                                    task.progress = pct;
+                                    task.speed = formatSpeedReadable(curBps);
+                                    task.eta = task.totalBytes > 0L
+                                        ? formatEtaReadable(Math.max(0L, task.totalBytes - task.receivedBytes), curBps)
+                                        : "Downloading...";
+                                    updateVideoDownloadNotification(task, false, false);
+                                }
+                            }
+                            out.flush();
+                        }
+
+                        if (task.cancelled.get() || task.paused.get()) return;
+                        if (task.partFile.length() <= 0L) {
+                            throw new IOException("Downloaded file was empty");
+                        }
+                        if (task.targetFile.exists()) {
+                            task.targetFile.delete();
+                        }
+                        if (!task.partFile.renameTo(task.targetFile)) {
+                            throw new IOException("Could not save final offline file");
+                        }
+
+                        task.progress = 100;
+                        task.receivedBytes = task.targetFile.length();
+                        task.totalBytes = task.targetFile.length();
+                        task.speed = "Saved Offline";
+                        task.eta = "0s";
+                        task.localUri = Uri.fromFile(task.targetFile).toString();
+                        task.status = "completed";
+                        updateVideoDownloadNotification(task, true, false);
+                        return;
+                    } catch (IOException attemptErr) {
+                        if (conn != null) {
+                            try { conn.disconnect(); } catch (Exception ignored) {}
+                            conn = null;
+                        }
+                        if (attempt == 1 || task.fallbackUrl == null || task.fallbackUrl.trim().isEmpty()) {
+                            throw attemptErr;
+                        }
+                    }
+                }
+            } catch (Exception ex) {
+                if (task.cancelled.get() || task.paused.get()) return;
+                task.status = "error";
+                task.speed = "0 KB/s";
+                task.eta = "Failed";
+                task.errorMessage = ex.getMessage() != null ? ex.getMessage() : "Download failed";
+                updateVideoDownloadNotification(task, false, true);
+            } finally {
+                task.running.set(false);
+                if (conn != null) {
+                    try { conn.disconnect(); } catch (Exception ignored) {}
+                }
+            }
+        });
+    }
+
     private void refreshCastStatusSnapshot() {
         try {
             JSONObject json = new JSONObject();
@@ -2051,11 +2431,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.230");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.231");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.230\",\"versionCode\":3450}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.231\",\"versionCode\":3451}";
             }
         }
 
@@ -2460,8 +2840,134 @@ public class MainActivity extends BridgeActivity {
         }
 
         @JavascriptInterface
+        public void exoSetResizeMode(final int mode) {
+            runOnUiThread(() -> {
+                exoResizeMode = mode;
+                updateExoVideoSurfaceSize();
+            });
+        }
+
+        @JavascriptInterface
         public String getExoState() {
             return cachedExoStateJson != null ? cachedExoStateJson : "{}";
+        }
+
+        // --- OFFLINE VIDEO DOWNLOADER BRIDGE METHODS ---
+        @JavascriptInterface
+        public void startOfflineVideoDownload(final String id, final String title, final String primaryUrl, final String fallbackUrl) {
+            if (id == null || id.trim().isEmpty() || primaryUrl == null || primaryUrl.trim().isEmpty()) return;
+            String cleanId = id.replaceAll("[^a-zA-Z0-9._-]", "_");
+            File dir = resolveOfflineMoviesDir();
+            File targetFile = new File(dir, cleanId + ".mp4");
+            File partFile = new File(dir, cleanId + ".mp4.part");
+            NativeVideoDownloadTask task = new NativeVideoDownloadTask(
+                id.trim(),
+                (title != null && !title.trim().isEmpty()) ? title.trim() : "Movie Portal Video",
+                primaryUrl.trim(),
+                fallbackUrl != null ? fallbackUrl.trim() : "",
+                targetFile,
+                partFile
+            );
+            nativeVideoDownloads.put(task.id, task);
+            executeNativeVideoDownloadTask(task);
+        }
+
+        @JavascriptInterface
+        public void pauseOfflineVideoDownload(final String id) {
+            if (id == null) return;
+            NativeVideoDownloadTask task = nativeVideoDownloads.get(id.trim());
+            if (task != null) {
+                task.paused.set(true);
+                task.status = "paused";
+                task.speed = "Paused";
+                task.eta = "Paused";
+                updateVideoDownloadNotification(task, false, false);
+            }
+        }
+
+        @JavascriptInterface
+        public void resumeOfflineVideoDownload(final String id) {
+            if (id == null) return;
+            NativeVideoDownloadTask task = nativeVideoDownloads.get(id.trim());
+            if (task != null && !"completed".equals(task.status)) {
+                task.paused.set(false);
+                task.cancelled.set(false);
+                executeNativeVideoDownloadTask(task);
+            }
+        }
+
+        @JavascriptInterface
+        public void cancelOfflineVideoDownload(final String id) {
+            if (id == null) return;
+            NativeVideoDownloadTask task = nativeVideoDownloads.remove(id.trim());
+            if (task != null) {
+                task.cancelled.set(true);
+                updateVideoDownloadNotification(task, false, false);
+                try {
+                    if (task.partFile.exists()) task.partFile.delete();
+                    if (task.targetFile.exists()) task.targetFile.delete();
+                } catch (Exception ignored) {}
+            }
+        }
+
+        @JavascriptInterface
+        public String getOfflineDownloadsStatus() {
+            try {
+                JSONArray arr = new JSONArray();
+                for (NativeVideoDownloadTask task : nativeVideoDownloads.values()) {
+                    JSONObject obj = new JSONObject();
+                    obj.put("id", task.id);
+                    obj.put("title", task.title);
+                    obj.put("progress", task.progress);
+                    obj.put("receivedBytes", task.receivedBytes);
+                    obj.put("totalBytes", task.totalBytes);
+                    obj.put("speed", task.speed);
+                    obj.put("eta", task.eta);
+                    obj.put("status", task.status);
+                    obj.put("localUri", task.localUri);
+                    obj.put("errorMessage", task.errorMessage);
+                    arr.put(obj);
+                }
+                return arr.toString();
+            } catch (Exception e) {
+                return "[]";
+            }
+        }
+
+        @JavascriptInterface
+        public boolean offlineFileExists(final String localUriOrPath) {
+            if (localUriOrPath == null || localUriOrPath.trim().isEmpty()) return false;
+            try {
+                String path = localUriOrPath.trim();
+                if (path.startsWith("file://")) {
+                    path = Uri.parse(path).getPath();
+                }
+                if (path == null || path.isEmpty()) return false;
+                File f = new File(path);
+                return f.exists() && f.length() > 0L;
+            } catch (Exception e) {
+                return false;
+            }
+        }
+
+        @JavascriptInterface
+        public boolean deleteOfflineVideoFile(final String localUriOrId) {
+            if (localUriOrId == null || localUriOrId.trim().isEmpty()) return false;
+            try {
+                String val = localUriOrId.trim();
+                File f;
+                if (val.startsWith("file://") || val.startsWith("/")) {
+                    String path = val.startsWith("file://") ? Uri.parse(val).getPath() : val;
+                    f = path != null ? new File(path) : null;
+                } else {
+                    String cleanId = val.replaceAll("[^a-zA-Z0-9._-]", "_");
+                    f = new File(resolveOfflineMoviesDir(), cleanId + ".mp4");
+                }
+                if (f != null && f.exists()) {
+                    return f.delete();
+                }
+            } catch (Exception ignored) {}
+            return false;
         }
 
         @JavascriptInterface

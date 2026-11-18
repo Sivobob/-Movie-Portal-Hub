@@ -10,7 +10,10 @@ import {
   ArrowDownCircle, 
   Film,
   Sparkles,
-  FolderDown
+  FolderDown,
+  RotateCcw,
+  WifiOff,
+  AlertCircle,
 } from 'lucide-react';
 import { ActiveDownload, DownloadedItem } from '../hooks/useDownloads';
 import { upgradePosterUrl } from '../utils/posterUrl';
@@ -107,25 +110,32 @@ export default function DownloadsView({
           <div className="space-y-2.5">
             {activeDownloads.map((task) => {
               const isPaused = task.status === 'paused';
-              const mbReceived = (task.receivedBytes / (1024 * 1024)).toFixed(0);
-              const mbTotal = (task.totalBytes / (1024 * 1024)).toFixed(0);
+              const isError = task.status === 'error';
+              const mbReceived = (task.receivedBytes / (1024 * 1024)).toFixed(1);
+              const mbTotal =
+                task.totalBytes > 0 ? (task.totalBytes / (1024 * 1024)).toFixed(1) : '--';
 
               return (
                 <div
                   key={task.id}
-                  className="bg-neutral-950 border border-neutral-800/90 rounded-2xl p-3.5 shadow-xl relative overflow-hidden"
+                  className={`bg-neutral-950 border rounded-2xl p-3.5 shadow-xl relative overflow-hidden ${
+                    isError ? 'border-red-500/40' : 'border-neutral-800/90'
+                  }`}
                 >
                   <div className="flex gap-3">
-                    {/* Poster */}
-                    <div className="w-14 h-20 rounded-xl overflow-hidden bg-neutral-900 border border-neutral-800 flex-shrink-0">
-                      <img
-                        src={upgradePosterUrl(task.posterUrl, 1080) || task.posterUrl || ''}
-                        alt={task.title}
-                        className="w-full h-full object-cover"
-                        onError={(e: any) => {
-                          e.target.src = 'https://images.unsplash.com/photo-1595760205842-8356d2cf98b1?q=80&w=800';
-                        }}
-                      />
+                    {/* Poster (offline safe) */}
+                    <div className="w-14 h-20 rounded-xl overflow-hidden bg-neutral-900 border border-neutral-800 flex-shrink-0 relative flex items-center justify-center text-neutral-600">
+                      <Film size={20} />
+                      {task.posterUrl && (
+                        <img
+                          src={upgradePosterUrl(task.posterUrl, 500) || task.posterUrl}
+                          alt={task.title}
+                          className="w-full h-full object-cover absolute inset-0"
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                          }}
+                        />
+                      )}
                     </div>
 
                     {/* Progress details */}
@@ -135,20 +145,43 @@ export default function DownloadsView({
                           <h5 className="text-xs sm:text-sm font-black text-white truncate">
                             {task.title}
                           </h5>
-                          <span className="text-xs font-black text-yellow-400">
-                            {task.progress}%
+                          <span
+                            className={`text-xs font-black flex-shrink-0 ${
+                              isError ? 'text-red-400' : 'text-yellow-400'
+                            }`}
+                          >
+                            {isError ? 'Failed' : `${task.progress}%`}
                           </span>
                         </div>
 
-                        <div className="flex items-center gap-2 text-[10px] text-gray-400 mt-0.5">
+                        <div className="flex items-center gap-2 text-[10px] text-gray-400 mt-0.5 flex-wrap">
                           <span className="bg-neutral-800 text-yellow-400 px-1.5 py-0.2 rounded font-bold">
                             {task.quality}
                           </span>
                           <span>•</span>
                           <span>{mbReceived} MB / {mbTotal} MB</span>
                           <span>•</span>
-                          <span className="text-green-400 font-medium">{isPaused ? 'Paused' : task.speed}</span>
-                          {!isPaused && (
+                          <span
+                            className={`font-medium ${
+                              isError
+                                ? 'text-red-400 flex items-center gap-1'
+                                : isPaused
+                                ? 'text-amber-300'
+                                : 'text-green-400'
+                            }`}
+                          >
+                            {isError ? (
+                              <>
+                                <AlertCircle size={10} />
+                                <span>{task.errorMessage || 'Download interrupted'}</span>
+                              </>
+                            ) : isPaused ? (
+                              'Paused'
+                            ) : (
+                              task.speed
+                            )}
+                          </span>
+                          {!isPaused && !isError && (
                             <>
                               <span>•</span>
                               <span>ETA {task.eta}</span>
@@ -162,7 +195,9 @@ export default function DownloadsView({
                         <div className="w-full bg-neutral-800 h-2 rounded-full overflow-hidden p-0.5">
                           <div
                             className={`h-full rounded-full transition-all duration-300 ${
-                              isPaused
+                              isError
+                                ? 'bg-red-500'
+                                : isPaused
                                 ? 'bg-amber-600'
                                 : 'bg-gradient-to-r from-yellow-500 via-yellow-400 to-amber-300'
                             }`}
@@ -173,7 +208,16 @@ export default function DownloadsView({
 
                       {/* Controls */}
                       <div className="flex items-center justify-end gap-2 pt-1.5">
-                        {isPaused ? (
+                        {isError ? (
+                          <button
+                            type="button"
+                            onClick={() => onResumeActive(task.id)}
+                            className="p-1.5 px-2.5 rounded-lg bg-[#00d664]/20 hover:bg-[#00d664]/30 text-[#00d664] text-xs font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            <RotateCcw size={13} />
+                            <span>Retry</span>
+                          </button>
+                        ) : isPaused ? (
                           <button
                             type="button"
                             onClick={() => onResumeActive(task.id)}
@@ -228,23 +272,23 @@ export default function DownloadsView({
                 key={item.id}
                 className="bg-neutral-950 border border-neutral-800/90 rounded-2xl p-3 shadow-lg flex gap-3 group hover:border-neutral-700 transition-all"
               >
-                <div 
-                  className="w-16 h-24 rounded-xl overflow-hidden bg-neutral-900 border border-neutral-800 flex-shrink-0 cursor-pointer relative"
-                  onClick={() => onPlayMovie({
-                    ...item,
-                    streamingUrl: item.videoUrl,
-                  })}
+                <div
+                  className="w-16 h-24 rounded-xl overflow-hidden bg-neutral-900 border border-neutral-800 flex-shrink-0 cursor-pointer relative flex items-center justify-center text-neutral-600"
+                  onClick={() => onPlayMovie(item)}
                 >
-                  <img
-                    src={upgradePosterUrl(item.posterUrl, 1080) || item.posterUrl || ''}
-                    alt={item.title}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    onError={(e: any) => {
-                      e.target.src = 'https://images.unsplash.com/photo-1595760205842-8356d2cf98b1?q=80&w=800';
-                    }}
-                  />
-                  <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                    <div className="w-8 h-8 rounded-full bg-yellow-400 text-black flex items-center justify-center shadow-lg">
+                  <Film size={22} />
+                  {item.posterUrl && (
+                    <img
+                      src={upgradePosterUrl(item.posterUrl, 500) || item.posterUrl}
+                      alt={item.title}
+                      className="w-full h-full object-cover absolute inset-0 group-hover:scale-105 transition-transform duration-300"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                      }}
+                    />
+                  )}
+                  <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                    <div className="w-8 h-8 rounded-full bg-[#00d664] text-black flex items-center justify-center shadow-lg">
                       <Play size={14} className="ml-0.5 fill-black" />
                     </div>
                   </div>
@@ -255,28 +299,29 @@ export default function DownloadsView({
                     <h5 className="text-xs sm:text-sm font-black text-white truncate drop-shadow">
                       {item.title}
                     </h5>
-                    <div className="flex items-center gap-1.5 text-[10px] text-gray-400 mt-1">
+                    <div className="flex items-center gap-1.5 text-[10px] text-gray-400 mt-1 flex-wrap">
                       <span className="bg-yellow-400/20 text-yellow-400 px-1.5 py-0.5 rounded font-black border border-yellow-400/30">
                         {item.quality || 'HD'}
                       </span>
                       <span>•</span>
-                      <span>{item.fileSize || '850 MB'}</span>
+                      <span>{item.fileSize || 'Saved'}</span>
                       <span>•</span>
                       <span>{item.releaseYear || 2024}</span>
+                    </div>
+                    <div className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold text-[#00d664]">
+                      <WifiOff size={10} />
+                      <span>{item.isOfflineReady ? 'Ready Offline' : 'Saved'}</span>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-2 pt-2">
                     <button
                       type="button"
-                      onClick={() => onPlayMovie({
-                        ...item,
-                        streamingUrl: item.videoUrl,
-                      })}
-                      className="flex-grow bg-yellow-400 hover:bg-yellow-500 active:scale-95 text-black font-black text-[11px] py-1.5 px-2.5 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      onClick={() => onPlayMovie(item)}
+                      className="flex-grow bg-[#00d664] hover:bg-[#00bf59] active:scale-95 text-black font-black text-[11px] py-1.5 px-2.5 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       <Play size={12} className="fill-black" />
-                      <span>Watch</span>
+                      <span>Play Offline</span>
                     </button>
 
                     <button

@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { Home, Download, User } from 'lucide-react';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
+import { useDownloads } from '../hooks/useDownloads';
 
 interface AndroidBottomNavProps {
   activeCategory?: string | null;
@@ -18,7 +19,9 @@ export default function AndroidBottomNav({
   const location = useLocation();
   const navigate = useNavigate();
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
+  const { activeDownloads, downloads } = useDownloads();
 
+  const runningDownload = activeDownloads.find((d) => d.status === 'downloading') || activeDownloads[0] || null;
   const pathname = location.pathname;
 
   useEffect(() => {
@@ -87,8 +90,17 @@ export default function AndroidBottomNav({
           }`}
           aria-label="Downloads"
         >
-          <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${isDownloads ? 'bg-[#00d664]/15' : ''}`}>
+          <div className={`relative w-7 h-7 rounded-lg flex items-center justify-center ${isDownloads ? 'bg-[#00d664]/15' : ''}`}>
             <Download size={20} className={isDownloads ? 'stroke-[2.5]' : 'stroke-[1.9]'} />
+            {runningDownload ? (
+              <span className="absolute -top-1 -right-2.5 px-1 rounded-full bg-[#00d664] text-black text-[9px] font-black leading-tight ring-2 ring-[#121418]">
+                {runningDownload.progress}%
+              </span>
+            ) : downloads.length > 0 ? (
+              <span className="absolute -top-0.5 -right-1.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-white/20 text-white text-[9px] font-bold flex items-center justify-center ring-1 ring-[#121418]">
+                {downloads.length}
+              </span>
+            ) : null}
           </div>
           <span className={`text-[11px] mt-0.5 tracking-tight ${isDownloads ? 'font-bold text-[#00d664]' : 'font-medium'}`}>
             Downloads
