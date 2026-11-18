@@ -59,14 +59,7 @@ export default function SearchPage() {
   };
 
   const openMovieDetails = (movie: any) => {
-    setActiveSeasonIndex(0);
-    selectedMovieRef.current = movie;
-    setSelectedMovie(movie);
-    if (window.history.state?.appModal !== 'movie_detail') {
-      try {
-        window.history.pushState({ ...(window.history.state || {}), appModal: 'movie_detail' }, '');
-      } catch {}
-    }
+    handleWatchNow(movie);
   };
 
   const closePlayer = () => {
