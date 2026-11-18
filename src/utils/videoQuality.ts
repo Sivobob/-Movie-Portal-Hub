@@ -154,3 +154,185 @@ export function buildQualitySizeEstimates(params: {
 
   return results;
 }
+
+const LANGUAGE_CODE_MAP: Record<string, string> = {
+  hi: 'Hindi',
+  hin: 'Hindi',
+  hindi: 'Hindi',
+  en: 'English',
+  eng: 'English',
+  english: 'English',
+  ta: 'Tamil',
+  tam: 'Tamil',
+  tamil: 'Tamil',
+  te: 'Telugu',
+  tel: 'Telugu',
+  telugu: 'Telugu',
+  ml: 'Malayalam',
+  mal: 'Malayalam',
+  malayalam: 'Malayalam',
+  kn: 'Kannada',
+  kan: 'Kannada',
+  kannada: 'Kannada',
+  bn: 'Bengali',
+  ben: 'Bengali',
+  bengali: 'Bengali',
+  mr: 'Marathi',
+  mar: 'Marathi',
+  marathi: 'Marathi',
+  pa: 'Punjabi',
+  pan: 'Punjabi',
+  pun: 'Punjabi',
+  punjabi: 'Punjabi',
+  gu: 'Gujarati',
+  guj: 'Gujarati',
+  gujarati: 'Gujarati',
+  ur: 'Urdu',
+  urd: 'Urdu',
+  urdu: 'Urdu',
+  ja: 'Japanese',
+  jpn: 'Japanese',
+  japanese: 'Japanese',
+  ko: 'Korean',
+  kor: 'Korean',
+  korean: 'Korean',
+  zh: 'Chinese',
+  chi: 'Chinese',
+  zho: 'Chinese',
+  chinese: 'Chinese',
+  es: 'Spanish',
+  spa: 'Spanish',
+  spanish: 'Spanish',
+  fr: 'French',
+  fre: 'French',
+  fra: 'French',
+  french: 'French',
+  de: 'German',
+  ger: 'German',
+  deu: 'German',
+  german: 'German',
+  ar: 'Arabic',
+  ara: 'Arabic',
+  arabic: 'Arabic',
+  ru: 'Russian',
+  rus: 'Russian',
+  russian: 'Russian',
+  pt: 'Portuguese',
+  por: 'Portuguese',
+  portuguese: 'Portuguese',
+  it: 'Italian',
+  ita: 'Italian',
+  italian: 'Italian',
+  tr: 'Turkish',
+  tur: 'Turkish',
+  turkish: 'Turkish',
+  th: 'Thai',
+  tha: 'Thai',
+  thai: 'Thai',
+  id: 'Indonesian',
+  ind: 'Indonesian',
+  indonesian: 'Indonesian',
+  und: '',
+  unknown: '',
+};
+
+const KNOWN_LANGUAGE_NAMES = Array.from(
+  new Set(Object.values(LANGUAGE_CODE_MAP).filter(Boolean))
+);
+
+export function cleanMediaTrackLabel(
+  langRaw?: string,
+  titleRaw?: string,
+  kind: 'audio' | 'subtitle' = 'audio',
+  index = 0
+): { lang: string; label: string } {
+  const code = String(langRaw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[-_].*$/, '');
+  const mappedLang = LANGUAGE_CODE_MAP[code] || '';
+
+  let cleanedTitle = String(titleRaw || '')
+    // Strip URLs, handles, piracy/site tags & decorative symbols
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/www\.\S+/gi, ' ')
+    .replace(/@[a-z0-9_]+/gi, ' ')
+    .replace(
+      /\b(skymovieshd|filmyzilla|vegamovies|hdhub4u|mkvcinemas|katmoviehd|bolly4u|worldfree4u|moviesmod|uhdmovies|9xmovies|extramovies|olamovies|pagalworld|filmywap|mp4moviez|jalshamoviez|mlsbd|cinevez|tamilrockers|isaimini|movierulz)\b/gi,
+      ' '
+    )
+    .replace(/\b[a-z0-9-]+\.(com|net|org|in|me|cc|lol|fun|pw|club|site|pro|xyz|top|live|info|to)\b/gi, ' ')
+    .replace(/[:._]{2,}/g, ' ')
+    // Strip codec/bitrate/container/channel/subtitle clutter
+    .replace(/\[[^\]]*(aac|ac3|e-?ac3|ddp?|dts|truehd|atmos|flac|mp3|opus|vorbis|kbps|mbps|full|forced|sdh|cc|stereo|mono|\d\.\d|ch)[^\]]*\]/gi, ' ')
+    .replace(/\([^\)]*(aac|ac3|e-?ac3|ddp?|dts|truehd|atmos|flac|mp3|opus|vorbis|kbps|mbps|full|forced|sdh|cc|stereo|mono|\d\.\d|ch)[^\)]*\)/gi, ' ')
+    .replace(/\b(aac|ac3|e-?ac3|ddp?|dts|truehd|atmos|flac|mp3|opus|vorbis|5\.1|7\.1|2\.0|6ch|2ch|\d+\s*kbps|full|forced|sdh)\b/gi, ' ')
+    .replace(/[()\[\]{}•|:/\\-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Detect known language embedded inside raw title (e.g. "... - Hindi - ...")
+  let detectedFromTitle = '';
+  for (const name of KNOWN_LANGUAGE_NAMES) {
+    const re = new RegExp(`\\b${name}\\b`, 'i');
+    if (re.test(cleanedTitle)) {
+      detectedFromTitle = name;
+      break;
+    }
+  }
+
+  const finalLang = mappedLang || detectedFromTitle;
+  if (finalLang) {
+    return { lang: finalLang, label: finalLang };
+  }
+
+  if (cleanedTitle && cleanedTitle.length >= 2 && !/^(track|audio|subtitle)\s*\d*$/i.test(cleanedTitle)) {
+    return { lang: cleanedTitle, label: cleanedTitle };
+  }
+
+  if (code && code !== 'und' && code.length <= 3) {
+    const up = code.toUpperCase();
+    return { lang: up, label: up };
+  }
+
+  return kind === 'audio'
+    ? { lang: 'Audio', label: `Audio ${index + 1}` }
+    : { lang: 'Subtitle', label: `Subtitle ${index + 1}` };
+}
+
+export function normalizePlayerTrackList<
+  T extends { id: number | string; label?: string; lang?: string; selected?: boolean }
+>(tracks: T[], kind: 'audio' | 'subtitle'): Array<T & { label: string; lang: string }> {
+  if (!Array.isArray(tracks)) return [];
+  const filtered =
+    kind === 'subtitle'
+      ? tracks.filter((t) => {
+          const l = String(t.label || '').trim().toLowerCase();
+          const lg = String(t.lang || '').trim().toLowerCase();
+          return l !== 'off' && lg !== 'off' && String(t.id).toLowerCase() !== 'off';
+        })
+      : tracks;
+
+  const seenLabels = new Map<string, number>();
+  const out: Array<T & { label: string; lang: string }> = [];
+
+  for (let i = 0; i < filtered.length; i++) {
+    const item = filtered[i];
+    const { lang, label } = cleanMediaTrackLabel(item.lang, item.label, kind, i);
+    const key = label.toLowerCase();
+    const count = seenLabels.get(key) || 0;
+    if (kind === 'subtitle' && count > 0) {
+      // Avoid duplicate identical subtitle language buttons (e.g. multiple "English")
+      continue;
+    }
+    seenLabels.set(key, count + 1);
+    const uniqueLabel = count > 0 ? `${label} (${count + 1})` : label;
+    out.push({
+      ...item,
+      lang,
+      label: uniqueLabel,
+    });
+  }
+
+  return out;
+}

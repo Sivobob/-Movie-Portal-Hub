@@ -62,6 +62,8 @@ import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.Tracks;
 import androidx.media3.common.VideoSize;
+import androidx.media3.common.text.Cue;
+import androidx.media3.common.text.CueGroup;
 import androidx.media3.datasource.DefaultDataSource;
 import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.exoplayer.DecoderCounters;
@@ -187,8 +189,9 @@ public class MainActivity extends BridgeActivity {
     private volatile boolean exoActiveDecoderIsSoftware = false;
     private volatile String exoAudioTracksJson = "[]";
     private volatile String exoSubtitleTracksJson = "[]";
+    private volatile String exoActiveCueText = "";
     private volatile int exoResizeMode = 0; // 0 = fit, 4 = zoom/cover, 3 = stretch/fill
-    private volatile String cachedExoStateJson = "{\"active\":false,\"state\":1,\"isPlaying\":false,\"isBuffering\":false,\"ended\":false,\"seekable\":false,\"currentTime\":0,\"duration\":0,\"bufferedPosition\":0,\"videoWidth\":0,\"videoHeight\":0,\"firstFrameRendered\":false,\"renderedFrames\":0,\"droppedFrames\":0,\"preferSoftware\":false,\"isSoftwareDecoder\":false,\"decoderName\":\"\",\"surfaceMode\":\"texture\",\"error\":\"\",\"audioTracks\":[],\"subtitleTracks\":[]}";
+    private volatile String cachedExoStateJson = "{\"active\":false,\"state\":1,\"isPlaying\":false,\"isBuffering\":false,\"ended\":false,\"seekable\":false,\"currentTime\":0,\"duration\":0,\"bufferedPosition\":0,\"videoWidth\":0,\"videoHeight\":0,\"firstFrameRendered\":false,\"renderedFrames\":0,\"droppedFrames\":0,\"preferSoftware\":false,\"isSoftwareDecoder\":false,\"decoderName\":\"\",\"surfaceMode\":\"texture\",\"error\":\"\",\"audioTracks\":[],\"subtitleTracks\":[],\"cueText\":\"\"}";
 
     private static final String VIDEO_DOWNLOAD_CHANNEL_ID = "movie_box_video_downloads";
     private static final String VIDEO_DOWNLOAD_DONE_CHANNEL_ID = "movie_box_video_downloads_done";
@@ -803,8 +806,84 @@ public class MainActivity extends BridgeActivity {
             obj.put("surfaceVisible", exoContainer != null && exoContainer.getVisibility() == View.VISIBLE);
             obj.put("audioTracks", new JSONArray(exoAudioTracksJson != null ? exoAudioTracksJson : "[]"));
             obj.put("subtitleTracks", new JSONArray(exoSubtitleTracksJson != null ? exoSubtitleTracksJson : "[]"));
+            obj.put("cueText", exoActiveCueText != null ? exoActiveCueText : "");
             cachedExoStateJson = obj.toString();
         } catch (Exception ignored) {}
+    }
+
+    private String mapCleanLanguageCode(final String rawLang) {
+        if (rawLang == null) return "";
+        String code = rawLang.trim().toLowerCase(Locale.US).replaceAll("[-_].*$", "");
+        switch (code) {
+            case "hi": case "hin": case "hindi": return "Hindi";
+            case "en": case "eng": case "english": return "English";
+            case "ta": case "tam": case "tamil": return "Tamil";
+            case "te": case "tel": case "telugu": return "Telugu";
+            case "ml": case "mal": case "malayalam": return "Malayalam";
+            case "kn": case "kan": case "kannada": return "Kannada";
+            case "bn": case "ben": case "bengali": return "Bengali";
+            case "mr": case "mar": case "marathi": return "Marathi";
+            case "pa": case "pan": case "pun": case "punjabi": return "Punjabi";
+            case "gu": case "guj": case "gujarati": return "Gujarati";
+            case "ur": case "urd": case "urdu": return "Urdu";
+            case "ja": case "jpn": case "japanese": return "Japanese";
+            case "ko": case "kor": case "korean": return "Korean";
+            case "zh": case "chi": case "zho": case "chinese": return "Chinese";
+            case "es": case "spa": case "spanish": return "Spanish";
+            case "fr": case "fre": case "fra": case "french": return "French";
+            case "de": case "ger": case "deu": case "german": return "German";
+            case "ar": case "ara": case "arabic": return "Arabic";
+            case "ru": case "rus": case "russian": return "Russian";
+            case "pt": case "por": case "portuguese": return "Portuguese";
+            case "it": case "ita": case "italian": return "Italian";
+            case "tr": case "tur": case "turkish": return "Turkish";
+            case "th": case "tha": case "thai": return "Thai";
+            case "id": case "ind": case "indonesian": return "Indonesian";
+            case "und": case "unknown": return "";
+            default: return "";
+        }
+    }
+
+    private String sanitizeTrackDisplayName(final String langCode, final String rawTitle, final int trackType, final int countIdx) {
+        String mappedLang = mapCleanLanguageCode(langCode);
+        String cleaned = rawTitle != null ? rawTitle : "";
+        cleaned = cleaned
+            .replaceAll("(?i)https?://\\S+", " ")
+            .replaceAll("(?i)www\\.\\S+", " ")
+            .replaceAll("@[a-zA-Z0-9_]+", " ")
+            .replaceAll("(?i)\\b(skymovieshd|filmyzilla|vegamovies|hdhub4u|mkvcinemas|katmoviehd|bolly4u|worldfree4u|moviesmod|uhdmovies|9xmovies|extramovies|olamovies|pagalworld|filmywap|mp4moviez|jalshamoviez|mlsbd|cinevez|tamilrockers|isaimini|movierulz)\\b", " ")
+            .replaceAll("(?i)\\b[a-z0-9-]+\\.(com|net|org|in|me|cc|lol|fun|pw|club|site|pro|xyz|top|live|info|to)\\b", " ")
+            .replaceAll("[:._]{2,}", " ")
+            .replaceAll("(?i)\\[[^\\]]*(aac|ac3|e-?ac3|ddp?|dts|truehd|atmos|flac|mp3|opus|vorbis|kbps|mbps|full|forced|sdh|cc|stereo|mono|\\d\\.\\d|ch)[^\\]]*\\]", " ")
+            .replaceAll("(?i)\\([^)]*(aac|ac3|e-?ac3|ddp?|dts|truehd|atmos|flac|mp3|opus|vorbis|kbps|mbps|full|forced|sdh|cc|stereo|mono|\\d\\.\\d|ch)[^)]*\\)", " ")
+            .replaceAll("(?i)\\b(aac|ac3|e-?ac3|ddp?|dts|truehd|atmos|flac|mp3|opus|vorbis|5\\.1|7\\.1|2\\.0|6ch|2ch|\\d+\\s*kbps|full|forced|sdh)\\b", " ")
+            .replaceAll("[()\\[\\]{}•|:/\\\\-]+", " ")
+            .replaceAll("\\s+", " ")
+            .trim();
+
+        String[] known = {
+            "Hindi", "English", "Tamil", "Telugu", "Malayalam", "Kannada",
+            "Bengali", "Marathi", "Punjabi", "Gujarati", "Urdu", "Japanese",
+            "Korean", "Chinese", "Spanish", "French", "German", "Arabic",
+            "Russian", "Portuguese", "Italian", "Turkish", "Thai", "Indonesian"
+        };
+        String detectedFromTitle = "";
+        for (String name : known) {
+            if (cleaned.toLowerCase(Locale.US).matches(".*\\b" + name.toLowerCase(Locale.US) + "\\b.*")) {
+                detectedFromTitle = name;
+                break;
+            }
+        }
+
+        if (!mappedLang.isEmpty()) return mappedLang;
+        if (!detectedFromTitle.isEmpty()) return detectedFromTitle;
+        if (cleaned.length() >= 2 && !cleaned.toLowerCase(Locale.US).matches("^(track|audio|subtitle)\\s*\\d*$")) {
+            return cleaned;
+        }
+        if (langCode != null && !langCode.trim().isEmpty() && !"und".equalsIgnoreCase(langCode.trim()) && langCode.trim().length() <= 3) {
+            return langCode.trim().toUpperCase(Locale.US);
+        }
+        return trackType == C.TRACK_TYPE_AUDIO ? ("Audio " + (countIdx + 1)) : ("Subtitle " + (countIdx + 1));
     }
 
     private void ensureExoPlayer(final boolean preferSoftware) {
@@ -909,6 +988,8 @@ public class MainActivity extends BridgeActivity {
                 try {
                     List<JSONObject> audioList = new ArrayList<>();
                     List<JSONObject> textList = new ArrayList<>();
+                    java.util.HashMap<String, Integer> audioLabelCounts = new java.util.HashMap<>();
+                    java.util.HashSet<String> seenSubLabels = new java.util.HashSet<>();
                     for (int g = 0; g < tracks.getGroups().size(); g++) {
                         Tracks.Group group = tracks.getGroups().get(g);
                         int type = group.getType();
@@ -917,11 +998,20 @@ public class MainActivity extends BridgeActivity {
                             if (!group.isTrackSupported(t)) continue;
                             Format fmt = group.getTrackFormat(t);
                             String lang = fmt.language != null ? fmt.language : "";
-                            String label = (fmt.label != null && !fmt.label.trim().isEmpty())
-                                ? fmt.label.trim()
-                                : (!lang.isEmpty()
-                                    ? lang.toUpperCase(java.util.Locale.US)
-                                    : (type == C.TRACK_TYPE_AUDIO ? "Track " + (audioList.size() + 1) : "Subtitle " + (textList.size() + 1)));
+                            int curIdx = type == C.TRACK_TYPE_AUDIO ? audioList.size() : textList.size();
+                            String label = sanitizeTrackDisplayName(lang, fmt.label, type, curIdx);
+                            if (type == C.TRACK_TYPE_TEXT) {
+                                String key = label.toLowerCase(Locale.US);
+                                if (seenSubLabels.contains(key)) continue;
+                                seenSubLabels.add(key);
+                            } else {
+                                String key = label.toLowerCase(Locale.US);
+                                int prev = audioLabelCounts.containsKey(key) ? audioLabelCounts.get(key) : 0;
+                                audioLabelCounts.put(key, prev + 1);
+                                if (prev > 0) {
+                                    label = label + " (" + (prev + 1) + ")";
+                                }
+                            }
                             JSONObject item = new JSONObject();
                             item.put("id", g + ":" + t);
                             item.put("label", label);
@@ -936,6 +1026,32 @@ public class MainActivity extends BridgeActivity {
                     }
                     exoAudioTracksJson = new JSONArray(audioList).toString();
                     exoSubtitleTracksJson = new JSONArray(textList).toString();
+                    refreshExoStateSnapshot();
+                } catch (Exception ignored) {}
+            }
+
+            @Override
+            public void onCues(CueGroup cueGroup) {
+                try {
+                    if (cueGroup == null || cueGroup.cues == null || cueGroup.cues.isEmpty()) {
+                        exoActiveCueText = "";
+                    } else {
+                        StringBuilder sb = new StringBuilder();
+                        for (int i = 0; i < cueGroup.cues.size(); i++) {
+                            Cue cue = cueGroup.cues.get(i);
+                            if (cue != null && cue.text != null) {
+                                String raw = cue.text.toString()
+                                    .replaceAll("\\{\\\\[^}]*\\}", "")
+                                    .replaceAll("<[^>]+>", "")
+                                    .trim();
+                                if (!raw.isEmpty()) {
+                                    if (sb.length() > 0) sb.append("\n");
+                                    sb.append(raw);
+                                }
+                            }
+                        }
+                        exoActiveCueText = sb.toString();
+                    }
                     refreshExoStateSnapshot();
                 } catch (Exception ignored) {}
             }
@@ -956,6 +1072,15 @@ public class MainActivity extends BridgeActivity {
                 refreshExoStateSnapshot();
             }
         });
+        // Keep subtitles disabled by default until user picks a subtitle language
+        try {
+            exoPlayer.setTrackSelectionParameters(
+                exoPlayer.getTrackSelectionParameters()
+                    .buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                    .build()
+            );
+        } catch (Exception ignored) {}
     }
 
     private void startExoPlaybackNative(final String url, final double startSec, final double speed) {
@@ -997,8 +1122,20 @@ public class MainActivity extends BridgeActivity {
             exoActiveDecoderIsSoftware = false;
             exoAudioTracksJson = "[]";
             exoSubtitleTracksJson = "[]";
+            exoActiveCueText = "";
 
             ensureExoPlayer(preferSoftware);
+            if (exoPlayer != null) {
+                try {
+                    exoPlayer.setTrackSelectionParameters(
+                        exoPlayer.getTrackSelectionParameters()
+                            .buildUpon()
+                            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                            .build()
+                    );
+                } catch (Exception ignored) {}
+            }
 
             Runnable prepareRunnable = () -> {
                 if (!exoActive || exoSessionId != sessionId || exoPlayer == null) return;
@@ -1106,6 +1243,7 @@ public class MainActivity extends BridgeActivity {
         exoActiveDecoderIsSoftware = false;
         exoAudioTracksJson = "[]";
         exoSubtitleTracksJson = "[]";
+        exoActiveCueText = "";
         refreshExoStateSnapshot();
     }
 
@@ -1137,6 +1275,8 @@ public class MainActivity extends BridgeActivity {
             if (trackId == null || trackId.trim().isEmpty() || "off".equalsIgnoreCase(trackId.trim())) {
                 if (trackType == C.TRACK_TYPE_TEXT) {
                     builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true);
+                    exoActiveCueText = "";
+                    refreshExoStateSnapshot();
                 }
                 exoPlayer.setTrackSelectionParameters(builder.build());
                 return;
@@ -1706,7 +1846,7 @@ public class MainActivity extends BridgeActivity {
                             conn.setConnectTimeout(25000);
                             conn.setReadTimeout(60000);
                             conn.setRequestMethod("GET");
-                            conn.setRequestProperty("User-Agent", "MoviePortal/3.5.232 AndroidDownloader");
+                            conn.setRequestProperty("User-Agent", "MoviePortal/3.5.233 AndroidDownloader");
                             conn.setRequestProperty("Accept-Encoding", "identity");
                             if (existingOffset > 0L && task.totalBytes > existingOffset) {
                                 conn.setRequestProperty("Range", "bytes=" + existingOffset + "-" + (task.totalBytes - 1L));
@@ -2431,11 +2571,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.232");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.233");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.232\",\"versionCode\":3452}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.233\",\"versionCode\":3453}";
             }
         }
 

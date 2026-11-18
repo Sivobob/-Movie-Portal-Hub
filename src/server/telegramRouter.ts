@@ -1851,6 +1851,83 @@ router.get('/stream-info', async (req: Request, res: Response) => {
   }
 });
 
+const subtitleVttCache = new Map<string, { vtt: string; cachedAt: number }>();
+
+/**
+ * GET /api/telegram/subtitles.vtt?url=...&trackIdx=0
+ * Extracts a real text-based subtitle track (SRT/ASS/WebVTT) as WebVTT for web playback.
+ */
+router.get('/subtitles.vtt', async (req: Request, res: Response) => {
+  const urlParam = String(req.query.url || '').trim();
+  const trackIdx = Math.max(0, parseInt(String(req.query.trackIdx || '0'), 10) || 0);
+  if (!urlParam) return res.status(400).send('URL required');
+
+  const cacheKey = `${urlParam}::${trackIdx}`;
+  const cached = subtitleVttCache.get(cacheKey);
+  if (cached && Date.now() - cached.cachedAt < 15 * 60 * 1000) {
+    res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=600');
+    return res.status(200).send(cached.vtt);
+  }
+
+  let inputUrl = urlParam;
+  if (urlParam.includes('t.me') || urlParam.includes('telegram.me')) {
+    const localPort = process.env.INTERNAL_APP_PORT || process.env.APP_PORT || '3000';
+    inputUrl = `http://127.0.0.1:${localPort}/api/stream?url=${encodeURIComponent(urlParam)}&raw=1`;
+  }
+
+  try {
+    const ffArgs = [
+      '-v', 'error',
+      '-reconnect', '1',
+      '-reconnect_streamed', '1',
+      '-reconnect_delay_max', '2',
+      '-i', inputUrl,
+      '-vn', '-an', '-dn',
+      '-map', `0:s:${trackIdx}?`,
+      '-c:s', 'webvtt',
+      '-f', 'webvtt',
+      'pipe:1',
+    ];
+
+    const vttText = await new Promise<string>((resolve) => {
+      const proc = spawn('ffmpeg', ffArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+      const chunks: Buffer[] = [];
+      let totalBytes = 0;
+      const timer = setTimeout(() => {
+        try { proc.kill('SIGKILL'); } catch {}
+        resolve(Buffer.concat(chunks).toString('utf-8'));
+      }, 25000);
+
+      proc.stdout.on('data', (d: Buffer) => {
+        if (totalBytes < 4 * 1024 * 1024) {
+          chunks.push(d);
+          totalBytes += d.length;
+        }
+      });
+      proc.on('close', () => {
+        clearTimeout(timer);
+        resolve(Buffer.concat(chunks).toString('utf-8'));
+      });
+      proc.on('error', () => {
+        clearTimeout(timer);
+        resolve('');
+      });
+    });
+
+    const normalizedVtt = vttText && vttText.trim().startsWith('WEBVTT') ? vttText : 'WEBVTT\n\n';
+    if (normalizedVtt.length > 16) {
+      subtitleVttCache.set(cacheKey, { vtt: normalizedVtt, cachedAt: Date.now() });
+    }
+    res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=600');
+    return res.status(200).send(normalizedVtt);
+  } catch {
+    res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+    return res.status(200).send('WEBVTT\n\n');
+  }
+});
+
 const MAX_CONCURRENT_FFMPEG = Math.max(1, Number(process.env.MAX_CONCURRENT_FFMPEG) || 4);
 const activeFfmpegProcs = new Set<ReturnType<typeof spawn>>();
 

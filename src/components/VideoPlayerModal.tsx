@@ -39,6 +39,51 @@ import {
 } from '../utils/apiConfig';
 import { formatClockTime, parseDurationToSeconds } from '../utils/duration';
 import { isEpisodeNewActive } from '../services/movieStorage';
+import { normalizePlayerTrackList } from '../utils/videoQuality';
+
+interface ParsedSubtitleCue {
+  start: number;
+  end: number;
+  text: string;
+}
+
+function parseVttTimestamp(raw: string): number {
+  const cleaned = raw.trim().replace(',', '.');
+  const parts = cleaned.split(':');
+  if (parts.length === 3) {
+    return (Number(parts[0]) || 0) * 3600 + (Number(parts[1]) || 0) * 60 + (parseFloat(parts[2]) || 0);
+  }
+  if (parts.length === 2) {
+    return (Number(parts[0]) || 0) * 60 + (parseFloat(parts[1]) || 0);
+  }
+  return parseFloat(cleaned) || 0;
+}
+
+function parseWebVttCues(vttText: string): ParsedSubtitleCue[] {
+  if (!vttText) return [];
+  const blocks = vttText.replace(/\r\n/g, '\n').split(/\n\s*\n/);
+  const cues: ParsedSubtitleCue[] = [];
+  for (const block of blocks) {
+    const lines = block.trim().split('\n');
+    const timeIdx = lines.findIndex((l) => l.includes('-->'));
+    if (timeIdx < 0) continue;
+    const [startRaw, endRawWithMeta] = lines[timeIdx].split('-->');
+    if (!startRaw || !endRawWithMeta) continue;
+    const endRaw = endRawWithMeta.trim().split(/\s+/)[0];
+    const start = parseVttTimestamp(startRaw);
+    const end = parseVttTimestamp(endRaw);
+    const text = lines
+      .slice(timeIdx + 1)
+      .join('\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/\{\\[^}]*\}/g, '')
+      .trim();
+    if (text && end > start) {
+      cues.push({ start, end, text });
+    }
+  }
+  return cues;
+}
 
 
 export interface VideoPlayerModalProps {
@@ -234,16 +279,15 @@ export default function VideoPlayerModal({
 
   // Real detected audio and subtitle tracks
   const [realAudioTracks, setRealAudioTracks] = useState<Array<{ id: number | string; label: string; lang?: string }>>([
-    { id: 0, label: 'Hindi', lang: 'hi' },
-    { id: 1, label: 'English', lang: 'en' }
+    { id: 0, label: language || (movie?.language) || 'Original Audio', lang: '' },
   ]);
-  const [selectedAudio, setSelectedAudio] = useState<string>('Hindi');
-  const [realSubtitleTracks, setRealSubtitleTracks] = useState<Array<{ id: number | string; label: string; lang?: string }>>([
-    { id: 0, label: 'English', lang: 'en' },
-    { id: 1, label: 'Hindi', lang: 'hi' },
-    { id: 'off', label: 'Off', lang: 'off' }
-  ]);
+  const [selectedAudio, setSelectedAudio] = useState<string>(language || (movie?.language) || 'Original Audio');
+  const [realSubtitleTracks, setRealSubtitleTracks] = useState<Array<{ id: number | string; label: string; lang?: string; streamIndex?: number }>>([]);
   const [selectedSubtitle, setSelectedSubtitle] = useState<string>('Off');
+  const selectedSubtitleRef = useRef<string>('Off');
+  selectedSubtitleRef.current = selectedSubtitle;
+  const [activeSubtitleCue, setActiveSubtitleCue] = useState<string>('');
+  const webSubtitleCuesRef = useRef<ParsedSubtitleCue[]>([]);
 
 
 
@@ -517,6 +561,10 @@ export default function VideoPlayerModal({
 
   useEffect(() => {
     userPickedQualityRef.current = false;
+    setSelectedSubtitle('Off');
+    selectedSubtitleRef.current = 'Off';
+    setActiveSubtitleCue('');
+    webSubtitleCuesRef.current = [];
   }, [isOpen, activeStreamUrl]);
 
   // Step 1: Run pre-flight stream inspection once per stream source to get real duration, codec mode & audio tracks
@@ -707,34 +755,32 @@ export default function VideoPlayerModal({
 
             if (!exoCapable) {
               if (Array.isArray(info.audioTracks) && info.audioTracks.length > 0) {
-                setRealAudioTracks(info.audioTracks);
+                const cleanAudio = normalizePlayerTrackList(info.audioTracks, 'audio');
+                setRealAudioTracks(cleanAudio);
                 const preferredLang = verifiedLanguageRef.current.toLowerCase();
-                const matchIdx = info.audioTracks.findIndex(
-                  (t: any) =>
+                const matchIdx = cleanAudio.findIndex(
+                  (t) =>
                     String(t.lang || '').toLowerCase().includes(preferredLang) ||
                     String(t.label || '').toLowerCase().includes(preferredLang)
                 );
-                const chosenTrack = matchIdx >= 0 ? info.audioTracks[matchIdx] : info.audioTracks[0];
-                setSelectedAudio(chosenTrack.label);
-                if (typeof chosenTrack.id === 'number') {
-                  setSelectedAudioIdx(chosenTrack.id);
-                  if (chosenTrack.id > 0 && chosenMode === 'direct' && remoteTranscodeAvailable) {
-                    chosenMode = 'remux';
-                    chosenStage = 'level2_remux';
+                const chosenTrack = matchIdx >= 0 ? cleanAudio[matchIdx] : cleanAudio[0];
+                if (chosenTrack) {
+                  setSelectedAudio(chosenTrack.label);
+                  if (typeof chosenTrack.id === 'number') {
+                    setSelectedAudioIdx(chosenTrack.id);
+                    if (chosenTrack.id > 0 && chosenMode === 'direct' && remoteTranscodeAvailable) {
+                      chosenMode = 'remux';
+                      chosenStage = 'level2_remux';
+                    }
                   }
                 }
               }
 
               if (Array.isArray(info.subtitleTracks) && info.subtitleTracks.length > 0) {
-                const cleanedSubs = info.subtitleTracks.map((s: any) => ({
-                  id: s.id,
-                  label: s.label || s.lang || 'English',
-                  lang: s.lang || 'en'
-                }));
-                if (!cleanedSubs.some((s: any) => s.label.toLowerCase() === 'off')) {
-                  cleanedSubs.push({ id: 'off', label: 'Off', lang: 'off' });
-                }
-                setRealSubtitleTracks(cleanedSubs);
+                const cleanSubs = normalizePlayerTrackList(info.subtitleTracks, 'subtitle');
+                setRealSubtitleTracks(cleanSubs);
+              } else {
+                setRealSubtitleTracks([]);
               }
             }
           }
@@ -1264,21 +1310,29 @@ export default function VideoPlayerModal({
         }
 
         if (Array.isArray(st.audioTracks) && st.audioTracks.length > 0) {
-          const sig = JSON.stringify(st.audioTracks);
+          const cleanAudio = normalizePlayerTrackList(st.audioTracks, 'audio');
+          const sig = JSON.stringify(cleanAudio);
           if (sig !== lastAudioJson) {
             lastAudioJson = sig;
-            setRealAudioTracks(st.audioTracks);
-            const activeTrk = st.audioTracks.find((t: any) => t.selected) || st.audioTracks[0];
+            setRealAudioTracks(cleanAudio);
+            const activeTrk = cleanAudio.find((t) => t.selected) || cleanAudio[0];
             if (activeTrk?.label) setSelectedAudio(activeTrk.label);
           }
         }
 
         if (Array.isArray(st.subtitleTracks)) {
-          const sig = JSON.stringify(st.subtitleTracks);
+          const cleanSubs = normalizePlayerTrackList(st.subtitleTracks, 'subtitle');
+          const sig = JSON.stringify(cleanSubs);
           if (sig !== lastSubJson) {
             lastSubJson = sig;
-            setRealSubtitleTracks(st.subtitleTracks);
+            setRealSubtitleTracks(cleanSubs);
           }
+        }
+
+        if (selectedSubtitleRef.current === 'Off') {
+          setActiveSubtitleCue('');
+        } else {
+          setActiveSubtitleCue(typeof st.cueText === 'string' ? st.cueText : '');
         }
 
         if (st.ended && !endedHandled) {
@@ -1322,22 +1376,28 @@ export default function VideoPlayerModal({
       hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
         setIsLoading(false);
         if (hlsInstance && hlsInstance.audioTracks && hlsInstance.audioTracks.length > 0) {
-          const tracks = hlsInstance.audioTracks.map((t, idx) => ({
-            id: idx,
-            label: t.name || t.lang || `Track ${idx + 1}`,
-            lang: t.lang
-          }));
+          const tracks = normalizePlayerTrackList(
+            hlsInstance.audioTracks.map((t, idx) => ({
+              id: idx,
+              label: t.name || t.lang || `Audio ${idx + 1}`,
+              lang: t.lang
+            })),
+            'audio'
+          );
           setRealAudioTracks(tracks);
           if (tracks.length > 0) {
             setSelectedAudio(tracks[hlsInstance.audioTrack]?.label || tracks[0].label);
           }
         }
         if (hlsInstance && hlsInstance.subtitleTracks && hlsInstance.subtitleTracks.length > 0) {
-          const subTracks = hlsInstance.subtitleTracks.map((s, idx) => ({
-            id: idx,
-            label: s.name || s.lang || `Sub ${idx + 1}`,
-            lang: s.lang
-          }));
+          const subTracks = normalizePlayerTrackList(
+            hlsInstance.subtitleTracks.map((s, idx) => ({
+              id: idx,
+              label: s.name || s.lang || `Subtitle ${idx + 1}`,
+              lang: s.lang
+            })),
+            'subtitle'
+          );
           setRealSubtitleTracks(subTracks);
         }
 
@@ -1417,6 +1477,32 @@ export default function VideoPlayerModal({
             localStorage.setItem(`resume_pos_${episodeResumeKey}`, effectiveTime.toString());
           } catch (e) {}
         }
+      }
+
+      // Sync real WebVTT / native textTrack cues for web playback
+      if (selectedSubtitleRef.current === 'Off') {
+        setActiveSubtitleCue('');
+      } else if (webSubtitleCuesRef.current.length > 0) {
+        const activeCues = webSubtitleCuesRef.current.filter(
+          (c) => effectiveTime >= c.start && effectiveTime <= c.end
+        );
+        const text = activeCues.map((c) => c.text).join('\n');
+        setActiveSubtitleCue(text);
+      } else if (video.textTracks && video.textTracks.length > 0) {
+        let cueOut = '';
+        for (let i = 0; i < video.textTracks.length; i++) {
+          const tr = video.textTracks[i];
+          if (tr.mode !== 'disabled' && tr.activeCues && tr.activeCues.length > 0) {
+            const parts: string[] = [];
+            for (let c = 0; c < tr.activeCues.length; c++) {
+              const rawTxt = String((tr.activeCues[c] as any)?.text || '').replace(/<[^>]+>/g, '').trim();
+              if (rawTxt) parts.push(rawTxt);
+            }
+            cueOut = parts.join('\n');
+            break;
+          }
+        }
+        setActiveSubtitleCue(cueOut);
       }
 
       if (video.buffered.length > 0) {
@@ -1999,9 +2085,13 @@ export default function VideoPlayerModal({
   };
 
   // Real Subtitle Selection
-  const handleSelectSubtitle = (label: string) => {
+  const handleSelectSubtitle = async (label: string) => {
     setSelectedSubtitle(label);
+    selectedSubtitleRef.current = label;
     setShowSubtitlesMenu(false);
+    setShowLanguageMenu(false);
+    setActiveSubtitleCue('');
+    webSubtitleCuesRef.current = [];
     resetAutoHideTimer();
 
     if (exoModeActive) {
@@ -2026,15 +2116,39 @@ export default function VideoPlayerModal({
       return;
     }
 
-    const matched = realSubtitleTracks.find(s => s.label === label);
-    if (matched) {
-      if (hlsRef.current && typeof matched.id === 'number') {
-        hlsRef.current.subtitleTrack = matched.id;
-      } else if (videoRef.current && videoRef.current.textTracks) {
-        for (let i = 0; i < videoRef.current.textTracks.length; i++) {
-          videoRef.current.textTracks[i].mode = (i === matched.id ? 'showing' : 'disabled');
-        }
+    const matched = realSubtitleTracks.find((s) => s.label === label);
+    if (!matched) return;
+
+    if (hlsRef.current && typeof matched.id === 'number') {
+      hlsRef.current.subtitleTrack = matched.id;
+    }
+    if (videoRef.current && videoRef.current.textTracks && videoRef.current.textTracks.length > 0 && typeof matched.id === 'number') {
+      for (let i = 0; i < videoRef.current.textTracks.length; i++) {
+        // Use 'hidden' so browser doesn't double-render default yellow/large box over our clean white overlay
+        videoRef.current.textTracks[i].mode = i === matched.id ? 'hidden' : 'disabled';
       }
+    }
+
+    // Fetch real extracted WebVTT cues from backend if source is a remote/Telegram stream
+    const srcUrl = activeStreamUrl.trim();
+    if (srcUrl && !/^(file:|blob:)/i.test(srcUrl) && typeof matched.id === 'number') {
+      try {
+        const subIdx = matched.id;
+        const vttUrl = buildApiUrl(
+          `/api/telegram/subtitles.vtt?url=${encodeURIComponent(srcUrl)}&trackIdx=${subIdx}`
+        );
+        const res = await fetch(vttUrl);
+        if (res.ok && selectedSubtitleRef.current === label) {
+          const text = await res.text();
+          const parsed = parseWebVttCues(text);
+          if (selectedSubtitleRef.current === label) {
+            webSubtitleCuesRef.current = parsed;
+            const cur = currentTimeRef.current || 0;
+            const active = parsed.filter((c) => cur >= c.start && cur <= c.end);
+            setActiveSubtitleCue(active.map((c) => c.text).join('\n'));
+          }
+        }
+      } catch {}
     }
   };
 
@@ -2124,31 +2238,24 @@ export default function VideoPlayerModal({
                 />
               )}
 
-              {/* Loading Indicator */}
-              {isLoading && (
-                <div className="absolute inset-0 m-auto w-24 h-24 flex flex-col items-center justify-center gap-2 bg-black/60 backdrop-blur-md rounded-2xl z-25 pointer-events-none shadow-2xl">
-                  <RefreshCw className="animate-spin text-yellow-400" size={28} />
-                  <span className="text-[11px] text-gray-200 font-bold tracking-wide">Loading</span>
+              {/* Loading Indicator (White only, never stacked over center play-slot spinner) */}
+              {isLoading && !(showControls && !isLocked && !isPlaying) && (
+                <div className="absolute inset-0 m-auto w-20 h-20 flex flex-col items-center justify-center gap-1.5 bg-black/55 backdrop-blur-sm rounded-2xl z-25 pointer-events-none">
+                  <RefreshCw className="animate-spin text-white" size={28} />
+                  <span className="text-[11px] text-white/90 font-semibold tracking-wide">Loading</span>
                 </div>
               )}
 
-              {/* Active Subtitle Overlay */}
-              {selectedSubtitle !== 'Off' && (
-                <div className="absolute bottom-16 sm:bottom-20 left-1/2 -translate-x-1/2 z-40 max-w-3xl w-[92%] px-6 py-2.5 bg-black/90 backdrop-blur-lg rounded-2xl text-yellow-300 text-center text-base sm:text-lg font-bold tracking-wide shadow-2xl border-2 border-yellow-400/40 pointer-events-none transition-all">
-                  <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-0.5 font-semibold">
-                    Subtitles: {selectedSubtitle}
-                  </div>
-                  <div>
-                    {selectedSubtitle.toLowerCase().includes('hindi') ? (
-                      currentTime < 6 ? 'Hindi Subtitles active: Swagat hai aapka is episode mein!' :
-                      currentTime % 12 < 6 ? `(Hindi Dialogue): Yeh दृश्य (${Math.floor(currentTime)}s) behad romanchak hai...` :
-                      'Hindi Subtitles: Kahaani mein naya mod aa raha hai.'
-                    ) : (
-                      currentTime < 6 ? 'English Subtitles active: Welcome to this episode!' :
-                      currentTime % 12 < 6 ? `(English Dialogue): Scene action taking place at ${Math.floor(currentTime)}s...` :
-                      'English Subtitles: Enjoying immersive viewing experience.'
-                    )}
-                  </div>
+              {/* Active Subtitle Overlay (Real extracted cues only, small crisp white text at very bottom) */}
+              {selectedSubtitle !== 'Off' && activeSubtitleCue.trim() && (
+                <div
+                  className={`absolute left-1/2 -translate-x-1/2 z-30 max-w-[90%] sm:max-w-2xl px-2 text-center pointer-events-none transition-all duration-200 ${
+                    showControls && !isLocked ? 'bottom-24 sm:bottom-28' : 'bottom-3 sm:bottom-5'
+                  }`}
+                >
+                  <p className="text-white text-xs sm:text-sm font-medium leading-snug whitespace-pre-line [text-shadow:0_1px_4px_rgba(0,0,0,0.95),0_0_2px_rgba(0,0,0,1)]">
+                    {activeSubtitleCue}
+                  </p>
                 </div>
               )}
               {/* Screen Fit Mode Momentary Toast */}
@@ -2655,19 +2762,21 @@ export default function VideoPlayerModal({
                           <span>Off</span>
                           {selectedSubtitle === 'Off' && <Check size={14} className="stroke-[3]" />}
                         </button>
-                        {realSubtitleTracks.map((sub) => (
-                          <button
-                            key={sub.label}
-                            type="button"
-                            onClick={() => handleSelectSubtitle(sub.label)}
-                            className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs hover:bg-white/10 transition-colors flex items-center justify-between cursor-pointer ${
-                              selectedSubtitle === sub.label ? 'text-emerald-400 font-bold bg-white/5' : 'text-white'
-                            }`}
-                          >
-                            <span>{sub.label}</span>
-                            {selectedSubtitle === sub.label && <Check size={14} className="stroke-[3]" />}
-                          </button>
-                        ))}
+                        {realSubtitleTracks
+                          .filter((sub) => sub.label.trim().toLowerCase() !== 'off')
+                          .map((sub) => (
+                            <button
+                              key={`${sub.id}-${sub.label}`}
+                              type="button"
+                              onClick={() => handleSelectSubtitle(sub.label)}
+                              className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs hover:bg-white/10 transition-colors flex items-center justify-between cursor-pointer ${
+                                selectedSubtitle === sub.label ? 'text-emerald-400 font-bold bg-white/5' : 'text-white'
+                              }`}
+                            >
+                              <span className="truncate">{sub.label}</span>
+                              {selectedSubtitle === sub.label && <Check size={14} className="stroke-[3]" />}
+                            </button>
+                          ))}
                       </div>
                     </div>
                   </div>

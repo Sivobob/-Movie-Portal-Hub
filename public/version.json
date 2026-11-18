@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.232",
-  "minimumRequiredVersion": "3.5.232",
-  "latestVersionCode": 3452,
-  "minimumRequiredVersionCode": 3452,
+  "latestVersion": "3.5.233",
+  "minimumRequiredVersion": "3.5.233",
+  "latestVersionCode": 3453,
+  "minimumRequiredVersionCode": 3453,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Portal v3.5.232 is ready! Real server-scaled 1080p/720p/480p/360p playback & downloads, plus accurate per-movie and per-episode file sizes.",
-  "releaseNotes": "v3.5.232: Genuine multi-quality transcoding (1080p/720p/480p/360p) from single stream URLs for both streaming and offline downloads, plus live per-title file size probing in Download Options."
+  "updateMessage": "Movie Portal v3.5.233 is ready! Clean Audio & Subtitle track names, real bottom white-only subtitles, and unified white loading indicator.",
+  "releaseNotes": "v3.5.233: Clean Hindi/English track labels (removed release-group & codec clutter), genuine ExoPlayer & WebVTT subtitles styled as small clean white text at bottom, and white-only loading spinner."
 }

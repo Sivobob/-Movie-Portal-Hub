@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { spawn } from 'child_process';
 import { Api, TelegramClient } from 'telegram';
 import bigInt from 'big-integer';
+import { cleanMediaTrackLabel } from '../utils/videoQuality.ts';
 
 export const BLOCK_SIZE = 512 * 1024; // 512 KB (exact Telegram upload.GetFile unit)
 const MAX_CACHED_BLOCKS = 96; // ~48 MB RAM LRU cache across active streams
@@ -293,53 +294,13 @@ export async function streamTelegramRange(
   }
 }
 
-function formatLanguageLabel(langRaw?: string, titleRaw?: string, idx: number = 0): { lang: string; label: string } {
-  const code = (langRaw || '').trim().toLowerCase();
-  const title = (titleRaw || '').trim();
-  const langMap: Record<string, string> = {
-    hin: 'Hindi',
-    hi: 'Hindi',
-    hindi: 'Hindi',
-    eng: 'English',
-    en: 'English',
-    english: 'English',
-    tam: 'Tamil',
-    ta: 'Tamil',
-    tel: 'Telugu',
-    te: 'Telugu',
-    mal: 'Malayalam',
-    ml: 'Malayalam',
-    kan: 'Kannada',
-    kn: 'Kannada',
-    ben: 'Bengali',
-    bn: 'Bengali',
-    mar: 'Marathi',
-    mr: 'Marathi',
-    pun: 'Punjabi',
-    pa: 'Punjabi',
-    jpn: 'Japanese',
-    ja: 'Japanese',
-    kor: 'Korean',
-    ko: 'Korean',
-    spa: 'Spanish',
-    es: 'Spanish',
-    fre: 'French',
-    fra: 'French',
-    fr: 'French',
-    und: '',
-  };
-
-  const prettyLang = langMap[code] || (code ? code.toUpperCase() : '');
-  if (title && prettyLang && !title.toLowerCase().includes(prettyLang.toLowerCase())) {
-    return { lang: prettyLang || 'Unknown', label: `${prettyLang} (${title})` };
-  }
-  if (title) {
-    return { lang: prettyLang || title, label: title };
-  }
-  if (prettyLang) {
-    return { lang: prettyLang, label: prettyLang };
-  }
-  return { lang: 'Audio', label: `Audio Track ${idx + 1}` };
+function formatLanguageLabel(
+  langRaw?: string,
+  titleRaw?: string,
+  idx: number = 0,
+  kind: 'audio' | 'subtitle' = 'audio'
+): { lang: string; label: string } {
+  return cleanMediaTrackLabel(langRaw, titleRaw, kind, idx);
 }
 
 function fallbackProbeFromMetadata(docInfo: TelegramDocInfo): ProbeMediaResult {
@@ -474,7 +435,7 @@ export async function probeTelegramMedia(
           profile.includes('10');
 
         const audioTracks: AudioTrackInfo[] = audioStreamObjs.map((s, idx) => {
-          const { lang, label } = formatLanguageLabel(s.tags?.language, s.tags?.title, idx);
+          const { lang, label } = formatLanguageLabel(s.tags?.language, s.tags?.title, idx, 'audio');
           return {
             id: idx,
             streamIndex: Number(s.index ?? idx),
@@ -486,7 +447,7 @@ export async function probeTelegramMedia(
         });
 
         const subtitleTracks: SubtitleTrackInfo[] = subtitleStreamObjs.map((s, idx) => {
-          const { lang, label } = formatLanguageLabel(s.tags?.language, s.tags?.title, idx);
+          const { lang, label } = formatLanguageLabel(s.tags?.language, s.tags?.title, idx, 'subtitle');
           return {
             id: idx,
             streamIndex: Number(s.index ?? idx),
@@ -495,14 +456,6 @@ export async function probeTelegramMedia(
             label: label || (idx === 0 ? 'English' : 'Hindi'),
           };
         });
-
-        // Fallback: if video container has subtitle streams or soft subs, ensure Hindi and English are listed
-        if (subtitleTracks.length === 0 && (subtitleStreamObjs.length > 0 || streams.some(s => s.codec_type === 'subtitle'))) {
-          subtitleTracks.push(
-            { id: 0, streamIndex: 0, codec: 'subrip', lang: 'English', label: 'English' },
-            { id: 1, streamIndex: 1, codec: 'subrip', lang: 'Hindi', label: 'Hindi' }
-          );
-        }
 
         const primaryAudioCodec = audioTracks[0]?.codec || '';
         const container = String(format.format_name || '').toLowerCase();
