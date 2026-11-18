@@ -471,7 +471,7 @@ export default function MovieDetailsModal({
 
   const inlineVideoRef = useRef<HTMLVideoElement | null>(null);
   const [inlineLoaded, setInlineLoaded] = useState(false);
-  const [inlineMuted, setInlineMuted] = useState(false);
+  const [inlineMuted, setInlineMuted] = useState(true);
 
   useEffect(() => {
     const videoEl = inlineVideoRef.current;
@@ -479,6 +479,8 @@ export default function MovieDetailsModal({
 
     let hlsInstance: Hls | null = null;
     const isHls = primaryDownloadUrl.includes('.m3u8');
+
+    videoEl.muted = true;
 
     if (isHls && Hls.isSupported()) {
       hlsInstance = new Hls();
@@ -489,12 +491,24 @@ export default function MovieDetailsModal({
     }
 
     setInlineLoaded(false);
+
+    const handleCanPlay = () => {
+      setInlineLoaded(true);
+      videoEl.play().catch(() => {});
+    };
+
+    const handlePlaying = () => {
+      setInlineLoaded(true);
+    };
+
+    videoEl.addEventListener('canplay', handleCanPlay);
+    videoEl.addEventListener('playing', handlePlaying);
+    videoEl.addEventListener('loadeddata', handleCanPlay);
+
     videoEl.play().then(() => {
       setInlineLoaded(true);
     }).catch(() => {
-      setInlineMuted(true);
-      videoEl.muted = true;
-      videoEl.play().then(() => setInlineLoaded(true)).catch(() => {});
+      // Will play on user interaction or canplay
     });
 
     return () => {
@@ -502,6 +516,9 @@ export default function MovieDetailsModal({
         hlsInstance.destroy();
       }
       if (videoEl) {
+        videoEl.removeEventListener('canplay', handleCanPlay);
+        videoEl.removeEventListener('playing', handlePlaying);
+        videoEl.removeEventListener('loadeddata', handleCanPlay);
         videoEl.pause();
         videoEl.src = '';
       }
@@ -552,9 +569,17 @@ export default function MovieDetailsModal({
 
             {/* Clean White Loading Spinner & Text while buffering */}
             {!inlineLoaded && (
-              <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center gap-2.5 z-20">
+              <div 
+                className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center gap-2.5 z-20 cursor-pointer"
+                onClick={() => {
+                  if (inlineVideoRef.current) {
+                    inlineVideoRef.current.muted = true;
+                    inlineVideoRef.current.play().then(() => setInlineLoaded(true)).catch(() => {});
+                  }
+                }}
+              >
                 <div className="w-8 h-8 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-                <span className="text-white text-xs font-semibold tracking-wide">Loading...</span>
+                <span className="text-white text-xs font-semibold tracking-wide">Loading... (Tap to Play)</span>
               </div>
             )}
 
