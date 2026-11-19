@@ -359,7 +359,7 @@ export default function MovieDetailsModal({
 
   const handleShare = async () => {
     const shareUrl = window.location.href;
-    const shareText = `Watch "${movie.title}" on Movie Portal!`;
+    const shareText = `Watch "${movie.title}" on Movie Hub!`;
     if (navigator.share) {
       try {
         await navigator.share({

@@ -1768,7 +1768,7 @@ export default function AdminDashboard() {
         latestVersionCode: CURRENT_VERSION_CODE,
         minimumRequiredVersionCode: CURRENT_VERSION_CODE,
         apkDownloadUrl: updateConfigForm.apkDownloadUrl || DEFAULT_REMOTE_UPDATE_CONFIG.apkDownloadUrl,
-        updateMessage: `Movie Portal v${CURRENT_VERSION_NAME} update is ready! Update now for push release notifications with movie posters and bug fixes.`,
+        updateMessage: `Movie Hub v${CURRENT_VERSION_NAME} update is ready! Update now for push release notifications with movie posters and bug fixes.`,
       });
       setUpdateConfigForm(saved);
       setFirebaseUpdateVersion(saved.minimumRequiredVersion || saved.latestVersion);
@@ -2880,7 +2880,7 @@ export default function AdminDashboard() {
             to="/"
             className="inline-flex items-center gap-1.5 text-xs text-yellow-400 hover:text-yellow-300 font-bold transition-colors"
           >
-            <Home size={14} /> Back to Movie Portal
+            <Home size={14} /> Back to Movie Hub
           </Link>
         </div>
       </div>
@@ -2908,7 +2908,7 @@ export default function AdminDashboard() {
               </span>
             </div>
             <h1 className="text-xl sm:text-2xl font-black text-white mt-1 tracking-tight flex items-center gap-2">
-              <Film className="text-yellow-400" size={24} /> MOVIE PORTAL Dashboard
+              <Film className="text-yellow-400" size={24} /> MOVIE HUB Dashboard
             </h1>
           </div>
 

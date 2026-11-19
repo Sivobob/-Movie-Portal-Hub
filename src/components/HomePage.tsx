@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { collection, query, where, onSnapshot, getDocsFromServer } from 'firebase/firestore';
 import { db } from '../firebase';
 import MovieCard from './MovieCard';
-import { Search, Play, X, Film, Plus, Check, Info, Trash2 } from 'lucide-react';
+import { Play, Film, Plus, Check, Info, Trash2 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -94,22 +94,15 @@ export default function HomePage() {
   const [activeSeasonIndex, setActiveSeasonIndex] = useState(0);
   const [playingMovie, setPlayingMovie] = useState<any | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [isFolderSearchOpen, setIsFolderSearchOpen] = useState(false);
-  const [folderSearchQuery, setFolderSearchQuery] = useState('');
-  const folderSearchInputRef = useRef<HTMLInputElement | null>(null);
 
   // Recently watched & My List state
   const [recentlyWatched, setRecentlyWatched] = useState<WatchHistoryItem[]>([]);
   const [myListIds, setMyListIds] = useState<Set<string>>(new Set());
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
 
-  const isFolderSearchSupported =
-    category === 'Bollywood' || category === 'Hollywood' || category === 'Series';
-
   const categoryRef = useRef(category);
   const selectedMovieRef = useRef(selectedMovie);
   const playingMovieRef = useRef(playingMovie);
-  const isFolderSearchOpenRef = useRef(isFolderSearchOpen);
   const ignoringPopstateRef = useRef(0);
   const ignoreResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -126,26 +119,11 @@ export default function HomePage() {
   }, [playingMovie]);
 
   useEffect(() => {
-    isFolderSearchOpenRef.current = isFolderSearchOpen;
-  }, [isFolderSearchOpen]);
-
-  useEffect(() => {
-    setIsFolderSearchOpen(false);
-    setFolderSearchQuery('');
     try {
       window.scrollTo({ top: 0, behavior: 'auto' });
       document.getElementById('root')?.scrollTo({ top: 0, behavior: 'auto' });
     } catch {}
   }, [category]);
-
-  useEffect(() => {
-    if (isFolderSearchOpen) {
-      const timer = setTimeout(() => {
-        folderSearchInputRef.current?.focus();
-      }, 60);
-      return () => clearTimeout(timer);
-    }
-  }, [isFolderSearchOpen]);
 
   // Load user watch history and My List
   const loadUserHistory = () => {
@@ -213,12 +191,6 @@ export default function HomePage() {
         setSelectedMovie(null);
         return;
       }
-      if (isFolderSearchOpenRef.current) {
-        isFolderSearchOpenRef.current = false;
-        setIsFolderSearchOpen(false);
-        setFolderSearchQuery('');
-        return;
-      }
     };
 
     window.addEventListener('popstate', handlePopState);
@@ -236,12 +208,6 @@ export default function HomePage() {
           }
           if (selectedMovieRef.current) {
             closeMovieDetails();
-            return;
-          }
-          if (isFolderSearchOpenRef.current) {
-            isFolderSearchOpenRef.current = false;
-            setIsFolderSearchOpen(false);
-            setFolderSearchQuery('');
             return;
           }
           if (categoryRef.current) {
@@ -565,16 +531,6 @@ export default function HomePage() {
       })
     : [];
 
-  const trimmedFolderQuery = folderSearchQuery.trim().toLowerCase();
-  const filteredCategoryMovies =
-    isFolderSearchSupported && trimmedFolderQuery
-      ? categoryMovies.filter((m) => {
-          const title = String(m.title || '').toLowerCase();
-          const genre = String(m.genre || '').toLowerCase();
-          return title.includes(trimmedFolderQuery) || genre.includes(trimmedFolderQuery);
-        })
-      : categoryMovies;
-
   const handleMovieClick = (movie: any) => {
     setActiveSeasonIndex(0);
     selectedMovieRef.current = movie;
@@ -807,58 +763,6 @@ export default function HomePage() {
             </h2>
           </div>
 
-          {/* Floating Bottom-Right Search Icon & Expandable Bar (ONLY for Bollywood, Hollywood, Series) */}
-          {isFolderSearchSupported && !selectedMovie && !playingMovie && (
-            !isFolderSearchOpen ? (
-              <button
-                type="button"
-                onClick={() => setIsFolderSearchOpen(true)}
-                className="fixed right-4 bottom-[calc(5.25rem+env(safe-area-inset-bottom))] z-40 w-12 h-12 rounded-full bg-red-600 hover:bg-red-500 text-white shadow-[0_6px_24px_rgba(229,9,20,0.55)] border border-white/20 flex items-center justify-center transition-transform active:scale-90 cursor-pointer"
-                aria-label={`Search ${category}`}
-                title={`Search ${category}`}
-              >
-                <Search size={21} className="stroke-[2.5]" />
-              </button>
-            ) : (
-              <div className="fixed left-3 right-3 bottom-[calc(5.25rem+env(safe-area-inset-bottom))] z-40 animate-in fade-in slide-in-from-bottom-2 duration-150">
-                <div className="max-w-xl mx-auto flex items-center gap-2.5 bg-neutral-900/95 backdrop-blur-xl border border-red-600 rounded-2xl px-3.5 py-2.5 shadow-2xl shadow-black/80">
-                  <Search size={18} className="text-red-500 shrink-0" />
-                  <input
-                    ref={folderSearchInputRef}
-                    type="text"
-                    value={folderSearchQuery}
-                    onChange={(e) => setFolderSearchQuery(e.target.value)}
-                    placeholder={`Search in ${category}...`}
-                    className="bg-transparent flex-grow min-w-0 text-sm text-white placeholder-gray-400 outline-none"
-                  />
-                  {folderSearchQuery && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFolderSearchQuery('');
-                        folderSearchInputRef.current?.focus();
-                      }}
-                      className="min-w-[34px] min-h-[34px] flex items-center justify-center rounded-lg text-gray-400 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer"
-                      aria-label="Clear search"
-                    >
-                      <X size={16} />
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsFolderSearchOpen(false);
-                      setFolderSearchQuery('');
-                    }}
-                    className="px-2.5 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-xs font-bold text-red-400 whitespace-nowrap shrink-0 cursor-pointer transition-colors"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            )
-          )}
-
           {categoryMovies.length === 0 ? (
             <div className="py-24 px-4 text-center">
               <Film className="mx-auto mb-3 text-neutral-700" size={44} />
@@ -871,7 +775,7 @@ export default function HomePage() {
             </div>
           ) : (
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2 sm:gap-3 px-2 sm:px-4">
-              {filteredCategoryMovies.map((movie) => {
+              {categoryMovies.map((movie) => {
                 return (
                   <div key={movie.id} className="relative group">
                     <MovieCard movie={movie} onClick={() => handleMovieClick(movie)} />

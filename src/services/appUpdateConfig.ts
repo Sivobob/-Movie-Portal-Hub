@@ -14,14 +14,14 @@ import { checkAndHandleQuotaError } from './firestoreQuotaService';
 export const APP_UPDATE_COLLECTION = 'admins';
 export const APP_UPDATE_DOC_ID = 'android_update';
 
-export const CURRENT_VERSION_NAME = '3.5.236';
-export const CURRENT_VERSION_CODE = 3456;
+export const CURRENT_VERSION_NAME = '3.5.237';
+export const CURRENT_VERSION_CODE = 3457;
 
 export const OFFICIAL_APK_DIRECT_URL =
   'https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk';
 
 export const DEFAULT_UPDATE_MESSAGE =
-  'A new version of Movie Box is available. Please update the app to continue watching movies and series.';
+  'A new version of Movie Hub is available. Please update the app to continue watching movies and series.';
 
 const GITHUB_VERSION_JSON_URL =
   'https://raw.githubusercontent.com/Sivobob/-Movie-Portal-Hub/main/public/version.json';

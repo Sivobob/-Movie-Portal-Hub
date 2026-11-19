@@ -1,6 +1,6 @@
 {
-  "name": "Movie Portal",
-  "short_name": "Movie Portal",
+  "name": "Movie Hub",
+  "short_name": "Movie Hub",
   "description": "Stream unlimited movies and series in HD quality with offline downloads.",
   "start_url": "/?platform=android",
   "display": "standalone",

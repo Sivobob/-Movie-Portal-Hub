@@ -385,7 +385,7 @@ export default function SettingsPage() {
                 {activeModal === 'watch_options' && 'Watch Options'}
                 {activeModal === 'privacy' && 'Privacy Settings'}
                 {activeModal === 'check_update' && 'Check Update'}
-                {activeModal === 'about' && 'About Movie Portal'}
+                {activeModal === 'about' && 'About Movie Hub'}
                 {activeModal === 'privacy_policy' && 'Privacy Policy'}
               </h3>
               <button
@@ -560,11 +560,11 @@ export default function SettingsPage() {
               <div className="flex flex-col items-center text-center space-y-3 py-2">
                 <img
                   src="/assets/icons/master_icon.png"
-                  alt="Movie Portal"
-                  className="w-16 h-16 rounded-2xl object-cover border border-white/15 shadow-lg"
+                  alt="Movie Hub"
+                  className="w-20 h-20 rounded-2xl object-cover border border-white/15 shadow-lg bg-[#15191e]"
                 />
                 <div>
-                  <h4 className="text-base font-bold text-white">Movie Portal</h4>
+                  <h4 className="text-base font-bold text-white">Movie Hub</h4>
                   <p className="text-xs text-neutral-400 mt-0.5">
                     Version {installedVer?.versionName || CURRENT_VERSION_NAME}
                   </p>
@@ -578,7 +578,7 @@ export default function SettingsPage() {
             {activeModal === 'privacy_policy' && (
               <div className="space-y-2.5 text-xs text-neutral-300 leading-relaxed">
                 <p>
-                  Movie Portal respects your privacy. We store only essential account identifiers (when you choose to sign in), your saved My List, My Likes, Watch History, and app preferences.
+                  Movie Hub respects your privacy. We store only essential account identifiers (when you choose to sign in), your saved My List, My Likes, Watch History, and app preferences.
                 </p>
                 <p>
                   You can clear your Watch History at any time under Privacy Settings. Offline downloads stay on your local device storage under your control.

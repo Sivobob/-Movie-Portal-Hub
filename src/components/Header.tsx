@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
-import { ShieldCheck, Lock, Eye, EyeOff, X, KeyRound, LogOut, Download, Smartphone, Search } from 'lucide-react';
+import { ShieldCheck, Settings, Lock, Eye, EyeOff, X, KeyRound, LogOut, Download, Smartphone, Search } from 'lucide-react';
 import { isNativeAndroid, isInstalledPhoneApp, downloadOfficialApk, OFFICIAL_APK_DOWNLOAD_URL } from '../utils/platform';
 import { CURRENT_VERSION_NAME } from '../services/appUpdateConfig';
 
@@ -237,13 +237,13 @@ export default function Header() {
         {showPromoBar && (
           <div className="w-full bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 text-black px-3 sm:px-4 py-1.5 pt-[max(0.45rem,env(safe-area-inset-top))] flex items-center justify-between gap-2 shadow-lg">
             <div className="flex items-center gap-2 min-w-0 flex-1">
-              <div className="w-7 h-7 rounded-lg overflow-hidden bg-black flex items-center justify-center flex-shrink-0 shadow">
-                <img src="/assets/icons/master_icon.png" alt="Movie Portal" className="w-full h-full object-cover" />
+              <div className="w-7 h-7 rounded-lg overflow-hidden bg-[#15191e] flex items-center justify-center flex-shrink-0 shadow">
+                <img src="/assets/icons/master_icon.png" alt="Movie Hub" className="w-full h-full object-cover" />
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5 min-w-0">
                   <span className="text-[11px] sm:text-sm font-black uppercase tracking-tight text-black truncate">
-                    Movie Portal App
+                    Movie Hub App
                   </span>
                   <span className="hidden xs:inline-block sm:inline-block bg-black/20 text-black text-[9px] sm:text-[10px] font-extrabold px-1.5 py-0.5 rounded uppercase flex-shrink-0">
                     v{CURRENT_VERSION_NAME}
@@ -285,13 +285,13 @@ export default function Header() {
             onTouchStart={startLogoLongPress}
             onTouchEnd={cancelLogoLongPress}
             onTouchCancel={cancelLogoLongPress}
-            className="flex items-center justify-center flex-shrink-0 cursor-pointer active:scale-95 transition-transform rounded-xl overflow-hidden shadow-lg border border-white/15"
-            aria-label="Movie Portal Home"
+            className="w-10 h-10 flex items-center justify-center flex-shrink-0 cursor-pointer active:scale-95 transition-transform rounded-xl overflow-hidden shadow-lg border border-white/15 bg-[#15191e]"
+            aria-label="Movie Hub Home"
           >
             <img
               src="/assets/icons/master_icon.png"
-              alt="Movie Portal"
-              className="w-9 h-9 object-cover"
+              alt="Movie Hub"
+              className="w-full h-full object-cover"
             />
           </button>
 
@@ -311,6 +311,18 @@ export default function Header() {
               Search
             </span>
           </button>
+
+          {!isInstalled && (
+            <button
+              type="button"
+              onClick={handleSettingsClick}
+              className="w-[42px] h-[42px] rounded-lg bg-[#2a2d30] hover:bg-[#313538] text-[#c5c9cf] hover:text-white flex items-center justify-center flex-shrink-0 cursor-pointer active:scale-95 transition-all"
+              aria-label="Settings / Admin"
+              title="Settings / Admin"
+            >
+              <Settings size={19} className="transition-transform hover:rotate-90 duration-300" />
+            </button>
+          )}
         </div>
       </header>
 

@@ -146,7 +146,7 @@ export default function TVCastModal({
         bridge.connectToCastDevice(
           activeRouteIdRef.current,
           targetUrl,
-          title || 'Movie Portal',
+          title || 'Movie Hub',
           poster || '',
           currentTime || 0
         );
@@ -304,7 +304,7 @@ export default function TVCastModal({
         bridge.connectToCastDevice(
           device.id,
           targetUrl,
-          title || 'Movie Portal',
+          title || 'Movie Hub',
           poster || '',
           currentTime || 0
         );

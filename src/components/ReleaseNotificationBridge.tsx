@@ -126,7 +126,7 @@ function dispatchNotificationToDevice(
   // 2. Web / Android Chrome / PWA Browser fallback
   if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
     saveNotifiedId(payload.id, false);
-    const titleText = 'Movie Portal';
+    const titleText = 'Movie Hub';
     const options: any = {
       body: `${payload.notificationTitle}\n${payload.notificationBody}`,
       icon: payload.posterUrl || '/assets/icons/master_icon.jpg',

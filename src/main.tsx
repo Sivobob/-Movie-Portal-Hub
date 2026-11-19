@@ -35,7 +35,7 @@ class ErrorBoundary extends Component<Props, State> {
             <div className="w-12 h-12 rounded-2xl bg-yellow-400/10 border border-yellow-500/30 flex items-center justify-center text-yellow-400 mx-auto mb-4 font-black text-xl">
               !
             </div>
-            <h2 className="text-lg font-black text-white uppercase tracking-tight mb-2">Movie Portal</h2>
+            <h2 className="text-lg font-black text-white uppercase tracking-tight mb-2">Movie Hub</h2>
             <p className="text-xs text-gray-400 mb-6 leading-relaxed">
               The application encountered a temporary setup notice. Tap below to reload.
             </p>
@@ -43,7 +43,7 @@ class ErrorBoundary extends Component<Props, State> {
               onClick={() => window.location.reload()}
               className="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-black text-xs py-3 px-4 rounded-xl shadow-lg transition-all uppercase tracking-wider cursor-pointer"
             >
-              Reload Movie Portal
+              Reload Movie Hub
             </button>
           </div>
         </div>

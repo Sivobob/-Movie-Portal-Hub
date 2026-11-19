@@ -82,7 +82,7 @@ function AdminRoute({ children }: { children: React.ReactElement }) {
 
         <Link to="/" className="inline-flex items-center gap-1.5 text-xs text-yellow-400 hover:text-yellow-300 font-bold transition-colors">
           <ArrowLeft size={14} />
-          <span>Return to Movie Portal</span>
+          <span>Return to Movie Hub</span>
         </Link>
       </div>
     </div>
