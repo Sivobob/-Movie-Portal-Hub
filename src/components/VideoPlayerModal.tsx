@@ -31,6 +31,7 @@ import {
   buildApiUrl,
   ensureAndroidStreamBridge,
   forceUseLocalNativeBridge,
+  getApiBaseUrl,
   getNativeLocalBridgeUrl,
   getRemoteTranscodeBackendUrl,
   hasRemoteTranscodeBackend,
@@ -952,14 +953,8 @@ export default function VideoPlayerModal({
 
     let apiUrl: string;
     if (Capacitor.isNativePlatform() && isServerPipe) {
-      const remoteBase = getRemoteTranscodeBackendUrl();
-      if (!remoteBase) {
-        apiUrl = isTelegram
-          ? buildApiUrl(`/api/stream?url=${encodeURIComponent(sourceUrl)}&ext=.mp4`)
-          : sourceUrl;
-      } else {
-        apiUrl = `${remoteBase}/api/stream${params}`;
-      }
+      const remoteBase = getRemoteTranscodeBackendUrl() || getApiBaseUrl();
+      apiUrl = remoteBase ? `${remoteBase}/api/stream${params}` : buildApiUrl(`/api/stream${params}`);
     } else {
       apiUrl = buildApiUrl(`/api/stream${params}`);
     }
@@ -1904,6 +1899,18 @@ export default function VideoPlayerModal({
       }, 2500);
     };
 
+    try {
+      video.setAttribute('webkit-playsinline', 'true');
+      video.setAttribute('x-webkit-playsinline', 'true');
+    } catch {}
+
+    const onWebkitBeginFullscreen = () => {
+      setIsFullscreen(true);
+    };
+    const onWebkitEndFullscreen = () => {
+      setIsFullscreen(false);
+    };
+
     video.addEventListener('play', onPlay);
     video.addEventListener('pause', onPause);
     video.addEventListener('timeupdate', onTimeUpdate);
@@ -1913,12 +1920,13 @@ export default function VideoPlayerModal({
     video.addEventListener('waiting', onWaiting);
     video.addEventListener('waiting', onStallWaiting);
     video.addEventListener('stalled', onStalled);
-    video.addEventListener('suspend', onStalled);
     video.addEventListener('playing', onPlaying);
     video.addEventListener('canplay', onCanPlay);
     video.addEventListener('seeked', onSeeked);
     video.addEventListener('ended', onEnded);
     video.addEventListener('error', onError);
+    video.addEventListener('webkitbeginfullscreen', onWebkitBeginFullscreen);
+    video.addEventListener('webkitendfullscreen', onWebkitEndFullscreen);
     document.addEventListener('visibilitychange', onVisibilityChange);
 
     // If no pending seek offset, kick off playback right away; if resuming from small screen, start after metadata so browser seeks before playing frame 0
@@ -1959,12 +1967,13 @@ export default function VideoPlayerModal({
       video.removeEventListener('waiting', onWaiting);
       video.removeEventListener('waiting', onStallWaiting);
       video.removeEventListener('stalled', onStalled);
-      video.removeEventListener('suspend', onStalled);
       video.removeEventListener('playing', onPlaying);
       video.removeEventListener('canplay', onCanPlay);
       video.removeEventListener('seeked', onSeeked);
       video.removeEventListener('ended', onEnded);
       video.removeEventListener('error', onError);
+      video.removeEventListener('webkitbeginfullscreen', onWebkitBeginFullscreen);
+      video.removeEventListener('webkitendfullscreen', onWebkitEndFullscreen);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, [playableUrl, isYouTube, exoModeActive, episodeResumeKey, streamFallbackMode, manualRetryNonce]);

@@ -3,6 +3,7 @@ import { spawn } from 'child_process';
 import { Api, TelegramClient } from 'telegram';
 import bigInt from 'big-integer';
 import { cleanMediaTrackLabel } from '../utils/videoQuality.ts';
+import { isTelegramAuthKeyError, resetTelegramClient } from '../utils/telegramClient.ts';
 
 export const BLOCK_SIZE = 512 * 1024; // 512 KB (exact Telegram upload.GetFile unit)
 const MAX_CACHED_BLOCKS = 96; // ~48 MB RAM LRU cache across active streams
@@ -22,6 +23,7 @@ export interface AudioTrackInfo {
   channels: number;
   lang: string;
   label: string;
+  startTime?: number;
 }
 
 export interface SubtitleTrackInfo {
@@ -48,6 +50,7 @@ export interface ProbeMediaResult {
   recommendedMode: 'direct' | 'remux' | 'transcode';
   needsAudioTranscode: boolean;
   probedByFfprobe: boolean;
+  videoStartTime?: number;
 }
 
 // Global LRU Block Cache: key = `${docId}:${blockIndex}`
@@ -108,8 +111,9 @@ async function fetchTelegramBlockRaw(
     thumbSize: '',
   });
 
+  let activeClient = client;
   let dcId: number | undefined = resolvedDcMap.get(docIdStr) ?? doc.dcId;
-  let sender = await getDcSenderSafe(client, dcId);
+  let sender = await getDcSenderSafe(activeClient, dcId);
 
   const request = new Api.upload.GetFile({
     location,
@@ -117,14 +121,18 @@ async function fetchTelegramBlockRaw(
     limit: BLOCK_SIZE,
   });
 
+  const maxAttempts = 5;
   let attempts = 0;
-  while (attempts < 4) {
+  let authResetDone = false;
+
+  while (attempts < maxAttempts) {
     attempts++;
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     try {
-      const invokePromise = client.invokeWithSender(request, sender);
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('TIMEOUT: Telegram GetFile timed out')), 12000)
-      );
+      const invokePromise = activeClient.invokeWithSender(request, sender);
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => reject(new Error('TIMEOUT: Telegram GetFile timed out')), 20000);
+      });
       const result: any = await Promise.race([invokePromise, timeoutPromise]);
       if (result instanceof Api.upload.FileCdnRedirect) {
         throw new Error('CDN redirect not supported for GetFile');
@@ -135,30 +143,58 @@ async function fetchTelegramBlockRaw(
       return Buffer.isBuffer(result.bytes) ? result.bytes : Buffer.from(result.bytes);
     } catch (err: any) {
       const msg = String(err?.errorMessage || err?.message || '');
+      if (isTelegramAuthKeyError(err) && !authResetDone) {
+        authResetDone = true;
+        activeClient = await resetTelegramClient({ clearSavedSession: true, preferBotFallback: true });
+        sender = await getDcSenderSafe(activeClient, dcId);
+        continue;
+      }
       if (err?.newDc) {
         dcId = Number(err.newDc);
         resolvedDcMap.set(docIdStr, dcId);
-        sender = await getDcSenderSafe(client, dcId);
+        sender = await getDcSenderSafe(activeClient, dcId);
         continue;
       }
       const migrateMatch = msg.match(/FILE_MIGRATE_(\d+)/i);
       if (migrateMatch) {
         dcId = Number(migrateMatch[1]);
         resolvedDcMap.set(docIdStr, dcId);
-        sender = await getDcSenderSafe(client, dcId);
+        sender = await getDcSenderSafe(activeClient, dcId);
         continue;
       }
-      if (msg.includes('TIMEOUT') && attempts < 3) {
-        await new Promise((r) => setTimeout(r, 400));
-        sender = await getDcSenderSafe(client, dcId);
+      const upperMsg = msg.toUpperCase();
+      const isTransientNetErr =
+        upperMsg.includes('TIMEOUT') ||
+        upperMsg.includes('ECONNRESET') ||
+        upperMsg.includes('ETIMEDOUT') ||
+        upperMsg.includes('CONNECTION') ||
+        upperMsg.includes('NOT CONNECTED') ||
+        upperMsg.includes('WEBSOCKET');
+      if (isTransientNetErr && attempts < maxAttempts) {
+        if (attempts >= 2) {
+          try {
+            (sender as any)?.reconnect?.();
+          } catch {}
+        }
+        await new Promise((r) => setTimeout(r, Math.min(2500, 400 * attempts)));
+        try {
+          if (!activeClient.connected) {
+            await activeClient.connect();
+          }
+          sender = await getDcSenderSafe(activeClient, dcId);
+        } catch {}
         continue;
       }
       const floodMatch = msg.match(/FLOOD_WAIT_(\d+)/i);
-      if (floodMatch && Number(floodMatch[1]) <= 10 && attempts < 3) {
+      if (floodMatch && Number(floodMatch[1]) <= 10 && attempts < maxAttempts) {
         await new Promise((r) => setTimeout(r, (Number(floodMatch[1]) + 1) * 1000));
         continue;
       }
       throw err;
+    } finally {
+      if (timeoutHandle !== undefined) {
+        clearTimeout(timeoutHandle);
+      }
     }
   }
   throw new Error('Failed to fetch Telegram block after retries');
@@ -209,6 +245,7 @@ export async function streamTelegramRange(
 ): Promise<void> {
   const firstBlock = Math.floor(start / BLOCK_SIZE);
   const lastBlock = Math.floor(endPos / BLOCK_SIZE);
+  const effectiveConcurrency = Math.max(1, Math.min(concurrency, 3));
 
   // Active prefetch queue keyed by blockIndex
   const blockPromises = new Map<number, Promise<Buffer>>();
@@ -216,7 +253,7 @@ export async function streamTelegramRange(
 
   const queueAhead = (upToBlock: number) => {
     const cap = Math.min(lastBlock, upToBlock);
-    while (nextToQueue <= cap && !isClosedFn()) {
+    while (nextToQueue <= cap && !isClosedFn() && !res.writableEnded) {
       const idx = nextToQueue++;
       if (!blockPromises.has(idx)) {
         const p = fetchBlock(client, doc, idx);
@@ -228,14 +265,11 @@ export async function streamTelegramRange(
   };
 
   // Start initial parallel batch immediately
-  queueAhead(firstBlock + concurrency - 1);
+  queueAhead(firstBlock + effectiveConcurrency - 1);
 
   try {
     for (let blockIdx = firstBlock; blockIdx <= lastBlock; blockIdx++) {
       if (isClosedFn() || res.writableEnded) break;
-
-      // Ensure pipeline stays full ahead of current block
-      queueAhead(blockIdx + concurrency);
 
       const p = blockPromises.get(blockIdx) || fetchBlock(client, doc, blockIdx);
       const blockBuf = await p;
@@ -278,6 +312,10 @@ export async function streamTelegramRange(
         // Reached EOF
         break;
       }
+
+      // Queue next blocks ONLY after downstream socket accepted/drained the current block
+      // so a paused player/FFmpeg backpressure never leaves Telegram GetFile RPCs stalling in flight.
+      queueAhead(blockIdx + effectiveConcurrency);
     }
   } catch (err: any) {
     if (String(err?.message || '').includes('FILE_REFERENCE')) {
@@ -434,8 +472,10 @@ export async function probeTelegramMedia(
           pixFmt.includes('12le') ||
           profile.includes('10');
 
+        const videoStartTime = parseFloat(videoStream?.start_time || '0');
         const audioTracks: AudioTrackInfo[] = audioStreamObjs.map((s, idx) => {
           const { lang, label } = formatLanguageLabel(s.tags?.language, s.tags?.title, idx, 'audio');
+          const trackStart = parseFloat(s.start_time || '0');
           return {
             id: idx,
             streamIndex: Number(s.index ?? idx),
@@ -443,6 +483,7 @@ export async function probeTelegramMedia(
             channels: Number(s.channels || 2),
             lang,
             label,
+            startTime: Number.isFinite(trackStart) ? trackStart : 0,
           };
         });
 
@@ -531,6 +572,7 @@ export async function probeTelegramMedia(
           recommendedMode,
           needsAudioTranscode,
           probedByFfprobe: true,
+          videoStartTime: Number.isFinite(videoStartTime) ? videoStartTime : 0,
         });
       } catch {
         resolve(fallbackProbeFromMetadata(docInfo));

@@ -21,6 +21,7 @@ import DownloadsPage from './components/DownloadsPage';
 import MePage from './components/MePage';
 import SettingsPage from './components/SettingsPage';
 import { syncAppPreferencesFromFirestore } from './services/userPreferencesService';
+import { MoviesProvider } from './context/MoviesContext';
 
 function AdminRoute({ children }: { children: React.ReactElement }) {
   const [unlocked, setUnlocked] = useState(() => {
@@ -162,7 +163,9 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <AppContent />
+      <MoviesProvider>
+        <AppContent />
+      </MoviesProvider>
     </BrowserRouter>
   );
 }

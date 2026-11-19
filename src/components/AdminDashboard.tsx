@@ -15,6 +15,7 @@ import {
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth, isAuthorizedAdminEmail, AUTHORIZED_ADMIN_EMAILS } from '../context/AuthContext';
 import { getDisplayCategory } from '../utils/categoryMapping';
+import { broadcastWebPushNotification } from '../services/webPushService';
 import { Link } from 'react-router-dom';
 import { 
   Film, 
@@ -66,6 +67,7 @@ import {
   getTimestampMs,
   isEpisodeNewActive,
   NEW_EPISODE_WINDOW_MS,
+  touchCatalogSyncMarker,
   MovieData
 } from '../services/movieStorage';
 import { loginWithGoogle } from '../services/authService';
@@ -1257,7 +1259,7 @@ export default function AdminDashboard() {
           setEditingMovie(updatedMovie);
           saveMovieLocally(updatedMovie);
           setMovies((prev) => prev.map((m) => (m.id === editingMovie.id ? updatedMovie : m)));
-          broadcastMoviesUpdated();
+          broadcastMoviesUpdated(editingMovie.id, 'new_episode');
           showNotification(
             'success',
             nextActive
@@ -1590,6 +1592,7 @@ export default function AdminDashboard() {
 
     setFormLoading(false);
     if (synced > 0) {
+      broadcastMoviesUpdated('bulk_sync', 'import');
       showNotification('success', `Successfully synced ${synced} movies to cloud!`);
       fetchMovies();
     } else if (failed > 0) {
@@ -2189,12 +2192,13 @@ export default function AdminDashboard() {
     }
   };
 
-  const broadcastMoviesUpdated = () => {
+  const broadcastMoviesUpdated = (movieId = '', action = 'update') => {
     try {
+      touchCatalogSyncMarker(movieId, action).catch(() => {});
       window.dispatchEvent(new CustomEvent('movies_updated'));
       if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
         const bc = new BroadcastChannel('movie_portal_updates');
-        bc.postMessage({ type: 'MOVIES_UPDATED' });
+        bc.postMessage({ type: 'MOVIES_UPDATED', movieId, action });
         bc.close();
       }
     } catch {}
@@ -2339,6 +2343,23 @@ export default function AdminDashboard() {
     } catch (bcErr) {
       console.warn('Broadcast notification error:', bcErr);
     }
+
+    // Dispatch instant background Web Push (APNs/FCM via VAPID) to all subscribed phones even if app is closed
+    try {
+      return await broadcastWebPushNotification({
+        id: broadcastPayload.id,
+        movieId: broadcastPayload.movieId,
+        title: broadcastPayload.title,
+        notificationTitle: broadcastPayload.notificationTitle,
+        notificationBody: broadcastPayload.notificationBody,
+        message: broadcastPayload.message,
+        posterUrl: broadcastPayload.posterUrl,
+        backdropUrl: broadcastPayload.backdropUrl,
+        imageUrl: broadcastPayload.imageUrl,
+      });
+    } catch {
+      return { sentCount: 0, totalTargets: 0 };
+    }
   };
 
   const handleManualSendNotification = async (movie: MovieData) => {
@@ -2349,7 +2370,7 @@ export default function AdminDashboard() {
         (movie.originalCategory || '').toLowerCase().includes('series')
         || (Array.isArray(movie.seasons) && movie.seasons.length > 0)
       );
-      await publishReleaseAnnouncement({
+      const pushStats = await publishReleaseAnnouncement({
         movieId: movie.id,
         title: movie.title,
         releaseYear: movie.releaseYear,
@@ -2362,7 +2383,11 @@ export default function AdminDashboard() {
         posterUrl: movie.posterUrl,
         backdropUrl: movie.backdropUrl || movie.posterUrl,
       });
-      showNotification('success', `🔔 Notification sent to all users for "${movie.title}"!`);
+      const pushSummary =
+        pushStats && pushStats.totalTargets > 0
+          ? ` (${pushStats.sentCount}/${pushStats.totalTargets} background phone push sent)`
+          : '';
+      showNotification('success', `🔔 Notification sent to all users for "${movie.title}"!${pushSummary}`);
     } catch (err: any) {
       showNotification('error', `Failed to send notification: ${err?.message || 'Error'}`);
     } finally {
@@ -2490,7 +2515,7 @@ export default function AdminDashboard() {
             updatedAt: Date.now(),
           } as MovieData;
           saveMovieLocally(updatedLocal);
-          broadcastMoviesUpdated();
+          broadcastMoviesUpdated(editingMovie.id, 'edit');
           setMovies((prev) => prev.map((m) => (m.id === editingMovie.id ? updatedLocal : m)));
 
           if (!asDraft && notifyOnUpdate) {
@@ -2532,8 +2557,9 @@ export default function AdminDashboard() {
         newDocId = docRef.id;
 
         // Create a rich public release notification for all installed app users
+        let pushNote = '';
         if (!asDraft) {
-          await publishReleaseAnnouncement({
+          const pushStats = await publishReleaseAnnouncement({
             movieId: newDocId,
             title: moviePayload.title,
             releaseYear: moviePayload.releaseYear,
@@ -2546,11 +2572,20 @@ export default function AdminDashboard() {
             posterUrl: moviePayload.posterUrl,
             backdropUrl: moviePayload.backdropUrl,
           });
+          if (pushStats && pushStats.totalTargets > 0) {
+            pushNote = ` (${pushStats.sentCount}/${pushStats.totalTargets} phone push sent)`;
+          }
         }
 
         // Always persist to local cache as well
-        saveMovieLocally({ id: newDocId, ...moviePayload } as any);
-        broadcastMoviesUpdated();
+        const nowMs = Date.now();
+        saveMovieLocally({
+          id: newDocId,
+          ...moviePayload,
+          createdAt: nowMs,
+          updatedAt: nowMs,
+        } as any);
+        broadcastMoviesUpdated(newDocId, 'add');
 
         resetMovieForm();
 
@@ -2578,7 +2613,7 @@ export default function AdminDashboard() {
           'success', 
           asDraft 
             ? `Saved "${moviePayload.title}" as Draft (Unpublished).` 
-            : `🎉 Successfully PUBLISHED "${moviePayload.title}" into ${autoDisplayCategory} Section!`
+            : `🎉 Successfully PUBLISHED "${moviePayload.title}" into ${autoDisplayCategory} Section!${pushNote}`
         );
         
         await fetchMovies();
@@ -2754,6 +2789,7 @@ export default function AdminDashboard() {
         console.warn('Firestore publish toggle failed, updating in local cache:', fsErr);
       }
       togglePublishLocally(movie.id);
+      broadcastMoviesUpdated(movie.id, 'toggle_publish');
       setMovies((prev) =>
         prev.map((m) => (m.id === movie.id ? { ...m, published: newStatus } : m))
       );
@@ -2777,6 +2813,7 @@ export default function AdminDashboard() {
         console.warn('Firestore featured toggle failed, updating in local cache:', fsErr);
       }
       toggleFeaturedLocally(movie.id);
+      broadcastMoviesUpdated(movie.id, 'toggle_featured');
       setMovies((prev) =>
         prev.map((m) => (m.id === movie.id ? { ...m, featured: newFeatured } : m))
       );

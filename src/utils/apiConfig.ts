@@ -1,6 +1,7 @@
-export const LIVE_BACKEND_URL = 'https://ais-dev-23ig7rhoci7kumxir7xicl-835315626292.asia-northeast1.run.app';
-export const PRE_BACKEND_URL = 'https://ais-pre-23ig7rhoci7kumxir7xicl-835315626292.asia-northeast1.run.app';
-export const APP_VERSION = 'v3.5.235';
+export const CLOUD_RUN_BACKEND_URL = 'https://movie-portalhub-1012526016635.asia-southeast1.run.app';
+export const LIVE_BACKEND_URL = 'https://ais-dev-ic2kso77lsvaweb4l75hwo-828533060153.asia-northeast1.run.app';
+export const PRE_BACKEND_URL = 'https://ais-pre-ic2kso77lsvaweb4l75hwo-828533060153.asia-northeast1.run.app';
+export const APP_VERSION = 'v3.5.243';
 
 const ENV_BACKEND_URL = (
   (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_BASE_URL) ||
@@ -208,7 +209,7 @@ export async function probeWorkingBackendUrl(force = false): Promise<string | nu
     const firestoreBackendUrl = await fetchFirestoreConfiguredBackendUrl();
 
     const remoteCandidates = Array.from(
-      new Set([custom, ENV_BACKEND_URL, firestoreBackendUrl, PRE_BACKEND_URL, LIVE_BACKEND_URL].filter(Boolean))
+      new Set([custom, ENV_BACKEND_URL, firestoreBackendUrl, CLOUD_RUN_BACKEND_URL, PRE_BACKEND_URL, LIVE_BACKEND_URL].filter(Boolean))
     );
 
     if (remoteCandidates.length > 0) {

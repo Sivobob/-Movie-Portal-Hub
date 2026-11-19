@@ -1,14 +1,10 @@
 import { Router, Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import http from 'http';
 import https from 'https';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase.ts';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const downloadCastRouter = Router();
 

@@ -153,8 +153,11 @@ export async function getBrowserTelegramClient(forceReconnect = false): Promise<
 function isRecoverableClientError(err: any): boolean {
   const msg = String(err?.message || err?.errorMessage || '').toUpperCase();
   return (
+    msg.includes('AUTH_KEY_DUPLICATED') ||
     msg.includes('AUTH_KEY_UNREGISTERED') ||
+    msg.includes('AUTH_KEY_INVALID') ||
     msg.includes('SESSION_REVOKED') ||
+    msg.includes('SESSION_EXPIRED') ||
     msg.includes('WEBSOCKET') ||
     msg.includes('CONNECTION') ||
     msg.includes('NOT CONNECTED') ||

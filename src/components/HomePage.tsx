@@ -1,18 +1,14 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { collection, query, where, onSnapshot, getDocsFromServer } from 'firebase/firestore';
-import { db } from '../firebase';
 import MovieCard from './MovieCard';
-import { Play, Film, Plus, Check, Info, Trash2 } from 'lucide-react';
+import { Play, Film, Plus, Check, Info } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import VideoPlayerModal from './VideoPlayerModal';
 import MovieDetailsModal from './MovieDetailsModal';
 import { useAuth } from '../context/AuthContext';
+import { useMovies } from '../context/MoviesContext';
 import {
-  fetchWatchHistory,
-  WatchHistoryItem,
-  removeWatchHistoryItem,
   addToMyList,
   removeFromMyList,
   fetchMyList,
@@ -20,13 +16,10 @@ import {
 } from '../services/userWatchService';
 
 import {
-  getLocalMovies,
-  saveLocalMovies,
-  sortMoviesList,
   getNewEpisodesWithin24h,
   NEW_EPISODE_WINDOW_MS,
 } from '../services/movieStorage';
-import { upgradePosterUrl, normalizeMoviePosters } from '../utils/posterUrl';
+import { upgradePosterUrl } from '../utils/posterUrl';
 import { getVisibleQualityBadge } from '../utils/qualityBadge';
 import { parseDurationToSeconds } from '../utils/duration';
 import { getAppPreferences, isMatureContent } from '../services/userPreferencesService';
@@ -50,8 +43,7 @@ const slideVariants = {
 
 export default function HomePage() {
   const { user } = useAuth();
-  const initialLocal = sortMoviesList(getLocalMovies().filter((m: any) => m.published !== false));
-  const [rawMovies, setRawMovies] = useState<any[]>(initialLocal);
+  const { movies: rawMovies, isLoading } = useMovies();
   const [familyMode, setFamilyMode] = useState<boolean>(() => getAppPreferences().familyMode);
 
   useEffect(() => {
@@ -88,15 +80,13 @@ export default function HomePage() {
     }
   };
 
-  const [isLoading, setIsLoading] = useState<boolean>(false);
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const [selectedMovie, setSelectedMovie] = useState<any | null>(null);
   const [activeSeasonIndex, setActiveSeasonIndex] = useState(0);
   const [playingMovie, setPlayingMovie] = useState<any | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Recently watched & My List state
-  const [recentlyWatched, setRecentlyWatched] = useState<WatchHistoryItem[]>([]);
+  // My List state
   const [myListIds, setMyListIds] = useState<Set<string>>(new Set());
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
 
@@ -125,10 +115,9 @@ export default function HomePage() {
     } catch {}
   }, [category]);
 
-  // Load user watch history and My List
+  // Load user My List
   const loadUserHistory = () => {
     const uid = user?.uid || 'guest_user';
-    fetchWatchHistory(uid).then((history) => setRecentlyWatched(history)).catch(() => {});
     fetchMyList(uid).then((list) => {
       const ids = new Set(list.map((item) => item.movieId));
       setMyListIds(ids);
@@ -233,84 +222,7 @@ export default function HomePage() {
     };
   }, []);
 
-  // Load movies from Firestore
-  useEffect(() => {
-    let isMounted = true;
-    const q = query(collection(db, 'movies'), where('published', '==', true));
-
-    const applyMovieList = (rawDocs: any[], fromCache: boolean) => {
-      if (!isMounted) return;
-      const list = sortMoviesList(
-        rawDocs.map((d) => normalizeMoviePosters({ id: d.id, ...d.data() })) as any[]
-      );
-      if (fromCache && list.length === 0 && getLocalMovies().length > 0) {
-        return;
-      }
-      setIsLoading(false);
-      setRawMovies(list);
-      saveLocalMovies(list);
-    };
-
-    const syncFromServer = async () => {
-      try {
-        const snap = await getDocsFromServer(q);
-        applyMovieList(snap.docs, false);
-      } catch {}
-    };
-
-    const unsubscribe = onSnapshot(
-      q,
-      { includeMetadataChanges: true },
-      (snapshot) => {
-        applyMovieList(snapshot.docs, snapshot.metadata.fromCache);
-      },
-      (err) => {
-        console.error('Real-time sync error:', err);
-        if (isMounted) setIsLoading(false);
-      }
-    );
-
-    syncFromServer();
-
-    const handleMoviesUpdated = () => {
-      syncFromServer();
-      const local = sortMoviesList(getLocalMovies().filter((m: any) => m.published !== false));
-      if (local.length > 0) {
-        applyMovieList(local.map((m: any) => ({ id: m.id, data: () => m })), true);
-      }
-    };
-    window.addEventListener('movies_updated', handleMoviesUpdated);
-
-    let bc: BroadcastChannel | null = null;
-    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-      try {
-        bc = new BroadcastChannel('movie_portal_updates');
-        bc.onmessage = (event) => {
-          if (event.data?.type === 'MOVIES_UPDATED' || event.data?.type === 'NEW_RELEASE') {
-            handleMoviesUpdated();
-          }
-        };
-      } catch {}
-    }
-
-    const handleVisibilityOrFocus = () => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-      syncFromServer();
-    };
-    window.addEventListener('focus', handleVisibilityOrFocus);
-    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
-
-    return () => {
-      isMounted = false;
-      unsubscribe();
-      window.removeEventListener('movies_updated', handleMoviesUpdated);
-      if (bc) {
-        try { bc.close(); } catch {}
-      }
-      window.removeEventListener('focus', handleVisibilityOrFocus);
-      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
-    };
-  }, []);
+  // Global MoviesProvider keeps rawMovies synced live across all routes and resume events.
 
   // Open specific movie/series when user taps a push/release notification
   useEffect(() => {
@@ -622,14 +534,6 @@ export default function HomePage() {
     }
   };
 
-  const handleDeleteHistory = async (e: React.MouseEvent, movieId: string) => {
-    e.stopPropagation();
-    const uid = user?.uid || 'guest_user';
-    await removeWatchHistoryItem(uid, movieId);
-    setRecentlyWatched((prev) => prev.filter((item) => item.movieId !== movieId));
-    showToast('Removed from Recently Watched');
-  };
-
   const toggleMyList = async (e: React.MouseEvent, movie: any) => {
     e.stopPropagation();
     const uid = user?.uid || 'guest_user';
@@ -888,7 +792,7 @@ export default function HomePage() {
                       {currentFeatured.displayCategory || currentFeatured.originalCategory || 'Movie'}
                     </span>
                     <span>•</span>
-                    <span>{currentFeatured.year || '2026'}</span>
+                    <span>{currentFeatured.releaseYear || (currentFeatured as any).year || '2026'}</span>
                     <span>•</span>
                     <span className="text-red-400 truncate">{currentFeatured.genre || 'Action'}</span>
                   </div>
@@ -966,75 +870,6 @@ export default function HomePage() {
                           aria-label="Series Details"
                         >
                           <Info size={12} />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* 1. RECENTLY WATCHED SECTION (Exact Match with Reference Screenshot 2) */}
-          {recentlyWatched.length > 0 && (
-            <div className="mt-5 px-3 sm:px-6">
-              <h3 className="text-base sm:text-lg font-bold text-white tracking-wide mb-3">
-                Recently Watched
-              </h3>
-              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
-                {recentlyWatched.map((item) => {
-                  const liveMovie = movies.find(
-                    (m) => m.id === item.movieId || (m.imdbId && m.imdbId === item.movieId)
-                  );
-                  const movie = liveMovie
-                    ? { ...liveMovie, currentTime: item.currentTime || 0 }
-                    : (item.movieData || item);
-                  return (
-                    <div
-                      key={item.movieId}
-                      className="flex-shrink-0 w-32 sm:w-36 bg-neutral-900 rounded-xl overflow-hidden border border-neutral-800 flex flex-col shadow-lg"
-                    >
-                      {/* Poster Image with Circular Play Overlay & Red Progress Bar */}
-                      <div
-                        onClick={() => handleMovieClick(movie)}
-                        className="relative aspect-[3/4] w-full bg-neutral-950 overflow-hidden cursor-pointer group"
-                      >
-                        <img
-                          src={upgradePosterUrl(item.posterUrl, 400) || item.posterUrl}
-                          alt={item.title}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                        />
-                        <div className="absolute inset-0 flex items-center justify-center bg-black/35 group-hover:bg-black/15 transition-colors">
-                          <div className="w-10 h-10 rounded-full bg-white/30 backdrop-blur-sm border border-white/40 text-white flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
-                            <Play size={16} fill="white" className="ml-0.5" />
-                          </div>
-                        </div>
-                        {/* Red Progress Bar at Bottom of Poster */}
-                        <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-neutral-950">
-                          <div
-                            className="h-full bg-red-600"
-                            style={{ width: `${Math.min(100, Math.max(8, item.progress || 0))}%` }}
-                          />
-                        </div>
-                      </div>
-
-                      {/* Bottom Controls Bar: (i) Info Button + Trash Can Button */}
-                      <div className="flex items-center justify-around py-2 px-1 bg-neutral-900 border-t border-neutral-800/80">
-                        <button
-                          type="button"
-                          onClick={() => handleMovieClick(movie)}
-                          className="w-7 h-7 rounded-full bg-neutral-800 text-gray-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
-                          title="Details"
-                        >
-                          <Info size={14} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => handleDeleteHistory(e, item.movieId)}
-                          className="w-7 h-7 rounded-full bg-neutral-800 text-gray-400 hover:text-red-400 flex items-center justify-center transition-colors cursor-pointer"
-                          title="Remove from Recently Watched"
-                        >
-                          <Trash2 size={13} />
                         </button>
                       </div>
                     </div>

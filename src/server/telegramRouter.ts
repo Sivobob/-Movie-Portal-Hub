@@ -2,7 +2,12 @@ import { Router, Request, Response } from 'express';
 import { spawn } from 'child_process';
 import { Api } from 'telegram';
 import { parseTelegramUrl } from '../utils/telegramParser.ts';
-import { getTelegramClient, getTelegramCredentials } from '../utils/telegramClient.ts';
+import {
+  getTelegramClient,
+  getTelegramCredentials,
+  isTelegramAuthKeyError,
+  resetTelegramClient,
+} from '../utils/telegramClient.ts';
 import { 
   resolveTelegramMedia, 
   saveChannelEntity, 
@@ -157,25 +162,25 @@ function normalizeRequestedQuality(raw: unknown): VideoQualityTier | '' {
   return '';
 }
 
-function getFfmpegQualityArgs(quality: VideoQualityTier | '', isDownload: boolean): string[] {
+function getFfmpegQualityArgs(quality: VideoQualityTier | '', _isDownload: boolean): string[] {
   const args: string[] = [];
   if (quality === '360p') {
     args.push(
       '-vf', "scale='min(640,iw)':'min(360,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
       '-c:v', 'libx264',
       '-preset', 'ultrafast',
-      ...(isDownload ? [] : ['-tune', 'zerolatency']),
       '-threads', '0',
       '-pix_fmt', 'yuv420p',
       '-profile:v', 'main',
       '-level', '3.1',
-      '-vsync', 'cfr',
+      '-vsync', 'vfr',
       '-b:v', '280k',
       '-maxrate', '360k',
       '-bufsize', '720k',
       '-g', '48',
       '-keyint_min', '48',
       '-sc_threshold', '0',
+      '-af', 'aresample=async=1:min_hard_comp=0.100000:first_pts=0',
       '-c:a', 'aac',
       '-ac', '2',
       '-ar', '44100',
@@ -189,18 +194,18 @@ function getFfmpegQualityArgs(quality: VideoQualityTier | '', isDownload: boolea
       '-vf', "scale='min(854,iw)':'min(480,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
       '-c:v', 'libx264',
       '-preset', 'ultrafast',
-      ...(isDownload ? [] : ['-tune', 'zerolatency']),
       '-threads', '0',
       '-pix_fmt', 'yuv420p',
       '-profile:v', 'main',
       '-level', '3.1',
-      '-vsync', 'cfr',
+      '-vsync', 'vfr',
       '-b:v', '520k',
       '-maxrate', '650k',
       '-bufsize', '1300k',
       '-g', '48',
       '-keyint_min', '48',
       '-sc_threshold', '0',
+      '-af', 'aresample=async=1:min_hard_comp=0.100000:first_pts=0',
       '-c:a', 'aac',
       '-ac', '2',
       '-ar', '48000',
@@ -214,18 +219,18 @@ function getFfmpegQualityArgs(quality: VideoQualityTier | '', isDownload: boolea
       '-vf', "scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
       '-c:v', 'libx264',
       '-preset', 'ultrafast',
-      ...(isDownload ? [] : ['-tune', 'zerolatency']),
       '-threads', '0',
       '-pix_fmt', 'yuv420p',
       '-profile:v', 'main',
       '-level', '4.0',
-      '-vsync', 'cfr',
+      '-vsync', 'vfr',
       '-b:v', '1050k',
       '-maxrate', '1300k',
       '-bufsize', '2600k',
       '-g', '48',
       '-keyint_min', '48',
       '-sc_threshold', '0',
+      '-af', 'aresample=async=1:min_hard_comp=0.100000:first_pts=0',
       '-c:a', 'aac',
       '-ac', '2',
       '-ar', '48000',
@@ -239,7 +244,6 @@ function getFfmpegQualityArgs(quality: VideoQualityTier | '', isDownload: boolea
     '-vf', "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
     '-c:v', 'libx264',
     '-preset', 'ultrafast',
-    ...(isDownload ? [] : ['-tune', 'zerolatency']),
     '-threads', '0',
     '-pix_fmt', 'yuv420p',
     '-profile:v', 'main',
@@ -247,13 +251,14 @@ function getFfmpegQualityArgs(quality: VideoQualityTier | '', isDownload: boolea
     '-color_primaries', 'bt709',
     '-color_trc', 'bt709',
     '-colorspace', 'bt709',
-    '-vsync', 'cfr',
+    '-vsync', 'vfr',
     '-crf', '22',
     '-maxrate', '3400k',
     '-bufsize', '6800k',
     '-g', '48',
     '-keyint_min', '48',
     '-sc_threshold', '0',
+    '-af', 'aresample=async=1:min_hard_comp=0.100000:first_pts=0',
     '-c:a', 'aac',
     '-ac', '2',
     '-ar', '48000',
@@ -302,8 +307,18 @@ router.get('/status', async (_req: Request, res: Response) => {
   }
 
   try {
-    const client = await getTelegramClient();
-    const me: any = await client.getMe();
+    let client = await getTelegramClient();
+    let me: any;
+    try {
+      me = await client.getMe();
+    } catch (meErr: any) {
+      if (isTelegramAuthKeyError(meErr)) {
+        client = await resetTelegramClient({ clearSavedSession: true, preferBotFallback: true });
+        me = await client.getMe();
+      } else {
+        throw meErr;
+      }
+    }
     res.json({
       connected: client.connected,
       configured: true,
@@ -1963,15 +1978,22 @@ function pipeFfmpegMp4Stream(opts: {
     return res.status(503).json({ error: 'Transcoding server is busy. Please retry in a moment.' });
   }
 
+  const isPureRemux = remuxOnly && !requestedQuality;
   const ffArgs: string[] = [
-    '-probesize', '2000000',
-    '-analyzeduration', '2000000',
-    '-fflags', '+genpts+discardcorrupt',
+    '-probesize', '5000000',
+    '-analyzeduration', '5000000',
+    '-fflags', '+discardcorrupt',
     '-reconnect', '1',
     '-reconnect_streamed', '1',
+    '-reconnect_on_http_error', '4xx,5xx',
+    '-reconnect_on_network_error', '1',
     '-reconnect_delay_max', '2',
   ];
   if (startSec > 0) {
+    if (isPureRemux) {
+      // Snap both video and audio to the exact same keyframe when copying video
+      ffArgs.push('-noaccurate_seek');
+    }
     ffArgs.push('-ss', startSec.toString());
   }
   ffArgs.push(
@@ -1983,12 +2005,17 @@ function pipeFfmpegMp4Stream(opts: {
     '-map', `0:a:${audioIdx}?`
   );
 
-  if (remuxOnly && !requestedQuality) {
+  if (isPureRemux) {
     ffArgs.push('-c:v', 'copy');
     if (canCopyAudio) {
       ffArgs.push('-c:a', 'copy');
     } else {
-      ffArgs.push('-c:a', 'aac', '-ac', '2', '-ar', '48000', '-b:a', '192k');
+      // Pad leading silence only at startSec === 0; on seeks with -noaccurate_seek, keep audio aligned with keyframe PTS
+      const aresampleFilter =
+        startSec > 0
+          ? 'aresample=async=1:min_hard_comp=0.100000'
+          : 'aresample=async=1:min_hard_comp=0.100000:first_pts=0';
+      ffArgs.push('-af', aresampleFilter, '-c:a', 'aac', '-ac', '2', '-ar', '48000', '-b:a', '192k');
     }
   } else {
     ffArgs.push(...getFfmpegQualityArgs(requestedQuality, isDownload));
@@ -2242,8 +2269,16 @@ export async function handleStream(req: Request, res: Response) {
         const selectedAudioTrack = probe.audioTracks[audioIdxParam] || probe.audioTracks[0];
         const selectedAudioCodec = selectedAudioTrack?.codec || probe.audioCodec || '';
         const selectedChannels = selectedAudioTrack?.channels || 2;
+        const videoStart = probe.videoStartTime || 0;
+        const audioStart = selectedAudioTrack?.startTime || 0;
+        const hasStreamOffset = Math.abs(audioStart - videoStart) > 0.04;
+        const isAviContainer = (probe.container || '').toLowerCase().includes('avi');
         const canCopyAudio =
-          (selectedAudioCodec === 'aac' || selectedAudioCodec === 'mp3') && selectedChannels <= 2;
+          (selectedAudioCodec === 'aac' || selectedAudioCodec === 'mp3') &&
+          selectedChannels <= 2 &&
+          !hasStreamOffset &&
+          audioIdxParam === 0 &&
+          !isAviContainer;
 
         return pipeFfmpegMp4Stream({
           inputUrl: localSourceUrl,
@@ -2324,7 +2359,7 @@ export async function handleStream(req: Request, res: Response) {
     }
     res.writeHead(statusCode, headers);
 
-    const concurrency = isRawParam ? 6 : 4;
+    const concurrency = isRawParam ? 3 : 3;
     await streamTelegramRange(
       res,
       client,

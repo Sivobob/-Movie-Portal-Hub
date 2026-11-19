@@ -1,4 +1,5 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
@@ -6,17 +7,34 @@ import { initializeChannelCache } from './channelRegistry.ts';
 
 let client: TelegramClient | null = null;
 let connectingPromise: Promise<TelegramClient> | null = null;
+let resettingPromise: Promise<TelegramClient> | null = null;
+let bypassEnvSession = false;
 
-const SESSION_FILE_PATH = path.resolve('.telegram_session.txt');
+// Store auto-generated bot session outside workspace root so build snapshots/deployments
+// never share the same auth_key across multiple servers or containers.
+const SESSION_FILE_PATH = path.join(os.tmpdir(), '.movie_portal_tg_session.txt');
+
+export function isTelegramAuthKeyError(err: any): boolean {
+  const msg = String(err?.errorMessage || err?.message || err || '').toUpperCase();
+  return (
+    msg.includes('AUTH_KEY_DUPLICATED') ||
+    msg.includes('AUTH_KEY_UNREGISTERED') ||
+    msg.includes('AUTH_KEY_INVALID') ||
+    msg.includes('SESSION_REVOKED') ||
+    msg.includes('SESSION_EXPIRED')
+  );
+}
 
 function getSavedSessionString(): string {
-  const envSession = (
-    process.env.TELEGRAM_SESSION_STRING || 
-    process.env.TELEGRAM_SESSION || 
-    process.env.SESSION_STRING || 
-    ''
-  ).trim();
-  if (envSession) return envSession;
+  if (!bypassEnvSession) {
+    const envSession = (
+      process.env.TELEGRAM_SESSION_STRING ||
+      process.env.TELEGRAM_SESSION ||
+      process.env.SESSION_STRING ||
+      ''
+    ).trim();
+    if (envSession) return envSession;
+  }
 
   try {
     if (fs.existsSync(SESSION_FILE_PATH)) {
@@ -35,6 +53,49 @@ export function getTelegramCredentials() {
   const sessionStr = getSavedSessionString();
 
   return { apiId, apiHash, botToken, sessionStr };
+}
+
+export async function resetTelegramClient(options?: {
+  clearSavedSession?: boolean;
+  preferBotFallback?: boolean;
+}): Promise<TelegramClient> {
+  if (resettingPromise) return resettingPromise;
+
+  const { clearSavedSession = true, preferBotFallback = true } = options || {};
+
+  resettingPromise = (async () => {
+    const prev = client;
+    client = null;
+    connectingPromise = null;
+
+    if (prev) {
+      try {
+        await prev.disconnect();
+      } catch {}
+    }
+
+    if (clearSavedSession) {
+      try {
+        if (fs.existsSync(SESSION_FILE_PATH)) {
+          fs.unlinkSync(SESSION_FILE_PATH);
+        }
+      } catch {}
+    }
+
+    if (preferBotFallback) {
+      const botToken = (process.env.TELEGRAM_BOT_TOKEN || '').trim() || '8993099137:AAH5ppM00ckVZvMek7fv623fbeYty3qgsxM';
+      if (botToken) {
+        bypassEnvSession = true;
+      }
+    }
+
+    console.warn('[TelegramClient] Session reset triggered; establishing fresh Telegram session...');
+    return await getTelegramClient();
+  })().finally(() => {
+    resettingPromise = null;
+  });
+
+  return resettingPromise;
 }
 
 export async function getTelegramClient(): Promise<TelegramClient> {
@@ -72,13 +133,13 @@ export async function getTelegramClient(): Promise<TelegramClient> {
     } else if (botToken) {
       await newClient.start({ botAuthToken: botToken });
       console.log('[TelegramClient] Connected using Telegram Bot Auth Token');
-      
-      // Save session for future use to avoid flood waits
+
+      // Save session to tmpdir for future reuse within this container only
       const savedSession = newClient.session.save() as any;
       if (savedSession && typeof savedSession === 'string' && savedSession.length > 10) {
         try {
           fs.writeFileSync(SESSION_FILE_PATH, savedSession, 'utf-8');
-          console.log('[TelegramClient] New session saved to .telegram_session.txt');
+          console.log('[TelegramClient] New session cached in tmpdir');
         } catch (e) {
           console.warn('[TelegramClient] Failed to save session:', e);
         }

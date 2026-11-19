@@ -3,6 +3,7 @@ import path from 'path';
 import { Api, TelegramClient } from 'telegram';
 import bigInt from 'big-integer';
 import { ParsedTelegramLink } from './telegramParser.ts';
+import { isTelegramAuthKeyError, resetTelegramClient } from './telegramClient.ts';
 
 export interface CachedChannelInfo {
   channelId: string;
@@ -187,7 +188,8 @@ export async function initializeChannelCache(client: TelegramClient): Promise<vo
  */
 export async function resolveTelegramMedia(
   client: TelegramClient,
-  parsed: ParsedTelegramLink
+  parsed: ParsedTelegramLink,
+  allowAuthRetry = true
 ): Promise<{ message: any | null; error?: string }> {
   const messageId = parseInt(parsed.messageId);
   const cleanId = parsed.rawChannelId ? parsed.rawChannelId.replace('-100', '') : '';
@@ -265,6 +267,11 @@ export async function resolveTelegramMedia(
       }
     } catch (err: any) {
       lastError = err?.message || '';
+      if (allowAuthRetry && isTelegramAuthKeyError(err)) {
+        console.warn(`[ChannelRegistry] Auth key error (${lastError.substring(0, 80)}); resetting Telegram session and retrying...`);
+        const freshClient = await resetTelegramClient({ clearSavedSession: true, preferBotFallback: true });
+        return resolveTelegramMedia(freshClient, parsed, false);
+      }
       console.warn(`[ChannelRegistry] Peer check failed: ${lastError.substring(0, 100)}`);
     }
   }

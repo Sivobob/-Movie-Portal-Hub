@@ -1,7 +1,7 @@
 // server.ts
-import fs4 from "fs";
+import fs5 from "fs";
 import path5 from "path";
-import { fileURLToPath as fileURLToPath3 } from "url";
+import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import express3 from "express";
 import { spawnSync } from "child_process";
@@ -402,22 +402,39 @@ router.get("/status", async (_req, res) => {
 });
 async function fetchImdbSuggestions(query) {
   try {
-    const clean = query.toLowerCase().trim().replace(/[^a-z0-9]/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "");
+    const clean = query.toLowerCase().trim();
     if (!clean) return [];
-    const url = `https://v3.sg.media-imdb.com/suggestion/x/${encodeURIComponent(clean)}.json`;
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json"
+    const firstChar = clean.charAt(0).replace(/[^a-z]/g, "a") || "a";
+    const slug = clean.replace(/[^a-z0-9]/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "");
+    const urls = [
+      `https://v3.sg.media-imdb.com/suggestion/${firstChar}/${encodeURIComponent(slug)}.json`,
+      `https://v3.sg.media-imdb.com/suggestion/x/${encodeURIComponent(slug)}.json`,
+      `https://v1.sg.media-imdb.com/suggestion/${firstChar}/${encodeURIComponent(slug)}.json`
+    ];
+    let data = null;
+    for (const url of urls) {
+      try {
+        const res = await fetch(url, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json"
+          }
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json && Array.isArray(json.d) && json.d.length > 0) {
+            data = json;
+            break;
+          }
+        }
+      } catch {
       }
-    });
-    if (!res.ok) return [];
-    const data = await res.json();
-    if (!Array.isArray(data.d)) return [];
+    }
+    if (!data || !Array.isArray(data.d)) return [];
     return data.d.filter((item) => item.id && item.id.startsWith("tt")).map((item) => {
       const q = (item.q || "").toLowerCase();
       let itemType = "movie";
-      if (q.includes("series") || q.includes("tv")) {
+      if (q.includes("series") || q.includes("tv") || q.includes("miniseries")) {
         itemType = "series";
       } else if (q.includes("video game")) {
         itemType = "game";
@@ -721,6 +738,7 @@ function parseTelegramUrl(urlStr) {
 
 // src/utils/telegramClient.ts
 import fs2 from "fs";
+import os from "os";
 import path2 from "path";
 import { TelegramClient as TelegramClient2 } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
@@ -868,7 +886,7 @@ async function initializeChannelCache(client2) {
     console.warn("[ChannelRegistry] Initialization note:", err?.message || err);
   }
 }
-async function resolveTelegramMedia(client2, parsed) {
+async function resolveTelegramMedia(client2, parsed, allowAuthRetry = true) {
   const messageId = parseInt(parsed.messageId);
   const cleanId = parsed.rawChannelId ? parsed.rawChannelId.replace("-100", "") : "";
   const cachedHash = cleanId ? getCachedAccessHash(cleanId) : null;
@@ -935,6 +953,11 @@ async function resolveTelegramMedia(client2, parsed) {
       }
     } catch (err) {
       lastError = err?.message || "";
+      if (allowAuthRetry && isTelegramAuthKeyError(err)) {
+        console.warn(`[ChannelRegistry] Auth key error (${lastError.substring(0, 80)}); resetting Telegram session and retrying...`);
+        const freshClient = await resetTelegramClient({ clearSavedSession: true, preferBotFallback: true });
+        return resolveTelegramMedia(freshClient, parsed, false);
+      }
       console.warn(`[ChannelRegistry] Peer check failed: ${lastError.substring(0, 100)}`);
     }
   }
@@ -974,10 +997,18 @@ async function resolveTelegramMedia(client2, parsed) {
 // src/utils/telegramClient.ts
 var client = null;
 var connectingPromise = null;
-var SESSION_FILE_PATH = path2.resolve(".telegram_session.txt");
+var resettingPromise = null;
+var bypassEnvSession = false;
+var SESSION_FILE_PATH = path2.join(os.tmpdir(), ".movie_portal_tg_session.txt");
+function isTelegramAuthKeyError(err) {
+  const msg = String(err?.errorMessage || err?.message || err || "").toUpperCase();
+  return msg.includes("AUTH_KEY_DUPLICATED") || msg.includes("AUTH_KEY_UNREGISTERED") || msg.includes("AUTH_KEY_INVALID") || msg.includes("SESSION_REVOKED") || msg.includes("SESSION_EXPIRED");
+}
 function getSavedSessionString() {
-  const envSession = (process.env.TELEGRAM_SESSION_STRING || process.env.TELEGRAM_SESSION || process.env.SESSION_STRING || "").trim();
-  if (envSession) return envSession;
+  if (!bypassEnvSession) {
+    const envSession = (process.env.TELEGRAM_SESSION_STRING || process.env.TELEGRAM_SESSION || process.env.SESSION_STRING || "").trim();
+    if (envSession) return envSession;
+  }
   try {
     if (fs2.existsSync(SESSION_FILE_PATH)) {
       return fs2.readFileSync(SESSION_FILE_PATH, "utf-8").trim();
@@ -993,6 +1024,40 @@ function getTelegramCredentials() {
   const botToken = (process.env.TELEGRAM_BOT_TOKEN || "").trim() || "8993099137:AAH5ppM00ckVZvMek7fv623fbeYty3qgsxM";
   const sessionStr = getSavedSessionString();
   return { apiId, apiHash, botToken, sessionStr };
+}
+async function resetTelegramClient(options) {
+  if (resettingPromise) return resettingPromise;
+  const { clearSavedSession = true, preferBotFallback = true } = options || {};
+  resettingPromise = (async () => {
+    const prev = client;
+    client = null;
+    connectingPromise = null;
+    if (prev) {
+      try {
+        await prev.disconnect();
+      } catch {
+      }
+    }
+    if (clearSavedSession) {
+      try {
+        if (fs2.existsSync(SESSION_FILE_PATH)) {
+          fs2.unlinkSync(SESSION_FILE_PATH);
+        }
+      } catch {
+      }
+    }
+    if (preferBotFallback) {
+      const botToken = (process.env.TELEGRAM_BOT_TOKEN || "").trim() || "8993099137:AAH5ppM00ckVZvMek7fv623fbeYty3qgsxM";
+      if (botToken) {
+        bypassEnvSession = true;
+      }
+    }
+    console.warn("[TelegramClient] Session reset triggered; establishing fresh Telegram session...");
+    return await getTelegramClient();
+  })().finally(() => {
+    resettingPromise = null;
+  });
+  return resettingPromise;
 }
 async function getTelegramClient() {
   if (client) {
@@ -1029,7 +1094,7 @@ async function getTelegramClient() {
       if (savedSession && typeof savedSession === "string" && savedSession.length > 10) {
         try {
           fs2.writeFileSync(SESSION_FILE_PATH, savedSession, "utf-8");
-          console.log("[TelegramClient] New session saved to .telegram_session.txt");
+          console.log("[TelegramClient] New session cached in tmpdir");
         } catch (e) {
           console.warn("[TelegramClient] Failed to save session:", e);
         }
@@ -1322,21 +1387,25 @@ async function fetchTelegramBlockRaw(client2, doc2, blockIndex) {
     fileReference: doc2.fileReference,
     thumbSize: ""
   });
+  let activeClient = client2;
   let dcId = resolvedDcMap.get(docIdStr) ?? doc2.dcId;
-  let sender = await getDcSenderSafe(client2, dcId);
+  let sender = await getDcSenderSafe(activeClient, dcId);
   const request = new Api2.upload.GetFile({
     location,
     offset: bigInt2(offsetBytes),
     limit: BLOCK_SIZE
   });
+  const maxAttempts = 5;
   let attempts = 0;
-  while (attempts < 4) {
+  let authResetDone = false;
+  while (attempts < maxAttempts) {
     attempts++;
+    let timeoutHandle;
     try {
-      const invokePromise = client2.invokeWithSender(request, sender);
-      const timeoutPromise = new Promise(
-        (_, reject) => setTimeout(() => reject(new Error("TIMEOUT: Telegram GetFile timed out")), 12e3)
-      );
+      const invokePromise = activeClient.invokeWithSender(request, sender);
+      const timeoutPromise = new Promise((_, reject) => {
+        timeoutHandle = setTimeout(() => reject(new Error("TIMEOUT: Telegram GetFile timed out")), 2e4);
+      });
       const result = await Promise.race([invokePromise, timeoutPromise]);
       if (result instanceof Api2.upload.FileCdnRedirect) {
         throw new Error("CDN redirect not supported for GetFile");
@@ -1347,30 +1416,54 @@ async function fetchTelegramBlockRaw(client2, doc2, blockIndex) {
       return Buffer.isBuffer(result.bytes) ? result.bytes : Buffer.from(result.bytes);
     } catch (err) {
       const msg = String(err?.errorMessage || err?.message || "");
+      if (isTelegramAuthKeyError(err) && !authResetDone) {
+        authResetDone = true;
+        activeClient = await resetTelegramClient({ clearSavedSession: true, preferBotFallback: true });
+        sender = await getDcSenderSafe(activeClient, dcId);
+        continue;
+      }
       if (err?.newDc) {
         dcId = Number(err.newDc);
         resolvedDcMap.set(docIdStr, dcId);
-        sender = await getDcSenderSafe(client2, dcId);
+        sender = await getDcSenderSafe(activeClient, dcId);
         continue;
       }
       const migrateMatch = msg.match(/FILE_MIGRATE_(\d+)/i);
       if (migrateMatch) {
         dcId = Number(migrateMatch[1]);
         resolvedDcMap.set(docIdStr, dcId);
-        sender = await getDcSenderSafe(client2, dcId);
+        sender = await getDcSenderSafe(activeClient, dcId);
         continue;
       }
-      if (msg.includes("TIMEOUT") && attempts < 3) {
-        await new Promise((r) => setTimeout(r, 400));
-        sender = await getDcSenderSafe(client2, dcId);
+      const upperMsg = msg.toUpperCase();
+      const isTransientNetErr = upperMsg.includes("TIMEOUT") || upperMsg.includes("ECONNRESET") || upperMsg.includes("ETIMEDOUT") || upperMsg.includes("CONNECTION") || upperMsg.includes("NOT CONNECTED") || upperMsg.includes("WEBSOCKET");
+      if (isTransientNetErr && attempts < maxAttempts) {
+        if (attempts >= 2) {
+          try {
+            sender?.reconnect?.();
+          } catch {
+          }
+        }
+        await new Promise((r) => setTimeout(r, Math.min(2500, 400 * attempts)));
+        try {
+          if (!activeClient.connected) {
+            await activeClient.connect();
+          }
+          sender = await getDcSenderSafe(activeClient, dcId);
+        } catch {
+        }
         continue;
       }
       const floodMatch = msg.match(/FLOOD_WAIT_(\d+)/i);
-      if (floodMatch && Number(floodMatch[1]) <= 10 && attempts < 3) {
+      if (floodMatch && Number(floodMatch[1]) <= 10 && attempts < maxAttempts) {
         await new Promise((r) => setTimeout(r, (Number(floodMatch[1]) + 1) * 1e3));
         continue;
       }
       throw err;
+    } finally {
+      if (timeoutHandle !== void 0) {
+        clearTimeout(timeoutHandle);
+      }
     }
   }
   throw new Error("Failed to fetch Telegram block after retries");
@@ -1397,11 +1490,12 @@ function fetchBlock(client2, doc2, blockIndex) {
 async function streamTelegramRange(res, client2, doc2, start, endPos, concurrency, isClosedFn, onFileRefExpired) {
   const firstBlock = Math.floor(start / BLOCK_SIZE);
   const lastBlock = Math.floor(endPos / BLOCK_SIZE);
+  const effectiveConcurrency = Math.max(1, Math.min(concurrency, 3));
   const blockPromises = /* @__PURE__ */ new Map();
   let nextToQueue = firstBlock;
   const queueAhead = (upToBlock) => {
     const cap = Math.min(lastBlock, upToBlock);
-    while (nextToQueue <= cap && !isClosedFn()) {
+    while (nextToQueue <= cap && !isClosedFn() && !res.writableEnded) {
       const idx = nextToQueue++;
       if (!blockPromises.has(idx)) {
         const p = fetchBlock(client2, doc2, idx);
@@ -1411,11 +1505,10 @@ async function streamTelegramRange(res, client2, doc2, start, endPos, concurrenc
       }
     }
   };
-  queueAhead(firstBlock + concurrency - 1);
+  queueAhead(firstBlock + effectiveConcurrency - 1);
   try {
     for (let blockIdx = firstBlock; blockIdx <= lastBlock; blockIdx++) {
       if (isClosedFn() || res.writableEnded) break;
-      queueAhead(blockIdx + concurrency);
       const p = blockPromises.get(blockIdx) || fetchBlock(client2, doc2, blockIdx);
       const blockBuf = await p;
       blockPromises.delete(blockIdx);
@@ -1449,6 +1542,7 @@ async function streamTelegramRange(res, client2, doc2, start, endPos, concurrenc
       if (blockBuf.length < BLOCK_SIZE) {
         break;
       }
+      queueAhead(blockIdx + effectiveConcurrency);
     }
   } catch (err) {
     if (String(err?.message || "").includes("FILE_REFERENCE")) {
@@ -1564,15 +1658,18 @@ async function probeTelegramMedia(localPort, telegramUrl, docInfo, options) {
         const width = Number(videoStream?.width || 0);
         const height = Number(videoStream?.height || 0);
         const is10Bit = pixFmt.includes("10le") || pixFmt.includes("10be") || pixFmt.includes("12le") || profile.includes("10");
+        const videoStartTime = parseFloat(videoStream?.start_time || "0");
         const audioTracks = audioStreamObjs.map((s, idx) => {
           const { lang, label } = formatLanguageLabel(s.tags?.language, s.tags?.title, idx, "audio");
+          const trackStart = parseFloat(s.start_time || "0");
           return {
             id: idx,
             streamIndex: Number(s.index ?? idx),
             codec: String(s.codec_name || "").toLowerCase(),
             channels: Number(s.channels || 2),
             lang,
-            label
+            label,
+            startTime: Number.isFinite(trackStart) ? trackStart : 0
           };
         });
         const subtitleTracks = subtitleStreamObjs.map((s, idx) => {
@@ -1624,7 +1721,8 @@ async function probeTelegramMedia(localPort, telegramUrl, docInfo, options) {
           subtitleTracks,
           recommendedMode,
           needsAudioTranscode,
-          probedByFfprobe: true
+          probedByFfprobe: true,
+          videoStartTime: Number.isFinite(videoStartTime) ? videoStartTime : 0
         });
       } catch {
         resolve(fallbackProbeFromMetadata(docInfo));
@@ -1872,7 +1970,7 @@ function normalizeRequestedQuality(raw) {
   if (s === "360p" || s === "360") return "360p";
   return "";
 }
-function getFfmpegQualityArgs(quality, isDownload) {
+function getFfmpegQualityArgs(quality, _isDownload) {
   const args2 = [];
   if (quality === "360p") {
     args2.push(
@@ -1882,7 +1980,6 @@ function getFfmpegQualityArgs(quality, isDownload) {
       "libx264",
       "-preset",
       "ultrafast",
-      ...isDownload ? [] : ["-tune", "zerolatency"],
       "-threads",
       "0",
       "-pix_fmt",
@@ -1892,7 +1989,7 @@ function getFfmpegQualityArgs(quality, isDownload) {
       "-level",
       "3.1",
       "-vsync",
-      "cfr",
+      "vfr",
       "-b:v",
       "280k",
       "-maxrate",
@@ -1905,6 +2002,8 @@ function getFfmpegQualityArgs(quality, isDownload) {
       "48",
       "-sc_threshold",
       "0",
+      "-af",
+      "aresample=async=1:min_hard_comp=0.100000:first_pts=0",
       "-c:a",
       "aac",
       "-ac",
@@ -1924,7 +2023,6 @@ function getFfmpegQualityArgs(quality, isDownload) {
       "libx264",
       "-preset",
       "ultrafast",
-      ...isDownload ? [] : ["-tune", "zerolatency"],
       "-threads",
       "0",
       "-pix_fmt",
@@ -1934,7 +2032,7 @@ function getFfmpegQualityArgs(quality, isDownload) {
       "-level",
       "3.1",
       "-vsync",
-      "cfr",
+      "vfr",
       "-b:v",
       "520k",
       "-maxrate",
@@ -1947,6 +2045,8 @@ function getFfmpegQualityArgs(quality, isDownload) {
       "48",
       "-sc_threshold",
       "0",
+      "-af",
+      "aresample=async=1:min_hard_comp=0.100000:first_pts=0",
       "-c:a",
       "aac",
       "-ac",
@@ -1966,7 +2066,6 @@ function getFfmpegQualityArgs(quality, isDownload) {
       "libx264",
       "-preset",
       "ultrafast",
-      ...isDownload ? [] : ["-tune", "zerolatency"],
       "-threads",
       "0",
       "-pix_fmt",
@@ -1976,7 +2075,7 @@ function getFfmpegQualityArgs(quality, isDownload) {
       "-level",
       "4.0",
       "-vsync",
-      "cfr",
+      "vfr",
       "-b:v",
       "1050k",
       "-maxrate",
@@ -1989,6 +2088,8 @@ function getFfmpegQualityArgs(quality, isDownload) {
       "48",
       "-sc_threshold",
       "0",
+      "-af",
+      "aresample=async=1:min_hard_comp=0.100000:first_pts=0",
       "-c:a",
       "aac",
       "-ac",
@@ -2007,7 +2108,6 @@ function getFfmpegQualityArgs(quality, isDownload) {
     "libx264",
     "-preset",
     "ultrafast",
-    ...isDownload ? [] : ["-tune", "zerolatency"],
     "-threads",
     "0",
     "-pix_fmt",
@@ -2023,7 +2123,7 @@ function getFfmpegQualityArgs(quality, isDownload) {
     "-colorspace",
     "bt709",
     "-vsync",
-    "cfr",
+    "vfr",
     "-crf",
     "22",
     "-maxrate",
@@ -2036,6 +2136,8 @@ function getFfmpegQualityArgs(quality, isDownload) {
     "48",
     "-sc_threshold",
     "0",
+    "-af",
+    "aresample=async=1:min_hard_comp=0.100000:first_pts=0",
     "-c:a",
     "aac",
     "-ac",
@@ -2078,8 +2180,18 @@ router2.get("/status", async (_req, res) => {
     });
   }
   try {
-    const client2 = await getTelegramClient();
-    const me = await client2.getMe();
+    let client2 = await getTelegramClient();
+    let me;
+    try {
+      me = await client2.getMe();
+    } catch (meErr) {
+      if (isTelegramAuthKeyError(meErr)) {
+        client2 = await resetTelegramClient({ clearSavedSession: true, preferBotFallback: true });
+        me = await client2.getMe();
+      } else {
+        throw meErr;
+      }
+    }
     res.json({
       connected: client2.connected,
       configured: true,
@@ -3336,21 +3448,29 @@ function pipeFfmpegMp4Stream(opts) {
     console.warn(`[Stream] Active FFmpeg limit reached (${activeFfmpegProcs.size}/${MAX_CONCURRENT_FFMPEG})`);
     return res.status(503).json({ error: "Transcoding server is busy. Please retry in a moment." });
   }
+  const isPureRemux = remuxOnly && !requestedQuality;
   const ffArgs = [
     "-probesize",
-    "2000000",
+    "5000000",
     "-analyzeduration",
-    "2000000",
+    "5000000",
     "-fflags",
-    "+genpts+discardcorrupt",
+    "+discardcorrupt",
     "-reconnect",
     "1",
     "-reconnect_streamed",
+    "1",
+    "-reconnect_on_http_error",
+    "4xx,5xx",
+    "-reconnect_on_network_error",
     "1",
     "-reconnect_delay_max",
     "2"
   ];
   if (startSec > 0) {
+    if (isPureRemux) {
+      ffArgs.push("-noaccurate_seek");
+    }
     ffArgs.push("-ss", startSec.toString());
   }
   ffArgs.push(
@@ -3365,12 +3485,13 @@ function pipeFfmpegMp4Stream(opts) {
     "-map",
     `0:a:${audioIdx}?`
   );
-  if (remuxOnly && !requestedQuality) {
+  if (isPureRemux) {
     ffArgs.push("-c:v", "copy");
     if (canCopyAudio) {
       ffArgs.push("-c:a", "copy");
     } else {
-      ffArgs.push("-c:a", "aac", "-ac", "2", "-ar", "48000", "-b:a", "192k");
+      const aresampleFilter = startSec > 0 ? "aresample=async=1:min_hard_comp=0.100000" : "aresample=async=1:min_hard_comp=0.100000:first_pts=0";
+      ffArgs.push("-af", aresampleFilter, "-c:a", "aac", "-ac", "2", "-ar", "48000", "-b:a", "192k");
     }
   } else {
     ffArgs.push(...getFfmpegQualityArgs(requestedQuality, isDownload));
@@ -3588,7 +3709,11 @@ async function handleStream(req, res) {
         const selectedAudioTrack = probe.audioTracks[audioIdxParam] || probe.audioTracks[0];
         const selectedAudioCodec = selectedAudioTrack?.codec || probe.audioCodec || "";
         const selectedChannels = selectedAudioTrack?.channels || 2;
-        const canCopyAudio = (selectedAudioCodec === "aac" || selectedAudioCodec === "mp3") && selectedChannels <= 2;
+        const videoStart = probe.videoStartTime || 0;
+        const audioStart = selectedAudioTrack?.startTime || 0;
+        const hasStreamOffset = Math.abs(audioStart - videoStart) > 0.04;
+        const isAviContainer = (probe.container || "").toLowerCase().includes("avi");
+        const canCopyAudio = (selectedAudioCodec === "aac" || selectedAudioCodec === "mp3") && selectedChannels <= 2 && !hasStreamOffset && audioIdxParam === 0 && !isAviContainer;
         return pipeFfmpegMp4Stream({
           inputUrl: localSourceUrl,
           modeLabel: `${effectiveMode}${requestedQuality ? "-" + requestedQuality : ""}`,
@@ -3655,7 +3780,7 @@ async function handleStream(req, res) {
       console.log(`[Stream] Direct ${statusCode} | ${mimeType} | msg ${parsed.messageId} | bytes ${start}-${endPos}/${fileSize}`);
     }
     res.writeHead(statusCode, headers);
-    const concurrency = isRawParam ? 6 : 4;
+    const concurrency = isRawParam ? 3 : 3;
     await streamTelegramRange(
       res,
       client2,
@@ -3680,14 +3805,28 @@ import express2 from "express";
 import ffmpeg from "fluent-ffmpeg";
 import path3 from "path";
 import fs3 from "fs";
-import { fileURLToPath } from "url";
-var __filename = fileURLToPath(import.meta.url);
-var __dirname = path3.dirname(__filename);
-var rootDir = path3.resolve(__dirname, "../../");
-var transcodedDir = path3.join(rootDir, "public", "transcoded");
-if (!fs3.existsSync(transcodedDir)) {
-  fs3.mkdirSync(transcodedDir, { recursive: true });
+import os2 from "os";
+function getTranscodedDir() {
+  const primary = path3.resolve(process.cwd(), "public", "transcoded");
+  try {
+    if (!fs3.existsSync(primary)) {
+      fs3.mkdirSync(primary, { recursive: true });
+    }
+    return primary;
+  } catch (err) {
+    console.warn("[videoRouter] Notice: Unable to create public/transcoded directory, falling back to os.tmpdir:", err);
+    const fallback = path3.resolve(os2.tmpdir(), "movieportal_transcoded");
+    try {
+      if (!fs3.existsSync(fallback)) {
+        fs3.mkdirSync(fallback, { recursive: true });
+      }
+    } catch (e) {
+      console.warn("[videoRouter] Fallback dir error:", e);
+    }
+    return fallback;
+  }
 }
+var transcodedDir = getTranscodedDir();
 var router3 = express2.Router();
 router3.post("/transcode", requireAdmin, async (req, res) => {
   const { url, imdbId, targetQualities } = req.body;
@@ -3758,8 +3897,6 @@ var videoRouter_default = router3;
 
 // src/server/downloadCastRouter.ts
 import { Router as Router2 } from "express";
-import path4 from "path";
-import { fileURLToPath as fileURLToPath2 } from "url";
 import http from "http";
 import https from "https";
 import { collection, getDocs } from "firebase/firestore";
@@ -3857,8 +3994,6 @@ async function testConnection() {
 testConnection();
 
 // src/server/downloadCastRouter.ts
-var __filename2 = fileURLToPath2(import.meta.url);
-var __dirname2 = path4.dirname(__filename2);
 var downloadCastRouter = Router2();
 var cachedApkInfo = {
   url: "https://github.com/Sivobob/-Movie-Portal-Hub/releases/download/v3.5.2/Movie-Portal-v3.5.2.apk",
@@ -4345,10 +4480,180 @@ downloadCastRouter.get("/announcements/latest", async (_req, res) => {
 });
 var downloadCastRouter_default = downloadCastRouter;
 
+// src/server/pushRouter.ts
+import crypto from "crypto";
+import fs4 from "fs";
+import { createRequire } from "module";
+import os3 from "os";
+import path4 from "path";
+import { Router as Router3 } from "express";
+var require2 = createRequire(import.meta.url);
+var webPush = require2("web-push");
+var SUBS_CACHE_FILE = path4.join(os3.tmpdir(), ".movie_hub_push_subs.json");
+var subscriptionMap = /* @__PURE__ */ new Map();
+function loadSubsFromTmp() {
+  try {
+    if (fs4.existsSync(SUBS_CACHE_FILE)) {
+      const parsed = JSON.parse(fs4.readFileSync(SUBS_CACHE_FILE, "utf-8"));
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          if (item && typeof item.endpoint === "string" && item.keys?.p256dh && item.keys?.auth) {
+            subscriptionMap.set(item.endpoint, item);
+          }
+        }
+      }
+    }
+  } catch {
+  }
+}
+function saveSubsToTmp() {
+  try {
+    fs4.writeFileSync(SUBS_CACHE_FILE, JSON.stringify(Array.from(subscriptionMap.values())), "utf-8");
+  } catch {
+  }
+}
+loadSubsFromTmp();
+function getVapidKeys() {
+  const envPub = (process.env.VAPID_PUBLIC_KEY || "").trim();
+  const envPriv = (process.env.VAPID_PRIVATE_KEY || "").trim();
+  if (envPub && envPriv) {
+    return { publicKey: envPub, privateKey: envPriv };
+  }
+  const projectId2 = firebase_applet_config_default.projectId || "movie-portal-hub";
+  const dbId = firebase_applet_config_default.firestoreDatabaseId || "default";
+  const customSeed = (process.env.VAPID_KEY_SEED || "mp-webpush-vapid-v1").trim();
+  const seed = crypto.createHash("sha256").update(`${projectId2}:${dbId}:${customSeed}`).digest();
+  const ecdh = crypto.createECDH("prime256v1");
+  ecdh.setPrivateKey(seed);
+  return {
+    publicKey: ecdh.getPublicKey(null, "uncompressed").toString("base64url"),
+    privateKey: ecdh.getPrivateKey().toString("base64url")
+  };
+}
+var vapidKeys = getVapidKeys();
+webPush.setVapidDetails("mailto:support@moviehub.app", vapidKeys.publicKey, vapidKeys.privateKey);
+function normalizeSub(raw) {
+  const endpoint = String(raw?.endpoint || "").trim();
+  const p256dh = String(raw?.keys?.p256dh || "").trim();
+  const auth2 = String(raw?.keys?.auth || "").trim();
+  if (!endpoint || !p256dh || !auth2) return null;
+  if (!/^https:\/\//i.test(endpoint)) return null;
+  return {
+    endpoint,
+    expirationTime: raw?.expirationTime ?? null,
+    keys: { p256dh, auth: auth2 },
+    platform: String(raw?.platform || "").trim() || void 0,
+    updatedAtMs: Number(raw?.updatedAtMs) || Date.now()
+  };
+}
+var router4 = Router3();
+router4.get("/vapid-public-key", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ publicKey: vapidKeys.publicKey });
+});
+router4.post("/subscribe", (req, res) => {
+  const sub = normalizeSub(req.body?.subscription || req.body);
+  if (!sub) {
+    return res.status(400).json({ error: "Invalid Web Push subscription payload" });
+  }
+  subscriptionMap.set(sub.endpoint, sub);
+  saveSubsToTmp();
+  return res.json({ ok: true, cachedCount: subscriptionMap.size });
+});
+router4.post("/unsubscribe", (req, res) => {
+  const endpoint = String(req.body?.endpoint || "").trim();
+  if (endpoint && subscriptionMap.delete(endpoint)) {
+    saveSubsToTmp();
+  }
+  return res.json({ ok: true });
+});
+router4.post("/broadcast", async (req, res) => {
+  const payload = req.body?.payload;
+  const incomingSubs = Array.isArray(req.body?.subscriptions) ? req.body.subscriptions : [];
+  if (!payload || typeof payload !== "object") {
+    return res.status(400).json({ error: "Notification payload is required" });
+  }
+  const merged = /* @__PURE__ */ new Map();
+  for (const [ep, cached] of subscriptionMap.entries()) {
+    merged.set(ep, cached);
+  }
+  for (const raw of incomingSubs) {
+    const sub = normalizeSub(raw);
+    if (sub) {
+      merged.set(sub.endpoint, sub);
+      subscriptionMap.set(sub.endpoint, sub);
+    }
+  }
+  saveSubsToTmp();
+  const targets = Array.from(merged.values());
+  if (targets.length === 0) {
+    return res.json({
+      ok: true,
+      totalTargets: 0,
+      sentCount: 0,
+      failedCount: 0,
+      expiredEndpoints: []
+    });
+  }
+  const serializedPayload = JSON.stringify({
+    id: String(payload.id || `push-${Date.now()}`),
+    movieId: String(payload.movieId || ""),
+    title: String(payload.title || "New Release"),
+    notificationTitle: String(payload.notificationTitle || ""),
+    notificationBody: String(payload.notificationBody || ""),
+    message: String(payload.message || ""),
+    posterUrl: String(payload.posterUrl || ""),
+    backdropUrl: String(payload.backdropUrl || ""),
+    imageUrl: String(payload.imageUrl || "")
+  });
+  let sentCount = 0;
+  let failedCount = 0;
+  const expiredEndpoints = [];
+  const BATCH_SIZE = 20;
+  for (let i = 0; i < targets.length; i += BATCH_SIZE) {
+    const batch = targets.slice(i, i + BATCH_SIZE);
+    const results = await Promise.allSettled(
+      batch.map(
+        (sub) => webPush.sendNotification(sub, serializedPayload, {
+          TTL: 86400,
+          urgency: "high"
+        })
+      )
+    );
+    results.forEach((result, idx) => {
+      const sub = batch[idx];
+      if (result.status === "fulfilled") {
+        sentCount++;
+      } else {
+        failedCount++;
+        const statusCode = Number(result.reason?.statusCode || 0);
+        if (statusCode === 404 || statusCode === 410) {
+          expiredEndpoints.push(sub.endpoint);
+          subscriptionMap.delete(sub.endpoint);
+        }
+      }
+    });
+  }
+  if (expiredEndpoints.length > 0) {
+    saveSubsToTmp();
+  }
+  console.log(
+    `[WebPush] Broadcast complete | targets=${targets.length} sent=${sentCount} failed=${failedCount} expired=${expiredEndpoints.length}`
+  );
+  return res.json({
+    ok: true,
+    totalTargets: targets.length,
+    sentCount,
+    failedCount,
+    expiredEndpoints
+  });
+});
+var pushRouter_default = router4;
+
 // server.ts
-var __filename3 = fileURLToPath3(import.meta.url);
-var __dirname3 = path5.dirname(__filename3);
-var envPath = fs4.existsSync(path5.resolve(__dirname3, ".env")) ? path5.resolve(__dirname3, ".env") : path5.resolve(__dirname3, "../.env");
+var __filename = fileURLToPath(import.meta.url);
+var __dirname = path5.dirname(__filename);
+var envPath = fs5.existsSync(path5.resolve(__dirname, ".env")) ? path5.resolve(__dirname, ".env") : path5.resolve(__dirname, "../.env");
 dotenv.config({ path: envPath });
 function checkBinaryAvailable(bin) {
   try {
@@ -4395,7 +4700,7 @@ app3.use((req, res, next) => {
   next();
 });
 app3.use("/api", (req, res, next) => {
-  if (!req.path.startsWith("/stream")) {
+  if (!req.path.startsWith("/stream") && !req.path.startsWith("/ios-profile")) {
     res.setHeader("Content-Type", "application/json");
   }
   next();
@@ -4406,7 +4711,7 @@ app3.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
     time: (/* @__PURE__ */ new Date()).toISOString(),
-    version: "3.5.210",
+    version: "3.5.237",
     ffmpegAvailable: FFMPEG_AVAILABLE,
     ffprobeAvailable: FFPROBE_AVAILABLE,
     telegramConfigured,
@@ -4422,11 +4727,103 @@ app3.get("/api/debug-env", (req, res) => {
     ffprobeAvailable: FFPROBE_AVAILABLE
   });
 });
+app3.get("/api/ios-profile", (req, res) => {
+  try {
+    const rawHost = String(req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0].trim();
+    const rawProto = String(req.headers["x-forwarded-proto"] || req.protocol || "https").split(",")[0].trim();
+    const isLocal = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(rawHost);
+    const scheme = isLocal ? rawProto : "https";
+    const appOrigin = rawHost ? `${scheme}://${rawHost}/` : "https://ais-pre-ic2kso77lsvaweb4l75hwo-828533060153.asia-northeast1.run.app/";
+    const escapeXml = (str) => str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+    const iconCandidates = [
+      path5.resolve(process.cwd(), "public/apple-touch-icon.png"),
+      path5.resolve(process.cwd(), "dist/apple-touch-icon.png"),
+      path5.resolve(__dirname, "public/apple-touch-icon.png"),
+      path5.resolve(__dirname, "dist/apple-touch-icon.png"),
+      path5.resolve(__dirname, "apple-touch-icon.png"),
+      path5.resolve(process.cwd(), "public/assets/icons/master_icon.png"),
+      path5.resolve(__dirname, "public/assets/icons/master_icon.png")
+    ];
+    let iconBase64 = "";
+    for (const candidate of iconCandidates) {
+      if (fs5.existsSync(candidate)) {
+        iconBase64 = fs5.readFileSync(candidate).toString("base64");
+        break;
+      }
+    }
+    const iconEntry = iconBase64 ? `        <key>Icon</key>
+        <data>
+${iconBase64.replace(/.{1,76}/g, "          $&\n").trimEnd()}
+        </data>
+` : "";
+    const mobileConfigPlist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>PayloadContent</key>
+    <array>
+      <dict>
+        <key>FullScreen</key>
+        <true/>
+${iconEntry}        <key>IgnoreManifestScope</key>
+        <false/>
+        <key>IsRemovable</key>
+        <true/>
+        <key>Label</key>
+        <string>Movie Hub</string>
+        <key>PayloadDescription</key>
+        <string>Adds Movie Hub to your iPhone Home Screen in fullscreen app mode.</string>
+        <key>PayloadDisplayName</key>
+        <string>Movie Hub Web App</string>
+        <key>PayloadIdentifier</key>
+        <string>com.moviebox.stream.webclip.v1</string>
+        <key>PayloadType</key>
+        <string>com.apple.webClip.managed</string>
+        <key>PayloadUUID</key>
+        <string>8F3A9C12-4E21-4B89-9D7A-10C8B5A2E301</string>
+        <key>PayloadVersion</key>
+        <integer>1</integer>
+        <key>Precomposed</key>
+        <true/>
+        <key>URL</key>
+        <string>${escapeXml(appOrigin)}</string>
+      </dict>
+    </array>
+    <key>PayloadDescription</key>
+    <string>Install Movie Hub on your iPhone or iPad Home Screen. Compatible with all iPhone models and iOS versions.</string>
+    <key>PayloadDisplayName</key>
+    <string>Movie Hub</string>
+    <key>PayloadIdentifier</key>
+    <string>com.moviebox.stream.profile.ios</string>
+    <key>PayloadOrganization</key>
+    <string>Movie Hub</string>
+    <key>PayloadRemovalDisallowed</key>
+    <false/>
+    <key>PayloadType</key>
+    <string>Configuration</string>
+    <key>PayloadUUID</key>
+    <string>4B7D2E90-1A34-4F12-B8C3-7D9E0F12A402</string>
+    <key>PayloadVersion</key>
+    <integer>1</integer>
+  </dict>
+</plist>
+`;
+    res.setHeader("Content-Type", "application/x-apple-aspen-config");
+    res.setHeader("Content-Disposition", 'attachment; filename="Movie-Hub.mobileconfig"');
+    res.setHeader("Cache-Control", "no-store");
+    res.status(200).send(mobileConfigPlist);
+  } catch (err) {
+    res.status(500).setHeader("Content-Type", "application/json").json({
+      error: err?.message || "Failed to generate iOS profile"
+    });
+  }
+});
 app3.use("/api/metadata", metadataRouter_default);
 app3.use("/api/telegram", telegramRouter_default);
 app3.get("/api/stream", handleStream);
 app3.head("/api/stream", handleStream);
 app3.use("/api/video", videoRouter_default);
+app3.use("/api/push", pushRouter_default);
 app3.use("/api", downloadCastRouter_default);
 app3.use(downloadCastRouter_default);
 app3.use("/api", (req, res) => {
@@ -4447,8 +4844,23 @@ process.on("uncaughtException", (err) => {
 process.on("unhandledRejection", (reason) => {
   console.error("[Unhandled Rejection]", reason);
 });
-try {
-  if (process.env.NODE_ENV !== "production") {
+var isRunningFromDist = import.meta.url.includes("/dist/") || process.argv[1] && process.argv[1].includes("/dist/");
+var isProduction = process.env.NODE_ENV === "production" || isRunningFromDist;
+var getStaticDir = () => {
+  const candidates = [
+    path5.resolve(process.cwd(), "dist"),
+    path5.resolve(__dirname, "dist"),
+    __dirname
+  ];
+  for (const dir of candidates) {
+    if (fs5.existsSync(path5.resolve(dir, "index.html"))) {
+      return dir;
+    }
+  }
+  return __dirname;
+};
+if (!isProduction) {
+  try {
     const { createServer } = await import("vite");
     const vite = await createServer({
       server: {
@@ -4459,21 +4871,32 @@ try {
       appType: "spa"
     });
     app3.use(vite.middlewares);
-  } else {
-    const staticDir = fs4.existsSync(path5.resolve(__dirname3, "dist")) ? path5.resolve(__dirname3, "dist") : __dirname3;
+  } catch (viteErr) {
+    console.warn("[Vite Middleware notice - falling back to static/SPA]", viteErr);
+    const staticDir = getStaticDir();
     app3.use(express3.static(staticDir));
+    if (fs5.existsSync(path5.resolve(process.cwd(), "public"))) {
+      app3.use(express3.static(path5.resolve(process.cwd(), "public")));
+    }
     app3.get("*", (_req, res) => {
       res.sendFile(path5.resolve(staticDir, "index.html"));
     });
   }
-} catch (viteErr) {
-  console.warn("[Vite Middleware notice - falling back to static/SPA]", viteErr);
-  const staticDir = fs4.existsSync(path5.resolve(__dirname3, "dist")) ? path5.resolve(__dirname3, "dist") : __dirname3;
+} else {
+  const staticDir = getStaticDir();
+  console.log(`[Production] Serving static files from: ${staticDir}`);
   app3.use(express3.static(staticDir));
+  if (fs5.existsSync(path5.resolve(process.cwd(), "public"))) {
+    app3.use(express3.static(path5.resolve(process.cwd(), "public")));
+  }
   app3.get("*", (_req, res) => {
     res.sendFile(path5.resolve(staticDir, "index.html"));
   });
 }
-app3.listen(PORT, "0.0.0.0", () => {
+var server = app3.listen(PORT, "0.0.0.0", () => {
   console.log(`MOVIE PORTAL server running on port ${PORT}`);
 });
+server.requestTimeout = 0;
+server.timeout = 0;
+server.keepAliveTimeout = 65e3;
+server.headersTimeout = 66e3;

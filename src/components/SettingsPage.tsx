@@ -30,7 +30,8 @@ import {
   RemoteUpdateConfig,
   InstalledAppVersion,
 } from '../services/appUpdateConfig';
-import { isNativeAndroid } from '../utils/platform';
+import { isNativeAndroid, isIOSDevice } from '../utils/platform';
+import { ensureWebPushSubscribed, unsubscribeWebPush } from '../services/webPushService';
 
 type SettingsModal =
   | 'none'
@@ -126,27 +127,39 @@ export default function SettingsPage() {
     showToast(nextVal ? 'Family Mode enabled' : 'Family Mode disabled');
   };
 
-  const handleRequestNotifications = async () => {
+  const handleRequestNotifications = async (forceEnable = false) => {
+    const next = forceEnable ? true : !prefs.notificationsEnabled;
     if (isNativeAndroid()) {
       try {
         const bridge = (window as any).AndroidPlayerBridge;
-        if (bridge && typeof bridge.requestNotificationPermission === 'function') {
+        if (next && bridge && typeof bridge.requestNotificationPermission === 'function') {
           bridge.requestNotificationPermission();
         }
       } catch {}
     } else if (typeof window !== 'undefined' && 'Notification' in window) {
-      try {
-        const perm = await Notification.requestPermission();
-        setNotifPermGranted(perm === 'granted');
-      } catch {}
+      if (next) {
+        const res = await ensureWebPushSubscribed(true);
+        setNotifPermGranted(res.permission === 'granted');
+        if (res.permission === 'denied') {
+          showToast('Notifications blocked in browser settings');
+          return;
+        }
+      } else {
+        await unsubscribeWebPush();
+      }
     }
-    const next = !prefs.notificationsEnabled;
     await updatePrefs({ notificationsEnabled: next });
-    showToast(next ? 'Notifications enabled' : 'Notifications paused');
+    showToast(next ? 'Background notifications enabled' : 'Notifications paused');
   };
+
+  const isIOS = isIOSDevice();
 
   const handleOpenCheckUpdate = async () => {
     setActiveModal('check_update');
+    if (isIOS) {
+      setCheckingUpdate(false);
+      return;
+    }
     setCheckingUpdate(true);
     try {
       const [inst, remote] = await Promise.all([
@@ -160,6 +173,10 @@ export default function SettingsPage() {
   };
 
   const handleTriggerApkUpdate = () => {
+    if (isIOS) {
+      window.location.reload();
+      return;
+    }
     const url = remoteConfig?.apkDownloadUrl || OFFICIAL_APK_DIRECT_URL;
     if (isNativeAndroid()) {
       try {
@@ -411,7 +428,7 @@ export default function SettingsPage() {
                   </div>
                   <button
                     type="button"
-                    onClick={handleRequestNotifications}
+                    onClick={() => handleRequestNotifications(false)}
                     className={`relative w-12 h-7 rounded-full transition-colors cursor-pointer ${
                       prefs.notificationsEnabled ? 'bg-[#00d664]' : 'bg-[#353944]'
                     }`}
@@ -426,7 +443,7 @@ export default function SettingsPage() {
                 {!notifPermGranted && (
                   <button
                     type="button"
-                    onClick={handleRequestNotifications}
+                    onClick={() => handleRequestNotifications(true)}
                     className="w-full py-2.5 rounded-xl bg-[#00d664] text-black font-bold text-xs cursor-pointer"
                   >
                     Allow Device Notifications
@@ -515,7 +532,31 @@ export default function SettingsPage() {
 
             {activeModal === 'check_update' && (
               <div className="space-y-4">
-                {checkingUpdate ? (
+                {isIOS ? (
+                  <>
+                    <div className="bg-[#111317] border border-white/10 rounded-xl p-4 space-y-2 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-neutral-400">Platform</span>
+                        <span className="text-white font-bold">iPhone / iOS App</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-neutral-400">App Version</span>
+                        <span className="text-[#00d664] font-bold">v{CURRENT_VERSION_NAME}</span>
+                      </div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-[#00d664]/10 border border-[#00d664]/30 text-[#00d664] text-xs font-semibold text-center">
+                      iPhone app updates automatically.
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => window.location.reload()}
+                      className="w-full py-3 rounded-xl bg-[#00d664] text-black text-xs font-black flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <RefreshCw size={15} />
+                      <span>Refresh Latest Version</span>
+                    </button>
+                  </>
+                ) : checkingUpdate ? (
                   <div className="py-8 flex flex-col items-center gap-2 text-neutral-400 text-xs">
                     <RefreshCw size={22} className="animate-spin text-[#00d664]" />
                     <span>Checking for latest release...</span>

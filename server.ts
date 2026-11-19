@@ -16,6 +16,7 @@ import metadataRouter from './src/server/metadataRouter.ts';
 import telegramRouter, { handleStream } from './src/server/telegramRouter.ts';
 import videoRouter from './src/server/videoRouter.ts';
 import downloadCastRouter from './src/server/downloadCastRouter.ts';
+import pushRouter from './src/server/pushRouter.ts';
 import { getTelegramCredentials } from './src/utils/telegramClient.ts';
 
 function checkBinaryAvailable(bin: string): boolean {
@@ -72,9 +73,9 @@ app.use((req, res, next) => {
   next();
 });
 
-// Ensure API routes (except /api/stream) default to JSON
+// Ensure API routes (except /api/stream and /api/ios-profile) default to JSON
 app.use('/api', (req, res, next) => {
-  if (!req.path.startsWith('/stream')) {
+  if (!req.path.startsWith('/stream') && !req.path.startsWith('/ios-profile')) {
     res.setHeader('Content-Type', 'application/json');
   }
   next();
@@ -105,11 +106,117 @@ app.get('/api/debug-env', (req, res) => {
   });
 });
 
+// Direct Apple iOS WebClip Configuration Profile download (all iPhones & iOS versions)
+app.get('/api/ios-profile', (req, res) => {
+  try {
+    const rawHost = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+    const rawProto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0].trim();
+    const isLocal = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(rawHost);
+    const scheme = isLocal ? rawProto : 'https';
+    const appOrigin = rawHost ? `${scheme}://${rawHost}/` : 'https://ais-pre-ic2kso77lsvaweb4l75hwo-828533060153.asia-northeast1.run.app/';
+
+    const escapeXml = (str: string) =>
+      str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
+
+    const iconCandidates = [
+      path.resolve(process.cwd(), 'public/apple-touch-icon.png'),
+      path.resolve(process.cwd(), 'dist/apple-touch-icon.png'),
+      path.resolve(__dirname, 'public/apple-touch-icon.png'),
+      path.resolve(__dirname, 'dist/apple-touch-icon.png'),
+      path.resolve(__dirname, 'apple-touch-icon.png'),
+      path.resolve(process.cwd(), 'public/assets/icons/master_icon.png'),
+      path.resolve(__dirname, 'public/assets/icons/master_icon.png'),
+    ];
+    let iconBase64 = '';
+    for (const candidate of iconCandidates) {
+      if (fs.existsSync(candidate)) {
+        iconBase64 = fs.readFileSync(candidate).toString('base64');
+        break;
+      }
+    }
+
+    const iconEntry = iconBase64
+      ? `        <key>Icon</key>
+        <data>
+${iconBase64.replace(/.{1,76}/g, '          $&\n').trimEnd()}
+        </data>\n`
+      : '';
+
+    const mobileConfigPlist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>PayloadContent</key>
+    <array>
+      <dict>
+        <key>FullScreen</key>
+        <true/>
+${iconEntry}        <key>IgnoreManifestScope</key>
+        <false/>
+        <key>IsRemovable</key>
+        <true/>
+        <key>Label</key>
+        <string>Movie Hub</string>
+        <key>PayloadDescription</key>
+        <string>Adds Movie Hub to your iPhone Home Screen in fullscreen app mode.</string>
+        <key>PayloadDisplayName</key>
+        <string>Movie Hub Web App</string>
+        <key>PayloadIdentifier</key>
+        <string>com.moviebox.stream.webclip.v1</string>
+        <key>PayloadType</key>
+        <string>com.apple.webClip.managed</string>
+        <key>PayloadUUID</key>
+        <string>8F3A9C12-4E21-4B89-9D7A-10C8B5A2E301</string>
+        <key>PayloadVersion</key>
+        <integer>1</integer>
+        <key>Precomposed</key>
+        <true/>
+        <key>URL</key>
+        <string>${escapeXml(appOrigin)}</string>
+      </dict>
+    </array>
+    <key>PayloadDescription</key>
+    <string>Install Movie Hub on your iPhone or iPad Home Screen. Compatible with all iPhone models and iOS versions.</string>
+    <key>PayloadDisplayName</key>
+    <string>Movie Hub</string>
+    <key>PayloadIdentifier</key>
+    <string>com.moviebox.stream.profile.ios</string>
+    <key>PayloadOrganization</key>
+    <string>Movie Hub</string>
+    <key>PayloadRemovalDisallowed</key>
+    <false/>
+    <key>PayloadType</key>
+    <string>Configuration</string>
+    <key>PayloadUUID</key>
+    <string>4B7D2E90-1A34-4F12-B8C3-7D9E0F12A402</string>
+    <key>PayloadVersion</key>
+    <integer>1</integer>
+  </dict>
+</plist>
+`;
+
+    res.setHeader('Content-Type', 'application/x-apple-aspen-config');
+    res.setHeader('Content-Disposition', 'attachment; filename="Movie-Hub.mobileconfig"');
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(200).send(mobileConfigPlist);
+  } catch (err: any) {
+    res.status(500).setHeader('Content-Type', 'application/json').json({
+      error: err?.message || 'Failed to generate iOS profile',
+    });
+  }
+});
+
 app.use('/api/metadata', metadataRouter);
 app.use('/api/telegram', telegramRouter);
 app.get('/api/stream', handleStream);
 app.head('/api/stream', handleStream);
 app.use('/api/video', videoRouter);
+app.use('/api/push', pushRouter);
 app.use('/api', downloadCastRouter);
 app.use(downloadCastRouter);
 
@@ -137,9 +244,26 @@ process.on('unhandledRejection', (reason) => {
   console.error('[Unhandled Rejection]', reason);
 });
 
-// Development with Vite vs Production
-try {
-  if (process.env.NODE_ENV !== 'production') {
+// Development with Vite vs Production Static Serving
+const isRunningFromDist = import.meta.url.includes('/dist/') || (process.argv[1] && process.argv[1].includes('/dist/'));
+const isProduction = process.env.NODE_ENV === 'production' || isRunningFromDist;
+
+const getStaticDir = () => {
+  const candidates = [
+    path.resolve(process.cwd(), 'dist'),
+    path.resolve(__dirname, 'dist'),
+    __dirname,
+  ];
+  for (const dir of candidates) {
+    if (fs.existsSync(path.resolve(dir, 'index.html'))) {
+      return dir;
+    }
+  }
+  return __dirname;
+};
+
+if (!isProduction) {
+  try {
     const { createServer } = await import('vite');
     const vite = await createServer({
       server: { 
@@ -150,27 +274,34 @@ try {
       appType: 'spa',
     });
     app.use(vite.middlewares);
-  } else {
-    const staticDir = fs.existsSync(path.resolve(__dirname, 'dist')) 
-      ? path.resolve(__dirname, 'dist') 
-      : __dirname;
+  } catch (viteErr) {
+    console.warn('[Vite Middleware notice - falling back to static/SPA]', viteErr);
+    const staticDir = getStaticDir();
     app.use(express.static(staticDir));
+    if (fs.existsSync(path.resolve(process.cwd(), 'public'))) {
+      app.use(express.static(path.resolve(process.cwd(), 'public')));
+    }
     app.get('*', (_req, res) => {
       res.sendFile(path.resolve(staticDir, 'index.html'));
     });
   }
-} catch (viteErr) {
-  console.warn('[Vite Middleware notice - falling back to static/SPA]', viteErr);
-  const staticDir = fs.existsSync(path.resolve(__dirname, 'dist')) 
-    ? path.resolve(__dirname, 'dist') 
-    : __dirname;
+} else {
+  const staticDir = getStaticDir();
+  console.log(`[Production] Serving static files from: ${staticDir}`);
   app.use(express.static(staticDir));
+  if (fs.existsSync(path.resolve(process.cwd(), 'public'))) {
+    app.use(express.static(path.resolve(process.cwd(), 'public')));
+  }
   app.get('*', (_req, res) => {
     res.sendFile(path.resolve(staticDir, 'index.html'));
   });
 }
 
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`MOVIE PORTAL server running on port ${PORT}`);
 });
-
+// Prevent Node 22 default 300s requestTimeout from cutting off long video streams mid-playback
+server.requestTimeout = 0;
+server.timeout = 0;
+server.keepAliveTimeout = 65000;
+server.headersTimeout = 66000;

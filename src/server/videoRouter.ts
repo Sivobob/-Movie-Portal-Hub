@@ -2,17 +2,31 @@ import express from 'express';
 import ffmpeg from 'fluent-ffmpeg';
 import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const rootDir = path.resolve(__dirname, '../../');
-const transcodedDir = path.join(rootDir, 'public', 'transcoded');
+import os from 'os';
 
-// Ensure directory exists
-if (!fs.existsSync(transcodedDir)) {
-  fs.mkdirSync(transcodedDir, { recursive: true });
+function getTranscodedDir(): string {
+  const primary = path.resolve(process.cwd(), 'public', 'transcoded');
+  try {
+    if (!fs.existsSync(primary)) {
+      fs.mkdirSync(primary, { recursive: true });
+    }
+    return primary;
+  } catch (err) {
+    console.warn('[videoRouter] Notice: Unable to create public/transcoded directory, falling back to os.tmpdir:', err);
+    const fallback = path.resolve(os.tmpdir(), 'movieportal_transcoded');
+    try {
+      if (!fs.existsSync(fallback)) {
+        fs.mkdirSync(fallback, { recursive: true });
+      }
+    } catch (e) {
+      console.warn('[videoRouter] Fallback dir error:', e);
+    }
+    return fallback;
+  }
 }
+
+const transcodedDir = getTranscodedDir();
 
 import { requireAdmin } from './authMiddleware.ts';
 

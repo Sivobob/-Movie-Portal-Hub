@@ -166,26 +166,60 @@ export async function fetchMoviesFromFirestore(): Promise<MovieData[]> {
   }
 }
 
+function notifyMoviesUpdated(movie?: MovieData): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.dispatchEvent(new CustomEvent('movies_updated', { detail: movie }));
+  } catch {}
+  try {
+    const bc = new BroadcastChannel('movie_portal_updates');
+    bc.postMessage({ type: 'MOVIES_UPDATED', movieId: movie?.id });
+    setTimeout(() => bc.close(), 200);
+  } catch {}
+}
+
+export async function touchCatalogSyncMarker(movieId = '', action = 'update'): Promise<void> {
+  try {
+    await setDoc(
+      doc(db, 'app_config', 'catalog_sync'),
+      {
+        updatedAt: Date.now(),
+        movieId: String(movieId || ''),
+        action: String(action || 'update'),
+      },
+      { merge: true }
+    );
+  } catch {
+    // Non-fatal: primary onSnapshot on movies still handles delivery
+  }
+}
+
 export async function saveMovieToFirestore(movie: MovieData): Promise<void> {
   try {
     const normalized = normalizeMoviePosters(movie);
     await setDoc(doc(db, COLLECTION_NAME, normalized.id), normalized);
+    touchCatalogSyncMarker(normalized.id, 'save').catch(() => {});
     saveMovieLocally(normalized);
+    notifyMoviesUpdated(normalized);
   } catch (e) {
     checkAndHandleQuotaError(e);
     console.warn('Error saving movie to Firestore (saved locally):', e);
     saveMovieLocally(movie);
+    notifyMoviesUpdated(movie);
   }
 }
 
 export async function deleteMovieFromFirestore(id: string): Promise<void> {
   try {
     await deleteDoc(doc(db, COLLECTION_NAME, id));
+    touchCatalogSyncMarker(id, 'delete').catch(() => {});
     deleteMovieLocally(id);
+    notifyMoviesUpdated();
   } catch (e) {
     checkAndHandleQuotaError(e);
     console.warn('Error deleting movie from Firestore (deleted locally):', e);
     deleteMovieLocally(id);
+    notifyMoviesUpdated();
   }
 }
 
@@ -247,6 +281,7 @@ export function saveMovieLocally(movie: MovieData): MovieData[] {
   }
   const sorted = sortMoviesList(updated);
   saveLocalMovies(sorted);
+  notifyMoviesUpdated(movie);
   return sorted;
 }
 
@@ -254,6 +289,7 @@ export function deleteMovieLocally(id: string): MovieData[] {
   const current = getLocalMovies();
   const updated = current.filter((m) => m.id !== id);
   saveLocalMovies(updated);
+  notifyMoviesUpdated();
   return updated;
 }
 
@@ -261,6 +297,7 @@ export function togglePublishLocally(id: string): MovieData[] {
   const current = getLocalMovies();
   const updated = current.map((m) => (m.id === id ? { ...m, published: !m.published } : m));
   saveLocalMovies(updated);
+  notifyMoviesUpdated();
   return updated;
 }
 
@@ -268,6 +305,7 @@ export function toggleFeaturedLocally(id: string): MovieData[] {
   const current = getLocalMovies();
   const updated = current.map((m) => (m.id === id ? { ...m, featured: !m.featured } : m));
   saveLocalMovies(updated);
+  notifyMoviesUpdated();
   return updated;
 }
 
@@ -276,6 +314,7 @@ export function clearAllMoviesLocally(): void {
     if (typeof window !== 'undefined') {
       localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
       localStorage.removeItem('movie_portal_movies');
+      notifyMoviesUpdated();
     }
   } catch (e) {
     console.warn('Failed to clear movies from localStorage', e);

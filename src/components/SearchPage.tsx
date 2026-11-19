@@ -1,17 +1,14 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Search, X, ArrowLeft, Film } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
-import { collection, getDocs, getDocsFromServer } from 'firebase/firestore';
-import { db } from '../firebase';
 import VideoPlayerModal from './VideoPlayerModal';
 import MovieDetailsModal from './MovieDetailsModal';
 import MovieCard from './MovieCard';
-import { fetchMoviesFromFirestore, sortMoviesList } from '../services/movieStorage';
-import { normalizeMoviePosters } from '../utils/posterUrl';
 import { parseDurationToSeconds } from '../utils/duration';
 import { saveWatchProgress } from '../services/userWatchService';
 import { useAuth } from '../context/AuthContext';
+import { useMovies } from '../context/MoviesContext';
 import { getAppPreferences, isMatureContent } from '../services/userPreferencesService';
 
 const GENRES = [
@@ -23,16 +20,22 @@ const GENRES = [
 
 export default function SearchPage() {
   const { user } = useAuth();
+  const { movies: liveMovies, isLoading: catalogLoading, refreshMovies } = useMovies();
   const [searchParams] = useSearchParams();
   const initialQuery = searchParams.get('q') || '';
   const [searchQuery, setSearchQuery] = useState(initialQuery);
-  const [results, setResults] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [playingMovie, setPlayingMovie] = useState<any | null>(null);
   const [selectedMovie, setSelectedMovie] = useState<any | null>(null);
   const [activeSeasonIndex, setActiveSeasonIndex] = useState(0);
+  const [familyMode, setFamilyMode] = useState<boolean>(() => getAppPreferences().familyMode);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const onPrefs = () => setFamilyMode(getAppPreferences().familyMode);
+    window.addEventListener('mp_preferences_updated', onPrefs);
+    return () => window.removeEventListener('mp_preferences_updated', onPrefs);
+  }, []);
 
   useEffect(() => {
     const urlQuery = searchParams.get('q') || '';
@@ -231,67 +234,58 @@ export default function SearchPage() {
     }
   };
 
-  useEffect(() => {
+  const results = useMemo(() => {
     if (searchQuery.trim().length < 1 && selectedGenres.length === 0) {
-      setResults([]);
-      return;
+      return [];
+    }
+    let list = liveMovies.filter((m: any) => m.published !== false && !m.id?.startsWith('sample-'));
+
+    if (searchQuery.trim()) {
+      const lowerQuery = searchQuery.trim().toLowerCase();
+      list = list.filter((m: any) =>
+        String(m.title || '').toLowerCase().includes(lowerQuery) ||
+        String(m.originalTitle || '').toLowerCase().includes(lowerQuery) ||
+        String(m.genre || '').toLowerCase().includes(lowerQuery) ||
+        String(m.language || '').toLowerCase().includes(lowerQuery)
+      );
     }
 
-    const delayDebounceFn = setTimeout(() => {
-      handleSearch();
-    }, 350);
+    if (selectedGenres.length > 0) {
+      list = list.filter((m: any) =>
+        selectedGenres.some((g) => String(m.genre || '').toLowerCase().includes(g.toLowerCase()))
+      );
+    }
 
-    return () => clearTimeout(delayDebounceFn);
-  }, [searchQuery, selectedGenres]);
+    if (familyMode) {
+      list = list.filter((m: any) => !isMatureContent(m));
+    }
+
+    return list;
+  }, [liveMovies, searchQuery, selectedGenres, familyMode]);
+
+  const isLoading = catalogLoading && liveMovies.length === 0;
+
+  const resolvedSelectedMovie = useMemo(() => {
+    if (!selectedMovie) return null;
+    const live = liveMovies.find(
+      (m) => m.id === selectedMovie.id || (selectedMovie.imdbId && m.imdbId === selectedMovie.imdbId)
+    );
+    return live || selectedMovie;
+  }, [selectedMovie, liveMovies]);
+
+  const resolvedPlayingParentMovie = useMemo(() => {
+    if (!playingMovie) return undefined;
+    const candidate = playingMovie.movie || (playingMovie.seasons ? playingMovie : null);
+    if (!candidate) return undefined;
+    return (
+      liveMovies.find(
+        (m) => m.id === candidate.id || (candidate.imdbId && m.imdbId === candidate.imdbId)
+      ) || candidate
+    );
+  }, [playingMovie, liveMovies]);
 
   const handleSearch = async () => {
-    setIsLoading(true);
-    try {
-      let list: any[] = [];
-      try {
-        let snapshot;
-        try {
-          snapshot = await getDocsFromServer(collection(db, 'movies'));
-        } catch {
-          snapshot = await getDocs(collection(db, 'movies'));
-        }
-        list = sortMoviesList(
-          snapshot.docs
-            .map((d) => normalizeMoviePosters({ id: d.id, ...d.data() }))
-            .filter((m: any) => m.published !== false && !m.id?.startsWith('sample-'))
-        );
-      } catch (e: any) {
-        console.warn('Search falling back to storage service:', e?.message || e);
-        list = (await fetchMoviesFromFirestore()).filter((m: any) => m.published !== false);
-      }
-
-      if (searchQuery.trim()) {
-        const lowerQuery = searchQuery.trim().toLowerCase();
-        list = list.filter((m: any) =>
-          String(m.title || '').toLowerCase().includes(lowerQuery) ||
-          String(m.originalTitle || '').toLowerCase().includes(lowerQuery) ||
-          String(m.genre || '').toLowerCase().includes(lowerQuery) ||
-          String(m.language || '').toLowerCase().includes(lowerQuery)
-        );
-      }
-
-      if (selectedGenres.length > 0) {
-        list = list.filter((m: any) =>
-          selectedGenres.some((g) => String(m.genre || '').toLowerCase().includes(g.toLowerCase()))
-        );
-      }
-
-      if (getAppPreferences().familyMode) {
-        list = list.filter((m: any) => !isMatureContent(m));
-      }
-
-      setResults(list);
-    } catch (err: any) {
-      console.warn('Search error handled:', err?.message || err);
-      setResults([]);
-    } finally {
-      setIsLoading(false);
-    }
+    await refreshMovies(true);
   };
 
   const toggleGenre = (genre: string) => {
@@ -395,7 +389,6 @@ export default function SearchPage() {
           onClick={() => {
             setSelectedGenres([]);
             setSearchQuery('');
-            setResults([]);
           }}
         >
           Reset All
@@ -409,11 +402,11 @@ export default function SearchPage() {
         </button>
       </div>
 
-      {selectedMovie && !playingMovie && (
+      {resolvedSelectedMovie && !playingMovie && (
         <MovieDetailsModal
-          isOpen={Boolean(selectedMovie)}
+          isOpen={Boolean(resolvedSelectedMovie)}
           onClose={closeMovieDetails}
-          movie={selectedMovie}
+          movie={resolvedSelectedMovie}
           userId={user?.uid || 'guest_user'}
           onWatchNow={(m, sIdx, eIdx, lang) => handleWatchNow(m, sIdx, eIdx, lang)}
           onSelectMovie={(m) => {
@@ -435,7 +428,7 @@ export default function SearchPage() {
           videoQualities={playingMovie.videoQualities}
           category={playingMovie.displayCategory}
           posterUrl={playingMovie.posterUrl}
-          movie={playingMovie.movie || playingMovie}
+          movie={resolvedPlayingParentMovie || playingMovie.movie || playingMovie}
           seasonIndex={playingMovie.seasonIndex ?? 0}
           episodeIndex={playingMovie.episodeIndex ?? 0}
           language={playingMovie.language}

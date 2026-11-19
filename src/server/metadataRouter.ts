@@ -102,33 +102,44 @@ async function fetchImdbSuggestions(query: string): Promise<Array<{
   cast?: string;
 }>> {
   try {
-    const clean = query
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]/g, '_')
-      .replace(/_+/g, '_')
-      .replace(/^_+|_+$/g, '');
-
+    const clean = query.toLowerCase().trim();
     if (!clean) return [];
+    const firstChar = clean.charAt(0).replace(/[^a-z]/g, 'a') || 'a';
+    const slug = clean.replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
 
-    const url = `https://v3.sg.media-imdb.com/suggestion/x/${encodeURIComponent(clean)}.json`;
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json'
-      }
-    });
+    const urls = [
+      `https://v3.sg.media-imdb.com/suggestion/${firstChar}/${encodeURIComponent(slug)}.json`,
+      `https://v3.sg.media-imdb.com/suggestion/x/${encodeURIComponent(slug)}.json`,
+      `https://v1.sg.media-imdb.com/suggestion/${firstChar}/${encodeURIComponent(slug)}.json`
+    ];
 
-    if (!res.ok) return [];
-    const data = await res.json();
-    if (!Array.isArray(data.d)) return [];
+    let data: any = null;
+    for (const url of urls) {
+      try {
+        const res = await fetch(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json'
+          }
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json && Array.isArray(json.d) && json.d.length > 0) {
+            data = json;
+            break;
+          }
+        }
+      } catch {}
+    }
+
+    if (!data || !Array.isArray(data.d)) return [];
 
     return data.d
       .filter((item: any) => item.id && item.id.startsWith('tt'))
       .map((item: any) => {
         const q = (item.q || '').toLowerCase();
         let itemType = 'movie';
-        if (q.includes('series') || q.includes('tv')) {
+        if (q.includes('series') || q.includes('tv') || q.includes('miniseries')) {
           itemType = 'series';
         } else if (q.includes('video game')) {
           itemType = 'game';

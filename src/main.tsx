@@ -1,8 +1,31 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { Capacitor } from '@capacitor/core';
+import { registerSW } from 'virtual:pwa-register';
 import App from './App.tsx';
 import './index.css';
 import { AuthProvider } from './context/AuthContext';
+
+if (typeof window !== 'undefined' && !Capacitor.isNativePlatform()) {
+  try {
+    let refreshing = false;
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (refreshing) return;
+        refreshing = true;
+        window.location.reload();
+      });
+    }
+    registerSW({
+      immediate: true,
+      onRegisteredSW(_swUrl, reg) {
+        if (reg) {
+          reg.update().catch(() => {});
+        }
+      },
+    });
+  } catch {}
+}
 
 interface Props {
   children: ReactNode;

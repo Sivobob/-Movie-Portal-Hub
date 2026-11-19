@@ -1,8 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
-import { ShieldCheck, Settings, Lock, Eye, EyeOff, X, KeyRound, LogOut, Download, Smartphone, Search } from 'lucide-react';
-import { isNativeAndroid, isInstalledPhoneApp, downloadOfficialApk, OFFICIAL_APK_DOWNLOAD_URL } from '../utils/platform';
+import { ShieldCheck, Settings, Lock, Eye, EyeOff, X, KeyRound, LogOut, Download, Smartphone, Search, Share, PlusSquare, Copy, Check, ExternalLink } from 'lucide-react';
+import {
+  isNativeAndroid,
+  isInstalledPhoneApp,
+  isIOSDevice,
+  isIOSThirdPartyOrInApp,
+  getIOSVersionNumber,
+  downloadOfficialApk,
+  downloadIOSProfile,
+  OFFICIAL_APK_DOWNLOAD_URL,
+  getIOSProfileDownloadUrl,
+} from '../utils/platform';
 import { CURRENT_VERSION_NAME } from '../services/appUpdateConfig';
 
 export default function Header() {
@@ -11,9 +21,14 @@ export default function Header() {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const isAndroid = isNativeAndroid();
+  const isIOS = isIOSDevice();
+  const isIOSNonSafari = isIOSThirdPartyOrInApp();
+  const iosVersion = getIOSVersionNumber();
 
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showInstallGuide, setShowInstallGuide] = useState(false);
+  const [showIOSInstallModal, setShowIOSInstallModal] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
   const [showPasswordText, setShowPasswordText] = useState(false);
   const [passwordError, setPasswordError] = useState('');
@@ -243,30 +258,41 @@ export default function Header() {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5 min-w-0">
                   <span className="text-[11px] sm:text-sm font-black uppercase tracking-tight text-black truncate">
-                    Movie Hub App
+                    {isIOS ? 'Movie Hub for iPhone' : 'Movie Hub App'}
                   </span>
                   <span className="hidden xs:inline-block sm:inline-block bg-black/20 text-black text-[9px] sm:text-[10px] font-extrabold px-1.5 py-0.5 rounded uppercase flex-shrink-0">
-                    v{CURRENT_VERSION_NAME}
+                    {isIOS ? 'All iOS' : `v${CURRENT_VERSION_NAME}`}
                   </span>
                 </div>
                 <p className="text-[10px] sm:text-[11px] font-semibold text-neutral-900 truncate">
-                  High-speed streaming on Android!
+                  {isIOS ? 'Install app directly on any iPhone & iOS!' : 'High-speed streaming on Android!'}
                 </p>
               </div>
             </div>
-            <a
-              href={OFFICIAL_APK_DOWNLOAD_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => {
-                downloadOfficialApk(e);
-                setShowInstallGuide(true);
-              }}
-              className="flex-shrink-0 bg-black hover:bg-neutral-900 active:scale-95 text-yellow-400 font-black text-[11px] sm:text-xs px-2.5 sm:px-4 py-1.5 rounded-xl flex items-center gap-1.5 shadow transition-all cursor-pointer uppercase tracking-wider no-underline whitespace-nowrap"
-            >
-              <Download size={13} className="stroke-[2.5]" />
-              <span>Get App</span>
-            </a>
+            {isIOS ? (
+              <button
+                type="button"
+                onClick={() => setShowIOSInstallModal(true)}
+                className="flex-shrink-0 bg-black hover:bg-neutral-900 active:scale-95 text-yellow-400 font-black text-[11px] sm:text-xs px-2.5 sm:px-4 py-1.5 rounded-xl flex items-center gap-1.5 shadow transition-all cursor-pointer uppercase tracking-wider whitespace-nowrap"
+              >
+                <Download size={13} className="stroke-[2.5]" />
+                <span>Get App</span>
+              </button>
+            ) : (
+              <a
+                href={OFFICIAL_APK_DOWNLOAD_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => {
+                  downloadOfficialApk(e);
+                  setShowInstallGuide(true);
+                }}
+                className="flex-shrink-0 bg-black hover:bg-neutral-900 active:scale-95 text-yellow-400 font-black text-[11px] sm:text-xs px-2.5 sm:px-4 py-1.5 rounded-xl flex items-center gap-1.5 shadow transition-all cursor-pointer uppercase tracking-wider no-underline whitespace-nowrap"
+              >
+                <Download size={13} className="stroke-[2.5]" />
+                <span>Get App</span>
+              </a>
+            )}
           </div>
         )}
 
@@ -327,7 +353,7 @@ export default function Header() {
       </header>
 
       {!isInstalled && settingsModal}
-      {showInstallGuide && !isInstalled && (
+      {showInstallGuide && !isInstalled && !isIOS && (
         <div
           className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
           onClick={() => setShowInstallGuide(false)}
@@ -369,6 +395,157 @@ export default function Header() {
               className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-black text-xs py-2.5 rounded-xl uppercase tracking-wider cursor-pointer"
             >
               Got It
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showIOSInstallModal && !isInstalled && (
+        <div
+          className="fixed inset-0 z-[100] bg-black/85 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+          onClick={() => setShowIOSInstallModal(false)}
+        >
+          <div
+            className="w-full max-w-md bg-neutral-900 border border-yellow-400/40 rounded-t-3xl sm:rounded-3xl p-5 text-white shadow-2xl space-y-4 max-h-[88dvh] overflow-y-auto pb-[max(1.25rem,env(safe-area-inset-bottom))]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <img
+                  src="/apple-touch-icon.png"
+                  alt="Movie Hub"
+                  className="w-12 h-12 rounded-2xl object-cover border border-white/15 bg-[#15191e] flex-shrink-0 shadow-md"
+                />
+                <div className="min-w-0">
+                  <h3 className="font-black text-base tracking-tight text-white">
+                    Download Movie Hub for iPhone
+                  </h3>
+                  <p className="text-[11px] text-neutral-400">
+                    Works on all iPhones &amp; all iOS versions (iOS 12 &ndash; iOS 18+)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowIOSInstallModal(false)}
+                className="p-1.5 rounded-full bg-neutral-800 text-gray-400 hover:text-white cursor-pointer flex-shrink-0"
+                aria-label="Close"
+              >
+                <X size={17} />
+              </button>
+            </div>
+
+            {isIOSNonSafari && (
+              <div className="bg-amber-500/10 border border-amber-400/30 rounded-2xl p-3 space-y-2">
+                <p className="text-xs text-amber-200 leading-relaxed">
+                  For direct iPhone app installation, open this link in <strong className="text-white">Safari</strong> (or use <strong className="text-white">Share &rarr; Add to Home Screen</strong> on iOS 16.4+).
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      navigator.clipboard.writeText(window.location.origin);
+                      setCopiedLink(true);
+                      setTimeout(() => setCopiedLink(false), 2500);
+                    } catch {}
+                  }}
+                  className="w-full py-2 px-3 rounded-xl bg-neutral-950 border border-white/15 text-xs font-bold text-white flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  {copiedLink ? <Check size={14} className="text-[#00d664]" /> : <Copy size={14} className="text-yellow-400" />}
+                  <span>{copiedLink ? 'Link Copied! Paste in Safari' : 'Copy Movie Hub Link for Safari'}</span>
+                </button>
+              </div>
+            )}
+
+            {/* Option 1: Direct iPhone App Profile Download (.mobileconfig) */}
+            <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-black uppercase tracking-wider text-yellow-400">
+                  Method 1: Direct iPhone Download
+                </span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-yellow-400/15 text-yellow-300">
+                  Safari
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <a
+                  href={getIOSProfileDownloadUrl()}
+                  onClick={(e) => downloadIOSProfile(e)}
+                  className="flex-1 bg-yellow-400 hover:bg-yellow-300 active:scale-95 text-black font-black text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 uppercase tracking-wider shadow-lg shadow-yellow-400/15 no-underline cursor-pointer"
+                >
+                  <Download size={15} className="stroke-[2.5]" />
+                  <span>Download iPhone App</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      const fullUrl = window.location.origin + getIOSProfileDownloadUrl();
+                      navigator.clipboard.writeText(fullUrl);
+                      setCopiedLink(true);
+                      setTimeout(() => setCopiedLink(false), 2500);
+                    } catch {}
+                  }}
+                  className="px-3.5 py-3 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-yellow-400 text-xs font-bold flex items-center justify-center gap-1 cursor-pointer"
+                  title="Copy Direct Profile Link"
+                >
+                  {copiedLink ? <Check size={16} className="text-[#00d664]" /> : <Copy size={16} />}
+                </button>
+              </div>
+              <ol className="text-[11px] text-gray-300 space-y-1 pl-1 leading-relaxed">
+                <li>
+                  1. Tap <strong className="text-white">Allow</strong> when iPhone asks to download the profile.
+                </li>
+                <li>
+                  2. Open iPhone <strong className="text-white">Settings</strong> &rarr; tap <strong className="text-white">Profile Downloaded</strong> (or <span className="text-white font-semibold">General &rarr; {iosVersion && iosVersion < 15 ? 'Profile' : 'VPN & Device Management'}</span>) &rarr; tap <strong className="text-white">Install</strong>.
+                </li>
+              </ol>
+            </div>
+
+            {/* Option 2: Instant Add to Home Screen (No Settings needed) */}
+            <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-black uppercase tracking-wider text-[#00d664]">
+                  Method 2: Instant 1-Tap Setup
+                </span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-[#00d664]/15 text-[#00d664]">
+                  All iOS
+                </span>
+              </div>
+              <div className="space-y-2 text-xs text-gray-300">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-neutral-800 flex items-center justify-center text-sky-400 flex-shrink-0">
+                    <Share size={15} />
+                  </div>
+                  <p>
+                    1. Tap the <strong className="text-white">Share</strong> icon at the bottom (or top) of Safari.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-neutral-800 flex items-center justify-center text-[#00d664] flex-shrink-0">
+                    <PlusSquare size={15} />
+                  </div>
+                  <p>
+                    2. Scroll down and tap <strong className="text-white">Add to Home Screen</strong>.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg bg-neutral-800 flex items-center justify-center text-yellow-400 flex-shrink-0">
+                    <ExternalLink size={15} />
+                  </div>
+                  <p>
+                    3. Tap <strong className="text-white">Add</strong> &mdash; launch <strong className="text-white">Movie Hub</strong> fullscreen from your Home Screen!
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowIOSInstallModal(false)}
+              className="w-full bg-neutral-800 hover:bg-neutral-700 text-white font-bold text-xs py-2.5 rounded-xl uppercase tracking-wider cursor-pointer"
+            >
+              Close
             </button>
           </div>
         </div>
