@@ -1004,7 +1004,9 @@ export default function MovieDetailsModal({
                 <div className="flex items-center justify-between">
                   <h2 className="text-base font-bold text-white tracking-tight">Resources</h2>
                   <span className="text-xs text-neutral-400">
-                    {episodeList.length} Episode{episodeList.length === 1 ? '' : 's'}
+                    {episodeList.length === 1 && /\d+\s*-\s*\d+/.test(getEpisodeDisplayLabel(episodeList[0], 0, false))
+                      ? `${getEpisodeDisplayLabel(episodeList[0], 0, false)} Episodes`
+                      : `${episodeList.length} Episode${episodeList.length === 1 ? '' : 's'}`}
                   </span>
                 </div>
 
@@ -1111,7 +1113,6 @@ export default function MovieDetailsModal({
                       {episodeList.map((ep: any, eIdx: number) => {
                         const epNumLabel = getEpisodeDisplayLabel(ep, eIdx, true);
                         const isSelected = selectedEpisodeIdx === eIdx;
-                        const isCombinedRange = /\d+\s*-\s*\d+/.test(epNumLabel);
                         return (
                           <button
                             key={eIdx}
@@ -1119,13 +1120,13 @@ export default function MovieDetailsModal({
                             onClick={() => {
                               setSelectedEpisodeIdx(eIdx);
                             }}
-                            className={`relative flex-shrink-0 min-w-[48px] h-11 px-3 rounded-lg text-xs font-bold border transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
+                            className={`relative flex-shrink-0 min-w-[48px] h-11 px-3 rounded-lg text-xs font-bold border transition-colors cursor-pointer flex items-center justify-center ${
                               isSelected
                                 ? 'bg-[#0c3b28] border-[#00d664]/60 text-[#00d664]'
                                 : 'bg-[#1e222b] border-white/10 text-neutral-300 hover:bg-[#262b36]'
                             }`}
                           >
-                            <span>{isCombinedRange ? `${epNumLabel} EP` : epNumLabel}</span>
+                            <span>{epNumLabel}</span>
                             {isEpisodeNewActive(ep) && (
                               <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-[#00d664]" />
                             )}
