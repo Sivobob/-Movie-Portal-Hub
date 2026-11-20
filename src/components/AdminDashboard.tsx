@@ -1179,6 +1179,37 @@ export default function AdminDashboard() {
     setExpandedSeasons((prev) => ({ ...prev, [seasonIndex]: true }));
   };
 
+  const handleSetCombinedSeasonEpisode = (seasonIndex: number) => {
+    setExpandedSeasons((prev) => ({ ...prev, [seasonIndex]: true }));
+    setSeasons((prev) =>
+      prev.map((s, idx) => {
+        if (idx !== seasonIndex) return s;
+        const firstFilled = s.episodes.find((e) => e.streamUrl && e.streamUrl.trim()) || s.episodes[0];
+        const existingLabel = firstFilled?.episodeLabel?.trim();
+        const combinedLabel = existingLabel && existingLabel.includes('-') ? existingLabel : '1-6';
+        return {
+          ...s,
+          episodes: [
+            {
+              episodeNumber: 1,
+              episodeLabel: combinedLabel,
+              title: `Episodes ${combinedLabel} (All in 1 Video)`,
+              streamUrl: firstFilled?.streamUrl || '',
+              duration: firstFilled?.duration,
+              durationSec: firstFilled?.durationSec,
+              showInNewEpisodes: Boolean(firstFilled?.showInNewEpisodes),
+              ...(firstFilled?.newEpisodeEnabledAt ? { newEpisodeEnabledAt: firstFilled.newEpisodeEnabledAt } : {}),
+            },
+          ],
+        };
+      })
+    );
+    showNotification(
+      'success',
+      `Season ${seasons[seasonIndex]?.seasonNumber || seasonIndex + 1}: Combined 1-link mode ready (1-6). Bas 1 stream link paste karein aur range chahein toh badlein.`
+    );
+  };
+
   const handleToggleEpisodeNewFlag = async (seasonIndex: number, epIndex: number) => {
     const now = Date.now();
     const targetEp = seasons[seasonIndex]?.episodes?.[epIndex];
@@ -2436,37 +2467,42 @@ export default function AdminDashboard() {
       // Only attach 24h New Episode timestamps when the admin explicitly enabled showInNewEpisodes
       const saveNowMs = Date.now();
       const resolvedSeasons = Array.isArray(rawSeasons)
-        ? rawSeasons.map((season) => ({
-            ...season,
-            episodes: (season.episodes || []).map((ep: any) => {
-              const activeNew = isEpisodeNewActive(ep, saveNowMs);
-              const {
-                newEpisodeEnabledAt: _dropEnabledAt,
-                createdAt: _dropCreatedAt,
-                addedAt: _dropAddedAt,
-                episodeLabel: rawEpLabel,
-                ...cleanEp
-              } = ep;
-              const trimmedLabel = String(rawEpLabel || '').trim();
-              const labelField = trimmedLabel ? { episodeLabel: trimmedLabel } : {};
-              if (activeNew) {
-                const enabledAt = getTimestampMs(ep?.newEpisodeEnabledAt) || saveNowMs;
+        ? rawSeasons.map((season) => {
+            const rawEps = Array.isArray(season.episodes) ? season.episodes : [];
+            const filledEps = rawEps.filter((ep: any) => String(ep?.streamUrl || '').trim().length > 0);
+            const epsToSave = filledEps.length > 0 ? filledEps : rawEps;
+            return {
+              ...season,
+              episodes: epsToSave.map((ep: any) => {
+                const activeNew = isEpisodeNewActive(ep, saveNowMs);
+                const {
+                  newEpisodeEnabledAt: _dropEnabledAt,
+                  createdAt: _dropCreatedAt,
+                  addedAt: _dropAddedAt,
+                  episodeLabel: rawEpLabel,
+                  ...cleanEp
+                } = ep;
+                const trimmedLabel = String(rawEpLabel || '').trim();
+                const labelField = trimmedLabel ? { episodeLabel: trimmedLabel } : {};
+                if (activeNew) {
+                  const enabledAt = getTimestampMs(ep?.newEpisodeEnabledAt) || saveNowMs;
+                  return {
+                    ...cleanEp,
+                    ...labelField,
+                    showInNewEpisodes: true,
+                    newEpisodeEnabledAt: enabledAt,
+                    createdAt: enabledAt,
+                    addedAt: enabledAt,
+                  };
+                }
                 return {
                   ...cleanEp,
                   ...labelField,
-                  showInNewEpisodes: true,
-                  newEpisodeEnabledAt: enabledAt,
-                  createdAt: enabledAt,
-                  addedAt: enabledAt,
+                  showInNewEpisodes: false,
                 };
-              }
-              return {
-                ...cleanEp,
-                ...labelField,
-                showInNewEpisodes: false,
-              };
-            }),
-          }))
+              }),
+            };
+          })
         : [];
 
       const firstEpStream = isSeries && resolvedSeasons.length > 0 && resolvedSeasons[0].episodes?.length > 0
@@ -4593,6 +4629,14 @@ export default function AdminDashboard() {
                                   }`}
                                 >
                                   <Zap size={10} /> Bulk S{season.seasonNumber}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSetCombinedSeasonEpisode(sIdx)}
+                                  title="1 hi stream link mein multiple episodes (jaise 1-6) upload karne ke liye"
+                                  className="text-[10px] bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 font-bold px-2 py-1 rounded flex items-center gap-1 cursor-pointer"
+                                >
+                                  1-Link (1-6)
                                 </button>
                                 <button
                                   type="button"

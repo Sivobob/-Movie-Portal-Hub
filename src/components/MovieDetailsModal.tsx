@@ -1092,7 +1092,9 @@ export default function MovieDetailsModal({
                             >
                               <span>Season {String(sNum).padStart(2, '0')}</span>
                               <span className="text-[11px] opacity-75">
-                                {season.episodes?.length || 0} EP
+                                {season.episodes?.length === 1 && /\d+\s*-\s*\d+/.test(getEpisodeDisplayLabel(season.episodes[0], 0, false))
+                                  ? `${getEpisodeDisplayLabel(season.episodes[0], 0, false)} EP`
+                                  : `${season.episodes?.length || 0} EP`}
                               </span>
                             </button>
                           );
@@ -1102,32 +1104,45 @@ export default function MovieDetailsModal({
                   </div>
                 </div>
 
-                {/* Episode Number Tiles Strip (01, 02, 03...) */}
+                {/* Episode Number Tiles Strip (01, 02, 03... or Combined 1-6) */}
                 {episodeList.length > 0 ? (
-                  <div className="flex items-center gap-2 overflow-x-auto scrollbar-none py-1 touch-pan-x">
-                    {episodeList.map((ep: any, eIdx: number) => {
-                      const epNumLabel = getEpisodeDisplayLabel(ep, eIdx, true);
-                      const isSelected = selectedEpisodeIdx === eIdx;
-                      return (
-                        <button
-                          key={eIdx}
-                          type="button"
-                          onClick={() => {
-                            setSelectedEpisodeIdx(eIdx);
-                          }}
-                          className={`relative flex-shrink-0 min-w-[48px] h-11 px-3 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
-                            isSelected
-                              ? 'bg-[#0c3b28] border-[#00d664]/60 text-[#00d664]'
-                              : 'bg-[#1e222b] border-white/10 text-neutral-300 hover:bg-[#262b36]'
-                          }`}
-                        >
-                          {epNumLabel}
-                          {isEpisodeNewActive(ep) && (
-                            <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-[#00d664]" />
-                          )}
-                        </button>
-                      );
-                    })}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2 overflow-x-auto scrollbar-none py-1 touch-pan-x">
+                      {episodeList.map((ep: any, eIdx: number) => {
+                        const epNumLabel = getEpisodeDisplayLabel(ep, eIdx, true);
+                        const isSelected = selectedEpisodeIdx === eIdx;
+                        const isCombinedRange = /\d+\s*-\s*\d+/.test(epNumLabel);
+                        return (
+                          <button
+                            key={eIdx}
+                            type="button"
+                            onClick={() => {
+                              setSelectedEpisodeIdx(eIdx);
+                            }}
+                            className={`relative flex-shrink-0 min-w-[48px] h-11 px-3 rounded-lg text-xs font-bold border transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${
+                              isSelected
+                                ? 'bg-[#0c3b28] border-[#00d664]/60 text-[#00d664]'
+                                : 'bg-[#1e222b] border-white/10 text-neutral-300 hover:bg-[#262b36]'
+                            }`}
+                          >
+                            <span>{isCombinedRange ? `${epNumLabel} EP` : epNumLabel}</span>
+                            {isEpisodeNewActive(ep) && (
+                              <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-[#00d664]" />
+                            )}
+                          </button>
+                        );
+                      })}
+                      {episodeList.length === 1 && /\d+\s*-\s*\d+/.test(getEpisodeDisplayLabel(episodeList[0], 0, true)) && (
+                        <span className="text-xs text-neutral-300 font-medium whitespace-nowrap pl-1">
+                          All Episodes ({getEpisodeDisplayLabel(episodeList[0], 0, true)}) in 1 Video
+                        </span>
+                      )}
+                    </div>
+                    {currentEpisodeObj && /\d+\s*-\s*\d+/.test(getEpisodeDisplayLabel(currentEpisodeObj, primaryEpIdx, true)) && episodeList.length > 1 && (
+                      <p className="text-[11px] text-[#00d664]/90 font-medium">
+                        Selected: Episodes {getEpisodeDisplayLabel(currentEpisodeObj, primaryEpIdx, true)} combined in 1 video
+                      </p>
+                    )}
                   </div>
                 ) : (
                   <div className="text-center py-4 text-neutral-400 text-xs">
