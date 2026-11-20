@@ -519,6 +519,14 @@ export default function MovieDetailsModal({
     let cancelled = false;
     let hlsInstance: Hls | null = null;
     const isHls = primaryDownloadUrl.includes('.m3u8');
+    const ua = typeof navigator !== 'undefined' ? (navigator.userAgent || '') : '';
+    const isIosBrowser =
+      /iPhone|iPad|iPod/i.test(ua) ||
+      ((typeof navigator !== 'undefined' &&
+        (navigator.platform === 'MacIntel' || /Macintosh/i.test(ua)) &&
+        (navigator.maxTouchPoints || 0) > 1));
+    const isTelegramSource = /t\.me|telegram\.me/i.test(rawStreamUrl);
+    let currentInlineStage: 'direct' | 'remux_hls' | 'transcode_hls' = isHls ? 'remux_hls' : 'direct';
 
     let savedResumeSec = 0;
     if (inlineEpisodeResumeKey) {
@@ -553,19 +561,27 @@ export default function MovieDetailsModal({
       }
     };
 
+    const loadInlineSrc = (urlToLoad: string) => {
+      if (hlsInstance) {
+        hlsInstance.destroy();
+        hlsInstance = null;
+      }
+      const nextIsHls = urlToLoad.includes('.m3u8');
+      if (nextIsHls && Hls.isSupported()) {
+        hlsInstance = new Hls({
+          startPosition: pendingResumeSec !== null ? pendingResumeSec : -1,
+        });
+        hlsInstance.loadSource(urlToLoad);
+        hlsInstance.attachMedia(videoEl);
+      } else {
+        videoEl.src = urlToLoad;
+      }
+    };
+
     videoEl.muted = false;
     setInlineMuted(false);
 
-    if (isHls && Hls.isSupported()) {
-      hlsInstance = new Hls({
-        startPosition: pendingResumeSec !== null ? pendingResumeSec : -1,
-      });
-      hlsInstance.loadSource(primaryDownloadUrl);
-      hlsInstance.attachMedia(videoEl);
-    } else {
-      videoEl.src = primaryDownloadUrl;
-    }
-
+    loadInlineSrc(primaryDownloadUrl);
     setInlineLoaded(false);
 
     const startPlayback = () => {
@@ -584,6 +600,48 @@ export default function MovieDetailsModal({
         videoEl.play().catch(() => {});
       });
     };
+
+    const escalateInlineToHls = (targetMode: 'remux' | 'transcode') => {
+      if (cancelled || !isTelegramSource) return;
+      const nextStage = targetMode === 'transcode' ? 'transcode_hls' : 'remux_hls';
+      if (currentInlineStage === nextStage) return;
+      if (currentInlineStage === 'transcode_hls') return;
+      currentInlineStage = nextStage;
+      const hlsUrl = buildApiUrl(
+        `/api/telegram/hls/playlist.m3u8?url=${encodeURIComponent(rawStreamUrl)}&mode=${targetMode}`
+      );
+      setInlineLoaded(false);
+      loadInlineSrc(hlsUrl);
+      if (typeof videoEl.load === 'function') {
+        try {
+          videoEl.load();
+        } catch {}
+      }
+      startPlayback();
+    };
+
+    // On iOS Safari/PWA, pre-check codec/container so MKV/HEVC immediately uses Apple HLS instead of stalling
+    if (isIosBrowser && isTelegramSource && !isHls) {
+      fetch(buildApiUrl(`/api/telegram/stream-info?url=${encodeURIComponent(rawStreamUrl)}`), {
+        cache: 'no-store',
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((info) => {
+          if (cancelled || !info || info.status !== 'ok') return;
+          const vCodec = String(info.videoCodec || '').toLowerCase();
+          const cont = String(info.container || '').toLowerCase();
+          const mode =
+            cont.includes('webm') || vCodec === 'vp8' || vCodec === 'vp9' || info.recommendedMode === 'transcode'
+              ? 'transcode'
+              : info.recommendedMode === 'remux'
+                ? 'remux'
+                : null;
+          if (mode && currentInlineStage === 'direct') {
+            escalateInlineToHls(mode);
+          }
+        })
+        .catch(() => {});
+    }
 
     const handleLoadedMetadata = () => {
       tryApplyInlineResume();
@@ -610,6 +668,15 @@ export default function MovieDetailsModal({
       }
     };
 
+    const handleError = () => {
+      if (cancelled || !isTelegramSource) return;
+      if (currentInlineStage === 'direct') {
+        escalateInlineToHls('remux');
+      } else if (currentInlineStage === 'remux_hls') {
+        escalateInlineToHls('transcode');
+      }
+    };
+
     const handleTimeUpdate = () => {
       if (cancelled) return;
       const cur = videoEl.currentTime || 0;
@@ -625,6 +692,7 @@ export default function MovieDetailsModal({
     videoEl.addEventListener('canplay', handleCanPlay);
     videoEl.addEventListener('playing', handlePlaying);
     videoEl.addEventListener('waiting', handleWaiting);
+    videoEl.addEventListener('error', handleError);
     videoEl.addEventListener('timeupdate', handleTimeUpdate);
 
     startPlayback();
@@ -642,12 +710,13 @@ export default function MovieDetailsModal({
         videoEl.removeEventListener('canplay', handleCanPlay);
         videoEl.removeEventListener('playing', handlePlaying);
         videoEl.removeEventListener('waiting', handleWaiting);
+        videoEl.removeEventListener('error', handleError);
         videoEl.removeEventListener('timeupdate', handleTimeUpdate);
         videoEl.pause();
         videoEl.src = '';
       }
     };
-  }, [primaryDownloadUrl, inlineEpisodeResumeKey]);
+  }, [primaryDownloadUrl, rawStreamUrl, inlineEpisodeResumeKey]);
 
   const modalContent = (
     <div

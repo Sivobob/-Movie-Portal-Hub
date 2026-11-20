@@ -36,6 +36,29 @@ const MEDIA_CACHE_TTL_MS = 10 * 60 * 1000;
 
 let browserClient: TelegramClient | null = null;
 let connectPromise: Promise<TelegramClient> | null = null;
+let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+
+function ensureKeepaliveLoop() {
+  if (keepaliveTimer) return;
+  keepaliveTimer = setInterval(async () => {
+    const c = browserClient;
+    if (!c) return;
+    try {
+      if (!c.connected) {
+        await c.connect().catch(() => {});
+        return;
+      }
+      await Promise.race([
+        c.invoke(new Api.Ping({ pingId: bigInt(Date.now()) })),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('PING_TIMEOUT')), 8000)),
+      ]);
+    } catch {
+      try {
+        await getBrowserTelegramClient(true);
+      } catch {}
+    }
+  }, 45000);
+}
 
 function getSavedChannelHash(cleanId: string): string | null {
   if (!cleanId) return null;
@@ -98,6 +121,7 @@ export async function resetBrowserTelegramClient(): Promise<void> {
 
 export async function getBrowserTelegramClient(forceReconnect = false): Promise<TelegramClient> {
   if (!forceReconnect && browserClient && browserClient.connected) {
+    ensureKeepaliveLoop();
     return browserClient;
   }
   if (forceReconnect) {
@@ -119,6 +143,7 @@ export async function getBrowserTelegramClient(forceReconnect = false): Promise<
         await client.connect();
         if (client.connected) {
           browserClient = client;
+          ensureKeepaliveLoop();
           return client;
         }
       } catch {
@@ -137,6 +162,7 @@ export async function getBrowserTelegramClient(forceReconnect = false): Promise<
     const exported = freshClient.session.save() as unknown as string;
     saveBrowserSession(exported);
     browserClient = freshClient;
+    ensureKeepaliveLoop();
     return freshClient;
   })()
     .catch((err) => {
@@ -162,7 +188,10 @@ function isRecoverableClientError(err: any): boolean {
     msg.includes('CONNECTION') ||
     msg.includes('NOT CONNECTED') ||
     msg.includes('TIMEOUT') ||
-    msg.includes('ECONNRESET')
+    msg.includes('TIMED OUT') ||
+    msg.includes('ABORT') ||
+    msg.includes('ECONNRESET') ||
+    msg.includes('PING_TIMEOUT')
   );
 }
 
@@ -475,7 +504,7 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
   const BLOCK = 512 * 1024;
 
   const fetchOneBlockWithRetry = async (
-    client: TelegramClient,
+    clientRef: { current: TelegramClient },
     doc: Api.Document,
     blockIdx: number
   ): Promise<Uint8Array> => {
@@ -489,8 +518,12 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
     }
 
     let lastErr: any = null;
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      let timerId: ReturnType<typeof setTimeout> | undefined;
       try {
+        if (!clientRef.current?.connected) {
+          clientRef.current = await getBrowserTelegramClient(attempt >= 3);
+        }
         const fileLocation = new Api.InputDocumentFileLocation({
           id: doc.id,
           accessHash: doc.accessHash,
@@ -498,18 +531,26 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
           thumbSize: '',
         });
 
-        let collected: Uint8Array | null = null;
-        for await (const chunk of client.iterDownload({
-          file: fileLocation,
-          offset: bigInt(blockIdx * BLOCK) as any,
-          requestSize: BLOCK,
-          dcId: (doc as any).dcId,
-          fileSize: doc.size,
-        })) {
-          collected = new Uint8Array(chunk);
-          break;
-        }
-        const result = collected || new Uint8Array(0);
+        const downloadPromise = (async () => {
+          let collected: Uint8Array | null = null;
+          for await (const chunk of clientRef.current.iterDownload({
+            file: fileLocation,
+            offset: bigInt(blockIdx * BLOCK) as any,
+            requestSize: BLOCK,
+            dcId: (doc as any).dcId,
+            fileSize: doc.size,
+          })) {
+            collected = new Uint8Array(chunk);
+            break;
+          }
+          return collected || new Uint8Array(0);
+        })();
+
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timerId = setTimeout(() => reject(new Error('TIMEOUT: Telegram block fetch timed out')), 16000);
+        });
+
+        const result = await Promise.race([downloadPromise, timeoutPromise]);
         if (result.length > 0) {
           if (localBlockCache.size >= 96) {
             const oldest = localBlockCache.keys().next().value;
@@ -523,9 +564,16 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
         if (String(err?.message || '').includes('FILE_REFERENCE')) {
           throw err;
         }
-        if (attempt < 2) {
-          await new Promise((r) => setTimeout(r, 350));
+        if (attempt < 4) {
+          if (attempt >= 2 || isRecoverableClientError(err)) {
+            try {
+              clientRef.current = await getBrowserTelegramClient(true);
+            } catch {}
+          }
+          await new Promise((r) => setTimeout(r, Math.min(2000, 350 * attempt)));
         }
+      } finally {
+        if (timerId !== undefined) clearTimeout(timerId);
       }
     }
     throw lastErr || new Error('Failed to fetch Telegram block');
@@ -581,7 +629,8 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
         if (!meta.headerProbe) {
           try {
             const client = await getBrowserTelegramClient();
-            const block0 = await fetchOneBlockWithRetry(client, meta.document, 0);
+            const clientRef = { current: client };
+            const block0 = await fetchOneBlockWithRetry(clientRef, meta.document, 0);
             meta.headerProbe = inspectMediaHeaderBytes(
               block0,
               meta.fileName,
@@ -636,35 +685,36 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
 
       try {
         let entry = await resolveTelegramDocument(telegramUrl);
-        let client = await getBrowserTelegramClient();
+        const clientRef = { current: await getBrowserTelegramClient() };
+        const initialFirstBlock = Math.floor(startByte / BLOCK);
+        const lastBlock = Math.floor(endByte / BLOCK);
+        let resumeFromBlock = initialFirstBlock;
 
-        const runPump = async (doc: Api.Document) => {
-          const firstBlock = Math.floor(startByte / BLOCK);
-          const lastBlock = Math.floor(endByte / BLOCK);
+        const runPump = async (doc: Api.Document, fromBlock: number) => {
           const pending = new Map<number, Promise<Uint8Array>>();
-          let nextQueue = firstBlock;
+          let nextQueue = fromBlock;
 
           const queueAhead = (upTo: number) => {
             const cap = Math.min(lastBlock, upTo);
             while (nextQueue <= cap && !abortedReqs.has(reqId)) {
               const idx = nextQueue++;
               if (!pending.has(idx)) {
-                const p = fetchOneBlockWithRetry(client, doc, idx);
+                const p = fetchOneBlockWithRetry(clientRef, doc, idx);
                 p.catch(() => {});
                 pending.set(idx, p);
               }
             }
           };
 
-          for (let blockIdx = firstBlock; blockIdx <= lastBlock; blockIdx++) {
+          for (let blockIdx = fromBlock; blockIdx <= lastBlock; blockIdx++) {
             if (abortedReqs.has(reqId)) break;
-            if (blockIdx > firstBlock) {
+            if (blockIdx > fromBlock) {
               queueAhead(blockIdx + CONCURRENCY);
             } else {
-              nextQueue = Math.max(nextQueue, firstBlock + 1);
+              nextQueue = Math.max(nextQueue, fromBlock + 1);
             }
 
-            const blockData = await (pending.get(blockIdx) || fetchOneBlockWithRetry(client, doc, blockIdx));
+            const blockData = await (pending.get(blockIdx) || fetchOneBlockWithRetry(clientRef, doc, blockIdx));
             pending.delete(blockIdx);
 
             if (abortedReqs.has(reqId) || blockData.length === 0) break;
@@ -681,23 +731,33 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
                 break;
               }
             }
+            // Only advance resume checkpoint after downstream confirmed receipt of this block
+            resumeFromBlock = blockIdx + 1;
             if (blockData.length < BLOCK) break;
           }
           pending.clear();
         };
 
-        try {
-          await runPump(entry.document);
-        } catch (err: any) {
-          if (err?.message?.includes('FILE_REFERENCE')) {
-            const parsed = parseTelegramUrl(telegramUrl);
-            mediaCache.delete(`${parsed.chatId}:${parsed.messageId}`);
-            entry = await resolveTelegramDocument(telegramUrl);
-            await runPump(entry.document);
-          } else if (isRecoverableClientError(err)) {
-            client = await getBrowserTelegramClient(true);
-            await runPump(entry.document);
-          } else {
+        let recoveryAttempts = 0;
+        while (resumeFromBlock <= lastBlock && !abortedReqs.has(reqId)) {
+          try {
+            await runPump(entry.document, resumeFromBlock);
+            break;
+          } catch (err: any) {
+            recoveryAttempts += 1;
+            if (recoveryAttempts > 3) {
+              throw err;
+            }
+            if (err?.message?.includes('FILE_REFERENCE')) {
+              const parsed = parseTelegramUrl(telegramUrl);
+              mediaCache.delete(`${parsed.chatId}:${parsed.messageId}`);
+              entry = await resolveTelegramDocument(telegramUrl);
+              continue;
+            }
+            if (isRecoverableClientError(err)) {
+              clientRef.current = await getBrowserTelegramClient(true);
+              continue;
+            }
             throw err;
           }
         }

@@ -32,7 +32,12 @@ export default defineConfig(() => {
           navigateFallbackDenylist: [/^\/api\//],
           runtimeCaching: [
             {
-              urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
+              urlPattern: ({ url }) =>
+                url.pathname.startsWith('/api/') &&
+                !url.pathname.startsWith('/api/stream') &&
+                !url.pathname.startsWith('/api/telegram/stream') &&
+                !url.pathname.startsWith('/api/telegram/hls') &&
+                !url.pathname.startsWith('/api/video/'),
               handler: 'NetworkOnly',
             },
           ],

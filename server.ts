@@ -73,9 +73,14 @@ app.use((req, res, next) => {
   next();
 });
 
-// Ensure API routes (except /api/stream and /api/ios-profile) default to JSON
+// Ensure API routes (except /api/stream, /api/telegram/hls, and /api/ios-profile) default to JSON
 app.use('/api', (req, res, next) => {
-  if (!req.path.startsWith('/stream') && !req.path.startsWith('/ios-profile')) {
+  if (
+    !req.path.startsWith('/stream') &&
+    !req.path.startsWith('/telegram/hls') &&
+    !req.path.startsWith('/telegram/subtitles.vtt') &&
+    !req.path.startsWith('/ios-profile')
+  ) {
     res.setHeader('Content-Type', 'application/json');
   }
   next();
@@ -88,7 +93,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     time: new Date().toISOString(),
-    version: '3.5.247',
+    version: '3.5.248',
     ffmpegAvailable: FFMPEG_AVAILABLE,
     ffprobeAvailable: FFPROBE_AVAILABLE,
     telegramConfigured,

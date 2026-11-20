@@ -20,6 +20,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.SurfaceHolder;
@@ -195,6 +196,11 @@ public class MainActivity extends BridgeActivity {
     private volatile String exoSubtitleTracksJson = "[]";
     private volatile String exoActiveCueText = "";
     private volatile int exoResizeMode = 0; // 0 = fit, 4 = zoom/cover, 3 = stretch/fill
+    private volatile String currentExoMediaUrl = "";
+    private volatile int exoAutoReconnectAttempts = 0;
+    private Runnable pendingExoReconnectRunnable = null;
+    private PowerManager.WakeLock playbackWakeLock;
+    private WifiManager.WifiLock playbackWifiLock;
     private volatile String cachedExoStateJson = "{\"active\":false,\"state\":1,\"isPlaying\":false,\"isBuffering\":false,\"ended\":false,\"seekable\":false,\"currentTime\":0,\"duration\":0,\"bufferedPosition\":0,\"videoWidth\":0,\"videoHeight\":0,\"firstFrameRendered\":false,\"renderedFrames\":0,\"droppedFrames\":0,\"preferSoftware\":false,\"isSoftwareDecoder\":false,\"decoderName\":\"\",\"surfaceMode\":\"texture\",\"error\":\"\",\"audioTracks\":[],\"subtitleTracks\":[],\"cueText\":\"\"}";
 
     private static final String VIDEO_DOWNLOAD_CHANNEL_ID = "movie_box_video_downloads";
@@ -439,6 +445,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onDestroy() {
         releaseExoPlayerInternal();
+        releasePlaybackLocks();
         mainHandler.removeCallbacks(castStatusTicker);
         stopCastDiscoveryNative();
         disconnectCastNative();
@@ -894,6 +901,69 @@ public class MainActivity extends BridgeActivity {
         return trackType == C.TRACK_TYPE_AUDIO ? ("Audio " + (countIdx + 1)) : ("Subtitle " + (countIdx + 1));
     }
 
+    private void acquirePlaybackLocks() {
+        try {
+            if (playbackWakeLock == null) {
+                PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+                if (pm != null) {
+                    playbackWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MovieHub:PlaybackWakeLock");
+                    playbackWakeLock.setReferenceCounted(false);
+                }
+            }
+            if (playbackWakeLock != null && !playbackWakeLock.isHeld()) {
+                playbackWakeLock.acquire(4L * 60L * 60L * 1000L);
+            }
+        } catch (Exception ignored) {}
+        try {
+            if (playbackWifiLock == null) {
+                WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+                if (wm != null) {
+                    int mode = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                        ? WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+                        : WifiManager.WIFI_MODE_FULL_HIGH_PERF;
+                    playbackWifiLock = wm.createWifiLock(mode, "MovieHub:PlaybackWifiLock");
+                    playbackWifiLock.setReferenceCounted(false);
+                }
+            }
+            if (playbackWifiLock != null && !playbackWifiLock.isHeld()) {
+                playbackWifiLock.acquire();
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void releasePlaybackLocks() {
+        try {
+            if (playbackWakeLock != null && playbackWakeLock.isHeld()) {
+                playbackWakeLock.release();
+            }
+        } catch (Exception ignored) {}
+        try {
+            if (playbackWifiLock != null && playbackWifiLock.isHeld()) {
+                playbackWifiLock.release();
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private boolean isTransientIoPlaybackException(PlaybackException error) {
+        if (error == null) return false;
+        int code = error.errorCode;
+        if (code == PlaybackException.ERROR_CODE_IO_UNSPECIFIED
+            || code == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED
+            || code == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT
+            || code == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS
+            || code == PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE
+            || code == PlaybackException.ERROR_CODE_TIMEOUT) {
+            return true;
+        }
+        String msg = error.getMessage() != null ? error.getMessage().toLowerCase(Locale.US) : "";
+        return msg.contains("timeout")
+            || msg.contains("socket")
+            || msg.contains("connection")
+            || msg.contains("eof")
+            || msg.contains("reset")
+            || msg.contains("http");
+    }
+
     private void ensureExoPlayer(final boolean preferSoftware) {
         if (exoPlayer != null && currentPreferSoftware != preferSoftware) {
             try {
@@ -909,10 +979,10 @@ public class MainActivity extends BridgeActivity {
         boolean lowRam = isLowRamDeviceCompat();
         DefaultHttpDataSource.Factory httpFactory = new DefaultHttpDataSource.Factory()
             .setConnectTimeoutMs(30000)
-            .setReadTimeoutMs(45000)
+            .setReadTimeoutMs(60000)
             .setAllowCrossProtocolRedirects(true)
             .setKeepPostFor302Redirects(true)
-            .setUserAgent("MoviePortal/3.5.222 AndroidExoPlayer");
+            .setUserAgent("MoviePortal/3.5.248 AndroidExoPlayer");
 
         DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
             .setBufferDurationsMs(
@@ -955,9 +1025,10 @@ public class MainActivity extends BridgeActivity {
             .setMediaSourceFactory(
                 new DefaultMediaSourceFactory(this)
                     .setDataSourceFactory(dataSourceFactory)
-                    .setLoadErrorHandlingPolicy(new DefaultLoadErrorHandlingPolicy(4))
+                    .setLoadErrorHandlingPolicy(new DefaultLoadErrorHandlingPolicy(8))
             )
             .setLoadControl(loadControl)
+            .setWakeMode(C.WAKE_MODE_NETWORK)
             .build();
 
         exoPlayer.addAnalyticsListener(new AnalyticsListener() {
@@ -1066,16 +1137,60 @@ public class MainActivity extends BridgeActivity {
 
             @Override
             public void onPlaybackStateChanged(int playbackState) {
+                if (playbackState == Player.STATE_READY) {
+                    exoAutoReconnectAttempts = 0;
+                    exoErrorMessage = "";
+                }
                 refreshExoStateSnapshot();
             }
 
             @Override
             public void onIsPlayingChanged(boolean isPlaying) {
+                if (isPlaying) {
+                    exoAutoReconnectAttempts = 0;
+                    exoErrorMessage = "";
+                }
                 refreshExoStateSnapshot();
             }
 
             @Override
             public void onPlayerError(PlaybackException error) {
+                if (exoActive && exoPlayer != null && currentExoMediaUrl != null && !currentExoMediaUrl.isEmpty()
+                    && exoAutoReconnectAttempts < 5
+                    && (isTransientIoPlaybackException(error) || exoPlayer.getCurrentPosition() > 15000L)) {
+                    exoAutoReconnectAttempts++;
+                    final long sessionSnapshot = exoSessionId;
+                    final long resumePosMs = Math.max(0L, exoPlayer.getCurrentPosition());
+                    final boolean wasServerPiped = currentExoMediaUrl.contains("transcode=1") || currentExoMediaUrl.contains("remux=1");
+                    final String targetUrl = currentExoMediaUrl;
+                    exoErrorMessage = "";
+                    refreshExoStateSnapshot();
+
+                    if (pendingExoReconnectRunnable != null) {
+                        mainHandler.removeCallbacks(pendingExoReconnectRunnable);
+                    }
+                    pendingExoReconnectRunnable = () -> {
+                        pendingExoReconnectRunnable = null;
+                        if (!exoActive || exoSessionId != sessionSnapshot || exoPlayer == null) return;
+                        try {
+                            exoPlayer.stop();
+                            MediaItem mediaItem = MediaItem.fromUri(Uri.parse(targetUrl));
+                            if (!wasServerPiped && resumePosMs > 250L) {
+                                exoPlayer.setMediaItem(mediaItem, resumePosMs);
+                            } else {
+                                exoPlayer.setMediaItem(mediaItem);
+                            }
+                            exoPlayer.prepare();
+                            exoPlayer.setPlayWhenReady(true);
+                            refreshExoStateSnapshot();
+                        } catch (Throwable t) {
+                            exoErrorMessage = t.getMessage() != null ? t.getMessage() : "Reconnect failed";
+                            refreshExoStateSnapshot();
+                        }
+                    };
+                    mainHandler.postDelayed(pendingExoReconnectRunnable, 900L * exoAutoReconnectAttempts);
+                    return;
+                }
                 exoErrorMessage = error.getMessage() != null ? error.getMessage() : ("ExoPlayer error: " + error.getErrorCodeName());
                 refreshExoStateSnapshot();
             }
@@ -1122,6 +1237,13 @@ public class MainActivity extends BridgeActivity {
             }
 
             exoActive = true;
+            currentExoMediaUrl = url != null ? url.trim() : "";
+            exoAutoReconnectAttempts = 0;
+            if (pendingExoReconnectRunnable != null) {
+                mainHandler.removeCallbacks(pendingExoReconnectRunnable);
+                pendingExoReconnectRunnable = null;
+            }
+            acquirePlaybackLocks();
             exoVideoWidth = 0;
             exoVideoHeight = 0;
             exoFirstFrameRendered = false;
@@ -1213,8 +1335,17 @@ public class MainActivity extends BridgeActivity {
     private void stopExoPlaybackNative() {
         exoActive = false;
         exoSessionId++;
+        currentExoMediaUrl = "";
+        exoAutoReconnectAttempts = 0;
         pendingStartRunnable = null;
+        if (pendingExoReconnectRunnable != null) {
+            mainHandler.removeCallbacks(pendingExoReconnectRunnable);
+            pendingExoReconnectRunnable = null;
+        }
         mainHandler.removeCallbacks(exoStateTicker);
+        if (!isPlaybackActive) {
+            releasePlaybackLocks();
+        }
         if (exoPlayer != null) {
             try {
                 exoPlayer.stop();
@@ -1259,12 +1390,19 @@ public class MainActivity extends BridgeActivity {
     private void releaseExoPlayerInternal() {
         exoActive = false;
         exoSessionId++;
+        currentExoMediaUrl = "";
+        exoAutoReconnectAttempts = 0;
         pendingStartRunnable = null;
+        if (pendingExoReconnectRunnable != null) {
+            mainHandler.removeCallbacks(pendingExoReconnectRunnable);
+            pendingExoReconnectRunnable = null;
+        }
         if (pendingHideContainerRunnable != null) {
             mainHandler.removeCallbacks(pendingHideContainerRunnable);
             pendingHideContainerRunnable = null;
         }
         mainHandler.removeCallbacks(exoStateTicker);
+        releasePlaybackLocks();
         if (exoPlayer != null) {
             try {
                 exoPlayer.setVideoTextureView(null);
@@ -1702,7 +1840,7 @@ public class MainActivity extends BridgeActivity {
             conn.setConnectTimeout(30000);
             conn.setReadTimeout(60000);
             conn.setRequestMethod("GET");
-            conn.setRequestProperty("User-Agent", "MoviePortal-AndroidUpdater/3.5.247");
+            conn.setRequestProperty("User-Agent", "MoviePortal-AndroidUpdater/3.5.248");
             conn.setRequestProperty("Accept", "application/vnd.android.package-archive,application/octet-stream,*/*");
             conn.setRequestProperty("Accept-Encoding", "identity");
             conn.setRequestProperty("Cache-Control", "no-cache");
@@ -2670,11 +2808,15 @@ public class MainActivity extends BridgeActivity {
             runOnUiThread(() -> {
                 isPlaybackActive = active;
                 if (active) {
+                    acquirePlaybackLocks();
                     getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
                     if (!isPlaybackFullscreen && customView == null) {
                         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
                     }
                 } else {
+                    if (!exoActive) {
+                        releasePlaybackLocks();
+                    }
                     if (customView != null) {
                         hideCustomFullscreenView();
                     }
@@ -2730,11 +2872,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.247");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.248");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.247\",\"versionCode\":3467}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.248\",\"versionCode\":3468}";
             }
         }
 
