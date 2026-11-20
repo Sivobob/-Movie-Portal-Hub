@@ -32,6 +32,7 @@ export interface MovieData {
     seasonNumber: number;
     episodes: Array<{
       episodeNumber: number;
+      episodeLabel?: string;
       title: string;
       streamUrl: string;
       duration?: string;
@@ -42,6 +43,51 @@ export interface MovieData {
       newEpisodeEnabledAt?: number;
     }>;
   }>;
+}
+
+export function extractEpisodeRangeFromText(text?: string | null): string {
+  const clean = String(text || '').trim();
+  if (!clean) return '';
+  const explicitMatch = clean.match(
+    /(?:^|\b(?:episodes?|eps?|e)\s*)(\d{1,3})\s*(?:-|–|—|\bto\b)\s*(?:e\s*)?(\d{1,3})(?:\b|$)/i
+  );
+  if (explicitMatch) {
+    const startNum = parseInt(explicitMatch[1], 10);
+    const endNum = parseInt(explicitMatch[2], 10);
+    if (
+      Number.isFinite(startNum) &&
+      Number.isFinite(endNum) &&
+      endNum > startNum &&
+      startNum >= 1 &&
+      endNum <= 999
+    ) {
+      return `${startNum}-${endNum}`;
+    }
+  }
+  return '';
+}
+
+export function getEpisodeDisplayLabel(
+  ep: { episodeNumber?: number | null; episodeLabel?: string | null; title?: string | null } | null | undefined,
+  fallbackIndex = 0,
+  padSingle = true
+): string {
+  const explicitLabel = String(ep?.episodeLabel || '').trim();
+  if (explicitLabel) {
+    if (/^\d+$/.test(explicitLabel)) {
+      return padSingle ? explicitLabel.padStart(2, '0') : explicitLabel;
+    }
+    return explicitLabel.replace(/\s*[-–—]\s*/g, '-');
+  }
+
+  const inferredRange = extractEpisodeRangeFromText(ep?.title);
+  if (inferredRange) {
+    return inferredRange;
+  }
+
+  const num = Number(ep?.episodeNumber || fallbackIndex + 1);
+  const str = String(Number.isFinite(num) && num > 0 ? num : fallbackIndex + 1);
+  return padSingle ? str.padStart(2, '0') : str;
 }
 
 export const NEW_EPISODE_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -64,6 +110,7 @@ export interface RecentEpisodeItem {
   episodeIndex: number;
   seasonNumber: number;
   episodeNumber: number;
+  episodeLabel?: string;
   episodeTitle: string;
   duration?: string;
   addedAtMs: number;
@@ -113,6 +160,7 @@ export function getNewEpisodesWithin24h(
 
         const enabledAtMs = getTimestampMs(ep.newEpisodeEnabledAt);
         const epNum = Number(ep.episodeNumber) || eIdx + 1;
+        const resolvedLabel = getEpisodeDisplayLabel(ep, eIdx, true);
         items.push({
           key: `${movie.id}_s${seasonNum}_e${epNum}_${eIdx}`,
           movie,
@@ -120,7 +168,8 @@ export function getNewEpisodesWithin24h(
           episodeIndex: eIdx,
           seasonNumber: seasonNum,
           episodeNumber: epNum,
-          episodeTitle: ep.title?.trim() || `Episode ${epNum}`,
+          ...(ep.episodeLabel || extractEpisodeRangeFromText(ep.title) ? { episodeLabel: resolvedLabel } : {}),
+          episodeTitle: ep.title?.trim() || `Episode ${resolvedLabel}`,
           duration: ep.duration,
           addedAtMs: enabledAtMs,
         });

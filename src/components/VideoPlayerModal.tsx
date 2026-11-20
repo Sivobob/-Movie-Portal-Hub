@@ -39,7 +39,7 @@ import {
   probeWorkingBackendUrl,
 } from '../utils/apiConfig';
 import { formatClockTime, parseDurationToSeconds } from '../utils/duration';
-import { isEpisodeNewActive } from '../services/movieStorage';
+import { isEpisodeNewActive, getEpisodeDisplayLabel } from '../services/movieStorage';
 import { normalizePlayerTrackList } from '../utils/videoQuality';
 
 interface ParsedSubtitleCue {
@@ -2345,7 +2345,7 @@ export default function VideoPlayerModal({
       if (firstEp.streamUrl) {
         setActiveStreamUrl(firstEp.streamUrl);
         const sLabel = String(targetSeason.seasonNumber).padStart(2, '0');
-        const eLabel = String(firstEp.episodeNumber).padStart(2, '0');
+        const eLabel = getEpisodeDisplayLabel(firstEp, 0, true);
         setCurrentEpisodeTitle(`${seriesOrMovieTitle} - S${sLabel}E${eLabel}: ${firstEp.title}`);
         if (onEpisodeChange) onEpisodeChange(sIdx, 0);
       }
@@ -2364,7 +2364,7 @@ export default function VideoPlayerModal({
     if (ep && ep.streamUrl) {
       setActiveStreamUrl(ep.streamUrl);
       const sLabel = String(currentSeason?.seasonNumber || activeSeasonIdx + 1).padStart(2, '0');
-      const eLabel = String(ep.episodeNumber).padStart(2, '0');
+      const eLabel = getEpisodeDisplayLabel(ep, eIdx, true);
       setCurrentEpisodeTitle(`${seriesOrMovieTitle} - S${sLabel}E${eLabel}: ${ep.title}`);
       if (onEpisodeChange) onEpisodeChange(activeSeasonIdx, eIdx);
     }
@@ -2654,7 +2654,9 @@ export default function VideoPlayerModal({
                       className="bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg px-2.5 py-1 text-xs text-white font-semibold flex items-center gap-1 backdrop-blur-md shadow-sm transition-colors cursor-pointer max-w-[150px] sm:max-w-[200px]"
                     >
                       <span className="truncate">
-                        {currentEpisode ? `EP ${currentEpisode.episodeNumber}: ${currentEpisode.title}` : `Episode ${activeEpisodeIdx + 1}`}
+                        {currentEpisode
+                          ? `EP ${getEpisodeDisplayLabel(currentEpisode, activeEpisodeIdx, false)}: ${currentEpisode.title}`
+                          : `Episode ${activeEpisodeIdx + 1}`}
                       </span>
                       <ChevronDown size={13} className={`flex-shrink-0 transition-transform duration-200 ${showEpisodeDropdown ? 'rotate-180 text-emerald-400' : 'text-neutral-400'}`} />
                     </button>
@@ -2677,7 +2679,9 @@ export default function VideoPlayerModal({
                             }`}
                           >
                             <div className="truncate min-w-0 flex items-center gap-1.5">
-                              <span className="font-bold mr-1 text-neutral-400 flex-shrink-0">EP {ep.episodeNumber}:</span>
+                              <span className="font-bold mr-1 text-neutral-400 flex-shrink-0">
+                                EP {getEpisodeDisplayLabel(ep, idx, false)}:
+                              </span>
                               <span className="truncate">{ep.title}</span>
                               {isEpisodeNewActive(ep) && (
                                 <span className="bg-red-600 text-white font-black text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wider animate-pulse flex-shrink-0">

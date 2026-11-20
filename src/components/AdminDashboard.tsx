@@ -66,6 +66,7 @@ import {
   sortMoviesList,
   getTimestampMs,
   isEpisodeNewActive,
+  getEpisodeDisplayLabel,
   NEW_EPISODE_WINDOW_MS,
   touchCatalogSyncMarker,
   MovieData
@@ -239,7 +240,7 @@ export default function AdminDashboard() {
   const [showChannelPanel, setShowChannelPanel] = useState(false);
 
   // Series Season & Episode Management State
-  const [seasons, setSeasons] = useState<Array<{ seasonNumber: number; episodes: Array<{ episodeNumber: number; title: string; streamUrl: string; duration?: string; durationSec?: number; createdAt?: any; addedAt?: any; showInNewEpisodes?: boolean; newEpisodeEnabledAt?: number }> }>>([
+  const [seasons, setSeasons] = useState<Array<{ seasonNumber: number; episodes: Array<{ episodeNumber: number; episodeLabel?: string; title: string; streamUrl: string; duration?: string; durationSec?: number; createdAt?: any; addedAt?: any; showInNewEpisodes?: boolean; newEpisodeEnabledAt?: number }> }>>([
     {
       seasonNumber: 1,
       episodes: [
@@ -1219,7 +1220,7 @@ export default function AdminDashboard() {
       )
     );
 
-    const epLabel = `S${seasons[seasonIndex]?.seasonNumber || seasonIndex + 1} E${targetEp.episodeNumber || epIndex + 1}`;
+    const epLabel = `S${seasons[seasonIndex]?.seasonNumber || seasonIndex + 1} E${getEpisodeDisplayLabel(targetEp, epIndex, false)}`;
 
     // If editing an already-saved series and this episode already exists in saved data, sync immediately to Firestore
     const cleanUrl = String(targetEp.streamUrl || '').trim();
@@ -2443,12 +2444,16 @@ export default function AdminDashboard() {
                 newEpisodeEnabledAt: _dropEnabledAt,
                 createdAt: _dropCreatedAt,
                 addedAt: _dropAddedAt,
+                episodeLabel: rawEpLabel,
                 ...cleanEp
               } = ep;
+              const trimmedLabel = String(rawEpLabel || '').trim();
+              const labelField = trimmedLabel ? { episodeLabel: trimmedLabel } : {};
               if (activeNew) {
                 const enabledAt = getTimestampMs(ep?.newEpisodeEnabledAt) || saveNowMs;
                 return {
                   ...cleanEp,
+                  ...labelField,
                   showInNewEpisodes: true,
                   newEpisodeEnabledAt: enabledAt,
                   createdAt: enabledAt,
@@ -2457,6 +2462,7 @@ export default function AdminDashboard() {
               }
               return {
                 ...cleanEp,
+                ...labelField,
                 showInNewEpisodes: false,
               };
             }),
@@ -4752,9 +4758,48 @@ export default function AdminDashboard() {
                                 return (
                                 <div key={eIdx} className="flex flex-col gap-2 bg-neutral-950 p-2.5 rounded border border-neutral-800">
                                   <div className="flex flex-wrap items-center gap-2">
-                                    <span className="text-gray-400 font-mono font-bold w-10 flex-shrink-0 text-[11px]">
-                                      E{ep.episodeNumber}
-                                    </span>
+                                    <div
+                                      className="flex items-center bg-neutral-900 border border-neutral-800 rounded px-1.5 py-1 flex-shrink-0 focus-within:border-yellow-400"
+                                      title="Episode number ya combined range likhein (e.g. 1 ya 1-6)"
+                                    >
+                                      <span className="text-gray-400 font-mono font-bold text-[11px] mr-0.5">E</span>
+                                      <input
+                                        type="text"
+                                        value={ep.episodeLabel !== undefined ? ep.episodeLabel : String(ep.episodeNumber)}
+                                        onChange={(e) => {
+                                          const rawVal = e.target.value.replace(/\s+/g, '');
+                                          const firstNumMatch = rawVal.match(/^(\d+)/);
+                                          const parsedNum = firstNumMatch
+                                            ? Math.max(1, parseInt(firstNumMatch[1], 10) || eIdx + 1)
+                                            : eIdx + 1;
+                                          setSeasons((prev) =>
+                                            prev.map((s, si) =>
+                                              si === sIdx
+                                                ? {
+                                                    ...s,
+                                                    episodes: s.episodes.map((item, ei) => {
+                                                      if (ei !== eIdx) return item;
+                                                      const isDefaultTitle = /^Episode\s+\d+(?:\s*-\s*\d+)?$/i.test(
+                                                        (item.title || '').trim()
+                                                      );
+                                                      const nextTitle =
+                                                        isDefaultTitle && rawVal ? `Episode ${rawVal}` : item.title;
+                                                      return {
+                                                        ...item,
+                                                        episodeNumber: parsedNum,
+                                                        episodeLabel: rawVal,
+                                                        title: nextTitle,
+                                                      };
+                                                    }),
+                                                  }
+                                                : s
+                                            )
+                                          );
+                                        }}
+                                        placeholder="1-6"
+                                        className="w-12 bg-transparent text-white font-mono font-bold text-[11px] focus:outline-none"
+                                      />
+                                    </div>
                                     <input
                                       type="text"
                                       value={ep.title}

@@ -17,6 +17,7 @@ import {
 
 import {
   getNewEpisodesWithin24h,
+  getEpisodeDisplayLabel,
   NEW_EPISODE_WINDOW_MS,
 } from '../services/movieStorage';
 import { upgradePosterUrl } from '../utils/posterUrl';
@@ -496,7 +497,7 @@ export default function HomePage() {
         }
         pushPlayerHistory();
         const sLabel = String(season.seasonNumber || sIdx + 1).padStart(2, '0');
-        const eLabel = String(ep.episodeNumber || eIdx + 1).padStart(2, '0');
+        const eLabel = getEpisodeDisplayLabel(ep, eIdx, true);
         const nextPlaying = {
           title: `${movie.title} - S${sLabel}E${eLabel}: ${ep.title}`,
           streamingUrl: epStream,
@@ -821,7 +822,7 @@ export default function HomePage() {
               </div>
               <div className="flex items-stretch gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
                 {newEpisodes24h.map((item) => {
-                  const epCode = `S${String(item.seasonNumber).padStart(2, '0')} • E${String(item.episodeNumber).padStart(2, '0')}`;
+                  const epCode = `S${String(item.seasonNumber).padStart(2, '0')} • E${item.episodeLabel || String(item.episodeNumber).padStart(2, '0')}`;
                   return (
                     <div
                       key={item.key}

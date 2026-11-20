@@ -17,7 +17,7 @@ import {
   Layers,
 } from 'lucide-react';
 import { upgradePosterUrl } from '../utils/posterUrl';
-import { isEpisodeNewActive } from '../services/movieStorage';
+import { isEpisodeNewActive, getEpisodeDisplayLabel } from '../services/movieStorage';
 import { StartDownloadParams, useDownloads } from '../hooks/useDownloads';
 import {
   buildApiUrl,
@@ -591,7 +591,7 @@ export default function DownloadOptionsModal({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
                   {episodes.map((ep: any, eIdx: number) => {
                     const epNum = Number(ep.episodeNumber || eIdx + 1);
-                    const epNumLabel = String(epNum).padStart(2, '0');
+                    const epNumLabel = getEpisodeDisplayLabel(ep, eIdx, true);
                     const epStreamUrl = String(
                       ep?.streamUrl ||
                         ep?.videoQualities?.['720p'] ||
@@ -618,7 +618,7 @@ export default function DownloadOptionsModal({
                         }`}
                       >
                         <span
-                          className={`w-7 h-7 rounded-lg text-[11px] font-black flex items-center justify-center flex-shrink-0 ${
+                          className={`min-w-[28px] h-7 px-1.5 rounded-lg text-[11px] font-black flex items-center justify-center flex-shrink-0 ${
                             isSelected ? 'bg-[#00d664] text-black' : 'bg-[#232833] text-neutral-200'
                           }`}
                         >

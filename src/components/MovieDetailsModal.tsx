@@ -44,7 +44,7 @@ import {
   parseDurationToSeconds,
   probeTelegramDurationSec,
 } from '../utils/duration';
-import { isEpisodeNewActive } from '../services/movieStorage';
+import { isEpisodeNewActive, getEpisodeDisplayLabel } from '../services/movieStorage';
 
 interface MovieDetailsModalProps {
   movie: any | null;
@@ -479,7 +479,7 @@ export default function MovieDetailsModal({
     : 0;
 
   const inlineEpisodeResumeKey = hasRealSeasons && currentEpisodeObj
-    ? `${movie.title} - S${String(currentSeason?.seasonNumber || safeSeasonIndex + 1).padStart(2, '0')}E${String(currentEpisodeObj.episodeNumber || primaryEpIdx + 1).padStart(2, '0')}: ${currentEpisodeObj.title}`
+    ? `${movie.title} - S${String(currentSeason?.seasonNumber || safeSeasonIndex + 1).padStart(2, '0')}E${getEpisodeDisplayLabel(currentEpisodeObj, primaryEpIdx, true)}: ${currentEpisodeObj.title}`
     : String(movie.title || '').replace(/\s*\(Official Trailer\)/i, '');
 
   const inlineVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -1106,7 +1106,7 @@ export default function MovieDetailsModal({
                 {episodeList.length > 0 ? (
                   <div className="flex items-center gap-2 overflow-x-auto scrollbar-none py-1 touch-pan-x">
                     {episodeList.map((ep: any, eIdx: number) => {
-                      const epNumLabel = String(ep.episodeNumber || eIdx + 1).padStart(2, '0');
+                      const epNumLabel = getEpisodeDisplayLabel(ep, eIdx, true);
                       const isSelected = selectedEpisodeIdx === eIdx;
                       return (
                         <button

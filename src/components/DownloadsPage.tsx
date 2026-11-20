@@ -11,6 +11,7 @@ import {
   fetchMoviesFromFirestore,
   getLocalMovies,
   sortMoviesList,
+  getEpisodeDisplayLabel,
 } from '../services/movieStorage';
 import {
   addToMyList,
@@ -297,7 +298,7 @@ export default function DownloadsPage() {
         }
         pushPlayerHistory();
         const sLabel = String(season.seasonNumber || sIdx + 1).padStart(2, '0');
-        const eLabel = String(ep.episodeNumber || eIdx + 1).padStart(2, '0');
+        const eLabel = getEpisodeDisplayLabel(ep, eIdx, true);
         const nextPlaying = {
           title: `${movie.title} - S${sLabel}E${eLabel}: ${ep.title}`,
           streamingUrl: epStream,

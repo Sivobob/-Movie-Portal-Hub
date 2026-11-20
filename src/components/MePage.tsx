@@ -33,7 +33,7 @@ import {
   MyLikeItem,
   WatchHistoryItem,
 } from '../services/userWatchService';
-import { getLocalMovies, getTimestampMs } from '../services/movieStorage';
+import { getLocalMovies, getTimestampMs, getEpisodeDisplayLabel } from '../services/movieStorage';
 import { upgradePosterUrl } from '../utils/posterUrl';
 import { parseDurationToSeconds } from '../utils/duration';
 import MovieDetailsModal from './MovieDetailsModal';
@@ -314,7 +314,7 @@ export default function MePage() {
         }
         pushPlayerHistory();
         const sLabel = String(season.seasonNumber || sIdx + 1).padStart(2, '0');
-        const eLabel = String(ep.episodeNumber || eIdx + 1).padStart(2, '0');
+        const eLabel = getEpisodeDisplayLabel(ep, eIdx, true);
         const nextPlaying = {
           title: `${movie.title} - S${sLabel}E${eLabel}: ${ep.title}`,
           streamingUrl: epStream,
