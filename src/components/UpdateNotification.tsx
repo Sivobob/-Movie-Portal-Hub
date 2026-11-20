@@ -156,7 +156,7 @@ export default function UpdateNotification() {
   const isInstalling = apkStatus.state === 'installing';
   const hasError = apkStatus.state === 'error';
 
-  const handleStartDownload = () => {
+  const handleStartDownload = async () => {
     if (!trackedDownloadRef.current) {
       trackedDownloadRef.current = true;
       recordApkDownloadClick('in_app_update').catch(() => {});
@@ -172,10 +172,10 @@ export default function UpdateNotification() {
         bridge.downloadAndInstallApk(downloadUrl);
         return;
       }
-      if (bridge && typeof bridge.openApkDownloadInBrowser === 'function') {
-        bridge.openApkDownloadInBrowser(downloadUrl);
-      }
-    } catch {}
+      handleDownloadInBrowser();
+    } catch {
+      handleDownloadInBrowser();
+    }
   };
 
   const handleOpenPermissionSettings = () => {
@@ -195,13 +195,24 @@ export default function UpdateNotification() {
     } catch {}
   };
 
-  const handleDownloadInBrowser = () => {
+  const handleDownloadInBrowser = async () => {
     try {
       const bridge = (window as any).AndroidPlayerBridge;
       if (bridge && typeof bridge.openApkDownloadInBrowser === 'function') {
         bridge.openApkDownloadInBrowser(downloadUrl);
+        return;
       }
-    } catch {}
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const { Browser } = await import('@capacitor/browser');
+          await Browser.open({ url: downloadUrl });
+          return;
+        } catch {}
+      }
+      window.open(downloadUrl, '_blank');
+    } catch {
+      window.open(downloadUrl, '_blank');
+    }
   };
 
   return (
@@ -301,6 +312,14 @@ export default function UpdateNotification() {
           >
             <ExternalLink size={14} />
             <span>Download APK in Browser</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setUpdateRequired(false)}
+            className="w-full bg-transparent hover:bg-neutral-800 text-gray-400 hover:text-white font-medium text-[11px] py-2 px-4 rounded-xl cursor-pointer transition-colors"
+          >
+            <span>Continue Using App (Remind Later)</span>
           </button>
         </div>
       </div>

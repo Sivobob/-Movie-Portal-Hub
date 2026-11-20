@@ -6,6 +6,7 @@ import path from 'path';
 import { Router, Request, Response } from 'express';
 import type { PushSubscription } from 'web-push';
 import firebaseConfig from '../../firebase-applet-config.json';
+import { adminDb } from './firebaseAdmin.ts';
 
 const require = createRequire(import.meta.url);
 const webPush = require('web-push') as typeof import('web-push');
@@ -134,6 +135,22 @@ router.post('/broadcast', async (req: Request, res: Response) => {
       subscriptionMap.set(sub.endpoint, sub);
     }
   }
+
+  // Also fetch all active subscriptions directly from Firestore app_installs for robust background delivery
+  try {
+    const snap = await adminDb.collection('app_installs').where('type', '==', 'web_push').get();
+    snap.forEach((docSnap) => {
+      const data: any = docSnap.data();
+      const sub = normalizeSub(data);
+      if (sub) {
+        merged.set(sub.endpoint, sub);
+        subscriptionMap.set(sub.endpoint, sub);
+      }
+    });
+  } catch (dbErr) {
+    console.warn('[WebPush] Failed fetching subscriptions from adminDb:', dbErr);
+  }
+
   saveSubsToTmp();
 
   const targets = Array.from(merged.values());

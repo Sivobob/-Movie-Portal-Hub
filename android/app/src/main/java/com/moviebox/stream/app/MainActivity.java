@@ -9,6 +9,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageInfo;
+import android.content.pm.PackageInstaller;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.database.Cursor;
@@ -95,6 +96,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
@@ -119,6 +121,7 @@ public class MainActivity extends BridgeActivity {
     private volatile String pendingOpenMovieId = null;
     private final ExecutorService notificationExecutor = Executors.newSingleThreadExecutor();
 
+    private static final String ACTION_APK_INSTALL_RESULT = "com.moviebox.stream.app.ACTION_APK_INSTALL_RESULT";
     private volatile String apkUpdateState = "idle";
     private volatile int apkUpdateProgress = 0;
     private volatile String apkUpdateMessage = "";
@@ -126,6 +129,7 @@ public class MainActivity extends BridgeActivity {
     private volatile File downloadedApkFile = null;
     private volatile boolean isDownloadingApk = false;
     private volatile boolean pendingInstallAfterPermission = false;
+    private volatile boolean legacyInstallFallbackTried = false;
     private volatile long apkDownloadSessionSeq = 0L;
 
     // Google Cast & MediaRouter state
@@ -286,6 +290,10 @@ public class MainActivity extends BridgeActivity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        if (intent != null && ACTION_APK_INSTALL_RESULT.equals(intent.getAction())) {
+            handlePackageInstallerCallback(intent);
+            return;
+        }
         captureLaunchMovieIntent(intent);
         if (pendingOpenMovieId != null && !pendingOpenMovieId.isEmpty()) {
             dispatchOpenMovieToWebView(pendingOpenMovieId);
@@ -1441,25 +1449,201 @@ public class MainActivity extends BridgeActivity {
         return false;
     }
 
+    private String getApkArchiveVersionLabel(File apkFile) {
+        try {
+            if (apkFile != null && apkFile.exists()) {
+                PackageInfo archiveInfo = getPackageManager().getPackageArchiveInfo(apkFile.getAbsolutePath(), 0);
+                if (archiveInfo != null && archiveInfo.versionName != null && !archiveInfo.versionName.trim().isEmpty()) {
+                    return "v" + archiveInfo.versionName.trim();
+                }
+            }
+        } catch (Exception ignored) {}
+        return "";
+    }
+
+    private void handlePackageInstallerCallback(Intent intent) {
+        if (intent == null) return;
+        int status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE);
+        String message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE);
+
+        if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
+            Intent confirmIntent = intent.getParcelableExtra(Intent.EXTRA_INTENT);
+            if (confirmIntent != null) {
+                try {
+                    apkUpdateState = "installing";
+                    apkUpdateProgress = 100;
+                    String verLabel = getApkArchiveVersionLabel(downloadedApkFile);
+                    apkUpdateMessage = "Update " + (verLabel.isEmpty() ? "" : verLabel + " ") + "ready! Tap Update / Install on the Android prompt.";
+                    startActivity(confirmIntent);
+                    return;
+                } catch (Exception e) {
+                    if (!legacyInstallFallbackTried && downloadedApkFile != null) {
+                        legacyInstallFallbackTried = true;
+                        launchLegacyFileProviderInstaller(downloadedApkFile);
+                        return;
+                    }
+                    apkUpdateState = "error";
+                    apkUpdateProgress = 100;
+                    apkUpdateMessage = "Could not open system update prompt (" + (e.getMessage() != null ? e.getMessage() : "Error") + "). Tap Retry In-App Update.";
+                }
+            }
+            return;
+        }
+
+        if (status == PackageInstaller.STATUS_SUCCESS) {
+            apkUpdateState = "installing";
+            apkUpdateProgress = 100;
+            apkUpdateMessage = "Update installed successfully! Restarting Movie Hub...";
+            return;
+        }
+
+        if (status == PackageInstaller.STATUS_FAILURE_ABORTED) {
+            apkUpdateState = "installing";
+            apkUpdateProgress = 100;
+            apkUpdateMessage = "Update installation was cancelled. Tap \"Tap to Install Update\" below to install inside the app.";
+            return;
+        }
+
+        if (status == PackageInstaller.STATUS_FAILURE_CONFLICT) {
+            apkUpdateState = "error";
+            apkUpdateProgress = 100;
+            apkUpdateMessage = "APK signature conflict with the currently installed version. Please uninstall the old app once, or install via Browser.";
+            return;
+        }
+
+        if (!legacyInstallFallbackTried && downloadedApkFile != null) {
+            legacyInstallFallbackTried = true;
+            launchLegacyFileProviderInstaller(downloadedApkFile);
+            return;
+        }
+
+        apkUpdateState = "error";
+        apkUpdateProgress = 100;
+        apkUpdateMessage = "In-app installation failed" + (message != null && !message.trim().isEmpty() ? " (" + message.trim() + ")" : "") + ". Tap Retry In-App Update.";
+    }
+
+    private void installApkViaPackageInstallerSession(final File apkFile) {
+        apkUpdateState = "installing";
+        apkUpdateProgress = 100;
+        String verLabel = getApkArchiveVersionLabel(apkFile);
+        apkUpdateMessage = "Preparing in-app installer" + (verLabel.isEmpty() ? "" : " (" + verLabel + ")") + "...";
+
+        new Thread(() -> {
+            PackageInstaller.Session session = null;
+            try {
+                PackageInstaller packageInstaller = getPackageManager().getPackageInstaller();
+                PackageInstaller.SessionParams params = new PackageInstaller.SessionParams(
+                    PackageInstaller.SessionParams.MODE_FULL_INSTALL
+                );
+                params.setAppPackageName(getPackageName());
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    params.setInstallReason(PackageManager.INSTALL_REASON_USER);
+                }
+
+                int sessionId = packageInstaller.createSession(params);
+                session = packageInstaller.openSession(sessionId);
+
+                try (InputStream in = new BufferedInputStream(new java.io.FileInputStream(apkFile), 65536);
+                     OutputStream out = session.openWrite("movie_portal_update", 0, apkFile.length())) {
+                    byte[] buffer = new byte[65536];
+                    int bytesRead;
+                    while ((bytesRead = in.read(buffer)) != -1) {
+                        out.write(buffer, 0, bytesRead);
+                    }
+                    session.fsync(out);
+                }
+
+                Intent callbackIntent = new Intent(this, MainActivity.class);
+                callbackIntent.setAction(ACTION_APK_INSTALL_RESULT);
+                callbackIntent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                int piFlags = PendingIntent.FLAG_UPDATE_CURRENT
+                    | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ? PendingIntent.FLAG_MUTABLE : 0);
+                PendingIntent pendingIntent = PendingIntent.getActivity(this, 4201, callbackIntent, piFlags);
+
+                session.commit(pendingIntent.getIntentSender());
+                session.close();
+                session = null;
+            } catch (Exception e) {
+                if (session != null) {
+                    try { session.abandon(); } catch (Exception ignored) {}
+                }
+                if (!legacyInstallFallbackTried) {
+                    legacyInstallFallbackTried = true;
+                    runOnUiThread(() -> launchLegacyFileProviderInstaller(apkFile));
+                } else {
+                    apkUpdateState = "error";
+                    apkUpdateProgress = 100;
+                    apkUpdateMessage = "Could not start in-app installer (" + (e.getMessage() != null ? e.getMessage() : "Error") + "). Tap Retry In-App Update.";
+                }
+            }
+        }, "MoviePortalPackageInstaller").start();
+    }
+
+    private void launchLegacyFileProviderInstaller(File apkFile) {
+        try {
+            Uri apkUri = FileProvider.getUriForFile(
+                this,
+                getPackageName() + ".fileprovider",
+                apkFile
+            );
+            Intent installIntent = new Intent(Intent.ACTION_VIEW);
+            installIntent.setDataAndType(apkUri, "application/vnd.android.package-archive");
+            installIntent.setClipData(android.content.ClipData.newRawUri("", apkUri));
+            installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            installIntent.putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true);
+
+            if (installIntent.resolveActivity(getPackageManager()) == null) {
+                apkUpdateState = "error";
+                apkUpdateProgress = 100;
+                apkUpdateMessage = "No Android Package Installer found on this device. Tap \"Download APK in Browser\" below.";
+                return;
+            }
+
+            String verLabel = getApkArchiveVersionLabel(apkFile);
+            apkUpdateState = "installing";
+            apkUpdateProgress = 100;
+            apkUpdateMessage = "Update " + (verLabel.isEmpty() ? "" : verLabel + " ") + "ready! Tap Update / Install on the Android popup.";
+
+            try {
+                startActivity(installIntent);
+            } catch (Exception firstTryEx) {
+                installIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(installIntent);
+            }
+        } catch (SecurityException secEx) {
+            apkUpdateState = "error";
+            apkUpdateProgress = 100;
+            apkUpdateMessage = "Android system security blocked in-app installation ("
+                + (secEx.getMessage() != null ? secEx.getMessage() : "SecurityException")
+                + "). Check Unknown Sources permission or tap Retry.";
+        } catch (Exception e) {
+            apkUpdateState = "error";
+            apkUpdateProgress = 0;
+            apkUpdateMessage = "Could not start Android installer ("
+                + (e.getMessage() != null ? e.getMessage() : "Unknown error")
+                + "). Tap Retry In-App Update.";
+        }
+    }
+
     private void launchApkPackageInstaller(File apkFile) {
         if (!isValidApkZipHeader(apkFile)) {
             apkUpdateState = "error";
             apkUpdateProgress = 0;
-            apkUpdateMessage = "Downloaded update file is missing or incomplete. Please tap Retry.";
+            apkUpdateMessage = "Downloaded update file is missing or incomplete. Please tap Retry In-App Update.";
             return;
         }
 
         if (!isValidParsedApkPackage(apkFile)) {
             apkUpdateState = "error";
             apkUpdateProgress = 0;
-            apkUpdateMessage = "Downloaded APK failed package verification. Tap Retry or use Download in Browser.";
+            apkUpdateMessage = "Downloaded APK failed package verification. Tap Retry In-App Update.";
             return;
         }
 
         if (isDeviceInSecureFrpOrUnprovisioned()) {
             apkUpdateState = "error";
             apkUpdateProgress = 100;
-            apkUpdateMessage = "Android security lock (FRP / incomplete phone setup) is blocking APK installs on this device. Complete Google/device setup in Settings, or use Download in Browser.";
+            apkUpdateMessage = "Android security lock (FRP / incomplete phone setup) is blocking APK installs on this device.";
             return;
         }
 
@@ -1472,56 +1656,29 @@ public class MainActivity extends BridgeActivity {
         }
 
         pendingInstallAfterPermission = false;
-        try {
-            Uri apkUri = FileProvider.getUriForFile(
-                this,
-                getPackageName() + ".fileprovider",
-                apkFile
-            );
-            Intent installIntent = new Intent(Intent.ACTION_VIEW);
-            installIntent.setDataAndType(apkUri, "application/vnd.android.package-archive");
-            installIntent.setClipData(android.content.ClipData.newRawUri("", apkUri));
-            installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
-            installIntent.putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                installIntent.putExtra(Intent.EXTRA_INSTALLER_PACKAGE_NAME, getPackageName());
-            }
+        legacyInstallFallbackTried = false;
 
-            if (installIntent.resolveActivity(getPackageManager()) == null) {
-                apkUpdateState = "error";
-                apkUpdateProgress = 100;
-                apkUpdateMessage = "No Android Package Installer found on this device. Tap \"Download in Browser\" below.";
-                return;
-            }
-
-            apkUpdateState = "installing";
-            apkUpdateProgress = 100;
-            apkUpdateMessage = "Update ready! Tap Install / Update on the Android popup. If your phone's Package Installer crashes or blocks it, tap \"Download in Browser\" below.";
-
-            startActivity(installIntent);
-        } catch (SecurityException secEx) {
-            apkUpdateState = "error";
-            apkUpdateProgress = 100;
-            apkUpdateMessage = "Android system security blocked in-app installation ("
-                + (secEx.getMessage() != null ? secEx.getMessage() : "SecurityException")
-                + "). Use \"Download in Browser\" or check device FRP/Unknown Sources settings.";
-        } catch (Exception e) {
-            apkUpdateState = "error";
-            apkUpdateProgress = 0;
-            apkUpdateMessage = "Could not start Android installer ("
-                + (e.getMessage() != null ? e.getMessage() : "Unknown error")
-                + "). Try \"Download in Browser\".";
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            installApkViaPackageInstallerSession(apkFile);
+        } else {
+            launchLegacyFileProviderInstaller(apkFile);
         }
     }
 
     private File resolveApkDownloadDir() {
+        File internalUpdatesDir = new File(getFilesDir(), "apk_updates");
+        if (!internalUpdatesDir.exists()) {
+            internalUpdatesDir.mkdirs();
+        }
+        long minRecommendedBytes = 60L * 1024L * 1024L;
+        if (internalUpdatesDir.exists() && internalUpdatesDir.canWrite() && internalUpdatesDir.getUsableSpace() >= minRecommendedBytes) {
+            return internalUpdatesDir;
+        }
+
         File externalDir = null;
         try {
             externalDir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
         } catch (Exception ignored) {}
-        File internalDir = getFilesDir();
-
-        long minRecommendedBytes = 60L * 1024L * 1024L;
         if (externalDir != null) {
             if (!externalDir.exists()) {
                 externalDir.mkdirs();
@@ -1530,27 +1687,25 @@ public class MainActivity extends BridgeActivity {
                 return externalDir;
             }
         }
-        if (internalDir != null && internalDir.getUsableSpace() >= minRecommendedBytes) {
-            return internalDir;
+        if (internalUpdatesDir.exists() && internalUpdatesDir.canWrite()) {
+            return internalUpdatesDir;
         }
-        if (externalDir != null && externalDir.exists() && externalDir.canWrite()) {
-            return externalDir;
-        }
-        return internalDir != null ? internalDir : getCacheDir();
+        return getFilesDir() != null ? getFilesDir() : getCacheDir();
     }
 
     private HttpURLConnection openApkHttpConnectionWithRedirects(String rawUrl) throws IOException {
         String currentUrl = rawUrl;
-        for (int hops = 0; hops < 10; hops++) {
+        for (int hops = 0; hops < 12; hops++) {
             URL urlObj = new URL(currentUrl);
             HttpURLConnection conn = (HttpURLConnection) urlObj.openConnection();
             conn.setInstanceFollowRedirects(false);
-            conn.setConnectTimeout(25000);
-            conn.setReadTimeout(45000);
+            conn.setConnectTimeout(30000);
+            conn.setReadTimeout(60000);
             conn.setRequestMethod("GET");
-            conn.setRequestProperty("User-Agent", "MoviePortal-AndroidUpdater/3.5");
+            conn.setRequestProperty("User-Agent", "MoviePortal-AndroidUpdater/3.5.246");
             conn.setRequestProperty("Accept", "application/vnd.android.package-archive,application/octet-stream,*/*");
             conn.setRequestProperty("Accept-Encoding", "identity");
+            conn.setRequestProperty("Cache-Control", "no-cache");
             conn.connect();
 
             int code = conn.getResponseCode();
@@ -1586,7 +1741,7 @@ public class MainActivity extends BridgeActivity {
         }
 
         lastApkDownloadUrl = cleanUrl;
-        if (isDownloadingApk) return;
+        if (isDownloadingApk && "downloading".equals(apkUpdateState)) return;
         isDownloadingApk = true;
         final long sessionSeq = ++apkDownloadSessionSeq;
         apkUpdateState = "downloading";
@@ -1594,119 +1749,122 @@ public class MainActivity extends BridgeActivity {
         apkUpdateMessage = "Connecting to update server inside app...";
 
         new Thread(() -> {
-            File targetDir = resolveApkDownloadDir();
-            if (targetDir == null) {
-                isDownloadingApk = false;
-                apkUpdateState = "error";
-                apkUpdateProgress = 0;
-                apkUpdateMessage = "Storage directory unavailable. Please check device storage and tap Retry.";
-                return;
-            }
-            if (targetDir.getUsableSpace() > 0 && targetDir.getUsableSpace() < 60L * 1024L * 1024L) {
-                isDownloadingApk = false;
-                apkUpdateState = "error";
-                apkUpdateProgress = 0;
-                apkUpdateMessage = "Not enough free storage space (~60 MB required). Free up space and tap Retry.";
-                return;
-            }
-
-            File finalApkFile = new File(targetDir, "Movie-Portal-update.apk");
-            File tempPartFile = new File(targetDir, "Movie-Portal-update.apk.part");
-            String lastError = "Network error";
-
-            for (int attempt = 1; attempt <= 2; attempt++) {
-                if (sessionSeq != apkDownloadSessionSeq) {
+            try {
+                File targetDir = resolveApkDownloadDir();
+                if (targetDir == null) {
+                    apkUpdateState = "error";
+                    apkUpdateProgress = 0;
+                    apkUpdateMessage = "Storage directory unavailable. Please check device storage and tap Retry.";
                     return;
                 }
-                HttpURLConnection conn = null;
-                try {
-                    if (attempt > 1) {
-                        apkUpdateProgress = 1;
-                        apkUpdateMessage = "Retrying in-app download (attempt 2/2)...";
+                if (targetDir.getUsableSpace() > 0 && targetDir.getUsableSpace() < 60L * 1024L * 1024L) {
+                    apkUpdateState = "error";
+                    apkUpdateProgress = 0;
+                    apkUpdateMessage = "Not enough free storage space (~60 MB required). Free up space and tap Retry.";
+                    return;
+                }
+
+                File finalApkFile = new File(targetDir, "Movie-Portal-update.apk");
+                File tempPartFile = new File(targetDir, "Movie-Portal-update.apk.part");
+                String lastError = "Network error";
+
+                for (int attempt = 1; attempt <= 2; attempt++) {
+                    if (sessionSeq != apkDownloadSessionSeq) {
+                        return;
                     }
-                    if (tempPartFile.exists()) {
-                        tempPartFile.delete();
-                    }
+                    HttpURLConnection conn = null;
+                    try {
+                        if (attempt > 1) {
+                            apkUpdateProgress = 1;
+                            apkUpdateMessage = "Retrying in-app download (attempt 2/2)...";
+                        }
+                        if (tempPartFile.exists()) {
+                            tempPartFile.delete();
+                        }
 
-                    conn = openApkHttpConnectionWithRedirects(cleanUrl);
-                    String contentType = conn.getContentType();
-                    if (contentType != null && contentType.toLowerCase(Locale.US).contains("text/html")) {
-                        throw new IOException("Server returned HTML page instead of APK file");
-                    }
+                        conn = openApkHttpConnectionWithRedirects(cleanUrl);
+                        String contentType = conn.getContentType();
+                        if (contentType != null && contentType.toLowerCase(Locale.US).contains("text/html")) {
+                            throw new IOException("Server returned HTML page instead of APK file");
+                        }
 
-                    long totalBytes = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N
-                        ? conn.getContentLengthLong()
-                        : (long) conn.getContentLength();
+                        long totalBytes = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N
+                            ? conn.getContentLengthLong()
+                            : (long) conn.getContentLength();
 
-                    long downloaded = 0L;
-                    long lastUiUpdateMs = 0L;
-                    byte[] buffer = new byte[65536];
+                        long downloaded = 0L;
+                        long lastUiUpdateMs = 0L;
+                        byte[] buffer = new byte[65536];
 
-                    try (InputStream in = new BufferedInputStream(conn.getInputStream(), 65536);
-                         FileOutputStream out = new FileOutputStream(tempPartFile)) {
-                        int bytesRead;
-                        while ((bytesRead = in.read(buffer)) != -1) {
-                            if (sessionSeq != apkDownloadSessionSeq) {
-                                return;
-                            }
-                            out.write(buffer, 0, bytesRead);
-                            downloaded += bytesRead;
+                        try (InputStream in = new BufferedInputStream(conn.getInputStream(), 65536);
+                             FileOutputStream out = new FileOutputStream(tempPartFile)) {
+                            int bytesRead;
+                            while ((bytesRead = in.read(buffer)) != -1) {
+                                if (sessionSeq != apkDownloadSessionSeq) {
+                                    return;
+                                }
+                                out.write(buffer, 0, bytesRead);
+                                downloaded += bytesRead;
 
-                            long now = System.currentTimeMillis();
-                            if (now - lastUiUpdateMs >= 200L) {
-                                lastUiUpdateMs = now;
-                                long mbDone = downloaded / (1024L * 1024L);
-                                if (totalBytes > 0) {
-                                    int pct = (int) Math.max(1, Math.min(99, (downloaded * 100L) / totalBytes));
-                                    long mbTotal = Math.max(1L, totalBytes / (1024L * 1024L));
-                                    apkUpdateProgress = pct;
-                                    apkUpdateMessage = "Downloading update: " + mbDone + " MB / " + mbTotal + " MB (" + pct + "%)";
-                                } else {
-                                    apkUpdateProgress = (int) Math.min(95, Math.max(2, downloaded / (2L * 1024L * 1024L)));
-                                    apkUpdateMessage = "Downloading update: " + mbDone + " MB...";
+                                long now = System.currentTimeMillis();
+                                if (now - lastUiUpdateMs >= 200L) {
+                                    lastUiUpdateMs = now;
+                                    long mbDone = downloaded / (1024L * 1024L);
+                                    if (totalBytes > 0) {
+                                        int pct = (int) Math.max(1, Math.min(99, (downloaded * 100L) / totalBytes));
+                                        long mbTotal = Math.max(1L, totalBytes / (1024L * 1024L));
+                                        apkUpdateProgress = pct;
+                                        apkUpdateMessage = "Downloading update: " + mbDone + " MB / " + mbTotal + " MB (" + pct + "%)";
+                                    } else {
+                                        apkUpdateProgress = (int) Math.min(95, Math.max(2, downloaded / (2L * 1024L * 1024L)));
+                                        apkUpdateMessage = "Downloading update: " + mbDone + " MB...";
+                                    }
                                 }
                             }
+                            out.flush();
                         }
-                        out.flush();
-                    }
 
-                    if (totalBytes > 0 && downloaded < totalBytes) {
-                        throw new IOException("Incomplete download (" + downloaded + " / " + totalBytes + " bytes)");
-                    }
-                    if (!isValidParsedApkPackage(tempPartFile)) {
-                        throw new IOException("Downloaded file is corrupted or not a valid Movie Portal APK");
-                    }
+                        if (totalBytes > 0 && downloaded < totalBytes) {
+                            throw new IOException("Incomplete download (" + downloaded + " / " + totalBytes + " bytes)");
+                        }
+                        if (!isValidParsedApkPackage(tempPartFile)) {
+                            throw new IOException("Downloaded file is corrupted or not a valid Movie Hub APK");
+                        }
 
-                    if (finalApkFile.exists()) {
-                        finalApkFile.delete();
-                    }
-                    if (!tempPartFile.renameTo(finalApkFile)) {
-                        throw new IOException("Could not finalize downloaded APK file");
-                    }
+                        if (finalApkFile.exists()) {
+                            finalApkFile.delete();
+                        }
+                        if (!tempPartFile.renameTo(finalApkFile)) {
+                            throw new IOException("Could not finalize downloaded APK file");
+                        }
 
-                    downloadedApkFile = finalApkFile;
-                    isDownloadingApk = false;
-                    apkUpdateProgress = 100;
-                    apkUpdateMessage = "Download complete! Opening installer inside app...";
-                    final File readyFile = finalApkFile;
-                    runOnUiThread(() -> launchApkPackageInstaller(readyFile));
-                    return;
-                } catch (Exception ex) {
-                    lastError = ex.getMessage() != null ? ex.getMessage() : "Connection interrupted";
-                    if (tempPartFile.exists()) {
-                        tempPartFile.delete();
-                    }
-                } finally {
-                    if (conn != null) {
-                        try { conn.disconnect(); } catch (Exception ignored) {}
+                        downloadedApkFile = finalApkFile;
+                        apkUpdateProgress = 100;
+                        String verLabel = getApkArchiveVersionLabel(finalApkFile);
+                        apkUpdateMessage = "Download complete" + (verLabel.isEmpty() ? "" : " (" + verLabel + ")") + "! Launching installer inside app...";
+                        final File readyFile = finalApkFile;
+                        runOnUiThread(() -> launchApkPackageInstaller(readyFile));
+                        return;
+                    } catch (Exception ex) {
+                        lastError = ex.getMessage() != null ? ex.getMessage() : "Connection interrupted";
+                        if (tempPartFile.exists()) {
+                            tempPartFile.delete();
+                        }
+                    } finally {
+                        if (conn != null) {
+                            try { conn.disconnect(); } catch (Exception ignored) {}
+                        }
                     }
                 }
-            }
 
-            isDownloadingApk = false;
-            apkUpdateState = "error";
-            apkUpdateProgress = 0;
-            apkUpdateMessage = "In-app download failed (" + lastError + "). Check internet and tap Retry.";
+                apkUpdateState = "error";
+                apkUpdateProgress = 0;
+                apkUpdateMessage = "In-app download failed (" + lastError + "). Check internet and tap Retry In-App Update.";
+            } finally {
+                if (sessionSeq == apkDownloadSessionSeq) {
+                    isDownloadingApk = false;
+                }
+            }
         }, "MoviePortalApkUpdater").start();
     }
 
@@ -2572,11 +2730,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.235");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.246");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.235\",\"versionCode\":3455}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.246\",\"versionCode\":3466}";
             }
         }
 

@@ -14,8 +14,8 @@ import { checkAndHandleQuotaError } from './firestoreQuotaService';
 export const APP_UPDATE_COLLECTION = 'admins';
 export const APP_UPDATE_DOC_ID = 'android_update';
 
-export const CURRENT_VERSION_NAME = '3.5.243';
-export const CURRENT_VERSION_CODE = 3463;
+export const CURRENT_VERSION_NAME = '3.5.246';
+export const CURRENT_VERSION_CODE = 3466;
 
 export const OFFICIAL_APK_DIRECT_URL =
   'https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk';
@@ -169,7 +169,7 @@ export function normalizeRemoteUpdateConfig(raw: any): RemoteUpdateConfig {
     .trim()
     .replace(/^v/i, '');
   const minimumRequiredVersion = String(
-    raw?.minimumRequiredVersion || raw?.latestVersion || CURRENT_VERSION_NAME
+    raw?.minimumRequiredVersion || (raw?.isMandatory ? raw?.latestVersion : '1.0.0') || '1.0.0'
   )
     .trim()
     .replace(/^v/i, '');

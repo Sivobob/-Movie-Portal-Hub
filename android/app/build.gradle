@@ -7,8 +7,8 @@ android {
         applicationId "com.moviebox.stream.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 3463
-        versionName "3.5.243"
+        versionCode 3466
+        versionName "3.5.246"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              noCompress 'dat'

@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.237",
-  "minimumRequiredVersion": "3.5.237",
-  "latestVersionCode": 3457,
-  "minimumRequiredVersionCode": 3457,
+  "latestVersion": "3.5.246",
+  "minimumRequiredVersion": "3.5.246",
+  "latestVersionCode": 3466,
+  "minimumRequiredVersionCode": 3466,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Hub v3.5.237 is ready! Updated with the new Movie Hub logo & app name, clean folder view, instant All Genres search, and smooth player.",
-  "releaseNotes": "v3.5.237: Rebranded to Movie Hub with custom fitted Movie Hub logo, removed floating bottom folder search icon, instant All Genres search, and seamless player."
+  "updateMessage": "Movie Hub v3.5.246 is ready! Update now for instant background release notifications, clean UI without Recently Watched, and smooth in-app updates.",
+  "releaseNotes": "v3.5.246: Fixed in-app APK updater, removed Recently Watched / Watch History across app & web, and enabled instant background push notifications on movie/series publish."
 }

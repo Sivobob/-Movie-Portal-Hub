@@ -39,7 +39,7 @@ import { parseDurationToSeconds } from '../utils/duration';
 import MovieDetailsModal from './MovieDetailsModal';
 import VideoPlayerModal from './VideoPlayerModal';
 
-type MeSheet = 'none' | 'my_list' | 'my_likes' | 'watch_history' | 'messages';
+type MeSheet = 'none' | 'my_list' | 'my_likes' | 'messages';
 
 interface MessageEntry {
   id: string;
@@ -59,7 +59,6 @@ export default function MePage() {
 
   const [myList, setMyList] = useState<MyListItem[]>([]);
   const [myLikes, setMyLikes] = useState<MyLikeItem[]>([]);
-  const [watchHistory, setWatchHistory] = useState<WatchHistoryItem[]>([]);
   const [messages, setMessages] = useState<MessageEntry[]>([]);
   const [unreadCount, setUnreadCount] = useState<number>(0);
 
@@ -97,14 +96,12 @@ export default function MePage() {
   };
 
   const refreshUserCollections = async () => {
-    const [listRes, likesRes, historyRes] = await Promise.all([
+    const [listRes, likesRes] = await Promise.all([
       fetchMyList(uid).catch(() => []),
       fetchMyLikes(uid).catch(() => []),
-      fetchWatchHistory(uid).catch(() => []),
     ]);
     setMyList(listRes);
     setMyLikes(likesRes);
-    setWatchHistory(historyRes);
   };
 
   const loadMessages = async () => {
@@ -471,22 +468,7 @@ export default function MePage() {
             </div>
           </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveSheet('watch_history')}
-            className="w-full px-4 py-4 flex items-center justify-between hover:bg-white/[0.03] active:bg-white/[0.05] transition-colors cursor-pointer text-left"
-          >
-            <div className="flex items-center gap-3.5">
-              <History size={20} className="text-neutral-200 stroke-[1.9]" />
-              <span className="text-sm sm:text-[15px] font-medium text-white">Watch History</span>
-            </div>
-            <div className="flex items-center gap-2 text-neutral-400">
-              {watchHistory.length > 0 && (
-                <span className="text-xs sm:text-sm font-medium">{watchHistory.length}</span>
-              )}
-              <ChevronRight size={17} />
-            </div>
-          </button>
+
 
           <button
             type="button"
@@ -534,26 +516,11 @@ export default function MePage() {
                   ? 'My List'
                   : activeSheet === 'my_likes'
                   ? 'My Likes'
-                  : activeSheet === 'watch_history'
-                  ? 'Watch History'
                   : 'Messages'}
               </h2>
             </div>
 
             <div className="flex items-center gap-2">
-              {activeSheet === 'watch_history' && watchHistory.length > 0 && (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await clearWatchHistory(uid);
-                    setWatchHistory([]);
-                    showToast('Watch history cleared');
-                  }}
-                  className="text-xs font-semibold text-red-400 hover:text-red-300 px-2.5 py-1 rounded-lg bg-red-500/10 cursor-pointer"
-                >
-                  Clear All
-                </button>
-              )}
               <button
                 type="button"
                 onClick={() => setActiveSheet('none')}
@@ -652,73 +619,7 @@ export default function MePage() {
               )
             )}
 
-            {/* WATCH HISTORY SHEET */}
-            {activeSheet === 'watch_history' && (
-              watchHistory.length === 0 ? (
-                <div className="py-20 text-center text-neutral-400">
-                  <History size={40} className="mx-auto mb-3 opacity-30" />
-                  <p className="text-sm font-medium">No watch history yet</p>
-                </div>
-              ) : (
-                <div className="space-y-3 max-w-xl mx-auto">
-                  {watchHistory.map((item) => {
-                    const movieObj = resolveLiveMovie(item);
-                    const poster = upgradePosterUrl(movieObj.posterUrl || item.posterUrl, 400) || item.posterUrl;
-                    return (
-                      <div
-                        key={item.movieId}
-                        onClick={() => openMovieDetails(movieObj)}
-                        className="flex items-center gap-3 bg-[#1a1d24] border border-white/[0.06] rounded-xl p-2.5 cursor-pointer hover:bg-[#222630]"
-                      >
-                        <div className="relative w-20 aspect-[2/3] rounded-lg overflow-hidden bg-black flex-shrink-0">
-                          <img src={poster} alt={item.title} className="w-full h-full object-cover" />
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleWatchNow({
-                                ...movieObj,
-                                currentTime: item.currentTime || 0,
-                              });
-                            }}
-                            className="absolute inset-0 bg-black/40 flex items-center justify-center cursor-pointer"
-                            aria-label="Resume"
-                          >
-                            <div className="w-8 h-8 rounded-full bg-[#00d664] text-black flex items-center justify-center">
-                              <Play size={14} fill="black" className="ml-0.5" />
-                            </div>
-                          </button>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h4 className="text-sm font-semibold text-white truncate">{item.title}</h4>
-                          <p className="text-xs text-neutral-400 mt-0.5">
-                            {item.displayCategory || 'Movie'}
-                          </p>
-                          <div className="mt-2 h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-[#00d664] rounded-full"
-                              style={{ width: `${Math.max(4, Math.min(100, item.progress || 0))}%` }}
-                            />
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            await removeWatchHistoryItem(uid, item.movieId);
-                            setWatchHistory((prev) => prev.filter((x) => x.movieId !== item.movieId));
-                          }}
-                          className="p-2 rounded-lg text-neutral-400 hover:text-red-400 cursor-pointer"
-                          aria-label="Delete item"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )
-            )}
+
 
             {/* MESSAGES SHEET */}
             {activeSheet === 'messages' && (

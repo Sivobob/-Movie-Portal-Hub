@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Trash2,
   Shield,
+  ShieldAlert,
   CheckCircle2,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -20,12 +21,11 @@ import {
   getAppPreferences,
   saveAppPreferences,
 } from '../services/userPreferencesService';
-import { clearWatchHistory } from '../services/userWatchService';
 import {
   CURRENT_VERSION_NAME,
+  compareVersions,
   fetchRemoteUpdateConfig,
   getInstalledAppVersion,
-  isAppUpdateRequired,
   OFFICIAL_APK_DIRECT_URL,
   RemoteUpdateConfig,
   InstalledAppVersion,
@@ -69,6 +69,11 @@ export default function SettingsPage() {
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [installedVer, setInstalledVer] = useState<InstalledAppVersion | null>(null);
   const [remoteConfig, setRemoteConfig] = useState<RemoteUpdateConfig | null>(null);
+  const [apkStatus, setApkStatus] = useState<{ state: string; progress: number; message: string }>({
+    state: 'idle',
+    progress: 0,
+    message: '',
+  });
 
   useEffect(() => {
     const refreshNotifState = () => {
@@ -108,6 +113,29 @@ export default function SettingsPage() {
       if (listener && typeof listener.remove === 'function') listener.remove();
     };
   }, [activeModal, navigate]);
+
+  useEffect(() => {
+    if (!isNativeAndroid() || activeModal !== 'check_update') return;
+    const readStatus = () => {
+      try {
+        const bridge = (window as any).AndroidPlayerBridge;
+        if (bridge && typeof bridge.getApkUpdateStatus === 'function') {
+          const raw = bridge.getApkUpdateStatus();
+          const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+          if (parsed && typeof parsed.state === 'string') {
+            setApkStatus({
+              state: parsed.state,
+              progress: Number(parsed.progress) || 0,
+              message: String(parsed.message || ''),
+            });
+          }
+        }
+      } catch {}
+    };
+    readStatus();
+    const timer = setInterval(readStatus, 450);
+    return () => clearInterval(timer);
+  }, [activeModal]);
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
@@ -182,8 +210,12 @@ export default function SettingsPage() {
       try {
         const bridge = (window as any).AndroidPlayerBridge;
         if (bridge && typeof bridge.downloadAndInstallApk === 'function') {
+          setApkStatus({
+            state: 'downloading',
+            progress: 2,
+            message: 'Starting in-app update download...',
+          });
           bridge.downloadAndInstallApk(url);
-          showToast('Starting APK download...');
           return;
         }
         if (bridge && typeof bridge.openApkDownloadInBrowser === 'function') {
@@ -225,7 +257,11 @@ export default function SettingsPage() {
   };
 
   const hasNewerVersion =
-    installedVer && remoteConfig ? isAppUpdateRequired(installedVer, remoteConfig) : false;
+    installedVer && remoteConfig
+      ? compareVersions(installedVer.versionName, remoteConfig.latestVersion) < 0 ||
+        (compareVersions(installedVer.versionName, remoteConfig.latestVersion) === 0 &&
+          installedVer.versionCode < (remoteConfig.latestVersionCode || 0))
+      : false;
 
   return (
     <div className="min-h-[100dvh] w-full bg-[#111317] text-white flex flex-col select-none">
@@ -512,21 +548,9 @@ export default function SettingsPage() {
                 <div className="bg-[#111317] border border-white/10 rounded-xl p-3.5 flex items-start gap-3">
                   <Shield size={18} className="text-[#00d664] mt-0.5 flex-shrink-0" />
                   <p className="text-xs text-neutral-300 leading-relaxed">
-                    Your Watch History, My List, Likes, and Preferences sync securely to your account or stay stored locally on your device.
+                    Your My List, My Likes, and App Preferences sync securely to your account or stay stored locally on your device.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await clearWatchHistory(uid);
-                    showToast('Watch history cleared');
-                    setActiveModal('none');
-                  }}
-                  className="w-full py-3 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/30 text-red-400 text-xs font-bold flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <Trash2 size={15} />
-                  <span>Clear Watch History</span>
-                </button>
               </div>
             )}
 
@@ -579,14 +603,82 @@ export default function SettingsPage() {
                     </div>
 
                     {hasNewerVersion ? (
-                      <button
-                        type="button"
-                        onClick={handleTriggerApkUpdate}
-                        className="w-full py-3 rounded-xl bg-[#00d664] text-black text-xs font-black flex items-center justify-center gap-2 cursor-pointer"
-                      >
-                        <Download size={15} />
-                        <span>Download Update (v{remoteConfig?.latestVersion})</span>
-                      </button>
+                      <div className="space-y-3">
+                        {(apkStatus.state === 'downloading' || apkStatus.message) && (
+                          <div className="bg-[#111317] border border-white/10 rounded-xl p-3 space-y-2">
+                            <div className="flex items-center justify-between text-[11px] font-bold">
+                              <span className={apkStatus.state === 'error' ? 'text-red-400' : 'text-[#00d664]'}>
+                                {apkStatus.state === 'downloading'
+                                  ? 'Downloading APK...'
+                                  : apkStatus.state === 'permission_required'
+                                    ? 'Permission Required'
+                                    : apkStatus.state === 'installing'
+                                      ? 'Ready to Install'
+                                      : apkStatus.state === 'error'
+                                        ? 'Update Notice'
+                                        : 'Preparing...'}
+                              </span>
+                              {apkStatus.progress > 0 && (
+                                <span className="text-white font-mono">{apkStatus.progress}%</span>
+                              )}
+                            </div>
+                            {apkStatus.state === 'downloading' && (
+                              <div className="w-full h-2 bg-neutral-800 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-[#00d664] transition-all duration-300"
+                                  style={{ width: `${Math.max(4, Math.min(100, apkStatus.progress))}%` }}
+                                />
+                              </div>
+                            )}
+                            {apkStatus.message && (
+                              <p className="text-[11px] text-neutral-300 leading-snug">{apkStatus.message}</p>
+                            )}
+                          </div>
+                        )}
+
+                        {apkStatus.state === 'permission_required' ? (
+                          <button
+                            type="button"
+                            onClick={() => (window as any).AndroidPlayerBridge?.openUnknownSourcesSettings?.()}
+                            className="w-full py-3 rounded-xl bg-amber-400 text-black text-xs font-black flex items-center justify-center gap-2 cursor-pointer"
+                          >
+                            <ShieldAlert size={15} />
+                            <span>Allow Install Permission</span>
+                          </button>
+                        ) : apkStatus.state === 'installing' ? (
+                          <button
+                            type="button"
+                            onClick={() => (window as any).AndroidPlayerBridge?.retryInstallDownloadedApk?.()}
+                            className="w-full py-3 rounded-xl bg-[#00d664] text-black text-xs font-black flex items-center justify-center gap-2 cursor-pointer"
+                          >
+                            <RefreshCw size={15} />
+                            <span>Tap to Install Update</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={apkStatus.state === 'downloading'}
+                            onClick={handleTriggerApkUpdate}
+                            className="w-full py-3 rounded-xl bg-[#00d664] disabled:opacity-60 text-black text-xs font-black flex items-center justify-center gap-2 cursor-pointer"
+                          >
+                            {apkStatus.state === 'downloading' ? (
+                              <>
+                                <RefreshCw size={15} className="animate-spin" />
+                                <span>Downloading ({apkStatus.progress}%)</span>
+                              </>
+                            ) : (
+                              <>
+                                <Download size={15} />
+                                <span>
+                                  {apkStatus.state === 'error'
+                                    ? 'Retry In-App Update'
+                                    : `Update App Now (v${remoteConfig?.latestVersion})`}
+                                </span>
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
                     ) : (
                       <div className="p-3 rounded-xl bg-[#00d664]/10 border border-[#00d664]/30 text-[#00d664] text-xs font-semibold text-center">
                         You are on the latest version.
@@ -619,10 +711,10 @@ export default function SettingsPage() {
             {activeModal === 'privacy_policy' && (
               <div className="space-y-2.5 text-xs text-neutral-300 leading-relaxed">
                 <p>
-                  Movie Hub respects your privacy. We store only essential account identifiers (when you choose to sign in), your saved My List, My Likes, Watch History, and app preferences.
+                  Movie Hub respects your privacy. We store only essential account identifiers (when you choose to sign in), your saved My List, My Likes, and app preferences.
                 </p>
                 <p>
-                  You can clear your Watch History at any time under Privacy Settings. Offline downloads stay on your local device storage under your control.
+                  Offline downloads stay on your local device storage under your control.
                 </p>
               </div>
             )}

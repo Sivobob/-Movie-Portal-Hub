@@ -177,7 +177,7 @@ export default function AdminDashboard() {
   const [published, setPublished] = useState(true);
   const [qualityBadge, setQualityBadge] = useState<QualityBadgeValue>('HD');
   const [editingMovie, setEditingMovie] = useState<MovieData | null>(null);
-  const [notifyOnUpdate, setNotifyOnUpdate] = useState(false);
+  const [notifyOnUpdate, setNotifyOnUpdate] = useState(true);
   const [notifyingMovieId, setNotifyingMovieId] = useState<string | null>(null);
 
   // Firebase Remote App Update Config State
