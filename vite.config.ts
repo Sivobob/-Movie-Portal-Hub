@@ -15,7 +15,7 @@ export default defineConfig(() => {
         injectRegister: 'auto',
         manifestFilename: 'manifest.webmanifest',
         devOptions: {
-          enabled: true,
+          enabled: false,
         },
         includeAssets: [
           'sw-push.js',
