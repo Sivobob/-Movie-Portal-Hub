@@ -50,7 +50,7 @@ import java.util.regex.Pattern;
 public class LocalStreamServer {
     private static final String TAG = "LocalStreamServer";
     private static final long MAX_RANGE_CHUNK = 16L * 1024L * 1024L; // 16 MB per open-ended range
-    private static final long META_CACHE_TTL_MS = 10L * 60L * 1000L;
+    private static final long META_CACHE_TTL_MS = 45L * 60L * 1000L;
     private static final byte[] END_SENTINEL = new byte[0];
     private static final Pattern RANGE_PATTERN = Pattern.compile("bytes=(\\d+)-(\\d*)");
 
@@ -355,7 +355,7 @@ public class LocalStreamServer {
             try {
                 Socket client = serverSocket.accept();
                 client.setTcpNoDelay(true);
-                client.setSoTimeout(60000);
+                client.setSoTimeout(90000);
                 executor.execute(() -> handleClient(client, false));
             } catch (IOException e) {
                 if (running) {
@@ -370,7 +370,7 @@ public class LocalStreamServer {
             try {
                 Socket client = lanServerSocket.accept();
                 client.setTcpNoDelay(true);
-                client.setSoTimeout(60000);
+                client.setSoTimeout(90000);
                 executor.execute(() -> handleClient(client, true));
             } catch (IOException e) {
                 if (running) {
@@ -760,11 +760,12 @@ public class LocalStreamServer {
             webView.post(() -> webView.evaluateJavascript(js, null));
 
             long idleElapsedMs = 0;
+            long bytesSent = 0;
             while (!session.aborted && running) {
                 byte[] chunk = session.queue.poll(5, TimeUnit.SECONDS);
                 if (chunk == null) {
                     idleElapsedMs += 5000;
-                    if (session.ended || idleElapsedMs >= 90000) {
+                    if (session.ended || idleElapsedMs >= 120000) {
                         break;
                     }
                     continue;
@@ -773,14 +774,21 @@ public class LocalStreamServer {
                 if (chunk == END_SENTINEL) {
                     if (session.error != null && !session.error.isEmpty()) {
                         Log.w(TAG, "Stream ended with error: " + session.error);
+                        if (bytesSent < contentLength) {
+                            throw new IOException("Upstream Telegram stream failed mid-range: " + session.error);
+                        }
                     }
                     break;
                 }
                 out.write(chunk);
                 out.flush();
+                bytesSent += chunk.length;
+            }
+            if (bytesSent < contentLength && !session.aborted && idleElapsedMs >= 120000) {
+                throw new IOException("Upstream Telegram stream stalled after 120s idle");
             }
         } catch (IOException e) {
-            // Downstream video player disconnected (seek / close)
+            // Downstream video player disconnected or upstream range failed mid-transfer
             session.aborted = true;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

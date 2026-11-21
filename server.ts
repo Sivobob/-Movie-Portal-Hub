@@ -17,7 +17,7 @@ import telegramRouter, { handleStream } from './src/server/telegramRouter.ts';
 import videoRouter from './src/server/videoRouter.ts';
 import downloadCastRouter from './src/server/downloadCastRouter.ts';
 import pushRouter from './src/server/pushRouter.ts';
-import { getTelegramCredentials } from './src/utils/telegramClient.ts';
+import { getTelegramCredentials, isTelegramConnected } from './src/utils/telegramClient.ts';
 
 function checkBinaryAvailable(bin: string): boolean {
   try {
@@ -93,10 +93,12 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     time: new Date().toISOString(),
-    version: '3.5.248',
+    version: '3.5.249',
     ffmpegAvailable: FFMPEG_AVAILABLE,
     ffprobeAvailable: FFPROBE_AVAILABLE,
     telegramConfigured,
+    telegramConnected: isTelegramConnected(),
+    hlsSupported: FFMPEG_AVAILABLE && FFPROBE_AVAILABLE,
     transcodeSupported: FFMPEG_AVAILABLE && FFPROBE_AVAILABLE && telegramConfigured,
   });
 });
@@ -118,7 +120,7 @@ app.get('/api/ios-profile', (req, res) => {
     const rawProto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0].trim();
     const isLocal = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(rawHost);
     const scheme = isLocal ? rawProto : 'https';
-    const appOrigin = rawHost ? `${scheme}://${rawHost}/` : 'https://ais-pre-ic2kso77lsvaweb4l75hwo-828533060153.asia-northeast1.run.app/';
+    const appOrigin = rawHost ? `${scheme}://${rawHost}/` : 'https://ais-pre-z5ikji45t6fgwbl74rpxp2-832989141722.asia-southeast1.run.app/';
 
     const escapeXml = (str: string) =>
       str
@@ -277,6 +279,71 @@ if (!isProduction) {
         allowedHosts: true,
       },
       appType: 'spa',
+    });
+    // HMR is disabled in this environment (hmr: false); serve a clean no-socket @vite/client
+    // so CSS style injection and import.meta.hot stubs work without failing WebSocket errors.
+    app.get('/@vite/client', (_req, res) => {
+      res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store');
+      res.send(`
+const sheetsMap = new Map();
+if (typeof document !== 'undefined') {
+  document.querySelectorAll('style[data-vite-dev-id]').forEach((el) => {
+    sheetsMap.set(el.getAttribute('data-vite-dev-id'), el);
+  });
+}
+const cspNonce = typeof document !== 'undefined' ? document.querySelector('meta[property=csp-nonce]')?.nonce : undefined;
+let lastInsertedStyle;
+export function updateStyle(id, content) {
+  let style = sheetsMap.get(id);
+  if (!style) {
+    style = document.createElement('style');
+    style.setAttribute('type', 'text/css');
+    style.setAttribute('data-vite-dev-id', id);
+    style.textContent = content;
+    if (cspNonce) style.setAttribute('nonce', cspNonce);
+    if (!lastInsertedStyle) {
+      document.head.appendChild(style);
+      setTimeout(() => { lastInsertedStyle = undefined; }, 0);
+    } else {
+      lastInsertedStyle.insertAdjacentElement('afterend', style);
+    }
+    lastInsertedStyle = style;
+  } else {
+    style.textContent = content;
+  }
+  sheetsMap.set(id, style);
+}
+export function removeStyle(id) {
+  const style = sheetsMap.get(id);
+  if (style) {
+    style.remove();
+    sheetsMap.delete(id);
+  }
+}
+export function createHotContext() {
+  return {
+    data: {},
+    accept() {},
+    acceptExports() {},
+    dispose() {},
+    prune() {},
+    decline() {},
+    invalidate() {},
+    on() {},
+    off() {},
+    send() {},
+  };
+}
+export function injectQuery(url, queryToInject) {
+  if (!url || (url[0] !== '.' && url[0] !== '/')) return url;
+  const pathname = url.replace(/[?#].*$/, '');
+  const parsed = new URL(url, 'http://vite.dev');
+  return pathname + '?' + queryToInject + (parsed.search ? '&' + parsed.search.slice(1) : '') + (parsed.hash || '');
+}
+const BaseEl = typeof globalThis !== 'undefined' && globalThis.HTMLElement ? globalThis.HTMLElement : class {};
+export class ErrorOverlay extends BaseEl {}
+`);
     });
     app.use(vite.middlewares);
   } catch (viteErr) {

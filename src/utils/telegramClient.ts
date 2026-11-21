@@ -98,12 +98,45 @@ export async function resetTelegramClient(options?: {
   return resettingPromise;
 }
 
+export function isTelegramConnected(): boolean {
+  return Boolean(client && client.connected);
+}
+
+let serverKeepaliveStarted = false;
+function ensureServerKeepalive(activeClient: TelegramClient) {
+  if (serverKeepaliveStarted) return;
+  serverKeepaliveStarted = true;
+  const timer = setInterval(async () => {
+    const c = client || activeClient;
+    if (!c) return;
+    try {
+      if (!c.connected) {
+        await c.connect().catch(() => {});
+        return;
+      }
+      const bigInt = (await import('big-integer')).default;
+      const { Api } = await import('telegram');
+      await Promise.race([
+        c.invoke(new Api.Ping({ pingId: bigInt(Date.now()) })),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('SERVER_PING_TIMEOUT')), 8000)),
+      ]);
+    } catch {}
+  }, 40000);
+  (timer as any).unref?.();
+}
+
 export async function getTelegramClient(): Promise<TelegramClient> {
   if (client) {
-    if (client.connected) return client;
+    if (client.connected) {
+      ensureServerKeepalive(client);
+      return client;
+    }
     try {
       await client.connect();
-      if (client.connected) return client;
+      if (client.connected) {
+        ensureServerKeepalive(client);
+        return client;
+      }
     } catch (e) {
       console.warn('[TelegramClient] Reconnect attempt failed, re-initializing...', e);
       client = null;
@@ -147,6 +180,7 @@ export async function getTelegramClient(): Promise<TelegramClient> {
     }
 
     client = newClient;
+    ensureServerKeepalive(newClient);
 
     // Asynchronously warm up channel entity cache
     initializeChannelCache(newClient).catch(err => {

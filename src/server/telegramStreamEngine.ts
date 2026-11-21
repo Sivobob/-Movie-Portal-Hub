@@ -318,11 +318,12 @@ export async function streamTelegramRange(
       queueAhead(blockIdx + effectiveConcurrency);
     }
   } catch (err: any) {
-    if (String(err?.message || '').includes('FILE_REFERENCE')) {
+    const errTxt = String(err?.errorMessage || err?.message || '');
+    if (errTxt.includes('FILE_REFERENCE')) {
       onFileRefExpired?.();
     }
     if (!isClosedFn()) {
-      console.error('[StreamEngine] Range transfer error:', err?.message || err);
+      console.error('[StreamEngine] Range transfer error:', errTxt || err);
     }
   } finally {
     blockPromises.clear();

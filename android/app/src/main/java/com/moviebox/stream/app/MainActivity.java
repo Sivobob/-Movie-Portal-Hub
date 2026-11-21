@@ -955,13 +955,34 @@ public class MainActivity extends BridgeActivity {
             || code == PlaybackException.ERROR_CODE_TIMEOUT) {
             return true;
         }
-        String msg = error.getMessage() != null ? error.getMessage().toLowerCase(Locale.US) : "";
-        return msg.contains("timeout")
-            || msg.contains("socket")
-            || msg.contains("connection")
-            || msg.contains("eof")
-            || msg.contains("reset")
-            || msg.contains("http");
+        Throwable cause = error;
+        int depth = 0;
+        while (cause != null && depth < 8) {
+            String cls = cause.getClass().getName().toLowerCase(Locale.US);
+            if (cls.contains("httpdatasource")
+                || cls.contains("sockettimeoutexception")
+                || cls.contains("eofexception")
+                || cls.contains("connectexception")
+                || cls.contains("unknownhostexception")) {
+                return true;
+            }
+            String msg = cause.getMessage() != null ? cause.getMessage().toLowerCase(Locale.US) : "";
+            if (msg.contains("timeout")
+                || msg.contains("socket")
+                || msg.contains("connection")
+                || msg.contains("eof")
+                || msg.contains("reset")
+                || msg.contains("http")
+                || msg.contains("unexpected")
+                || msg.contains("source")
+                || msg.contains("chunk")
+                || msg.contains("broken pipe")) {
+                return true;
+            }
+            cause = cause.getCause();
+            depth++;
+        }
+        return false;
     }
 
     private void ensureExoPlayer(final boolean preferSoftware) {
@@ -982,7 +1003,7 @@ public class MainActivity extends BridgeActivity {
             .setReadTimeoutMs(60000)
             .setAllowCrossProtocolRedirects(true)
             .setKeepPostFor302Redirects(true)
-            .setUserAgent("MoviePortal/3.5.248 AndroidExoPlayer");
+            .setUserAgent("MoviePortal/3.5.249 AndroidExoPlayer");
 
         DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
             .setBufferDurationsMs(
@@ -1025,7 +1046,7 @@ public class MainActivity extends BridgeActivity {
             .setMediaSourceFactory(
                 new DefaultMediaSourceFactory(this)
                     .setDataSourceFactory(dataSourceFactory)
-                    .setLoadErrorHandlingPolicy(new DefaultLoadErrorHandlingPolicy(8))
+                    .setLoadErrorHandlingPolicy(new DefaultLoadErrorHandlingPolicy(4))
             )
             .setLoadControl(loadControl)
             .setWakeMode(C.WAKE_MODE_NETWORK)
@@ -1156,12 +1177,13 @@ public class MainActivity extends BridgeActivity {
             @Override
             public void onPlayerError(PlaybackException error) {
                 if (exoActive && exoPlayer != null && currentExoMediaUrl != null && !currentExoMediaUrl.isEmpty()
-                    && exoAutoReconnectAttempts < 5
+                    && exoAutoReconnectAttempts < 8
                     && (isTransientIoPlaybackException(error) || exoPlayer.getCurrentPosition() > 15000L)) {
                     exoAutoReconnectAttempts++;
                     final long sessionSnapshot = exoSessionId;
                     final long resumePosMs = Math.max(0L, exoPlayer.getCurrentPosition());
-                    final boolean wasServerPiped = currentExoMediaUrl.contains("transcode=1") || currentExoMediaUrl.contains("remux=1");
+                    final boolean isHlsPlaylist = currentExoMediaUrl.contains(".m3u8");
+                    final boolean wasServerPiped = !isHlsPlaylist && (currentExoMediaUrl.contains("transcode=1") || currentExoMediaUrl.contains("remux=1"));
                     final String targetUrl = currentExoMediaUrl;
                     exoErrorMessage = "";
                     refreshExoStateSnapshot();
@@ -1840,7 +1862,7 @@ public class MainActivity extends BridgeActivity {
             conn.setConnectTimeout(30000);
             conn.setReadTimeout(60000);
             conn.setRequestMethod("GET");
-            conn.setRequestProperty("User-Agent", "MoviePortal-AndroidUpdater/3.5.248");
+            conn.setRequestProperty("User-Agent", "MoviePortal-AndroidUpdater/3.5.249");
             conn.setRequestProperty("Accept", "application/vnd.android.package-archive,application/octet-stream,*/*");
             conn.setRequestProperty("Accept-Encoding", "identity");
             conn.setRequestProperty("Cache-Control", "no-cache");
@@ -2872,11 +2894,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.248");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.249");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.248\",\"versionCode\":3468}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.249\",\"versionCode\":3469}";
             }
         }
 

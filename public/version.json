@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.248",
-  "minimumRequiredVersion": "3.5.248",
-  "latestVersionCode": 3468,
-  "minimumRequiredVersionCode": 3468,
+  "latestVersion": "3.5.249",
+  "minimumRequiredVersion": "3.5.249",
+  "latestVersionCode": 3469,
+  "minimumRequiredVersionCode": 3469,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Hub v3.5.248 is ready! Fixed iPhone video playback (HLS streaming) and Android 15-20 min stream disconnect with automatic recovery.",
-  "releaseNotes": "v3.5.248: Native Apple HLS playback for iPhone Safari/PWA, MTProto keepalive + range-resume stream stability, and Android ExoPlayer WiFi/WakeLock + auto-reconnect."
+  "updateMessage": "Movie Hub v3.5.249 is ready! Fixed iPhone video playback (native Apple HLS) and Android 14-minute stream cutoff with long-session DC keepalive & seamless auto-resume.",
+  "releaseNotes": "v3.5.249: Fixed iOS ManagedMediaSource playback via native AVPlayer HLS, added 45-min metadata & per-DC sender keepalives, and added HLS + ExoPlayer mid-stream recovery."
 }

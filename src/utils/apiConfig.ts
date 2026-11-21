@@ -1,7 +1,7 @@
 export const CLOUD_RUN_BACKEND_URL = 'https://movie-portalhub-1012526016635.asia-southeast1.run.app';
-export const LIVE_BACKEND_URL = 'https://ais-dev-ic2kso77lsvaweb4l75hwo-828533060153.asia-northeast1.run.app';
-export const PRE_BACKEND_URL = 'https://ais-pre-ic2kso77lsvaweb4l75hwo-828533060153.asia-northeast1.run.app';
-export const APP_VERSION = 'v3.5.248';
+export const LIVE_BACKEND_URL = 'https://ais-dev-z5ikji45t6fgwbl74rpxp2-832989141722.asia-southeast1.run.app';
+export const PRE_BACKEND_URL = 'https://ais-pre-z5ikji45t6fgwbl74rpxp2-832989141722.asia-southeast1.run.app';
+export const APP_VERSION = 'v3.5.249';
 
 const ENV_BACKEND_URL = (
   (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_BASE_URL) ||
@@ -120,11 +120,12 @@ export function getApiBaseUrl(): string {
 interface HealthCheckResult {
   ok: boolean;
   transcodeSupported: boolean;
+  telegramConfigured: boolean;
 }
 
-async function checkBackendHealth(baseUrl: string, timeoutMs = 2000): Promise<HealthCheckResult> {
+async function checkBackendHealth(baseUrl: string, timeoutMs = 2200): Promise<HealthCheckResult> {
   const target = baseUrl.replace(/\/+$/, '');
-  if (!target) return { ok: false, transcodeSupported: false };
+  if (!target) return { ok: false, transcodeSupported: false, telegramConfigured: false };
   const healthUrl = `${target}/api/health`;
 
   try {
@@ -138,25 +139,25 @@ async function checkBackendHealth(baseUrl: string, timeoutMs = 2000): Promise<He
     clearTimeout(timer);
 
     if (res.redirected && /aistudio\.google\.com|__cookie_check|accounts\.google/i.test(res.url)) {
-      return { ok: false, transcodeSupported: false };
+      return { ok: false, transcodeSupported: false, telegramConfigured: false };
     }
 
     const ct = (res.headers.get('content-type') || '').toLowerCase();
     if (!res.ok || !ct.includes('application/json')) {
-      return { ok: false, transcodeSupported: false };
+      return { ok: false, transcodeSupported: false, telegramConfigured: false };
     }
 
     const data = await res.json().catch(() => null);
     if (!data || data.status !== 'ok') {
-      return { ok: false, transcodeSupported: false };
+      return { ok: false, transcodeSupported: false, telegramConfigured: false };
     }
+    const telegramConfigured = data.telegramConfigured !== false;
     const transcodeSupported =
       data.transcodeSupported === true ||
-      (data.ffmpegAvailable === true && data.ffprobeAvailable === true && data.telegramConfigured !== false) ||
-      (data.ffmpegAvailable === undefined && data.status === 'ok');
-    return { ok: true, transcodeSupported };
+      (data.ffmpegAvailable === true && data.ffprobeAvailable === true && telegramConfigured);
+    return { ok: true, transcodeSupported, telegramConfigured };
   } catch {
-    return { ok: false, transcodeSupported: false };
+    return { ok: false, transcodeSupported: false, telegramConfigured: false };
   }
 }
 
@@ -209,34 +210,43 @@ export async function probeWorkingBackendUrl(force = false): Promise<string | nu
     const firestoreBackendUrl = await fetchFirestoreConfiguredBackendUrl();
 
     const remoteCandidates = Array.from(
-      new Set([custom, ENV_BACKEND_URL, firestoreBackendUrl, CLOUD_RUN_BACKEND_URL, PRE_BACKEND_URL, LIVE_BACKEND_URL].filter(Boolean))
+      new Set([custom, ENV_BACKEND_URL, firestoreBackendUrl, PRE_BACKEND_URL, LIVE_BACKEND_URL, CLOUD_RUN_BACKEND_URL].filter(Boolean))
     );
 
+    let checks: Array<HealthCheckResult & { candidate: string }> = [];
     if (remoteCandidates.length > 0) {
-      const checks = await Promise.all(
+      checks = await Promise.all(
         remoteCandidates.map(async (candidate) => ({
           candidate,
-          ...(await checkBackendHealth(candidate, 2000)),
+          ...(await checkBackendHealth(candidate, 2200)),
         }))
       );
-      const firstHealthy = checks.find((c) => c.ok);
-      if (firstHealthy) {
-        resolvedNativeBackendUrl = firstHealthy.candidate;
-        resolvedRemoteTranscodeUrl = firstHealthy.transcodeSupported ? firstHealthy.candidate : null;
+      // Prefer a remote backend that has BOTH FFmpeg/HLS transcoding AND Telegram credentials configured
+      const fullHealthy = checks.find((c) => c.ok && c.transcodeSupported && c.telegramConfigured);
+      if (fullHealthy) {
+        resolvedNativeBackendUrl = fullHealthy.candidate;
+        resolvedRemoteTranscodeUrl = fullHealthy.candidate;
         lastProbeTimestamp = Date.now();
         await bridgeInitPromise;
-        return firstHealthy.candidate;
+        return fullHealthy.candidate;
       }
     }
 
     resolvedRemoteTranscodeUrl = null;
 
-    // Fallback on native Android APK: use built-in in-app localhost streaming bridge
+    // On native Android APK: prefer built-in in-app localhost streaming bridge over a remote server that lacks FFmpeg/transcoding
     const localBridgeUrl = await bridgeInitPromise;
     if (localBridgeUrl) {
       resolvedNativeBackendUrl = localBridgeUrl;
       lastProbeTimestamp = Date.now();
       return localBridgeUrl;
+    }
+
+    const fallbackRemote = checks.find((c) => c.ok && c.telegramConfigured);
+    if (fallbackRemote) {
+      resolvedNativeBackendUrl = fallbackRemote.candidate;
+      lastProbeTimestamp = Date.now();
+      return fallbackRemote.candidate;
     }
 
     return null;

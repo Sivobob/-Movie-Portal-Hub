@@ -1667,7 +1667,7 @@ interface CachedMediaEntry {
   cachedAt: number;
 }
 const mediaCache = new Map<string, CachedMediaEntry>();
-const MEDIA_CACHE_TTL_MS = 10 * 60 * 1000;
+const MEDIA_CACHE_TTL_MS = 45 * 60 * 1000;
 
 async function resolveAndCacheDocument(
   client: any,
@@ -2380,12 +2380,14 @@ export async function handleStream(req: Request, res: Response) {
 }
 
 // ============================================================================
-// NATIVE APPLE HLS STREAMING PIPELINE (/api/telegram/hls/*) FOR iOS SAFARI
+// NATIVE APPLE HLS STREAMING PIPELINE (/api/telegram/hls/*) FOR iOS & ANDROID
 // ============================================================================
-const HLS_SEG_DURATION = 6;
+const HLS_SEG_DURATION = 4;
+const HLS_TARGET_DURATION = 10;
 const HLS_TMP_ROOT = path.resolve('/tmp', 'movie_portal_hls');
 
 interface HlsWorkerJob {
+  jobId: number;
   sid: string;
   dir: string;
   startSeg: number;
@@ -2397,31 +2399,35 @@ interface HlsWorkerJob {
 }
 
 const hlsJobs = new Map<string, HlsWorkerJob>();
+let nextHlsJobSeq = 1;
 
-function cleanupHlsJob(sid: string) {
+function cleanupHlsJob(sid: string, removeDir = true) {
   const job = hlsJobs.get(sid);
   if (!job) return;
   hlsJobs.delete(sid);
   if (job.proc && !job.closed) {
     try {
       job.proc.kill('SIGTERM');
+      const procRef = job.proc;
       setTimeout(() => {
         try {
-          if (!job.closed) job.proc?.kill('SIGKILL');
+          if (!procRef.killed) procRef.kill('SIGKILL');
         } catch {}
       }, 400);
     } catch {}
   }
-  try {
-    fs.rmSync(job.dir, { recursive: true, force: true });
-  } catch {}
+  if (removeDir) {
+    try {
+      fs.rmSync(job.dir, { recursive: true, force: true });
+    } catch {}
+  }
 }
 
 setInterval(() => {
   const now = Date.now();
   for (const [sid, job] of hlsJobs.entries()) {
-    if (now - job.lastAccessedAt > 120 * 1000) {
-      cleanupHlsJob(sid);
+    if (now - job.lastAccessedAt > 180 * 1000) {
+      cleanupHlsJob(sid, true);
     }
   }
 }, 45 * 1000).unref?.();
@@ -2484,7 +2490,7 @@ function startHlsWorker(opts: {
   requestedQuality: VideoQualityTier | '';
   audioIdx: number;
 }): HlsWorkerJob {
-  cleanupHlsJob(opts.sid);
+  cleanupHlsJob(opts.sid, true);
   const dir = path.join(HLS_TMP_ROOT, opts.sid.replace(/[^a-zA-Z0-9_-]/g, '_'));
   fs.mkdirSync(dir, { recursive: true });
 
@@ -2532,7 +2538,7 @@ function startHlsWorker(opts: {
     '-f', 'hls',
     '-hls_time', String(HLS_SEG_DURATION),
     '-hls_list_size', '0',
-    '-hls_start_number', String(opts.startSeg),
+    '-start_number', String(opts.startSeg),
     '-hls_flags', 'independent_segments+temp_file',
     '-hls_segment_filename', path.join(dir, 'seg_%05d.ts'),
     path.join(dir, 'index.m3u8')
@@ -2540,6 +2546,7 @@ function startHlsWorker(opts: {
 
   const proc = spawn('ffmpeg', ffArgs, { stdio: ['ignore', 'ignore', 'pipe'] });
   const job: HlsWorkerJob = {
+    jobId: nextHlsJobSeq++,
     sid: opts.sid,
     dir,
     startSeg: opts.startSeg,
@@ -2554,13 +2561,17 @@ function startHlsWorker(opts: {
     const s = d.toString().trim();
     if (s) job.lastErrLine = s.slice(-240);
   });
-  proc.on('close', () => {
+  proc.on('close', (code) => {
     job.closed = true;
     job.proc = null;
+    if (code && code !== 0 && job.lastErrLine) {
+      console.warn(`[HLS Worker ${opts.sid}] FFmpeg exited (${code}): ${job.lastErrLine}`);
+    }
   });
-  proc.on('error', () => {
+  proc.on('error', (err) => {
     job.closed = true;
     job.proc = null;
+    job.lastErrLine = err?.message || 'spawn error';
   });
 
   hlsJobs.set(opts.sid, job);
@@ -2642,8 +2653,9 @@ router.get('/hls/playlist.m3u8', async (req: Request, res: Response) => {
       (resolved.requestedQuality ? `&quality=${encodeURIComponent(resolved.requestedQuality)}` : '') +
       `&audioIdx=${resolved.audioIdx}`;
 
-    // Pre-warm segment 0 immediately so iPhone AVPlayer receives seg 0 instantly
-    if (!hlsJobs.has(sid)) {
+    // Pre-warm segment 0 immediately so iPhone AVPlayer receives seg 0 faster
+    const existingJob = hlsJobs.get(sid);
+    if (!existingJob || existingJob.closed) {
       startHlsWorker({
         sid,
         startSeg: 0,
@@ -2653,12 +2665,14 @@ router.get('/hls/playlist.m3u8', async (req: Request, res: Response) => {
         requestedQuality: resolved.requestedQuality,
         audioIdx: resolved.audioIdx,
       });
+    } else {
+      existingJob.lastAccessedAt = Date.now();
     }
 
     const lines: string[] = [
       '#EXTM3U',
       '#EXT-X-VERSION:3',
-      `#EXT-X-TARGETDURATION:${HLS_SEG_DURATION}`,
+      `#EXT-X-TARGETDURATION:${HLS_TARGET_DURATION}`,
       '#EXT-X-MEDIA-SEQUENCE:0',
       '#EXT-X-PLAYLIST-TYPE:VOD',
     ];
@@ -2703,7 +2717,7 @@ router.get('/hls/seg.ts', async (req: Request, res: Response) => {
 
     const needRestart =
       !job ||
-      (!alreadyExists && (segIdx < job.startSeg || segIdx > Math.max(job.startSeg, job.highestSeg) + 6)) ||
+      (!alreadyExists && (segIdx < job.startSeg || segIdx > Math.max(job.startSeg, job.highestSeg) + 8)) ||
       (!alreadyExists && job.closed);
 
     if (needRestart) {
@@ -2726,18 +2740,27 @@ router.get('/hls/seg.ts', async (req: Request, res: Response) => {
       job.highestSeg = segIdx;
     }
 
-    const targetFile = getHlsSegmentPath(job.dir, segIdx);
     let clientDisconnected = false;
     req.on('close', () => {
       clientDisconnected = true;
     });
 
     const waitStart = Date.now();
+    let targetFile = getHlsSegmentPath(job.dir, segIdx);
     while (!clientDisconnected && !fs.existsSync(targetFile)) {
+      job.lastAccessedAt = Date.now();
       if (job.closed) {
+        // Check if another concurrent seek restarted this job covering segIdx
+        const latestJob = hlsJobs.get(sid);
+        if (latestJob && latestJob.jobId !== job.jobId && latestJob.startSeg <= segIdx) {
+          job = latestJob;
+          targetFile = getHlsSegmentPath(job.dir, segIdx);
+          continue;
+        }
         break;
       }
-      if (Date.now() - waitStart > 26000) {
+      if (Date.now() - waitStart > 45000) {
+        res.setHeader('Cache-Control', 'no-store');
         return res.status(504).send('HLS segment timed out');
       }
       await new Promise((r) => setTimeout(r, 80));
@@ -2745,6 +2768,7 @@ router.get('/hls/seg.ts', async (req: Request, res: Response) => {
 
     if (clientDisconnected) return;
     if (!fs.existsSync(targetFile)) {
+      res.setHeader('Cache-Control', 'no-store');
       return res.status(404).send(job.lastErrLine || 'Segment ended');
     }
 

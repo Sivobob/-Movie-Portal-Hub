@@ -567,13 +567,13 @@ export default function MovieDetailsModal({
         hlsInstance = null;
       }
       const nextIsHls = urlToLoad.includes('.m3u8');
-      if (nextIsHls && Hls.isSupported()) {
+      if (nextIsHls && !isIosBrowser && Hls.isSupported()) {
         hlsInstance = new Hls({
           startPosition: pendingResumeSec !== null ? pendingResumeSec : -1,
         });
         hlsInstance.loadSource(urlToLoad);
         hlsInstance.attachMedia(videoEl);
-      } else {
+      } else if (videoEl.getAttribute('src') !== urlToLoad) {
         videoEl.src = urlToLoad;
       }
     };
