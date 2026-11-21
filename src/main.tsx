@@ -8,6 +8,19 @@ import { AuthProvider } from './context/AuthContext';
 
 if (typeof window !== 'undefined' && !Capacitor.isNativePlatform()) {
   try {
+    // Clean up any stale/uncontrolled service workers that may be serving
+    // blank or outdated cached content in the preview iframe.
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then((regs) => {
+        for (const reg of regs) {
+          const scriptURL = reg.active?.scriptURL || '';
+          if (scriptURL.includes('dev-sw.js') || scriptURL.includes('/sw.js')) {
+            reg.unregister().catch(() => {});
+          }
+        }
+      }).catch(() => {});
+    }
+
     let refreshing = false;
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.addEventListener('controllerchange', () => {
