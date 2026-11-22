@@ -139,8 +139,8 @@ export function isAppUpdateRequired(
   remote: RemoteUpdateConfig | null | undefined
 ): boolean {
   if (!remote) return false;
-  const targetVersion = String(remote.minimumRequiredVersion || remote.latestVersion || '').trim();
-  const targetCode = Number(remote.minimumRequiredVersionCode || remote.latestVersionCode || 0);
+  const targetVersion = String(remote.latestVersion || '').trim();
+  const targetCode = Number(remote.latestVersionCode || 0);
 
   // Explicit kill-switch sentinel when admin sets version to 1.0.0
   if (targetVersion === '1.0.0' && targetCode <= 1) {
