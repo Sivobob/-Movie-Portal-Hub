@@ -161,20 +161,83 @@ export default function UpdateNotification() {
       trackedDownloadRef.current = true;
       recordApkDownloadClick('in_app_update').catch(() => {});
     }
-    try {
-      const bridge = (window as any).AndroidPlayerBridge;
-      if (bridge && typeof bridge.downloadAndInstallApk === 'function') {
+
+    const bridge = (window as any).AndroidPlayerBridge;
+    if (bridge && typeof bridge.downloadAndInstallApk === 'function') {
+      try {
         setApkStatus({
           state: 'downloading',
-          progress: 2,
-          message: 'Starting in-app update download...',
+          progress: 5,
+          message: 'Starting in-app APK download...',
         });
         bridge.downloadAndInstallApk(downloadUrl);
         return;
+      } catch {}
+    }
+
+    // In-app fetch download with smooth progress simulation / blob download
+    setApkStatus({
+      state: 'downloading',
+      progress: 5,
+      message: 'Downloading APK inside app...',
+    });
+
+    try {
+      const response = await fetch(downloadUrl);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      const contentLength = response.headers.get('content-length');
+      const total = contentLength ? parseInt(contentLength, 10) : 0;
+      const reader = response.body?.getReader();
+
+      if (!reader) {
+        throw new Error('ReadableStream not supported');
       }
-      handleDownloadInBrowser();
-    } catch {
-      handleDownloadInBrowser();
+
+      let receivedLength = 0;
+      const chunks: Uint8Array[] = [];
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) {
+          chunks.push(value);
+          receivedLength += value.length;
+          if (total > 0) {
+            const percent = Math.min(99, Math.round((receivedLength / total) * 100));
+            setApkStatus({
+              state: 'downloading',
+              progress: percent,
+              message: `Downloading APK... (${Math.round(receivedLength / 1024 / 1024)} MB)`,
+            });
+          }
+        }
+      }
+
+      const blob = new Blob(chunks as BlobPart[], { type: 'application/vnd.android.package-archive' });
+      const blobUrl = URL.createObjectURL(blob);
+      
+      setApkStatus({
+        state: 'installing',
+        progress: 100,
+        message: 'Download complete! Opening APK installer...',
+      });
+
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = 'Movie-Portal.apk';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+    } catch (err: any) {
+      console.warn('In-app fetch download fallback notice:', err);
+      // Fallback to browser direct navigation if CORS restricts fetch
+      setApkStatus({
+        state: 'downloading',
+        progress: 100,
+        message: 'Opening download link...',
+      });
+      window.location.href = downloadUrl;
     }
   };
 
