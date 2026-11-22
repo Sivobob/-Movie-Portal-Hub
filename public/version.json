@@ -5,7 +5,7 @@
   "minimumRequiredVersionCode": 3000,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
-  "isMandatory": true,
+  "isMandatory": false,
   "updateMessage": "Movie Hub v3.5.250 is live! Includes 24/7 Telegram auto-publish engine, smart duplicate shields, and stream stability improvements.",
   "releaseNotes": "v3.5.250: Added 24/7 background Telegram auto-sync, enhanced 4-layer duplicate protection, and automatic update delivery."
 }
