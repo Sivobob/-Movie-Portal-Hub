@@ -1,0 +1,6 @@
+{
+  "name": "MOVIE PORTAL",
+  "description": "A complete, professional, modern and production-ready movie streaming web application.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
