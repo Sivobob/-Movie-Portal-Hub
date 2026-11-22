@@ -136,19 +136,22 @@ router.post('/broadcast', async (req: Request, res: Response) => {
     }
   }
 
-  // Also fetch all active subscriptions directly from Firestore app_installs for robust background delivery
   try {
-    const snap = await adminDb.collection('app_installs').where('type', '==', 'web_push').get();
-    snap.forEach((docSnap) => {
-      const data: any = docSnap.data();
-      const sub = normalizeSub(data);
-      if (sub) {
-        merged.set(sub.endpoint, sub);
-        subscriptionMap.set(sub.endpoint, sub);
+    if (adminDb) {
+      const snap = await adminDb.collection('app_installs').where('type', '==', 'web_push').get().catch(() => null);
+      if (snap) {
+        snap.forEach((docSnap) => {
+          const data: any = docSnap.data();
+          const sub = normalizeSub(data);
+          if (sub) {
+            merged.set(sub.endpoint, sub);
+            subscriptionMap.set(sub.endpoint, sub);
+          }
+        });
       }
-    });
+    }
   } catch (dbErr) {
-    console.warn('[WebPush] Failed fetching subscriptions from adminDb:', dbErr);
+    // Silent fallback to local TMP subscription cache
   }
 
   saveSubsToTmp();
