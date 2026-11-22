@@ -1,7 +1,7 @@
 export const CLOUD_RUN_BACKEND_URL = 'https://movie-portalhub-1012526016635.asia-southeast1.run.app';
 export const LIVE_BACKEND_URL = 'https://ais-dev-z5ikji45t6fgwbl74rpxp2-832989141722.asia-southeast1.run.app';
 export const PRE_BACKEND_URL = 'https://ais-pre-z5ikji45t6fgwbl74rpxp2-832989141722.asia-southeast1.run.app';
-export const APP_VERSION = 'v3.5.249';
+export const APP_VERSION = 'v3.5.251';
 
 const ENV_BACKEND_URL = (
   (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_BASE_URL) ||
