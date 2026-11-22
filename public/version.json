@@ -1,8 +1,8 @@
 {
   "latestVersion": "3.5.250",
-  "minimumRequiredVersion": "3.5.250",
+  "minimumRequiredVersion": "3.5.200",
   "latestVersionCode": 3470,
-  "minimumRequiredVersionCode": 3470,
+  "minimumRequiredVersionCode": 3000,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
