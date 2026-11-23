@@ -287,7 +287,11 @@ public class MainActivity extends BridgeActivity {
         enableImmersiveStickyMode(false);
         configureWebView();
         createNotificationChannel();
-        captureLaunchMovieIntent(getIntent());
+        if (getIntent() != null && ACTION_APK_INSTALL_RESULT.equals(getIntent().getAction())) {
+            handlePackageInstallerCallback(getIntent());
+        } else {
+            captureLaunchMovieIntent(getIntent());
+        }
         mainHandler.postDelayed(this::requestPostNotificationsPermissionIfNeeded, 1200);
         ReleaseNotificationHelper.scheduleBackgroundWorker(this);
         notificationExecutor.execute(() -> ReleaseNotificationHelper.syncAndNotifyLatestReleases(getApplicationContext()));
@@ -1664,7 +1668,12 @@ public class MainActivity extends BridgeActivity {
                     apkUpdateProgress = 100;
                     String verLabel = getApkArchiveVersionLabel(downloadedApkFile);
                     apkUpdateMessage = "Update " + (verLabel.isEmpty() ? "" : verLabel + " ") + "ready! Tap Update / Install on the Android prompt.";
-                    startActivity(confirmIntent);
+                    try {
+                        startActivity(confirmIntent);
+                    } catch (Exception firstConfirmEx) {
+                        confirmIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        startActivity(confirmIntent);
+                    }
                     return;
                 } catch (Exception e) {
                     if (!legacyInstallFallbackTried && downloadedApkFile != null) {
@@ -1676,6 +1685,9 @@ public class MainActivity extends BridgeActivity {
                     apkUpdateProgress = 100;
                     apkUpdateMessage = "Could not open system update prompt (" + (e.getMessage() != null ? e.getMessage() : "Error") + "). Tap Retry In-App Update.";
                 }
+            } else if (!legacyInstallFallbackTried && downloadedApkFile != null) {
+                legacyInstallFallbackTried = true;
+                launchLegacyFileProviderInstaller(downloadedApkFile);
             }
             return;
         }
@@ -1690,6 +1702,7 @@ public class MainActivity extends BridgeActivity {
         if (status == PackageInstaller.STATUS_FAILURE_ABORTED) {
             apkUpdateState = "installing";
             apkUpdateProgress = 100;
+            legacyInstallFallbackTried = false;
             apkUpdateMessage = "Update installation was cancelled. Tap \"Tap to Install Update\" below to install inside the app.";
             return;
         }
@@ -1781,13 +1794,7 @@ public class MainActivity extends BridgeActivity {
             installIntent.setClipData(android.content.ClipData.newRawUri("", apkUri));
             installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             installIntent.putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true);
-
-            if (installIntent.resolveActivity(getPackageManager()) == null) {
-                apkUpdateState = "error";
-                apkUpdateProgress = 100;
-                apkUpdateMessage = "No Android Package Installer found on this device. Tap \"Download APK in Browser\" below.";
-                return;
-            }
+            installIntent.putExtra(Intent.EXTRA_RETURN_RESULT, true);
 
             String verLabel = getApkArchiveVersionLabel(apkFile);
             apkUpdateState = "installing";
@@ -1796,6 +1803,10 @@ public class MainActivity extends BridgeActivity {
 
             try {
                 startActivity(installIntent);
+            } catch (android.content.ActivityNotFoundException notFoundEx) {
+                apkUpdateState = "error";
+                apkUpdateProgress = 100;
+                apkUpdateMessage = "No Android Package Installer found on this device.";
             } catch (Exception firstTryEx) {
                 installIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 startActivity(installIntent);
@@ -1964,15 +1975,20 @@ public class MainActivity extends BridgeActivity {
                     }
                     HttpURLConnection conn = null;
                     try {
+                        String attemptUrl = cleanUrl;
                         if (attempt > 1) {
                             apkUpdateProgress = 1;
                             apkUpdateMessage = "Retrying in-app download (attempt 2/2)...";
+                            String officialUrl = "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk";
+                            if (!officialUrl.equals(cleanUrl)) {
+                                attemptUrl = officialUrl;
+                            }
                         }
                         if (tempPartFile.exists()) {
                             tempPartFile.delete();
                         }
 
-                        conn = openApkHttpConnectionWithRedirects(cleanUrl);
+                        conn = openApkHttpConnectionWithRedirects(attemptUrl);
                         String contentType = conn.getContentType();
                         if (contentType != null && contentType.toLowerCase(Locale.US).contains("text/html")) {
                             throw new IOException("Server returned HTML page instead of APK file");
@@ -2924,11 +2940,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.251");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.264");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.251\",\"versionCode\":3471}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.264\",\"versionCode\":35264}";
             }
         }
 
@@ -2996,7 +3012,12 @@ public class MainActivity extends BridgeActivity {
         public void retryInstallDownloadedApk() {
             runOnUiThread(() -> {
                 if (isValidParsedApkPackage(downloadedApkFile)) {
-                    launchApkPackageInstaller(downloadedApkFile);
+                    if ("installing".equals(apkUpdateState) && !legacyInstallFallbackTried) {
+                        legacyInstallFallbackTried = true;
+                        launchLegacyFileProviderInstaller(downloadedApkFile);
+                    } else {
+                        launchApkPackageInstaller(downloadedApkFile);
+                    }
                 } else if (lastApkDownloadUrl != null && !lastApkDownloadUrl.isEmpty()) {
                     startApkDownloadManager(lastApkDownloadUrl);
                 } else {

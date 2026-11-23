@@ -28,6 +28,7 @@ import {
   fetchRemoteUpdateConfig,
   getInstalledAppVersion,
   OFFICIAL_APK_DIRECT_URL,
+  resolveApkDownloadUrl,
   RemoteUpdateConfig,
   InstalledAppVersion,
 } from '../services/appUpdateConfig';
@@ -223,7 +224,7 @@ export default function SettingsPage() {
             progress: 2,
             message: 'Starting in-app update download...',
           });
-          const url = remoteConfig?.apkDownloadUrl || OFFICIAL_APK_DIRECT_URL;
+          const url = resolveApkDownloadUrl(remoteConfig?.apkDownloadUrl || OFFICIAL_APK_DIRECT_URL);
           bridge.downloadAndInstallApk(url);
           return;
         }

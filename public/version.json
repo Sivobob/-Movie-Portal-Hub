@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.263",
-  "minimumRequiredVersion": "3.5.263",
-  "latestVersionCode": 35263,
-  "minimumRequiredVersionCode": 35263,
+  "latestVersion": "3.5.264",
+  "minimumRequiredVersion": "3.5.264",
+  "latestVersionCode": 35264,
+  "minimumRequiredVersionCode": 35264,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Hub v3.5.263 is live! In-app update with direct installer, 24/7 Telegram auto-sync, and stability fixes.",
-  "releaseNotes": "v3.5.263: Native in-app APK downloader & direct installer, removed external browser popup."
+  "updateMessage": "Movie Hub v3.5.264 is live! In-app update popup with direct in-app download and installer.",
+  "releaseNotes": "v3.5.264: Improved in-app APK download, Android 11+ installer visibility, and automatic update popup."
 }

@@ -9,6 +9,7 @@ import {
   getInstalledAppVersion,
   isAppUpdateRequired,
   OFFICIAL_APK_DIRECT_URL,
+  resolveApkDownloadUrl,
 } from '../services/appUpdateConfig';
 import { recordApkDownloadClick } from '../services/appStatsService';
 
@@ -110,13 +111,29 @@ export default function UpdateNotification() {
       refreshCheck();
     };
 
+    const retryTimer = setTimeout(() => {
+      if (mounted && !currentRemote) {
+        refreshCheck();
+      }
+    }, 4500);
+
+    const periodicTimer = setInterval(() => {
+      if (mounted && (typeof document === 'undefined' || document.visibilityState !== 'hidden')) {
+        refreshCheck();
+      }
+    }, 90_000);
+
     window.addEventListener('focus', handleResumeCheck);
+    window.addEventListener('online', handleResumeCheck);
     document.addEventListener('visibilitychange', handleResumeCheck);
 
     return () => {
       mounted = false;
+      clearTimeout(retryTimer);
+      clearInterval(periodicTimer);
       unsub();
       window.removeEventListener('focus', handleResumeCheck);
+      window.removeEventListener('online', handleResumeCheck);
       document.removeEventListener('visibilitychange', handleResumeCheck);
     };
   }, [isNative]);
@@ -151,7 +168,7 @@ export default function UpdateNotification() {
     return null;
   }
 
-  const downloadUrl = remoteConfig.apkDownloadUrl || OFFICIAL_APK_DIRECT_URL;
+  const downloadUrl = resolveApkDownloadUrl(remoteConfig.apkDownloadUrl || OFFICIAL_APK_DIRECT_URL);
   const isDownloading = apkStatus.state === 'downloading';
   const needsPermission = apkStatus.state === 'permission_required';
   const isInstalling = apkStatus.state === 'installing';
@@ -294,13 +311,15 @@ export default function UpdateNotification() {
           )}
 
 
-          <button
-            type="button"
-            onClick={() => setUpdateRequired(false)}
-            className="w-full bg-transparent hover:bg-neutral-800 text-gray-400 hover:text-white font-medium text-[11px] py-2 px-4 rounded-xl cursor-pointer transition-colors"
-          >
-            <span>Continue Using App (Remind Later)</span>
-          </button>
+          {!isDownloading && (
+            <button
+              type="button"
+              onClick={() => setUpdateRequired(false)}
+              className="w-full bg-transparent hover:bg-neutral-800 text-gray-400 hover:text-white font-medium text-[11px] py-2 px-4 rounded-xl cursor-pointer transition-colors"
+            >
+              <span>Continue Using App (Remind Later)</span>
+            </button>
+          )}
         </div>
       </div>
     </div>

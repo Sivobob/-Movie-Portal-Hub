@@ -14,11 +14,19 @@ import { checkAndHandleQuotaError } from './firestoreQuotaService';
 export const APP_UPDATE_COLLECTION = 'admins';
 export const APP_UPDATE_DOC_ID = 'android_update';
 
-export const CURRENT_VERSION_NAME = '3.5.263';
-export const CURRENT_VERSION_CODE = 35263;
+export const CURRENT_VERSION_NAME = '3.5.264';
+export const CURRENT_VERSION_CODE = 35264;
 
 export const OFFICIAL_APK_DIRECT_URL =
   'https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk';
+
+export function resolveApkDownloadUrl(rawUrl?: string | null): string {
+  const trimmed = String(rawUrl || '').trim();
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  return OFFICIAL_APK_DIRECT_URL;
+}
 
 export const DEFAULT_UPDATE_MESSAGE =
   'A new version of Movie Hub is available. Please update the app to continue watching movies and series.';
@@ -194,7 +202,7 @@ export function normalizeRemoteUpdateConfig(raw: any): RemoteUpdateConfig {
     minimumRequiredVersion,
     latestVersionCode,
     minimumRequiredVersionCode: minimumRequiredVersionCode > 1 ? minimumRequiredVersionCode : undefined,
-    apkDownloadUrl: apkDownloadUrl || OFFICIAL_APK_DIRECT_URL,
+    apkDownloadUrl: resolveApkDownloadUrl(apkDownloadUrl),
     updateMessage: String(raw?.updateMessage || raw?.releaseNotes || DEFAULT_UPDATE_MESSAGE).trim() || DEFAULT_UPDATE_MESSAGE,
     updatedAt: raw?.updatedAt,
   };
