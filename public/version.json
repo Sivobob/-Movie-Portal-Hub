@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.264",
-  "minimumRequiredVersion": "3.5.264",
-  "latestVersionCode": 35264,
-  "minimumRequiredVersionCode": 35264,
+  "latestVersion": "3.5.265",
+  "minimumRequiredVersion": "3.5.265",
+  "latestVersionCode": 35265,
+  "minimumRequiredVersionCode": 35265,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Hub v3.5.264 is live! In-app update popup with direct in-app download and installer.",
-  "releaseNotes": "v3.5.264: Improved in-app APK download, Android 11+ installer visibility, and automatic update popup."
+  "updateMessage": "Movie Hub v3.5.265 is live! Fixed in-app APK installation prompt across Android 12–15 and OEM devices.",
+  "releaseNotes": "v3.5.265: Switched primary in-app installer to foreground FileProvider startActivityForResult with multi-layer fallbacks and install result handling."
 }

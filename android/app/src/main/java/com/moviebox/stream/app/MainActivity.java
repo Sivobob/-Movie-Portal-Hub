@@ -124,6 +124,7 @@ public class MainActivity extends BridgeActivity {
     private final ExecutorService notificationExecutor = Executors.newSingleThreadExecutor();
 
     private static final String ACTION_APK_INSTALL_RESULT = "com.moviebox.stream.app.ACTION_APK_INSTALL_RESULT";
+    private static final int REQUEST_CODE_INSTALL_APK = 4205;
     private volatile String apkUpdateState = "idle";
     private volatile int apkUpdateProgress = 0;
     private volatile String apkUpdateMessage = "";
@@ -410,7 +411,30 @@ public class MainActivity extends BridgeActivity {
             pendingInstallAfterPermission = false;
             final File readyApk = downloadedApkFile;
             if (readyApk != null && readyApk.exists() && readyApk.length() >= 1024L * 1024L) {
-                mainHandler.post(() -> launchApkPackageInstaller(readyApk));
+                mainHandler.postDelayed(() -> launchApkPackageInstaller(readyApk), 250);
+            }
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_CODE_INSTALL_APK) {
+            if (resultCode == RESULT_OK) {
+                apkUpdateState = "installing";
+                apkUpdateProgress = 100;
+                apkUpdateMessage = "Update installed successfully! Restarting Movie Hub...";
+            } else if (resultCode == RESULT_CANCELED) {
+                apkUpdateState = "installing";
+                apkUpdateProgress = 100;
+                apkUpdateMessage = "Install prompt was closed. Tap \"Tap to Install Update\" below to install inside the app.";
+            } else {
+                int installResult = data != null ? data.getIntExtra("android.intent.extra.INSTALL_RESULT", -1) : -1;
+                apkUpdateState = "error";
+                apkUpdateProgress = 100;
+                apkUpdateMessage = installResult != -1
+                    ? "Android installer did not complete (code " + installResult + "). Tap Retry or check if old app signature conflicts."
+                    : "Android installer did not complete. Tap Retry In-App Update.";
             }
         }
     }
@@ -1789,27 +1813,57 @@ public class MainActivity extends BridgeActivity {
                 getPackageName() + ".fileprovider",
                 apkFile
             );
-            Intent installIntent = new Intent(Intent.ACTION_VIEW);
-            installIntent.setDataAndType(apkUri, "application/vnd.android.package-archive");
-            installIntent.setClipData(android.content.ClipData.newRawUri("", apkUri));
-            installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            installIntent.putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true);
-            installIntent.putExtra(Intent.EXTRA_RETURN_RESULT, true);
-
             String verLabel = getApkArchiveVersionLabel(apkFile);
             apkUpdateState = "installing";
             apkUpdateProgress = 100;
             apkUpdateMessage = "Update " + (verLabel.isEmpty() ? "" : verLabel + " ") + "ready! Tap Update / Install on the Android popup.";
 
+            Intent viewIntent = new Intent(Intent.ACTION_VIEW);
+            viewIntent.setDataAndType(apkUri, "application/vnd.android.package-archive");
+            viewIntent.setClipData(android.content.ClipData.newRawUri("", apkUri));
+            viewIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            viewIntent.putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true);
+            viewIntent.putExtra(Intent.EXTRA_RETURN_RESULT, true);
+
             try {
-                startActivity(installIntent);
-            } catch (android.content.ActivityNotFoundException notFoundEx) {
-                apkUpdateState = "error";
-                apkUpdateProgress = 100;
-                apkUpdateMessage = "No Android Package Installer found on this device.";
-            } catch (Exception firstTryEx) {
-                installIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                startActivity(installIntent);
+                startActivityForResult(viewIntent, REQUEST_CODE_INSTALL_APK);
+                return;
+            } catch (Exception primaryEx) {
+                Intent installPkgIntent = new Intent(Intent.ACTION_INSTALL_PACKAGE);
+                installPkgIntent.setDataAndType(apkUri, "application/vnd.android.package-archive");
+                installPkgIntent.setClipData(android.content.ClipData.newRawUri("", apkUri));
+                installPkgIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                installPkgIntent.putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true);
+                installPkgIntent.putExtra(Intent.EXTRA_RETURN_RESULT, true);
+
+                try {
+                    startActivityForResult(installPkgIntent, REQUEST_CODE_INSTALL_APK);
+                    return;
+                } catch (Exception secondaryEx) {
+                    Intent newTaskViewIntent = new Intent(Intent.ACTION_VIEW);
+                    newTaskViewIntent.setDataAndType(apkUri, "application/vnd.android.package-archive");
+                    newTaskViewIntent.setClipData(android.content.ClipData.newRawUri("", apkUri));
+                    newTaskViewIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+                    newTaskViewIntent.putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true);
+
+                    try {
+                        startActivity(newTaskViewIntent);
+                        return;
+                    } catch (Exception newTaskEx) {
+                        if (!legacyInstallFallbackTried && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                            legacyInstallFallbackTried = true;
+                            installApkViaPackageInstallerSession(apkFile);
+                            return;
+                        }
+                        if (newTaskEx instanceof android.content.ActivityNotFoundException) {
+                            apkUpdateState = "error";
+                            apkUpdateProgress = 100;
+                            apkUpdateMessage = "No Android Package Installer found on this device.";
+                            return;
+                        }
+                        throw newTaskEx;
+                    }
+                }
             }
         } catch (SecurityException secEx) {
             apkUpdateState = "error";
@@ -1858,12 +1912,7 @@ public class MainActivity extends BridgeActivity {
 
         pendingInstallAfterPermission = false;
         legacyInstallFallbackTried = false;
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            installApkViaPackageInstallerSession(apkFile);
-        } else {
-            launchLegacyFileProviderInstaller(apkFile);
-        }
+        launchLegacyFileProviderInstaller(apkFile);
     }
 
     private File resolveApkDownloadDir() {
@@ -2940,11 +2989,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.264");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.265");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.264\",\"versionCode\":35264}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.265\",\"versionCode\":35265}";
             }
         }
 
@@ -3012,12 +3061,7 @@ public class MainActivity extends BridgeActivity {
         public void retryInstallDownloadedApk() {
             runOnUiThread(() -> {
                 if (isValidParsedApkPackage(downloadedApkFile)) {
-                    if ("installing".equals(apkUpdateState) && !legacyInstallFallbackTried) {
-                        legacyInstallFallbackTried = true;
-                        launchLegacyFileProviderInstaller(downloadedApkFile);
-                    } else {
-                        launchApkPackageInstaller(downloadedApkFile);
-                    }
+                    launchApkPackageInstaller(downloadedApkFile);
                 } else if (lastApkDownloadUrl != null && !lastApkDownloadUrl.isEmpty()) {
                     startApkDownloadManager(lastApkDownloadUrl);
                 } else {

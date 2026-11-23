@@ -104,22 +104,12 @@ export function useAppUpdate() {
       return;
     }
 
-    // Secondary fallback for older shells without native APK downloader
+    // No external browser fallback: keep update strictly inside the app
     setInstallStatus({
-      state: 'installing',
-      progress: 100,
-      message: 'Opening official APK download. Install the downloaded APK and return to the app.',
+      state: 'error',
+      progress: 0,
+      message: 'In-app update service is only available in the installed Android app.',
     });
-    try {
-      const { Browser } = await import('@capacitor/browser');
-      await Browser.open({ url });
-    } catch {
-      try {
-        window.open(url, '_system');
-      } catch {
-        window.location.href = url;
-      }
-    }
   }, []);
 
   const openUnknownSourcesSettings = useCallback(() => {
