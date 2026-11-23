@@ -53,6 +53,7 @@ export interface ProbeMediaResult {
   needsAudioTranscode: boolean;
   probedByFfprobe: boolean;
   videoStartTime?: number;
+  videoStreamIndex?: number;
 }
 
 // Global LRU Block Cache: key = `${docId}:${blockIndex}`
@@ -86,13 +87,44 @@ function getCachedBlock(key: string): Buffer | undefined {
 }
 
 const dcSenderPromises = new Map<string, Promise<any>>();
+const activeDcSenders = new Map<string, { client: TelegramClient; sender: any; dcId?: number; lastUsedAt: number }>();
+let dcKeepaliveTimer: ReturnType<typeof setInterval> | null = null;
+
+function ensureDcKeepaliveLoop() {
+  if (dcKeepaliveTimer) return;
+  dcKeepaliveTimer = setInterval(async () => {
+    const now = Date.now();
+    for (const [key, entry] of activeDcSenders.entries()) {
+      // Evict senders idle for > 15 minutes
+      if (now - entry.lastUsedAt > 15 * 60 * 1000) {
+        activeDcSenders.delete(key);
+        continue;
+      }
+      try {
+        await Promise.race([
+          entry.client.invokeWithSender(new Api.Ping({ pingId: bigInt(now) as any }), entry.sender),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('ping timeout')), 8000)),
+        ]);
+      } catch {
+        try {
+          (entry.sender as any)?.reconnect?.();
+        } catch {}
+      }
+    }
+  }, 35 * 1000);
+  dcKeepaliveTimer.unref?.();
+}
 
 async function getDcSenderSafe(client: TelegramClient, dcId: number | undefined): Promise<any> {
   const key = dcId !== undefined ? String(dcId) : 'default';
   const existing = dcSenderPromises.get(key);
   if (existing) return existing;
 
-  const p = client.getSender(dcId as any).finally(() => {
+  const p = client.getSender(dcId as any).then((sender) => {
+    activeDcSenders.set(key, { client, sender, dcId, lastUsedAt: Date.now() });
+    ensureDcKeepaliveLoop();
+    return sender;
+  }).finally(() => {
     dcSenderPromises.delete(key);
   });
   dcSenderPromises.set(key, p);
@@ -243,11 +275,17 @@ export async function streamTelegramRange(
   endPos: number,
   concurrency: number,
   isClosedFn: () => boolean,
-  onFileRefExpired?: () => void
+  onFileRefExpired?: () => void,
+  refreshDocFn?: () => Promise<Api.Document | null>
 ): Promise<void> {
   const firstBlock = Math.floor(start / BLOCK_SIZE);
   const lastBlock = Math.floor(endPos / BLOCK_SIZE);
   const effectiveConcurrency = Math.max(1, Math.min(concurrency, 3));
+
+  let currentDoc = doc;
+  let refRefreshAttempts = 0;
+  let bytesWritten = 0;
+  let reachedEndOfRange = false;
 
   // Active prefetch queue keyed by blockIndex
   const blockPromises = new Map<number, Promise<Buffer>>();
@@ -258,7 +296,7 @@ export async function streamTelegramRange(
     while (nextToQueue <= cap && !isClosedFn() && !res.writableEnded) {
       const idx = nextToQueue++;
       if (!blockPromises.has(idx)) {
-        const p = fetchBlock(client, doc, idx);
+        const p = fetchBlock(client, currentDoc, idx);
         // Prevent unhandled rejection warnings if aborted before awaiting
         p.catch(() => {});
         blockPromises.set(idx, p);
@@ -271,14 +309,49 @@ export async function streamTelegramRange(
 
   try {
     for (let blockIdx = firstBlock; blockIdx <= lastBlock; blockIdx++) {
-      if (isClosedFn() || res.writableEnded) break;
+      if (isClosedFn() || res.writableEnded) {
+        reachedEndOfRange = true;
+        break;
+      }
 
-      const p = blockPromises.get(blockIdx) || fetchBlock(client, doc, blockIdx);
-      const blockBuf = await p;
-      blockPromises.delete(blockIdx);
+      let blockBuf: Buffer;
+      try {
+        const p = blockPromises.get(blockIdx) || fetchBlock(client, currentDoc, blockIdx);
+        blockBuf = await p;
+        blockPromises.delete(blockIdx);
+      } catch (blockErr: any) {
+        blockPromises.delete(blockIdx);
+        const errMsg = String(blockErr?.errorMessage || blockErr?.message || '');
+        const canRefreshDoc =
+          Boolean(refreshDocFn) &&
+          refRefreshAttempts < 3 &&
+          (errMsg.includes('FILE_REFERENCE') || bytesWritten > 0);
+        if (canRefreshDoc && !isClosedFn() && !res.writableEnded) {
+          refRefreshAttempts += 1;
+          onFileRefExpired?.();
+          try {
+            const refreshedDoc = await refreshDocFn!();
+            if (refreshedDoc) {
+              currentDoc = refreshedDoc;
+              blockPromises.clear();
+              nextToQueue = blockIdx;
+              queueAhead(blockIdx + effectiveConcurrency - 1);
+              blockIdx -= 1;
+              continue;
+            }
+          } catch {}
+        }
+        throw blockErr;
+      }
 
-      if (isClosedFn() || res.writableEnded) break;
-      if (!blockBuf || blockBuf.length === 0) break;
+      if (isClosedFn() || res.writableEnded) {
+        reachedEndOfRange = true;
+        break;
+      }
+      if (!blockBuf || blockBuf.length === 0) {
+        reachedEndOfRange = true;
+        break;
+      }
 
       const blockFileStart = blockIdx * BLOCK_SIZE;
       const sliceStart = Math.max(0, start - blockFileStart);
@@ -289,6 +362,7 @@ export async function streamTelegramRange(
           ? blockBuf
           : blockBuf.subarray(sliceStart, sliceEnd);
 
+        bytesWritten += chunk.length;
         const canWrite = res.write(chunk);
         if (!canWrite && !isClosedFn() && !res.writableEnded) {
           await new Promise<void>((resolve) => {
@@ -310,9 +384,10 @@ export async function streamTelegramRange(
         }
       }
 
-      if (blockBuf.length < BLOCK_SIZE) {
-        // Reached EOF
-        break;
+      if (blockBuf.length < BLOCK_SIZE || blockIdx === lastBlock) {
+        // Reached legitimate EOF or end of requested range
+        reachedEndOfRange = true;
+        if (blockBuf.length < BLOCK_SIZE) break;
       }
 
       // Queue next blocks ONLY after downstream socket accepted/drained the current block
@@ -330,7 +405,16 @@ export async function streamTelegramRange(
   } finally {
     blockPromises.clear();
     if (!res.writableEnded) {
-      res.end();
+      if (!reachedEndOfRange && bytesWritten > 0 && !isClosedFn()) {
+        // Signal mid-stream error rather than clean EOF so FFmpeg -reconnect_streamed / players reconnect cleanly
+        try {
+          res.destroy(new Error('Telegram mid-stream range aborted'));
+        } catch {
+          res.end();
+        }
+      } else {
+        res.end();
+      }
     }
   }
 }
@@ -454,10 +538,16 @@ export async function probeTelegramMedia(
             ? Math.round(formatDuration)
             : docInfo.durationSec || 0;
 
-        // Ignore attached cover art images (mjpeg/png with attached_pic = 1)
-        const videoStream = streams.find(
-          (s) => s.codec_type === 'video' && (!s.disposition || s.disposition.attached_pic !== 1)
-        );
+        // Ignore attached cover art images (mjpeg/png with attached_pic = 1) or image codecs (png, mjpeg, webp, bmp, mjpg, gif)
+        const videoStreamObj = streams.find(
+          (s) =>
+            s.codec_type === 'video' &&
+            (!s.disposition || s.disposition.attached_pic !== 1) &&
+            !['png', 'mjpeg', 'webp', 'bmp', 'mjpg', 'gif', 'image'].includes(String(s.codec_name || '').toLowerCase())
+        ) || streams.find((s) => s.codec_type === 'video');
+
+        const videoStreamIndex = Number(videoStreamObj?.index ?? 0);
+        const videoStream = videoStreamObj;
         const audioStreamObjs = streams.filter((s) => s.codec_type === 'audio');
         const subtitleStreamObjs = streams.filter((s) => s.codec_type === 'subtitle');
 
@@ -581,6 +671,7 @@ export async function probeTelegramMedia(
           needsAudioTranscode,
           probedByFfprobe: true,
           videoStartTime: Number.isFinite(videoStartTime) ? videoStartTime : 0,
+          videoStreamIndex,
         });
       } catch {
         resolve(fallbackProbeFromMetadata(docInfo));

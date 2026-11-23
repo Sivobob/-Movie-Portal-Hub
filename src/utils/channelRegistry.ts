@@ -67,6 +67,19 @@ function loadCacheFromDisk(): Record<string, CachedChannelInfo> {
     inMemoryCache['-1003432917101'] = narutoPrivEntry;
   }
 
+  // Auto-seed Movie Hub Database private channel (+s2Qki5-sfnVjZTI1)
+  if (!inMemoryCache['4498557265']) {
+    const movieHubDbEntry: CachedChannelInfo = {
+      channelId: '4498557265',
+      accessHash: '113338100892344891',
+      title: 'Movie Hub Database',
+      username: '+s2Qki5-sfnVjZTI1',
+      updatedAt: Date.now(),
+    };
+    inMemoryCache['4498557265'] = movieHubDbEntry;
+    inMemoryCache['-1004498557265'] = movieHubDbEntry;
+  }
+
   return inMemoryCache;
 }
 

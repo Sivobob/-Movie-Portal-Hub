@@ -189,7 +189,7 @@ function parseEbmlHeader(buf: Uint8Array): Partial<LocalHeaderProbeResult> {
     out.videoCodec = 'vp9';
   } else if (containsBytes(buf, 'V_VP8') >= 0) {
     out.videoCodec = 'vp8';
-  } else if (containsBytes(buf, 'V_MPEG4/ISO/ASP') >= 0 || containsBytes(buf, 'V_MS/VFW/FOURCC') >= 0) {
+  } else if (containsBytes(buf, 'V_MPEG4/ISO/ASP') >= 0 || (containsBytes(buf, 'V_MS/VFW/FOURCC') >= 0 && containsBytes(buf, 'MPNG') < 0 && containsBytes(buf, 'image/png') < 0)) {
     out.videoCodec = 'mpeg4';
   }
 

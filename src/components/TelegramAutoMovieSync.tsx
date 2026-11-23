@@ -74,10 +74,15 @@ export interface AutoMovieDraft {
   confidenceScore: number;
   matchReason: string;
   isSeriesEpisode: boolean;
+  seasonNumber?: number | null;
+  episodeNumber?: number | null;
+  episodeLabel?: string;
+  episodeTitle?: string;
   alternateMatches: AutoMatchCandidate[];
 }
 
 interface SyncConfigState {
+  configVersion?: number;
   channelUrl: string;
   lastSyncedMsgId: number;
   autoWatchEnabled: boolean;
@@ -110,6 +115,8 @@ interface TelegramAutoMovieSyncProps {
 
 const LOCAL_SYNC_CONFIG_KEY = 'movie_hub_tg_auto_movie_sync_v1';
 const CONFIG_DOC_PATH = ['app_config', 'telegram_auto_sync'] as const;
+const DEFAULT_CHANNEL_URL = 'https://t.me/+s2Qki5-sfnVjZTI1';
+const AUTO_SYNC_CONFIG_VERSION = 2;
 
 const CATEGORY_OPTIONS = [
   'Bollywood Movie',
@@ -132,11 +139,17 @@ function collectExistingUrlsAndImdb(movies: MovieData[]): {
   imdbIds: Set<string>;
   existingTitles: Array<{ title: string; originalTitle: string; releaseYear: number; category: string }>;
   isTitleDuplicate: (titles: Array<string | undefined>, releaseYear?: number, category?: string) => boolean;
+  findExistingMatch: (
+    imdbId: string | undefined,
+    titles: Array<string | undefined>,
+    releaseYear?: number,
+    isSeries?: boolean
+  ) => MovieData | null;
 } {
   const urls = new Set<string>();
   const imdbIds = new Set<string>();
   const existingTitles: Array<{ title: string; originalTitle: string; releaseYear: number; category: string }> = [];
-  const entries: Array<{ k1: string; k2: string; year: number; isSeries: boolean }> = [];
+  const entries: Array<{ movie: MovieData; k1: string; k2: string; year: number; isSeries: boolean }> = [];
 
   for (const m of movies) {
     if (m.imdbId) imdbIds.add(String(m.imdbId).trim().toLowerCase());
@@ -147,7 +160,19 @@ function collectExistingUrlsAndImdb(movies: MovieData[]): {
         if (typeof u === 'string' && u.trim()) urls.add(u.trim().toLowerCase());
       });
     }
+    if (Array.isArray(m.seasons)) {
+      m.seasons.forEach((s: any) => {
+        if (Array.isArray(s?.episodes)) {
+          s.episodes.forEach((ep: any) => {
+            if (ep?.streamUrl && typeof ep.streamUrl === 'string') {
+              urls.add(ep.streamUrl.trim().toLowerCase());
+            }
+          });
+        }
+      });
+    }
     const cat = String(m.originalCategory || '');
+    const mIsSeries = cat.toLowerCase().includes('series') || (Array.isArray(m.seasons) && m.seasons.length > 0);
     existingTitles.push({
       title: String(m.title || ''),
       originalTitle: String((m as any).originalTitle || ''),
@@ -155,10 +180,11 @@ function collectExistingUrlsAndImdb(movies: MovieData[]): {
       category: cat,
     });
     entries.push({
+      movie: m,
       k1: normalizeDupTitle(String(m.title || '')),
       k2: normalizeDupTitle(String((m as any).originalTitle || '')),
       year: Number(m.releaseYear) || 0,
-      isSeries: cat.toLowerCase().includes('series'),
+      isSeries: mIsSeries,
     });
   }
 
@@ -179,7 +205,94 @@ function collectExistingUrlsAndImdb(movies: MovieData[]): {
     return false;
   };
 
-  return { urls, imdbIds, existingTitles, isTitleDuplicate };
+  const findExistingMatch = (
+    imdbId: string | undefined,
+    titles: Array<string | undefined>,
+    releaseYear = 0,
+    isSeries = false
+  ): MovieData | null => {
+    const cleanImdb = String(imdbId || '').trim().toLowerCase();
+    if (cleanImdb) {
+      const byImdb = movies.find(
+        (m) => m.imdbId && String(m.imdbId).trim().toLowerCase() === cleanImdb
+      );
+      if (byImdb) return byImdb;
+    }
+    const cKeys = titles.map((t) => normalizeDupTitle(t || '')).filter((k) => k.length >= 2);
+    for (const ex of entries) {
+      const eKeys = [ex.k1, ex.k2].filter((k) => k.length >= 2);
+      for (const ck of cKeys) {
+        for (const ek of eKeys) {
+          if (ck !== ek) continue;
+          if (ex.isSeries || isSeries) return ex.movie;
+          if (!releaseYear || !ex.year || Math.abs(releaseYear - ex.year) <= 1) return ex.movie;
+        }
+      }
+    }
+    return null;
+  };
+
+  return { urls, imdbIds, existingTitles, isTitleDuplicate, findExistingMatch };
+}
+
+function mergeEpisodeIntoClientSeasons(
+  existingSeasons: any[],
+  seasonNum: number,
+  newEpisode: {
+    episodeNumber: number;
+    episodeLabel?: string;
+    title: string;
+    streamUrl: string;
+    duration?: string;
+    durationSec?: number;
+    showInNewEpisodes: boolean;
+    newEpisodeEnabledAt: number;
+    createdAt: number;
+    addedAt: number;
+  }
+): { mergedSeasons: any[]; added: boolean } {
+  const cloned = Array.isArray(existingSeasons)
+    ? existingSeasons.map((s) => ({
+        seasonNumber: Number(s?.seasonNumber) || 1,
+        episodes: Array.isArray(s?.episodes) ? [...s.episodes] : [],
+      }))
+    : [];
+
+  let targetSeason = cloned.find((s) => s.seasonNumber === seasonNum);
+  if (!targetSeason) {
+    targetSeason = { seasonNumber: seasonNum, episodes: [] };
+    cloned.push(targetSeason);
+  }
+
+  const cleanStream = newEpisode.streamUrl.trim().toLowerCase();
+  if (
+    targetSeason.episodes.some(
+      (ep) => String(ep?.streamUrl || '').trim().toLowerCase() === cleanStream
+    )
+  ) {
+    return { mergedSeasons: cloned, added: false };
+  }
+
+  const sameIdx = targetSeason.episodes.findIndex(
+    (ep) => Number(ep?.episodeNumber) === newEpisode.episodeNumber && String(ep?.streamUrl || '').trim() !== ''
+  );
+  if (sameIdx >= 0) {
+    return { mergedSeasons: cloned, added: false };
+  }
+
+  const emptyIdx = targetSeason.episodes.findIndex(
+    (ep) => Number(ep?.episodeNumber) === newEpisode.episodeNumber && !String(ep?.streamUrl || '').trim()
+  );
+  if (emptyIdx >= 0) {
+    targetSeason.episodes[emptyIdx] = newEpisode;
+  } else {
+    targetSeason.episodes.push(newEpisode);
+  }
+
+  targetSeason.episodes.sort((a, b) => (Number(a?.episodeNumber) || 0) - (Number(b?.episodeNumber) || 0));
+  cloned.sort((a, b) => a.seasonNumber - b.seasonNumber);
+
+  return { mergedSeasons: cloned, added: true };
 }
 
 export default function TelegramAutoMovieSync({
@@ -191,8 +304,6 @@ export default function TelegramAutoMovieSync({
   publishReleaseAnnouncement,
   showNotification,
 }: TelegramAutoMovieSyncProps) {
-  const DEFAULT_CHANNEL_URL = 'https://t.me/+QSL_3k54YfBjMjE1';
-
   const [expanded, setExpanded] = useState(() => {
     try {
       const saved = localStorage.getItem(LOCAL_SYNC_CONFIG_KEY);
@@ -210,16 +321,23 @@ export default function TelegramAutoMovieSync({
       const saved = localStorage.getItem(LOCAL_SYNC_CONFIG_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        return {
-          channelUrl: String(parsed?.channelUrl || DEFAULT_CHANNEL_URL),
-          lastSyncedMsgId: Number(parsed?.lastSyncedMsgId) || 0,
-          autoWatchEnabled: Boolean(parsed?.autoWatchEnabled ?? true),
-          autoPublishVerified: Boolean(parsed?.autoPublishVerified ?? true),
-          notifyOnNewPublish: Boolean(parsed?.notifyOnNewPublish ?? true),
-        };
+        const savedVer = Number(parsed?.configVersion) || 1;
+        const savedUrl = String(parsed?.channelUrl || '').trim();
+        const isOldDefault = savedUrl.includes('QSL_3k54YfBjMjE1');
+        if (savedVer >= AUTO_SYNC_CONFIG_VERSION && savedUrl && !isOldDefault) {
+          return {
+            configVersion: savedVer,
+            channelUrl: savedUrl,
+            lastSyncedMsgId: Number(parsed?.lastSyncedMsgId) || 0,
+            autoWatchEnabled: Boolean(parsed?.autoWatchEnabled ?? true),
+            autoPublishVerified: Boolean(parsed?.autoPublishVerified ?? true),
+            notifyOnNewPublish: Boolean(parsed?.notifyOnNewPublish ?? true),
+          };
+        }
       }
     } catch {}
     return {
+      configVersion: AUTO_SYNC_CONFIG_VERSION,
       channelUrl: DEFAULT_CHANNEL_URL,
       lastSyncedMsgId: 0,
       autoWatchEnabled: true,
@@ -260,16 +378,20 @@ export default function TelegramAutoMovieSync({
 
   // Persist config locally and in Firestore
   const saveSyncConfig = async (next: SyncConfigState) => {
-    setConfig(next);
-    configRef.current = next;
+    const withVersion: SyncConfigState = {
+      ...next,
+      configVersion: AUTO_SYNC_CONFIG_VERSION,
+    };
+    setConfig(withVersion);
+    configRef.current = withVersion;
     try {
-      localStorage.setItem(LOCAL_SYNC_CONFIG_KEY, JSON.stringify(next));
+      localStorage.setItem(LOCAL_SYNC_CONFIG_KEY, JSON.stringify(withVersion));
     } catch {}
     try {
       await setDoc(
         doc(db, CONFIG_DOC_PATH[0], CONFIG_DOC_PATH[1]),
         {
-          ...next,
+          ...withVersion,
           updatedAtMs: Date.now(),
           updatedAt: serverTimestamp(),
         },
@@ -278,38 +400,55 @@ export default function TelegramAutoMovieSync({
     } catch {}
   };
 
-  // Load saved Firestore config on mount
+  // Load saved Firestore config on mount (and auto-migrate old default channel)
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const snap = await getDocFromServer(doc(db, CONFIG_DOC_PATH[0], CONFIG_DOC_PATH[1]));
-        if (!cancelled && snap.exists()) {
-          const data = snap.data() as any;
-          const merged: SyncConfigState = {
-            channelUrl: String(data?.channelUrl || configRef.current.channelUrl || ''),
-            lastSyncedMsgId: Math.max(
-              Number(data?.lastSyncedMsgId) || 0,
-              configRef.current.lastSyncedMsgId || 0
-            ),
-            autoWatchEnabled:
-              typeof data?.autoWatchEnabled === 'boolean'
-                ? data.autoWatchEnabled
-                : configRef.current.autoWatchEnabled,
-            autoPublishVerified:
-              typeof data?.autoPublishVerified === 'boolean'
-                ? data.autoPublishVerified
-                : configRef.current.autoPublishVerified,
-            notifyOnNewPublish:
-              typeof data?.notifyOnNewPublish === 'boolean'
-                ? data.notifyOnNewPublish
-                : configRef.current.notifyOnNewPublish,
-          };
-          setConfig(merged);
-          configRef.current = merged;
-          try {
-            localStorage.setItem(LOCAL_SYNC_CONFIG_KEY, JSON.stringify(merged));
-          } catch {}
+        if (!cancelled) {
+          const data = snap.exists() ? (snap.data() as any) : {};
+          const rawUrl = String(data?.channelUrl || '').trim();
+          const rawVer = Number(data?.configVersion) || 1;
+          const isOldDefault = rawUrl.includes('QSL_3k54YfBjMjE1');
+
+          if (!snap.exists() || rawVer < AUTO_SYNC_CONFIG_VERSION || isOldDefault || !rawUrl) {
+            const migrated: SyncConfigState = {
+              configVersion: AUTO_SYNC_CONFIG_VERSION,
+              channelUrl: DEFAULT_CHANNEL_URL,
+              lastSyncedMsgId: 0,
+              autoWatchEnabled: true,
+              autoPublishVerified: true,
+              notifyOnNewPublish: true,
+            };
+            await saveSyncConfig(migrated);
+          } else {
+            const merged: SyncConfigState = {
+              configVersion: rawVer,
+              channelUrl: rawUrl,
+              lastSyncedMsgId: Math.max(
+                Number(data?.lastSyncedMsgId) || 0,
+                configRef.current.lastSyncedMsgId || 0
+              ),
+              autoWatchEnabled:
+                typeof data?.autoWatchEnabled === 'boolean'
+                  ? data.autoWatchEnabled
+                  : configRef.current.autoWatchEnabled,
+              autoPublishVerified:
+                typeof data?.autoPublishVerified === 'boolean'
+                  ? data.autoPublishVerified
+                  : configRef.current.autoPublishVerified,
+              notifyOnNewPublish:
+                typeof data?.notifyOnNewPublish === 'boolean'
+                  ? data.notifyOnNewPublish
+                  : configRef.current.notifyOnNewPublish,
+            };
+            setConfig(merged);
+            configRef.current = merged;
+            try {
+              localStorage.setItem(LOCAL_SYNC_CONFIG_KEY, JSON.stringify(merged));
+            } catch {}
+          }
         }
       } catch {}
 
@@ -318,12 +457,16 @@ export default function TelegramAutoMovieSync({
         const pendJson = await pendResp.json();
         if (!cancelled && Array.isArray(pendJson?.drafts) && pendJson.drafts.length > 0) {
           const { urls, imdbIds, isTitleDuplicate } = collectExistingUrlsAndImdb(existingMoviesRef.current);
-          const fresh = (pendJson.drafts as AutoMovieDraft[]).filter(
-            (d) =>
+          const fresh = (pendJson.drafts as AutoMovieDraft[]).filter((d) => {
+            if (d.streamUrl && urls.has(d.streamUrl.trim().toLowerCase())) return false;
+            const isSeriesItem =
+              d.isSeriesEpisode || String(d.originalCategory || '').toLowerCase().includes('series');
+            if (isSeriesItem) return true;
+            return (
               (!d.imdbId || !imdbIds.has(d.imdbId.trim().toLowerCase())) &&
-              (!d.streamUrl || !urls.has(d.streamUrl.trim().toLowerCase())) &&
               !isTitleDuplicate([d.title, d.originalTitle, d.parsedTitle], d.releaseYear, d.originalCategory)
-          );
+            );
+          });
           if (fresh.length > 0) {
             setDrafts((prev) => {
               const seen = new Set(prev.map((p) => p.draftId));
@@ -338,7 +481,7 @@ export default function TelegramAutoMovieSync({
     };
   }, []);
 
-  // Helper: publish a single draft to Firestore `movies`
+  // Helper: publish a single movie OR series/episode draft to Firestore `movies`
   const publishSingleDraftToFirestore = async (
     draft: AutoMovieDraft,
     sendNotification: boolean
@@ -348,28 +491,23 @@ export default function TelegramAutoMovieSync({
       return { published: false };
     }
 
-    const { urls, imdbIds, isTitleDuplicate } = collectExistingUrlsAndImdb(existingMoviesRef.current);
-    if (draft.imdbId && imdbIds.has(draft.imdbId.trim().toLowerCase())) {
-      return { published: false, skippedDuplicate: true };
-    }
+    const { urls, findExistingMatch } = collectExistingUrlsAndImdb(existingMoviesRef.current);
     if (draft.streamUrl && urls.has(draft.streamUrl.trim().toLowerCase())) {
       return { published: false, skippedDuplicate: true };
     }
-    if (
-      isTitleDuplicate(
-        [draft.title, draft.originalTitle, draft.parsedTitle],
-        draft.releaseYear,
-        draft.originalCategory
-      )
-    ) {
-      return { published: false, skippedDuplicate: true };
-    }
 
-    const catToSave = draft.originalCategory || 'Bollywood Movie';
+    const rawCat = draft.originalCategory || 'Bollywood Movie';
+    const isSeries =
+      draft.isSeriesEpisode ||
+      rawCat.toLowerCase().includes('series') ||
+      Boolean(draft.seasonNumber || draft.episodeNumber);
+    const catToSave = isSeries
+      ? rawCat.toLowerCase().includes('anime')
+        ? 'Anime Series'
+        : 'Web Series'
+      : rawCat;
     const displayCat = getDisplayCategory(catToSave);
-    const isSeries = catToSave === 'Web Series' || catToSave === 'Anime Series';
-    const cleanBackdrop =
-      upgradePosterUrl(draft.backdropUrl || cleanPoster, 1280) || cleanPoster;
+    const cleanBackdrop = upgradePosterUrl(draft.backdropUrl || cleanPoster, 1280) || cleanPoster;
     const badge = normalizeQualityBadge(
       /cam|hdtc|predvd/i.test(draft.sourceFileName + ' ' + draft.sourceCaption)
         ? 'HDTC'
@@ -377,6 +515,227 @@ export default function TelegramAutoMovieSync({
         ? 'HD'
         : draft.qualityBadge
     );
+
+    const existingMatch = findExistingMatch(
+      draft.imdbId,
+      [draft.title, draft.originalTitle, draft.parsedTitle],
+      draft.releaseYear,
+      isSeries
+    );
+
+    const nowMs = Date.now();
+
+    if (isSeries) {
+      const seasonNum = Math.max(1, Number(draft.seasonNumber) || 1);
+      const fallbackEpNum = existingMatch
+        ? Math.max(
+            1,
+            ...(((Array.isArray(existingMatch.seasons)
+              ? existingMatch.seasons.find((s: any) => Number(s?.seasonNumber) === seasonNum)?.episodes
+              : []) || []
+            ).map((e: any) => Number(e?.episodeNumber) || 0)),
+            0
+          ) + 1
+        : 1;
+      const epNum = Math.max(1, Number(draft.episodeNumber) || fallbackEpNum);
+      const epTitle = draft.episodeTitle || `Episode ${epNum}`;
+      const epObj = {
+        episodeNumber: epNum,
+        ...(draft.episodeLabel ? { episodeLabel: draft.episodeLabel } : {}),
+        title: epTitle,
+        streamUrl: draft.streamUrl.trim(),
+        ...(draft.runtime ? { duration: draft.runtime } : {}),
+        ...(draft.durationSec > 0 ? { durationSec: draft.durationSec } : {}),
+        showInNewEpisodes: true,
+        newEpisodeEnabledAt: nowMs,
+        createdAt: nowMs,
+        addedAt: nowMs,
+      };
+
+      if (existingMatch && existingMatch.id) {
+        const { mergedSeasons, added } = mergeEpisodeIntoClientSeasons(
+          existingMatch.seasons || [],
+          seasonNum,
+          epObj
+        );
+        if (!added) {
+          return { published: false, skippedDuplicate: true };
+        }
+        const nextStream = existingMatch.streamingUrl || epObj.streamUrl;
+        await setDoc(
+          doc(db, 'movies', existingMatch.id),
+          {
+            seasons: mergedSeasons,
+            streamingUrl: nextStream,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+        const updatedMovie: MovieData = {
+          ...existingMatch,
+          seasons: mergedSeasons,
+          streamingUrl: nextStream,
+          updatedAt: nowMs,
+        };
+        existingMoviesRef.current = existingMoviesRef.current.map((m) =>
+          m.id === existingMatch.id ? updatedMovie : m
+        );
+        saveMovieLocally(updatedMovie);
+        touchCatalogSyncMarker();
+        onMoviePublished(updatedMovie);
+        broadcastMoviesUpdated(existingMatch.id, 'edit');
+        authFetch('/api/telegram/dismiss-review-draft', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ draftId: draft.draftId }),
+        }).catch(() => {});
+
+        if (sendNotification) {
+          await publishReleaseAnnouncement({
+            movieId: existingMatch.id,
+            title: existingMatch.title || draft.title,
+            releaseYear: existingMatch.releaseYear || draft.releaseYear,
+            originalCategory: existingMatch.originalCategory || catToSave,
+            isSeries: true,
+            language: existingMatch.language || draft.language,
+            genre: existingMatch.genre || draft.genre,
+            qualityBadge: badge !== 'NONE' ? badge : '',
+            runtime: draft.runtime,
+            posterUrl: existingMatch.posterUrl || cleanPoster,
+            backdropUrl: existingMatch.backdropUrl || cleanBackdrop,
+            customMessage: `Season ${seasonNum} Episode ${draft.episodeLabel || epNum} Now Streaming!`,
+          }).catch(() => {});
+        }
+        return { published: true };
+      }
+
+      const initialSeasons = [{ seasonNumber: seasonNum, episodes: [epObj] }];
+      const seriesPayload: any = {
+        title: draft.title.trim(),
+        originalTitle: (draft.originalTitle || draft.title).trim(),
+        description: draft.description.trim(),
+        posterUrl: cleanPoster,
+        backdropUrl: cleanBackdrop,
+        releaseYear: Number(draft.releaseYear) || new Date().getFullYear(),
+        originalCategory: catToSave,
+        displayCategory: displayCat,
+        contentType: catToSave.toLowerCase().includes('anime') ? 'anime' : null,
+        language: (draft.language || 'Hindi').trim(),
+        genre: (draft.genre || 'Drama').trim(),
+        director: (draft.director || '').trim(),
+        cast: (draft.cast || '').trim(),
+        runtime: (draft.runtime || '').trim(),
+        rating: Number(draft.rating) || 8.0,
+        imdbId: (draft.imdbId || '').trim(),
+        trailerUrl: '',
+        streamingUrl: epObj.streamUrl,
+        videoQualities: {},
+        seasons: initialSeasons,
+        featured: true,
+        published: true,
+        qualityBadge: badge,
+        duration: draft.durationSec || parseDurationToSeconds(draft.runtime) || 0,
+        telegramMsgId: draft.msgId,
+        telegramChannelId: draft.channelId,
+        updatedAt: serverTimestamp(),
+        createdAt: serverTimestamp(),
+      };
+
+      const seriesDocId =
+        draft.channelId && draft.msgId ? `tg_series_${draft.channelId}_${draft.msgId}` : '';
+      let publishedDocId = seriesDocId;
+      if (seriesDocId) {
+        await setDoc(doc(db, 'movies', seriesDocId), seriesPayload, { merge: true });
+      } else {
+        const docRef = await addDoc(collection(db, 'movies'), seriesPayload);
+        publishedDocId = docRef.id;
+      }
+
+      const localSeries: MovieData = {
+        ...seriesPayload,
+        id: publishedDocId,
+        createdAt: nowMs,
+        updatedAt: nowMs,
+      };
+      existingMoviesRef.current = [localSeries, ...existingMoviesRef.current];
+      saveMovieLocally(localSeries);
+      touchCatalogSyncMarker();
+      onMoviePublished(localSeries);
+      broadcastMoviesUpdated(publishedDocId, 'add');
+      authFetch('/api/telegram/dismiss-review-draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ draftId: draft.draftId }),
+      }).catch(() => {});
+
+      if (sendNotification) {
+        await publishReleaseAnnouncement({
+          movieId: publishedDocId,
+          title: seriesPayload.title,
+          releaseYear: seriesPayload.releaseYear,
+          originalCategory: seriesPayload.originalCategory,
+          isSeries: true,
+          language: seriesPayload.language,
+          genre: seriesPayload.genre,
+          qualityBadge: badge !== 'NONE' ? badge : '',
+          runtime: seriesPayload.runtime,
+          posterUrl: seriesPayload.posterUrl,
+          backdropUrl: seriesPayload.backdropUrl,
+        }).catch(() => {});
+      }
+
+      return { published: true };
+    }
+
+    // Single Movie: merge newly uploaded quality tiers if already in Firestore
+    if (existingMatch && existingMatch.id) {
+      const mergedQualities: Record<string, string> = {
+        ...((existingMatch as any).videoQualities || {}),
+      };
+      let qualityAdded = false;
+      for (const [qk, qUrl] of Object.entries(draft.videoQualities || {})) {
+        if (qUrl && !mergedQualities[qk]) {
+          mergedQualities[qk] = qUrl;
+          qualityAdded = true;
+        }
+      }
+      if (!qualityAdded) {
+        return { published: false, skippedDuplicate: true };
+      }
+      const upgradedStream =
+        mergedQualities['1080p'] ||
+        mergedQualities['4K'] ||
+        existingMatch.streamingUrl ||
+        draft.streamUrl.trim();
+      await setDoc(
+        doc(db, 'movies', existingMatch.id),
+        {
+          videoQualities: mergedQualities,
+          streamingUrl: upgradedStream,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+      const updatedMovie = {
+        ...existingMatch,
+        videoQualities: mergedQualities,
+        streamingUrl: upgradedStream,
+        updatedAt: nowMs,
+      } as MovieData;
+      existingMoviesRef.current = existingMoviesRef.current.map((m) =>
+        m.id === existingMatch.id ? updatedMovie : m
+      );
+      saveMovieLocally(updatedMovie);
+      touchCatalogSyncMarker();
+      onMoviePublished(updatedMovie);
+      broadcastMoviesUpdated(existingMatch.id, 'edit');
+      authFetch('/api/telegram/dismiss-review-draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ draftId: draft.draftId }),
+      }).catch(() => {});
+      return { published: true };
+    }
 
     const moviePayload: any = {
       title: draft.title.trim(),
@@ -418,7 +777,6 @@ export default function TelegramAutoMovieSync({
       const docRef = await addDoc(collection(db, 'movies'), moviePayload);
       publishedDocId = docRef.id;
     }
-    const nowMs = Date.now();
     const localMovie: MovieData = {
       ...moviePayload,
       id: publishedDocId,
@@ -426,6 +784,7 @@ export default function TelegramAutoMovieSync({
       updatedAt: nowMs,
     };
 
+    existingMoviesRef.current = [localMovie, ...existingMoviesRef.current];
     saveMovieLocally(localMovie);
     touchCatalogSyncMarker();
     onMoviePublished(localMovie);
@@ -442,7 +801,7 @@ export default function TelegramAutoMovieSync({
         title: moviePayload.title,
         releaseYear: moviePayload.releaseYear,
         originalCategory: moviePayload.originalCategory,
-        isSeries,
+        isSeries: false,
         language: moviePayload.language,
         genre: moviePayload.genre,
         qualityBadge: badge !== 'NONE' ? badge : '',
@@ -516,7 +875,11 @@ export default function TelegramAutoMovieSync({
           configRef.current.notifyOnNewPublish && incoming.length <= 3;
 
         for (const item of incoming) {
-          if (item.matchConfidence === 'high' && item.posterUrl && !item.isSeriesEpisode) {
+          const isConfidentMatch =
+            Boolean(item.posterUrl) &&
+            (item.matchConfidence === 'high' ||
+              (item.matchConfidence === 'medium' && item.confidenceScore >= 55 && Boolean(item.imdbId)));
+          if (isConfidentMatch) {
             try {
               const res = await publishSingleDraftToFirestore(item, shouldNotify);
               if (res.published) {
@@ -556,17 +919,17 @@ export default function TelegramAutoMovieSync({
         await onBatchComplete();
         showNotification(
           'success',
-          `🎉 ${autoPublishedCount} nayi movie IMDb poster & details ke sath automatically Publish ho gayi!${
+          `🎉 ${autoPublishedCount} nayi movie/series IMDb poster & details ke sath automatically Publish ho gayi!${
             reviewQueue.length > 0 ? ` (${reviewQueue.length} check ke liye queue me hain)` : ''
           }`
         );
       } else if (reviewQueue.length > 0) {
         showNotification(
           'success',
-          `📥 ${reviewQueue.length} nayi movie mili — poster check karke 1 click me Publish karein!`
+          `📥 ${reviewQueue.length} nayi movie/series mili — poster check karke 1 click me Publish karein!`
         );
       } else if (!silentAuto) {
-        showNotification('success', `Channel "${data.channelTitle || 'Connected'}" up-to-date hai — koi nayi pending movie nahi mili.`);
+        showNotification('success', `Channel "${data.channelTitle || 'Connected'}" up-to-date hai — koi nayi pending upload nahi mili.`);
       }
 
       setLastScanStats(
@@ -685,12 +1048,11 @@ export default function TelegramAutoMovieSync({
 
         const queueAdd: AutoMovieDraft[] = [];
         for (const item of chunkItems) {
-          if (
-            configRef.current.autoPublishVerified &&
-            item.matchConfidence === 'high' &&
-            item.posterUrl &&
-            !item.isSeriesEpisode
-          ) {
+          const isConfidentMatch =
+            Boolean(item.posterUrl) &&
+            (item.matchConfidence === 'high' ||
+              (item.matchConfidence === 'medium' && item.confidenceScore >= 55 && Boolean(item.imdbId)));
+          if (configRef.current.autoPublishVerified && isConfidentMatch) {
             try {
               const res = await publishSingleDraftToFirestore(item, false);
               if (res.published) {
@@ -900,7 +1262,7 @@ export default function TelegramAutoMovieSync({
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h2 className="text-sm sm:text-base font-black text-white tracking-tight">
-                Telegram Channel → Auto IMDb & Auto-Publish Movies
+                Telegram Channel → Auto IMDb & Auto-Publish Movies & Series
               </h2>
               {config.autoWatchEnabled && config.channelUrl && (
                 <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded bg-emerald-950/90 text-emerald-400 border border-emerald-700/60">
@@ -914,7 +1276,7 @@ export default function TelegramAutoMovieSync({
               )}
             </div>
             <p className="text-[11px] text-gray-400 mt-0.5">
-              Channel me movie upload karein — app automatically sahi IMDb poster, rating, cast, plot & category fill karke publish karega.
+              Channel me movie ya web/anime series upload karein — app automatically sahi IMDb poster, rating, cast, plot, episodes & category fill karke publish karega.
             </p>
           </div>
         </div>
@@ -999,7 +1361,7 @@ export default function TelegramAutoMovieSync({
                         type="text"
                         value={config.channelUrl}
                         onChange={(e) => setConfig((p) => ({ ...p, channelUrl: e.target.value }))}
-                        placeholder="https://t.me/+QSL_3k54YfBjMjE1"
+                        placeholder="https://t.me/+s2Qki5-sfnVjZTI1"
                         className="flex-grow bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-yellow-400"
                       />
                       <button
@@ -1049,7 +1411,7 @@ export default function TelegramAutoMovieSync({
                       className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-black text-xs px-4 py-2.5 rounded-lg flex items-center gap-2 cursor-pointer transition-all"
                     >
                       {scanning ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                      <span>Check & Auto-Fill New Movies Now</span>
+                      <span>Check & Auto-Fill New Uploads Now</span>
                     </button>
                     <span className="text-[11px] text-gray-400">
                       Bot (<code className="text-yellow-400">@Movies_Direct_Group_Bot</code>) ko channel me Admin rakhein.
@@ -1079,7 +1441,7 @@ export default function TelegramAutoMovieSync({
                         type="text"
                         value={rangeEndUrl}
                         onChange={(e) => setRangeEndUrl(e.target.value)}
-                        placeholder={config.channelUrl || 'https://t.me/+QSL_3k54YfBjMjE1'}
+                        placeholder={config.channelUrl || 'https://t.me/+s2Qki5-sfnVjZTI1'}
                         className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-yellow-400"
                       />
                     </div>
@@ -1128,7 +1490,7 @@ export default function TelegramAutoMovieSync({
                   className="mt-0.5 accent-emerald-400 w-4 h-4 rounded"
                 />
                 <span className="text-xs text-gray-200 leading-snug">
-                  <strong className="text-white">Auto-Publish Verified Matches:</strong> Sahi IMDb poster & year confirm hone par seedha app me upload ho jayegi; doubtful matches Review me rukenge.
+                  <strong className="text-white">Auto-Publish Verified Matches:</strong> Sahi IMDb poster & year confirm hone par movies aur series episodes seedha app me publish ho jayenge; doubtful matches Review me rukenge.
                 </span>
               </label>
 
@@ -1142,7 +1504,7 @@ export default function TelegramAutoMovieSync({
                   className="mt-0.5 accent-yellow-400 w-4 h-4 rounded"
                 />
                 <span className="text-xs text-gray-200 leading-snug">
-                  <strong className="text-white">Background Auto-Check:</strong> Admin Panel khulte hi nayi Telegram movies apne aap check karein.
+                  <strong className="text-white">24/7 Background Auto-Sync:</strong> Channel me movie/series upload hote hi background server aur Admin Panel apne aap auto-publish karenge.
                 </span>
               </label>
 
@@ -1161,7 +1523,7 @@ export default function TelegramAutoMovieSync({
               </label>
 
               <p className="text-[10px] text-gray-400 bg-neutral-900 border border-neutral-800 rounded-lg p-2">
-                Tip: Telegram file/caption me movie ka naam + year (e.g. <span className="text-yellow-400 font-mono">Pushpa 2 (2024)</span>) ya IMDb link daalne se 100% exact poster match hota hai.
+                Tip: Movie ke liye <span className="text-yellow-400 font-mono">Pushpa 2 (2024) 1080p</span> ya Series ke liye <span className="text-yellow-400 font-mono">Stranger Things S01E01 1080p</span> (ya IMDb link) daalne se 100% exact IMDb auto-fill hota hai.
               </p>
             </div>
           </div>
@@ -1366,9 +1728,9 @@ export default function TelegramAutoMovieSync({
                           </div>
 
                           <div className="flex flex-wrap gap-1">
-                            {draft.isSeriesEpisode && (
+                            {(draft.isSeriesEpisode || draft.originalCategory.toLowerCase().includes('series')) && (
                               <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-purple-950/90 text-purple-300 border border-purple-700/60">
-                                Series Ep
+                                {`S${String(draft.seasonNumber || 1).padStart(2, '0')} • E${draft.episodeLabel || String(draft.episodeNumber || 1).padStart(2, '0')}`}
                               </span>
                             )}
                             {qualityTags.length > 0 ? (

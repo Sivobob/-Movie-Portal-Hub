@@ -2115,6 +2115,7 @@ function pipeFfmpegMp4Stream(opts: {
   commonHeaders: Record<string, string>;
   req: Request;
   res: Response;
+  videoStreamIndex?: number;
 }) {
   const {
     inputUrl,
@@ -2128,6 +2129,7 @@ function pipeFfmpegMp4Stream(opts: {
     commonHeaders,
     req,
     res,
+    videoStreamIndex,
   } = opts;
 
   if (activeFfmpegProcs.size >= MAX_CONCURRENT_FFMPEG) {
@@ -2158,7 +2160,7 @@ function pipeFfmpegMp4Stream(opts: {
     '-sn',
     '-dn',
     '-map_chapters', '-1',
-    '-map', '0:V:0',
+    '-map', `0:v:${opts.videoStreamIndex ?? 0}`,
     '-map', `0:a:${audioIdx}?`
   );
 
@@ -2449,6 +2451,7 @@ export async function handleStream(req: Request, res: Response) {
           commonHeaders,
           req,
           res,
+          videoStreamIndex: probe.videoStreamIndex ?? 0,
         });
       }
     }
@@ -2525,7 +2528,12 @@ export async function handleStream(req: Request, res: Response) {
       endPos,
       concurrency,
       () => isClosed,
-      () => mediaCache.delete(cacheKey)
+      () => mediaCache.delete(cacheKey),
+      async () => {
+        mediaCache.delete(cacheKey);
+        const refreshed = await resolveAndCacheDocument(client, parsed);
+        return refreshed.entry?.docInfo.document || null;
+      }
     );
   } catch (err: any) {
     console.error('[Stream] Global streaming error:', err.message);
@@ -2548,6 +2556,9 @@ interface HlsWorkerJob {
   dir: string;
   startSeg: number;
   highestSeg: number;
+  lastServedSeg: number;
+  pausedForBackpressure: boolean;
+  backpressureTimer: ReturnType<typeof setInterval> | null;
   proc: ChildProcess | null;
   closed: boolean;
   superseded: boolean;
@@ -2558,6 +2569,30 @@ interface HlsWorkerJob {
 
 const hlsJobs = new Map<string, HlsWorkerJob>();
 let nextHlsJobSeq = 1;
+
+function resumeHlsWorkerIfPaused(job: HlsWorkerJob) {
+  if (job.pausedForBackpressure && job.proc && !job.closed) {
+    try {
+      job.proc.kill('SIGCONT');
+      job.pausedForBackpressure = false;
+    } catch {}
+  }
+}
+
+function getHighestProducedHlsSeg(dir: string, fallbackSeg: number): number {
+  let maxSeg = fallbackSeg;
+  try {
+    const files = fs.readdirSync(dir);
+    for (const f of files) {
+      const m = f.match(/^seg_(\d+)\.ts$/);
+      if (m) {
+        const idx = parseInt(m[1], 10);
+        if (idx > maxSeg) maxSeg = idx;
+      }
+    }
+  } catch {}
+  return maxSeg;
+}
 
 function scheduleRemoveHlsDir(job: HlsWorkerJob, delayMs = 8000) {
   const tryRemove = () => {
@@ -2580,16 +2615,25 @@ function cleanupHlsJob(sid: string, removeDir = true, markSuperseded = false) {
   const job = hlsJobs.get(sid);
   if (!job) return;
   hlsJobs.delete(sid);
+  if (job.backpressureTimer) {
+    clearInterval(job.backpressureTimer);
+    job.backpressureTimer = null;
+  }
   if (markSuperseded) {
     job.superseded = true;
   }
   if (job.proc && !job.closed) {
     try {
+      // Resume stopped FFmpeg first so SIGTERM/SIGKILL delivers cleanly on Linux
+      resumeHlsWorkerIfPaused(job);
       job.proc.kill('SIGTERM');
       const procRef = job.proc;
       setTimeout(() => {
         try {
-          if (!procRef.killed) procRef.kill('SIGKILL');
+          if (!procRef.killed) {
+            try { procRef.kill('SIGCONT'); } catch {}
+            procRef.kill('SIGKILL');
+          }
         } catch {}
       }, 400).unref?.();
     } catch {}
@@ -2678,6 +2722,7 @@ function startHlsWorker(opts: {
   canCopyAudio: boolean;
   requestedQuality: VideoQualityTier | '';
   audioIdx: number;
+  videoStreamIndex?: number;
 }): HlsWorkerJob {
   cleanupHlsJob(opts.sid, true, true);
 
@@ -2720,7 +2765,7 @@ function startHlsWorker(opts: {
     '-i', opts.inputUrl,
     '-sn', '-dn',
     '-map_chapters', '-1',
-    '-map', '0:V:0',
+    '-map', `0:v:${opts.videoStreamIndex ?? 0}`,
     '-map', `0:a:${opts.audioIdx}?`,
     '-max_muxing_queue_size', '4096'
   );
@@ -2766,6 +2811,9 @@ function startHlsWorker(opts: {
     dir,
     startSeg: opts.startSeg,
     highestSeg: opts.startSeg - 1,
+    lastServedSeg: opts.startSeg,
+    pausedForBackpressure: false,
+    backpressureTimer: null,
     proc,
     closed: false,
     superseded: false,
@@ -2774,6 +2822,25 @@ function startHlsWorker(opts: {
     lastErrLine: '',
   };
 
+  // Backpressure controller: prevent fast FFmpeg transcode from exhausting /tmp tmpfs on long movies
+  job.backpressureTimer = setInterval(() => {
+    if (job.closed || !job.proc) return;
+    const highestProduced = getHighestProducedHlsSeg(job.dir, job.highestSeg);
+    if (highestProduced > job.highestSeg) {
+      job.highestSeg = highestProduced;
+    }
+    const leadSegs = highestProduced - job.lastServedSeg;
+    if (!job.pausedForBackpressure && leadSegs > 45) {
+      try {
+        job.proc.kill('SIGSTOP');
+        job.pausedForBackpressure = true;
+      } catch {}
+    } else if (job.pausedForBackpressure && leadSegs <= 22) {
+      resumeHlsWorkerIfPaused(job);
+    }
+  }, 1500);
+  job.backpressureTimer.unref?.();
+
   proc.stderr?.on('data', (d: Buffer) => {
     const s = d.toString().trim();
     if (s) job.lastErrLine = s.slice(-240);
@@ -2781,6 +2848,11 @@ function startHlsWorker(opts: {
   proc.on('close', (code) => {
     job.closed = true;
     job.proc = null;
+    job.pausedForBackpressure = false;
+    if (job.backpressureTimer) {
+      clearInterval(job.backpressureTimer);
+      job.backpressureTimer = null;
+    }
     if (!job.superseded && code && code !== 0 && job.lastErrLine) {
       console.warn(`[HLS Worker ${opts.sid}] FFmpeg exited (${code}): ${job.lastErrLine}`);
     }
@@ -2788,6 +2860,11 @@ function startHlsWorker(opts: {
   proc.on('error', (err) => {
     job.closed = true;
     job.proc = null;
+    job.pausedForBackpressure = false;
+    if (job.backpressureTimer) {
+      clearInterval(job.backpressureTimer);
+      job.backpressureTimer = null;
+    }
     job.lastErrLine = err?.message || 'spawn error';
   });
 
@@ -2806,6 +2883,7 @@ async function resolveHlsSourceParams(req: Request) {
   let durationSec = Math.max(0, Number(req.query.dur || 0) || 0);
   let remuxOnly = modeParam !== 'transcode' && !requestedQuality;
   let canCopyAudio = false;
+  let videoStreamIndex = 0;
 
   if (isTelegram) {
     const parsed = parseTelegramUrl(urlParam);
@@ -2843,6 +2921,7 @@ async function resolveHlsSourceParams(req: Request) {
     const audioStart = selectedTrack?.startTime || 0;
     const hasStreamOffset = Math.abs(audioStart - videoStart) > 0.04;
     canCopyAudio = ac === 'aac' && ch <= 2 && audioIdx === 0 && !hasStreamOffset;
+    videoStreamIndex = probe.videoStreamIndex ?? 0;
   } else {
     if (durationSec <= 0) {
       const info = await probeDirectHttpInfo(urlParam).catch(() => null);
@@ -2851,7 +2930,7 @@ async function resolveHlsSourceParams(req: Request) {
     remuxOnly = modeParam !== 'transcode' && !requestedQuality;
   }
 
-  return { urlParam, modeParam, requestedQuality, audioIdx, inputUrl, durationSec, remuxOnly, canCopyAudio };
+  return { urlParam, modeParam, requestedQuality, audioIdx, inputUrl, durationSec, remuxOnly, canCopyAudio, videoStreamIndex };
 }
 
 async function handleHlsPlaylistRequest(req: Request, res: Response) {
@@ -2885,6 +2964,7 @@ async function handleHlsPlaylistRequest(req: Request, res: Response) {
         canCopyAudio: resolved.canCopyAudio,
         requestedQuality: resolved.requestedQuality,
         audioIdx: resolved.audioIdx,
+        videoStreamIndex: resolved.videoStreamIndex,
       });
     } else {
       existingJob.lastAccessedAt = Date.now();
@@ -2972,6 +3052,7 @@ async function handleHlsSegmentRequest(req: Request, res: Response) {
           canCopyAudio: forceSafeTranscode ? false : resolved.canCopyAudio,
           requestedQuality: resolved.requestedQuality,
           audioIdx: resolved.audioIdx,
+          videoStreamIndex: resolved.videoStreamIndex,
         });
       }
 
@@ -2979,14 +3060,19 @@ async function handleHlsSegmentRequest(req: Request, res: Response) {
         return res.status(503).send('HLS job unavailable');
       }
       job.lastAccessedAt = Date.now();
+      if (segIdx > job.lastServedSeg) {
+        job.lastServedSeg = segIdx;
+      }
       if (segIdx > job.highestSeg) {
         job.highestSeg = segIdx;
       }
+      resumeHlsWorkerIfPaused(job);
 
       const waitStart = Date.now();
       targetFile = getHlsSegmentPath(job.dir, segIdx);
       while (!clientDisconnected && !segmentReadyOnDisk(targetFile)) {
         job.lastAccessedAt = Date.now();
+        resumeHlsWorkerIfPaused(job);
         if (job.closed) {
           const latestJob = hlsJobs.get(sid);
           if (latestJob && latestJob.jobId !== job.jobId && latestJob.startSeg <= segIdx) {
@@ -3247,8 +3333,8 @@ async function ensureChannelUploadWatcher(client: any): Promise<void> {
           `[TelegramAutoWatcher] New channel video detected: "${classified.fileName || msg.id}" (${streamUrl})`
         );
 
-        // Trigger debounced server-side auto-IMDb & auto-publish pass (12s window groups multi-quality uploads)
-        scheduleServerAutoSync(`new_video_${cleanChannelId}_${msg.id}`, 12000);
+        // Trigger debounced server-side auto-IMDb & auto-publish pass (8s window groups multi-quality uploads)
+        scheduleServerAutoSync(`new_video_${cleanChannelId}_${msg.id}`, 8000);
       } catch (watchErr: any) {
         console.warn('[TelegramAutoWatcher] Handler warning:', watchErr?.message || watchErr);
       }
@@ -3372,23 +3458,44 @@ async function resolveChannelPeerFromLinkOrId(
     channelTitle = `@${u}`;
   }
 
-  // Handle Private Invite Links (e.g. https://t.me/+QSL_3k54YfBjMjE1) accurately
+  // Handle Private Invite Links (e.g. https://t.me/+s2Qki5-sfnVjZTI1) accurately
   if (parsed.isInviteLink && parsed.inviteHash) {
     const hash = parsed.inviteHash;
-    // 1. Try CheckChatInvite (succeeds on user sessions)
-    try {
-      const checkRes: any = await client.invoke(new Api.messages.CheckChatInvite({ hash }));
-      const chat = checkRes?.chat || checkRes?.channel;
-      if (chat && chat.id) {
-        cleanChannelId = chat.id.toString().replace(/^-100/, '');
-        channelTitle = chat.title || channelTitle;
-        if (chat.accessHash) {
-          saveChannelEntity(cleanChannelId, chat.accessHash.toString(), channelTitle, chat.username || '');
-        }
-      }
-    } catch {}
 
-    // 2. Bot API updates + getChat exact invite match
+    // 0. Check direct cached/known invite mappings FIRST (fast & never steals Bot API updates)
+    const directCached = getAllCachedChannels().find(
+      (c) =>
+        /^\d+$/.test(c.channelId) &&
+        c.accessHash &&
+        c.accessHash !== '0' &&
+        ((c.username || '').replace(/^\+/, '') === hash ||
+          (hash === 's2Qki5-sfnVjZTI1' && c.channelId === '4498557265') ||
+          (hash === 'QSL_3k54YfBjMjE1' && c.channelId === '3850537977'))
+    );
+    if (directCached) {
+      cleanChannelId = directCached.channelId;
+      channelTitle = directCached.title || channelTitle;
+      if (directCached.username && !directCached.username.startsWith('+')) {
+        publicUsername = directCached.username;
+      }
+    }
+
+    // 1. Try CheckChatInvite (succeeds on user sessions)
+    if (!cleanChannelId) {
+      try {
+        const checkRes: any = await client.invoke(new Api.messages.CheckChatInvite({ hash }));
+        const chat = checkRes?.chat || checkRes?.channel;
+        if (chat && chat.id) {
+          cleanChannelId = chat.id.toString().replace(/^-100/, '');
+          channelTitle = chat.title || channelTitle;
+          if (chat.accessHash) {
+            saveChannelEntity(cleanChannelId, chat.accessHash.toString(), channelTitle, `+${hash}`);
+          }
+        }
+      } catch {}
+    }
+
+    // 2. Bot API updates + getChat exact invite match (only for unknown invite links)
     if (!cleanChannelId) {
       try {
         const { botToken } = getTelegramCredentials();
@@ -3405,7 +3512,6 @@ async function resolveChannelPeerFromLinkOrId(
             }
           }
 
-          // Check primary invite link match across recent chats + cached numeric channels
           const cachedNumericIds = getAllCachedChannels()
             .filter((c) => /^\d+$/.test(c.channelId) && c.accessHash && c.accessHash !== '0')
             .map((c) => `-100${c.channelId}`);
@@ -3424,39 +3530,11 @@ async function resolveChannelPeerFromLinkOrId(
             } catch {}
           }
 
-          // Known primary movie database channel mapping or most recent non-anime channel from updates
-          if (!cleanChannelId) {
-            const movieCached = getAllCachedChannels().find(
-              (c) => c.channelId === '3850537977' && c.accessHash && c.accessHash !== '0'
-            );
-            if (hash === 'QSL_3k54YfBjMjE1' && movieCached) {
-              cleanChannelId = movieCached.channelId;
-              channelTitle = movieCached.title || 'app Databas';
-            } else if (recentChatIds.length > 0) {
-              cleanChannelId = recentChatIds[0].replace(/^-100/, '');
-            } else if (movieCached) {
-              cleanChannelId = movieCached.channelId;
-              channelTitle = movieCached.title || 'app Databas';
-            }
+          if (!cleanChannelId && recentChatIds.length > 0) {
+            cleanChannelId = recentChatIds[0].replace(/^-100/, '');
           }
         }
       } catch {}
-    }
-
-    // 3. Final fallback from cached numeric channels (preferring non-anime movie channel 3850537977)
-    if (!cleanChannelId) {
-      const cachedList = getAllCachedChannels().filter(
-        (c) => c.accessHash && c.accessHash !== '0' && /^\d+$/.test(c.channelId)
-      );
-      const preferred =
-        cachedList.find((c) => c.channelId === '3850537977') ||
-        cachedList.find((c) => !/naruto/i.test(c.title || '')) ||
-        cachedList[0];
-      if (preferred) {
-        cleanChannelId = preferred.channelId;
-        channelTitle = preferred.title || cleanChannelId;
-        publicUsername = preferred.username || '';
-      }
     }
   }
 
@@ -3780,9 +3858,7 @@ router.post('/scan-movies-channel', async (req: Request, res: Response) => {
     const groupIndexByKey = new Map<string, number>();
 
     for (const v of videoCandidates) {
-      const gKey = v.parsed.groupKey && !v.parsed.isSeriesEpisode
-        ? v.parsed.groupKey
-        : `msg-${v.msgId}`;
+      const gKey = v.parsed.groupKey || `msg-${v.msgId}`;
 
       const existingIdx = v.parsed.groupKey ? groupIndexByKey.get(gKey) : undefined;
       if (existingIdx !== undefined) {
@@ -3818,7 +3894,7 @@ router.post('/scan-movies-channel', async (req: Request, res: Response) => {
           videoQualities: vq,
           qualitySizes: qs,
         });
-        if (v.parsed.groupKey && !v.parsed.isSeriesEpisode) {
+        if (v.parsed.groupKey) {
           groupIndexByKey.set(gKey, newIdx);
         }
       }
@@ -3853,21 +3929,28 @@ router.post('/scan-movies-channel', async (req: Request, res: Response) => {
         };
 
         const matched = await resolveBestImdbMatch(mergedParsed);
-        if (matched.imdbId && existingImdbSet.has(matched.imdbId.toLowerCase())) {
-          skippedAlreadyAdded++;
-          return null;
-        }
-        if (
-          isDuplicateByTitleAndYear(
-            existingTitleList,
-            [matched.title, matched.originalTitle, mergedParsed.cleanTitle],
-            matched.releaseYear || mergedParsed.year || 0,
-            mergedParsed.isSeriesEpisode ||
-              String(matched.originalCategory || '').toLowerCase().includes('series')
-          )
-        ) {
-          skippedAlreadyAdded++;
-          return null;
+        const isSeriesItem =
+          mergedParsed.isSeriesEpisode ||
+          String(matched.originalCategory || '').toLowerCase().includes('series');
+
+        // For single movies (not series episodes), skip if already in Firestore by IMDb or title+year
+        // (Series episodes are NEVER skipped here because new episodes merge into the existing series!)
+        if (!isSeriesItem) {
+          if (matched.imdbId && existingImdbSet.has(matched.imdbId.toLowerCase())) {
+            skippedAlreadyAdded++;
+            return null;
+          }
+          if (
+            isDuplicateByTitleAndYear(
+              existingTitleList,
+              [matched.title, matched.originalTitle, mergedParsed.cleanTitle],
+              matched.releaseYear || mergedParsed.year || 0,
+              false
+            )
+          ) {
+            skippedAlreadyAdded++;
+            return null;
+          }
         }
 
         const bestDurSec = Math.max(0, ...grp.members.map((m) => m.durationSec || 0));
@@ -3906,6 +3989,10 @@ router.post('/scan-movies-channel', async (req: Request, res: Response) => {
           confidenceScore: matched.confidenceScore,
           matchReason: matched.matchReason,
           isSeriesEpisode: mergedParsed.isSeriesEpisode,
+          seasonNumber: mergedParsed.seasonNumber,
+          episodeNumber: mergedParsed.episodeNumber,
+          episodeLabel: mergedParsed.episodeLabel,
+          episodeTitle: mergedParsed.episodeTitle,
           alternateMatches: matched.alternateMatches,
         };
       },
@@ -4006,7 +4093,9 @@ function isDuplicateByTitleAndYear(
   return false;
 }
 
-const DEFAULT_AUTO_SYNC_CHANNEL_URL = 'https://t.me/+QSL_3k54YfBjMjE1';
+const DEFAULT_AUTO_SYNC_CHANNEL_URL = 'https://t.me/+s2Qki5-sfnVjZTI1';
+const DEFAULT_AUTO_SYNC_CHANNEL_ID = '4498557265';
+const AUTO_SYNC_CONFIG_VERSION = 2;
 const PENDING_DRAFTS_FILE = path.join(os.tmpdir(), '.movie_hub_tg_pending_drafts.json');
 let pendingServerDrafts: AutoMatchedMovieDraft[] = [];
 
@@ -4042,9 +4131,22 @@ router.post('/dismiss-review-draft', (req: Request, res: Response) => {
   return res.json({ success: true, remaining: pendingServerDrafts.length });
 });
 
+router.post('/trigger-auto-sync', async (_req: Request, res: Response) => {
+  try {
+    await runServerAutoSyncPass('manual_trigger');
+    return res.json({
+      success: true,
+      pendingDrafts: pendingServerDrafts.length,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || 'Auto-sync trigger failed.' });
+  }
+});
+
 let serverAutoSyncTimer: NodeJS.Timeout | null = null;
 let serverAutoSyncRunning = false;
 let cachedSyncConfig: {
+  configVersion: number;
   channelUrl: string;
   lastSyncedMsgId: number;
   autoWatchEnabled: boolean;
@@ -4053,7 +4155,7 @@ let cachedSyncConfig: {
   fetchedAt: number;
 } | null = null;
 
-function scheduleServerAutoSync(reason: string, delayMs = 12000) {
+function scheduleServerAutoSync(reason: string, delayMs = 8000) {
   if (serverAutoSyncTimer) clearTimeout(serverAutoSyncTimer);
   serverAutoSyncTimer = setTimeout(() => {
     serverAutoSyncTimer = null;
@@ -4064,23 +4166,54 @@ function scheduleServerAutoSync(reason: string, delayMs = 12000) {
 }
 
 async function getServerAutoSyncConfig(forceRefresh = false) {
-  if (!forceRefresh && cachedSyncConfig && Date.now() - cachedSyncConfig.fetchedAt < 90_000) {
+  if (!forceRefresh && cachedSyncConfig && Date.now() - cachedSyncConfig.fetchedAt < 60_000) {
     return cachedSyncConfig;
   }
   try {
-    const snap = await getDocFromServer(doc(db, 'app_config', 'telegram_auto_sync'));
+    const ref = doc(db, 'app_config', 'telegram_auto_sync');
+    const snap = await getDocFromServer(ref);
     const d = snap.exists() ? (snap.data() as any) : {};
-    cachedSyncConfig = {
-      channelUrl: String(d?.channelUrl || DEFAULT_AUTO_SYNC_CHANNEL_URL).trim(),
-      lastSyncedMsgId: Number(d?.lastSyncedMsgId) || 0,
-      autoWatchEnabled: typeof d?.autoWatchEnabled === 'boolean' ? d.autoWatchEnabled : true,
-      autoPublishVerified: typeof d?.autoPublishVerified === 'boolean' ? d.autoPublishVerified : true,
-      notifyOnNewPublish: typeof d?.notifyOnNewPublish === 'boolean' ? d.notifyOnNewPublish : true,
-      fetchedAt: Date.now(),
-    };
+    const rawUrl = String(d?.channelUrl || '').trim();
+    const rawVer = Number(d?.configVersion) || 1;
+    const isOldDefaultChannel = rawUrl.includes('QSL_3k54YfBjMjE1');
+
+    if (!snap.exists() || rawVer < AUTO_SYNC_CONFIG_VERSION || isOldDefaultChannel || !rawUrl) {
+      const migrated = {
+        configVersion: AUTO_SYNC_CONFIG_VERSION,
+        channelUrl: DEFAULT_AUTO_SYNC_CHANNEL_URL,
+        activeChannelId: DEFAULT_AUTO_SYNC_CHANNEL_ID,
+        lastSyncedMsgId: 0,
+        autoWatchEnabled: true,
+        autoPublishVerified: true,
+        notifyOnNewPublish: true,
+        updatedAtMs: Date.now(),
+        updatedAt: serverTimestamp(),
+      };
+      await setDoc(ref, migrated, { merge: true }).catch(() => {});
+      cachedSyncConfig = {
+        configVersion: AUTO_SYNC_CONFIG_VERSION,
+        channelUrl: DEFAULT_AUTO_SYNC_CHANNEL_URL,
+        lastSyncedMsgId: 0,
+        autoWatchEnabled: true,
+        autoPublishVerified: true,
+        notifyOnNewPublish: true,
+        fetchedAt: Date.now(),
+      };
+    } else {
+      cachedSyncConfig = {
+        configVersion: rawVer,
+        channelUrl: rawUrl,
+        lastSyncedMsgId: Number(d?.lastSyncedMsgId) || 0,
+        autoWatchEnabled: typeof d?.autoWatchEnabled === 'boolean' ? d.autoWatchEnabled : true,
+        autoPublishVerified: typeof d?.autoPublishVerified === 'boolean' ? d.autoPublishVerified : true,
+        notifyOnNewPublish: typeof d?.notifyOnNewPublish === 'boolean' ? d.notifyOnNewPublish : true,
+        fetchedAt: Date.now(),
+      };
+    }
   } catch {
     if (!cachedSyncConfig) {
       cachedSyncConfig = {
+        configVersion: AUTO_SYNC_CONFIG_VERSION,
         channelUrl: DEFAULT_AUTO_SYNC_CHANNEL_URL,
         lastSyncedMsgId: 0,
         autoWatchEnabled: true,
@@ -4093,12 +4226,112 @@ async function getServerAutoSyncConfig(forceRefresh = false) {
   return cachedSyncConfig;
 }
 
+interface ExistingMovieRecord {
+  id: string;
+  imdbId: string;
+  title: string;
+  originalTitle: string;
+  releaseYear: number;
+  originalCategory: string;
+  isSeries: boolean;
+  streamingUrl: string;
+  videoQualities: Record<string, string>;
+  seasons: Array<{ seasonNumber: number; episodes: any[] }>;
+}
+
+function findMatchingExistingRecord(
+  records: ExistingMovieRecord[],
+  imdbId: string,
+  titles: Array<string | undefined>,
+  year: number,
+  isSeries: boolean
+): ExistingMovieRecord | null {
+  const cleanImdb = String(imdbId || '').trim().toLowerCase();
+  if (cleanImdb) {
+    const byImdb = records.find((r) => r.imdbId && r.imdbId.toLowerCase() === cleanImdb);
+    if (byImdb) return byImdb;
+  }
+
+  const candKeys = titles.map((t) => normalizeDupTitleKey(t || '')).filter((k) => k.length >= 2);
+  for (const r of records) {
+    const rKeys = [normalizeDupTitleKey(r.title), normalizeDupTitleKey(r.originalTitle)].filter((k) => k.length >= 2);
+    for (const ck of candKeys) {
+      for (const rk of rKeys) {
+        if (ck !== rk) continue;
+        if (isSeries || r.isSeries) return r;
+        if (!year || !r.releaseYear || Math.abs(year - r.releaseYear) <= 1) return r;
+      }
+    }
+  }
+  return null;
+}
+
+function mergeEpisodeIntoSeasons(
+  existingSeasons: Array<{ seasonNumber: number; episodes: any[] }>,
+  seasonNum: number,
+  newEpisode: {
+    episodeNumber: number;
+    episodeLabel?: string;
+    title: string;
+    streamUrl: string;
+    duration?: string;
+    durationSec?: number;
+    showInNewEpisodes: boolean;
+    newEpisodeEnabledAt: number;
+    createdAt: number;
+    addedAt: number;
+  }
+): { mergedSeasons: Array<{ seasonNumber: number; episodes: any[] }>; added: boolean } {
+  const cloned = Array.isArray(existingSeasons)
+    ? existingSeasons.map((s) => ({
+        seasonNumber: Number(s?.seasonNumber) || 1,
+        episodes: Array.isArray(s?.episodes) ? [...s.episodes] : [],
+      }))
+    : [];
+
+  let targetSeason = cloned.find((s) => s.seasonNumber === seasonNum);
+  if (!targetSeason) {
+    targetSeason = { seasonNumber: seasonNum, episodes: [] };
+    cloned.push(targetSeason);
+  }
+
+  const cleanStream = newEpisode.streamUrl.trim().toLowerCase();
+  const alreadyByUrl = targetSeason.episodes.some(
+    (ep) => String(ep?.streamUrl || '').trim().toLowerCase() === cleanStream
+  );
+  if (alreadyByUrl) {
+    return { mergedSeasons: cloned, added: false };
+  }
+
+  const sameEpIdx = targetSeason.episodes.findIndex(
+    (ep) => Number(ep?.episodeNumber) === newEpisode.episodeNumber && String(ep?.streamUrl || '').trim() !== ''
+  );
+  if (sameEpIdx >= 0) {
+    // Episode number already exists with a stream; don't overwrite unless empty
+    return { mergedSeasons: cloned, added: false };
+  }
+
+  const emptyEpIdx = targetSeason.episodes.findIndex(
+    (ep) => Number(ep?.episodeNumber) === newEpisode.episodeNumber && !String(ep?.streamUrl || '').trim()
+  );
+  if (emptyEpIdx >= 0) {
+    targetSeason.episodes[emptyEpIdx] = newEpisode;
+  } else {
+    targetSeason.episodes.push(newEpisode);
+  }
+
+  targetSeason.episodes.sort((a, b) => (Number(a?.episodeNumber) || 0) - (Number(b?.episodeNumber) || 0));
+  cloned.sort((a, b) => a.seasonNumber - b.seasonNumber);
+
+  return { mergedSeasons: cloned, added: true };
+}
+
 async function runServerAutoSyncPass(reason: string): Promise<void> {
   if (serverAutoSyncRunning) return;
   serverAutoSyncRunning = true;
 
   try {
-    const cfg = await getServerAutoSyncConfig(reason.startsWith('new_video') || reason === 'boot');
+    const cfg = await getServerAutoSyncConfig(reason.startsWith('new_video') || reason === 'boot' || reason === 'manual_trigger');
     if (!cfg.autoWatchEnabled || !cfg.channelUrl) return;
 
     const client = await getTelegramClient().catch(() => null);
@@ -4114,7 +4347,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
     if (baseline <= 0) {
       const latest = await discoverChannelLatestMsgId(client, peer, cleanChannelId);
       if (latest <= 0) return;
-      baseline = Math.max(0, latest - 10);
+      baseline = Math.max(0, latest - 25);
     }
 
     // Fast lightweight probe: check if ANY messages exist after `baseline` before querying Firestore `movies`
@@ -4124,7 +4357,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
     const validMsgs = (probedMsgs || []).filter((m) => m && m.id);
     if (validMsgs.length === 0) return;
 
-    // Fetch up to another 50 if the first 50 were completely full
+    // Fetch up to another 100 if the first 50 were completely full
     if (validMsgs.length >= 45) {
       const moreIds: number[] = [];
       for (let id = baseline + 51; id <= baseline + 150; id++) moreIds.push(id);
@@ -4145,22 +4378,41 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
       saveRecentChannelPostsToDisk();
     }
 
-    // Load current movies from Firestore ONLY when new Telegram messages actually arrived
+    // Load current movies & series from Firestore ONLY when new Telegram messages actually arrived
     const existingSnap = await getDocsFromServer(collection(db, 'movies'));
     const existingUrlSet = new Set<string>();
-    const existingImdbSet = new Set<string>();
-    const existingTitleList: ExistingTitleDupEntry[] = [];
+    const existingRecords: ExistingMovieRecord[] = [];
     existingSnap.docs.forEach((d) => {
       const m = d.data() as any;
-      if (m?.imdbId) existingImdbSet.add(String(m.imdbId).trim().toLowerCase());
+      const cat = String(m?.originalCategory || '');
+      const isSeries = cat.toLowerCase().includes('series') || (Array.isArray(m?.seasons) && m.seasons.length > 0);
       if (m?.streamingUrl) existingUrlSet.add(String(m.streamingUrl).trim().toLowerCase());
       if (m?.videoQualities && typeof m.videoQualities === 'object') {
         Object.values(m.videoQualities).forEach((u) => {
           if (typeof u === 'string' && u.trim()) existingUrlSet.add(u.trim().toLowerCase());
         });
       }
-      const entry = buildExistingTitleDupEntry(m?.title, m?.originalTitle, m?.releaseYear, m?.originalCategory);
-      if (entry.normTitle.length >= 2) existingTitleList.push(entry);
+      if (Array.isArray(m?.seasons)) {
+        m.seasons.forEach((s: any) => {
+          if (Array.isArray(s?.episodes)) {
+            s.episodes.forEach((ep: any) => {
+              if (ep?.streamUrl) existingUrlSet.add(String(ep.streamUrl).trim().toLowerCase());
+            });
+          }
+        });
+      }
+      existingRecords.push({
+        id: d.id,
+        imdbId: String(m?.imdbId || '').trim(),
+        title: String(m?.title || ''),
+        originalTitle: String(m?.originalTitle || ''),
+        releaseYear: Number(m?.releaseYear) || 0,
+        originalCategory: cat,
+        isSeries,
+        streamingUrl: String(m?.streamingUrl || '').trim(),
+        videoQualities: m?.videoQualities && typeof m.videoQualities === 'object' ? { ...m.videoQualities } : {},
+        seasons: Array.isArray(m?.seasons) ? m.seasons : [],
+      });
     });
 
     interface BgVideoCandidate {
@@ -4222,7 +4474,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
       return;
     }
 
-    // Group multi-quality uploads
+    // Group multi-quality uploads (both movies AND same-episode series uploads!)
     interface BgGroup {
       groupKey: string;
       primary: BgVideoCandidate;
@@ -4235,7 +4487,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
     const groupIdxByKey = new Map<string, number>();
 
     for (const v of candidates) {
-      const gKey = v.parsed.groupKey && !v.parsed.isSeriesEpisode ? v.parsed.groupKey : `msg-${v.msgId}`;
+      const gKey = v.parsed.groupKey || `msg-${v.msgId}`;
       const existingIdx = v.parsed.groupKey ? groupIdxByKey.get(gKey) : undefined;
       if (existingIdx !== undefined) {
         const grp = groups[existingIdx];
@@ -4263,7 +4515,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
         }
         const idx = groups.length;
         groups.push({ groupKey: gKey, primary: v, members: [v], videoQualities: vq, qualitySizes: qs });
-        if (v.parsed.groupKey && !v.parsed.isSeriesEpisode) {
+        if (v.parsed.groupKey) {
           groupIdxByKey.set(gKey, idx);
         }
       }
@@ -4292,26 +4544,10 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
       };
 
       const matched = await resolveBestImdbMatch(mergedParsed);
-      if (matched.imdbId && existingImdbSet.has(matched.imdbId.toLowerCase())) {
-        continue;
-      }
       const candYear = Number(matched.releaseYear || mergedParsed.year || 0);
-      const candIsSeries =
+      const isSeriesItem =
         mergedParsed.isSeriesEpisode ||
         String(matched.originalCategory || '').toLowerCase().includes('series');
-      if (
-        isDuplicateByTitleAndYear(
-          existingTitleList,
-          [matched.title, matched.originalTitle, mergedParsed.cleanTitle],
-          candYear,
-          candIsSeries
-        )
-      ) {
-        console.log(
-          `[ServerAutoSync] Skipping already-uploaded title "${matched.title || mergedParsed.cleanTitle}" (msg #${grp.primary.msgId})`
-        );
-        continue;
-      }
 
       const bestDurSec = Math.max(0, ...grp.members.map((m) => m.durationSec || 0));
       const durationFormatted = bestDurSec > 0 ? formatDuration(bestDurSec) : '';
@@ -4349,21 +4585,33 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
         confidenceScore: matched.confidenceScore,
         matchReason: matched.matchReason,
         isSeriesEpisode: mergedParsed.isSeriesEpisode,
+        seasonNumber: mergedParsed.seasonNumber,
+        episodeNumber: mergedParsed.episodeNumber,
+        episodeLabel: mergedParsed.episodeLabel,
+        episodeTitle: mergedParsed.episodeTitle,
         alternateMatches: matched.alternateMatches,
       };
 
-      const canAutoPublish =
-        cfg.autoPublishVerified &&
-        draft.matchConfidence === 'high' &&
-        Boolean(draft.posterUrl) &&
-        !draft.isSeriesEpisode &&
-        !existingUrlSet.has(draft.streamUrl.toLowerCase()) &&
-        (!draft.imdbId || !existingImdbSet.has(draft.imdbId.toLowerCase()));
+      const existingRec = findMatchingExistingRecord(
+        existingRecords,
+        draft.imdbId,
+        [draft.title, draft.originalTitle, mergedParsed.cleanTitle],
+        candYear,
+        isSeriesItem
+      );
 
-      if (canAutoPublish) {
+      const isConfidentImdbMatch =
+        Boolean(draft.posterUrl) &&
+        (draft.matchConfidence === 'high' ||
+          (draft.matchConfidence === 'medium' && draft.confidenceScore >= 55 && Boolean(draft.imdbId)));
+
+      if (cfg.autoPublishVerified && isConfidentImdbMatch) {
+        const nowMs = Date.now();
         const cleanPoster = upgradePosterUrl(draft.posterUrl, 1080) || draft.posterUrl;
         const cleanBackdrop = upgradePosterUrl(draft.backdropUrl || cleanPoster, 1280) || cleanPoster;
-        const catToSave = draft.originalCategory || 'Bollywood Movie';
+        const catToSave = isSeriesItem
+          ? (String(draft.originalCategory || '').toLowerCase().includes('anime') ? 'Anime Series' : 'Web Series')
+          : (draft.originalCategory || 'Bollywood Movie');
         const displayCat = getDisplayCategory(catToSave);
         const badge = normalizeQualityBadge(
           /cam|hdtc|predvd/i.test(`${draft.sourceFileName} ${draft.sourceCaption}`)
@@ -4372,8 +4620,202 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
             ? 'HD'
             : draft.qualityBadge
         );
-        const deterministicDocId = `tg_${cleanChannelId}_${draft.msgId}`;
 
+        if (isSeriesItem) {
+          const seasonNum = Math.max(1, Number(draft.seasonNumber) || 1);
+          const fallbackEpNum = existingRec
+            ? Math.max(
+                1,
+                ...((existingRec.seasons.find((s) => Number(s.seasonNumber) === seasonNum)?.episodes || []).map(
+                  (e: any) => Number(e?.episodeNumber) || 0
+                )),
+                0
+              ) + 1
+            : 1;
+          const epNum = Math.max(1, Number(draft.episodeNumber) || fallbackEpNum);
+          const epTitle = draft.episodeTitle || `Episode ${epNum}`;
+          const epObj = {
+            episodeNumber: epNum,
+            ...(draft.episodeLabel ? { episodeLabel: draft.episodeLabel } : {}),
+            title: epTitle,
+            streamUrl: draft.streamUrl.trim(),
+            ...(durationFormatted ? { duration: durationFormatted } : {}),
+            ...(bestDurSec > 0 ? { durationSec: bestDurSec } : {}),
+            showInNewEpisodes: true,
+            newEpisodeEnabledAt: nowMs,
+            createdAt: nowMs,
+            addedAt: nowMs,
+          };
+
+          if (existingRec) {
+            const { mergedSeasons, added } = mergeEpisodeIntoSeasons(existingRec.seasons, seasonNum, epObj);
+            if (!added) {
+              existingUrlSet.add(draft.streamUrl.toLowerCase());
+              continue;
+            }
+            const nextStream = existingRec.streamingUrl || epObj.streamUrl;
+            await setDoc(
+              doc(db, 'movies', existingRec.id),
+              {
+                seasons: mergedSeasons,
+                streamingUrl: nextStream,
+                updatedAt: serverTimestamp(),
+              },
+              { merge: true }
+            );
+            existingRec.seasons = mergedSeasons;
+            existingRec.streamingUrl = nextStream;
+            existingUrlSet.add(draft.streamUrl.toLowerCase());
+            publishedCount++;
+
+            console.log(
+              `[ServerAutoSync] Added ${draft.title} S${seasonNum}E${epNum} -> movies/${existingRec.id}`
+            );
+
+            if (cfg.notifyOnNewPublish && publishedCount <= 3) {
+              await setDoc(
+                doc(db, 'announcements', `tg_rel_${cleanChannelId}_${draft.msgId}`),
+                {
+                  title: draft.title,
+                  releaseYear: Number(draft.releaseYear) || new Date().getFullYear(),
+                  category: catToSave,
+                  isSeries: true,
+                  language: (draft.language || 'Hindi').trim(),
+                  genre: (draft.genre || 'Drama').trim(),
+                  qualityBadge: badge !== 'NONE' ? badge : '',
+                  runtime: (draft.runtime || '').trim(),
+                  posterUrl: cleanPoster,
+                  backdropUrl: cleanBackdrop,
+                  message: `Season ${seasonNum} Episode ${draft.episodeLabel || epNum} Now Streaming!`,
+                  movieId: existingRec.id,
+                  createdAt: serverTimestamp(),
+                  createdAtMs: nowMs,
+                  expiresAt: new Date(nowMs + 48 * 60 * 60 * 1000),
+                },
+                { merge: true }
+              ).catch(() => {});
+            }
+            continue;
+          } else {
+            const seriesDocId = `tg_series_${cleanChannelId}_${draft.msgId}`;
+            const initialSeasons = [{ seasonNumber: seasonNum, episodes: [epObj] }];
+            await setDoc(
+              doc(db, 'movies', seriesDocId),
+              {
+                title: draft.title.trim(),
+                originalTitle: (draft.originalTitle || draft.title).trim(),
+                description: draft.description.trim(),
+                posterUrl: cleanPoster,
+                backdropUrl: cleanBackdrop,
+                releaseYear: Number(draft.releaseYear) || new Date().getFullYear(),
+                originalCategory: catToSave,
+                displayCategory: displayCat,
+                contentType: catToSave.toLowerCase().includes('anime') ? 'anime' : null,
+                language: (draft.language || 'Hindi').trim(),
+                genre: (draft.genre || 'Drama').trim(),
+                director: (draft.director || '').trim(),
+                cast: (draft.cast || '').trim(),
+                runtime: (draft.runtime || '').trim(),
+                rating: Number(draft.rating) || 8.0,
+                imdbId: (draft.imdbId || '').trim(),
+                trailerUrl: '',
+                streamingUrl: epObj.streamUrl,
+                videoQualities: {},
+                seasons: initialSeasons,
+                featured: true,
+                published: true,
+                qualityBadge: badge,
+                duration: bestDurSec || parseDurationToSeconds(draft.runtime) || 0,
+                telegramMsgId: draft.msgId,
+                telegramChannelId: cleanChannelId,
+                updatedAt: serverTimestamp(),
+                createdAt: serverTimestamp(),
+              },
+              { merge: true }
+            );
+            existingUrlSet.add(draft.streamUrl.toLowerCase());
+            existingRecords.push({
+              id: seriesDocId,
+              imdbId: (draft.imdbId || '').trim(),
+              title: draft.title.trim(),
+              originalTitle: (draft.originalTitle || draft.title).trim(),
+              releaseYear: Number(draft.releaseYear) || new Date().getFullYear(),
+              originalCategory: catToSave,
+              isSeries: true,
+              streamingUrl: epObj.streamUrl,
+              videoQualities: {},
+              seasons: initialSeasons,
+            });
+            publishedCount++;
+
+            console.log(
+              `[ServerAutoSync] Auto-Published Series "${draft.title}" S${seasonNum}E${epNum} (${draft.imdbId || 'no-imdb'}) -> movies/${seriesDocId}`
+            );
+
+            if (cfg.notifyOnNewPublish && publishedCount <= 3) {
+              await setDoc(
+                doc(db, 'announcements', `tg_rel_${cleanChannelId}_${draft.msgId}`),
+                {
+                  title: draft.title,
+                  releaseYear: Number(draft.releaseYear) || new Date().getFullYear(),
+                  category: catToSave,
+                  isSeries: true,
+                  language: (draft.language || 'Hindi').trim(),
+                  genre: (draft.genre || 'Drama').trim(),
+                  qualityBadge: badge !== 'NONE' ? badge : '',
+                  runtime: (draft.runtime || '').trim(),
+                  posterUrl: cleanPoster,
+                  backdropUrl: cleanBackdrop,
+                  message: 'NEW SERIES • GO STREAM or DOWNLOAD NOW',
+                  movieId: seriesDocId,
+                  createdAt: serverTimestamp(),
+                  createdAtMs: nowMs,
+                  expiresAt: new Date(nowMs + 48 * 60 * 60 * 1000),
+                },
+                { merge: true }
+              ).catch(() => {});
+            }
+            continue;
+          }
+        }
+
+        // Single Movie: merge new quality if already in Firestore, otherwise publish new doc
+        if (existingRec) {
+          const mergedQualities = { ...existingRec.videoQualities };
+          let qualityAdded = false;
+          for (const [qk, qUrl] of Object.entries(draft.videoQualities || {})) {
+            if (qUrl && !mergedQualities[qk]) {
+              mergedQualities[qk] = qUrl;
+              qualityAdded = true;
+            }
+          }
+          if (qualityAdded) {
+            const upgradedStream =
+              mergedQualities['1080p'] ||
+              mergedQualities['4K'] ||
+              existingRec.streamingUrl ||
+              draft.streamUrl.trim();
+            await setDoc(
+              doc(db, 'movies', existingRec.id),
+              {
+                videoQualities: mergedQualities,
+                streamingUrl: upgradedStream,
+                updatedAt: serverTimestamp(),
+              },
+              { merge: true }
+            );
+            existingRec.videoQualities = mergedQualities;
+            existingRec.streamingUrl = upgradedStream;
+            existingUrlSet.add(draft.streamUrl.toLowerCase());
+            publishedCount++;
+            console.log(
+              `[ServerAutoSync] Merged new quality for "${existingRec.title}" -> movies/${existingRec.id}`
+            );
+          }
+          continue;
+        }
+
+        const deterministicDocId = `tg_${cleanChannelId}_${draft.msgId}`;
         await setDoc(
           doc(db, 'movies', deterministicDocId),
           {
@@ -4409,19 +4851,26 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
           { merge: true }
         );
 
-        if (draft.imdbId) existingImdbSet.add(draft.imdbId.toLowerCase());
         existingUrlSet.add(draft.streamUrl.toLowerCase());
-        existingTitleList.push(
-          buildExistingTitleDupEntry(draft.title, draft.originalTitle, draft.releaseYear, draft.originalCategory)
-        );
+        existingRecords.push({
+          id: deterministicDocId,
+          imdbId: (draft.imdbId || '').trim(),
+          title: draft.title.trim(),
+          originalTitle: (draft.originalTitle || draft.title).trim(),
+          releaseYear: Number(draft.releaseYear) || new Date().getFullYear(),
+          originalCategory: catToSave,
+          isSeries: false,
+          streamingUrl: draft.streamUrl.trim(),
+          videoQualities: draft.videoQualities || {},
+          seasons: [],
+        });
         publishedCount++;
 
         console.log(
-          `[ServerAutoSync] Auto-Published "${draft.title}" (${draft.releaseYear}, ${draft.imdbId || 'no-imdb'}) -> movies/${deterministicDocId}`
+          `[ServerAutoSync] Auto-Published Movie "${draft.title}" (${draft.releaseYear}, ${draft.imdbId || 'no-imdb'}) -> movies/${deterministicDocId}`
         );
 
         if (cfg.notifyOnNewPublish && publishedCount <= 3) {
-          const nowMs = Date.now();
           await setDoc(
             doc(db, 'announcements', `tg_rel_${cleanChannelId}_${draft.msgId}`),
             {
@@ -4445,7 +4894,9 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
           ).catch(() => {});
         }
       } else {
-        queuedForReview.push(draft);
+        if (!existingRec || isSeriesItem) {
+          queuedForReview.push(draft);
+        }
       }
     }
 
@@ -4462,8 +4913,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
       await setDoc(
         doc(db, 'app_config', 'catalog_sync'),
         {
-          updatedAtMs: Date.now(),
-          updatedAt: serverTimestamp(),
+          updatedAt: Date.now(),
           action: 'auto_publish',
         },
         { merge: true }
@@ -4489,7 +4939,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
   }
 }
 
-// Start 24/7 MTProto channel watcher on server boot + 25s safety poll
+// Start 24/7 MTProto channel watcher on server boot + 15s safety poll
 setTimeout(() => {
   getTelegramClient()
     .then((client) => ensureChannelUploadWatcher(client))
@@ -4498,8 +4948,8 @@ setTimeout(() => {
 
   setInterval(() => {
     runServerAutoSyncPass('periodic').catch(() => {});
-  }, 25_000);
-}, 6000);
+  }, 15_000);
+}, 5000);
 
 router.get('/stream', handleStream);
 router.head('/stream', handleStream);

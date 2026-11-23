@@ -16,6 +16,10 @@ export interface ParsedTelegramMovieMeta {
   languageHint: string;
   isHindiDubbed: boolean;
   isSeriesEpisode: boolean;
+  seasonNumber: number | null;
+  episodeNumber: number | null;
+  episodeLabel: string;
+  episodeTitle: string;
   isSampleOrClip: boolean;
 }
 
@@ -60,6 +64,10 @@ export interface AutoMatchedMovieDraft {
   confidenceScore: number;
   matchReason: string;
   isSeriesEpisode: boolean;
+  seasonNumber?: number | null;
+  episodeNumber?: number | null;
+  episodeLabel?: string;
+  episodeTitle?: string;
   alternateMatches: AutoMatchedCandidateSummary[];
 }
 
@@ -67,13 +75,25 @@ const RELEASE_CUTOFF_RE =
   /\b(?:480p|720p|1080p|2160p|360p|4k|uhd|fhd|hdrip|hd[\s._-]*cam|hdcam|hdts|hdtc|predvd|camrip|dvdscr|dvdrip|web[\s._-]*dl|webdl|web[\s._-]*rip|webrip|bluray|bdrip|brrip|x264|x265|h[\s._-]*264|h[\s._-]*265|hevc|avc|10bit|8bit|hi10p|aac|aac2|aac5|ac3|eac3|dd5[\s._-]*1|ddp5[\s._-]*1|dd2[\s._-]*0|dts|atmos|truehd|esub|esubs|msub|msubs|hc[\s._-]*sub|hc[\s._-]*esub|dual[\s._-]*audio|multi[\s._-]*audio|hindi[\s._-]*dubbed|org[\s._-]*hindi|original[\s._-]*hindi|uncut|unrated|extended|remastered|imax|nf|amzn|dsnp|kone|hotstar|zee5|jiocinema|sonyliv|mxplayer|voot|moviesmod|vegamovies|filmyzilla|filmy4wap|hdhub4u|katmoviehd|skymovieshd|mkvcinemas|bolly4u|bollyflix|dotmovies|hdmovie2|cinevoo|movies4u|pagalworld|worldfree4u|khatrimaza|yify|rarbg|psa|flux|ntb|evo|syncopy)\b/i;
 
 const SERIES_EP_RE =
-  /(?:^|[\s._\-\[(])(?:S\d{1,2}[\s._-]*E\d{1,4}|S\d{1,2}|Season[\s._-]*\d{1,2}(?:[\s._-]*(?:Ep|Episode)[\s._-]*\d{1,4})?|Episode[\s._-]*\d{1,4})(?:$|[\s._\-\])])/i;
+  /(?:^|[\s._\-\[(])(?:S\d{1,2}[\s._-]*E\d{1,4}|S\d{1,2}|Season[\s._-]*\d{1,2}(?:[\s._-]*(?:Ep|Episode)[\s._-]*\d{1,4})?|Episode[\s._-]*\d{1,4}|Ep\.?[\s._-]*\d{1,4}|E0*\d{1,3}(?:[\s._-]*[-–—][\s._-]*E?0*\d{1,3})?|\d{1,2}x\d{1,4})(?:$|[\s._\-\])])/i;
+
+const SERIES_CUTOFF_RE =
+  /(?:^|[\s._\-\[(])(?:S0?\d{1,2}[\s._-]*E0?\d{1,4}|S0?\d{1,2}|Season[\s._-]*\d{1,2}|Episode[\s._-]*\d{1,4}|Ep\.?[\s._-]*\d{1,4}|E0*\d{1,3}(?:[\s._-]*[-–—][\s._-]*E?0*\d{1,3})?|\d{1,2}x\d{1,4})\b/i;
 
 const PROMO_LINE_RE =
-  /(?:join\s+@|join\s+our|channel\s*:|powered\s+by|uploaded\s+by|share\s*&|subscribe|t\.me\/|https?:\/\/|download\s+link|request\s+here|feedback|backup\s+channel)/i;
+  /(?:join\s+@|join\s+our|channel\s*:|powered\s+by|uploaded\s+by|shared\s+by|share\s*&|subscribe|t\.me\/|https?:\/\/|download\s+link|request\s+here|feedback|backup\s+channel|follow\s+us|telegram\.me)/i;
+
+const NON_TITLE_META_LINE_RE =
+  /^(?:imdb(?:\s+rating)?|rating|score|genre|genres|story(?:line)?|plot|synopsis|overview|about|cast|starring|actors?|director|directed\s+by|writer|music|producer|language|languages|audio|subtitle|subtitles|quality|format|resolution|codec|size|file\s*size|duration|runtime|release(?:\s+date)?|released|country|note|info|screens?(?:hots?)?|links?|watch\s+online|download|telegram|channel|bot)\s*[:\-–—]/i;
+
+const EXPLICIT_TITLE_LABEL_RE =
+  /^(?:movie\s*(?:name|title)?|web\s*series|series\s*(?:name|title)?|show\s*(?:name|title)?|film\s*(?:name|title)?|title|name)\s*[:\-–—]\s*(.+)$/i;
+
+const INLINE_META_CUTOFF_RE =
+  /\s+(?:imdb(?:\s*rating)?|rating|genre|genres|story(?:line)?|plot|synopsis|cast|starring|actors?|director|directed\s+by|language|languages|audio|quality|resolution|duration|runtime|release\s*date|subtitles?|size|download|watch\s+online|join\s+@?)\s*[:\-–—]/i;
 
 const TRAILING_LANG_SEASON_RE =
-  /\b(?:s\d{1,2}[\s._-]*e\d{1,4}|s0?\d{1,2}|e0?\d{1,4}|season\s*\d{1,2}|episode\s*\d{1,4}|hindi|english|tamil|telugu|malayalam|kannada|punjabi|bengali|marathi|japanese|korean|dubbed|subbed|multi|dual)\b/gi;
+  /\b(?:s\d{1,2}[\s._-]*e\d{1,4}|s0?\d{1,2}|e0?\d{1,4}|ep\.?\s*0*\d{1,4}|season\s*\d{1,2}|episode\s*\d{1,4}|hindi|english|tamil|telugu|malayalam|kannada|punjabi|bengali|marathi|japanese|korean|dubbed|subbed|multi|dual)\b/gi;
 
 function stripFileExtension(name: string): string {
   return name.replace(/\.(mkv|mp4|avi|mov|webm|m4v|ts|flv|wmv|mpg|mpeg)$/i, '');
@@ -82,26 +102,39 @@ function stripFileExtension(name: string): string {
 function cleanSingleTitleLine(rawLine: string): {
   title: string;
   year: number | null;
+  hasExplicitLabel: boolean;
 } {
   let text = stripFileExtension(String(rawLine || '').trim());
 
-  // Strip emojis and decorative Unicode symbols
-  text = text.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, ' ');
+  // Strip emojis, stars, bullets, and decorative Unicode symbols
+  text = text.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}★☆⭐🎬📺🔥✨👉👇━═─│┃•]+/gu, ' ');
 
-  // Remove URLs and @mentions
+  // Remove URLs, @mentions, and #hashtags
   text = text.replace(/https?:\/\/\S+/gi, ' ');
   text = text.replace(/t\.me\/\S+/gi, ' ');
   text = text.replace(/@[a-zA-Z0-9_]{3,}/g, ' ');
+  text = text.replace(/(?:^|\s)#[^\s]+/g, ' ');
 
   // Remove size tokens like 1.4GB, 850 MB
   text = text.replace(/\b\d+(?:\.\d+)?\s*(?:gb|mb|kb)\b/gi, ' ');
 
-  // Replace dots/underscores used as separators with spaces
+  // Replace dots/underscores/pipes used as separators with spaces
   text = text.replace(/[._|]+/g, ' ');
   text = text.replace(/\s+/g, ' ').trim();
 
-  // Remove leading label prefixes like "Movie:", "Title:", "Name:"
-  text = text.replace(/^(?:movie|film|title|name)\s*[:\-]\s*/i, '').trim();
+  // Check and remove leading label prefixes like "Movie Name:", "Series Name:", "Title:", "Name:"
+  let hasExplicitLabel = false;
+  const labelMatch = text.match(EXPLICIT_TITLE_LABEL_RE);
+  if (labelMatch) {
+    hasExplicitLabel = true;
+    text = labelMatch[1].trim();
+  }
+
+  // Cut off inline trailing metadata (e.g. "Pushpa 2 (2024) Rating: 8.5 Audio: Hindi")
+  const inlineMetaMatch = text.match(INLINE_META_CUTOFF_RE);
+  if (inlineMetaMatch && typeof inlineMetaMatch.index === 'number' && inlineMetaMatch.index > 1) {
+    text = text.slice(0, inlineMetaMatch.index).trim();
+  }
 
   // Remove bracketed site tags at start like [MoviesMod]
   text = text.replace(/^\[[^\]]{2,40}\]\s*/g, '').trim();
@@ -142,6 +175,12 @@ function cleanSingleTitleLine(rawLine: string): {
     }
   }
 
+  // Cut at the earliest series marker (S01E01 / Season 1 / Ep 01 / E01) if after the show title
+  const seriesCut = text.match(SERIES_CUTOFF_RE);
+  if (seriesCut && typeof seriesCut.index === 'number' && seriesCut.index > 1) {
+    text = text.slice(0, seriesCut.index);
+  }
+
   // Cut at the earliest release/quality/codec/site tag
   const cutoffMatch = text.match(RELEASE_CUTOFF_RE);
   if (cutoffMatch && typeof cutoffMatch.index === 'number' && cutoffMatch.index > 1) {
@@ -159,13 +198,78 @@ function cleanSingleTitleLine(rawLine: string): {
     .replace(/[\[(]\s*[\])]/g, ' ')
     .replace(/\[[^\]]*\]/g, ' ')
     .replace(/\([^)]*(?:dubbed|hindi|english|tamil|telugu|dual|audio|esub|480p|720p|1080p|4k|rip|cam)[^)]*\)/gi, ' ')
-    .replace(/\b(?:full\s+movie|hindi\s+movie|south\s+movie|bollywood|hollywood)\b/gi, ' ')
+    .replace(/\b(?:full\s+movie|hindi\s+movie|south\s+movie|bollywood|hollywood|web\s+series|complete\s+series|all\s+episodes)\b/gi, ' ')
     .replace(/^[\s\-–—:;,./\\]+|[\s\-–—:;,./\\]+$/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 
   void yearIndex;
-  return { title: text, year: detectedYear };
+  return { title: text, year: detectedYear, hasExplicitLabel };
+}
+
+function parseSeriesSeasonEpisode(rawText: string): {
+  seasonNumber: number | null;
+  episodeNumber: number | null;
+  episodeLabel: string;
+  episodeTitle: string;
+} {
+  const norm = String(rawText || '').replace(/[._]+/g, ' ');
+  let seasonNumber: number | null = null;
+  let episodeNumber: number | null = null;
+  let episodeLabel = '';
+
+  const seRange = norm.match(/\bS0*(\d{1,2})\s*[-–—]?\s*E0*(\d{1,4})\s*[-–—]\s*E?0*(\d{1,4})\b/i);
+  const seSingle = norm.match(/\bS0*(\d{1,2})\s*[-–—]?\s*E0*(\d{1,4})\b/i);
+  const xMatch = norm.match(/\b0*(\d{1,2})x0*(\d{1,4})\b/i);
+  const seasonWord = norm.match(/\b(?:Season|S)\s*0*(\d{1,2})\b/i);
+  const epRange = norm.match(/\b(?:Episodes?|Eps?)\s*[:\-]?\s*0*(\d{1,4})\s*(?:-|–|to)\s*0*(\d{1,4})\b/i);
+  const epWord = norm.match(/\b(?:Episode|Ep)\s*[:\-]?\s*0*(\d{1,4})\b/i);
+  const standaloneEpRange = norm.match(/(?:^|[\s\-\[(])E0*(\d{1,3})\s*[-–—]\s*E?0*(\d{1,3})(?:$|[\s\-\])])/i);
+  const standaloneEpSingle = norm.match(/(?:^|[\s\-\[(])E0*(\d{1,3})(?:$|[\s\-\])])/i);
+
+  if (seRange) {
+    seasonNumber = parseInt(seRange[1], 10);
+    const eStart = parseInt(seRange[2], 10);
+    const eEnd = parseInt(seRange[3], 10);
+    episodeNumber = eStart;
+    if (eEnd > eStart) episodeLabel = `${eStart}-${eEnd}`;
+  } else if (seSingle) {
+    seasonNumber = parseInt(seSingle[1], 10);
+    episodeNumber = parseInt(seSingle[2], 10);
+  } else if (xMatch) {
+    seasonNumber = parseInt(xMatch[1], 10);
+    episodeNumber = parseInt(xMatch[2], 10);
+  } else {
+    if (seasonWord) seasonNumber = parseInt(seasonWord[1], 10);
+    if (epRange) {
+      const eStart = parseInt(epRange[1], 10);
+      const eEnd = parseInt(epRange[2], 10);
+      episodeNumber = eStart;
+      if (eEnd > eStart) episodeLabel = `${eStart}-${eEnd}`;
+    } else if (epWord) {
+      episodeNumber = parseInt(epWord[1], 10);
+    } else if (standaloneEpRange) {
+      const eStart = parseInt(standaloneEpRange[1], 10);
+      const eEnd = parseInt(standaloneEpRange[2], 10);
+      episodeNumber = eStart;
+      if (eEnd > eStart) episodeLabel = `${eStart}-${eEnd}`;
+    } else if (standaloneEpSingle) {
+      episodeNumber = parseInt(standaloneEpSingle[1], 10);
+    }
+  }
+
+  if (episodeNumber !== null && seasonNumber === null) {
+    seasonNumber = 1;
+  }
+
+  const episodeTitle =
+    episodeLabel
+      ? `Episodes ${episodeLabel}`
+      : episodeNumber !== null
+      ? `Episode ${episodeNumber}`
+      : '';
+
+  return { seasonNumber, episodeNumber, episodeLabel, episodeTitle };
 }
 
 function detectQualityTag(
@@ -253,49 +357,87 @@ export function parseTelegramMovieMeta(
 
   const isSeriesEpisode = SERIES_EP_RE.test(combined);
 
-  // Pick the cleanest title from caption lines OR filename
+  // Pick ONLY the cleanest Movie/Series title line from caption OR filename, ignoring extra metadata/promo/plot lines
   const captionLines = String(caption || '')
     .split(/\r?\n/)
     .map((l) => l.trim())
-    .filter((l) => l.length > 0 && !PROMO_LINE_RE.test(l) && !/^(?:join|http|@)/i.test(l));
+    .filter((l) => {
+      if (!l) return false;
+      const plain = l.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}★☆⭐🎬📺🔥✨👉👇━═─│┃•]+/gu, ' ').trim();
+      if (!plain || plain.length < 2) return false;
+      if (/^[\s\-_=*~.,:;!?/\\|]+$/.test(plain)) return false;
+      if (/^(?:#[^\s]+\s*)+$/.test(plain)) return false;
+      if (PROMO_LINE_RE.test(plain) || /^(?:join|http|@)/i.test(plain)) return false;
+      if (NON_TITLE_META_LINE_RE.test(plain)) return false;
+      // Ignore long story/synopsis paragraphs unless explicitly prefixed with Movie/Series Name
+      if (!EXPLICIT_TITLE_LABEL_RE.test(plain) && plain.length > 110 && !/\b(?:19|20)\d{2}\b/.test(plain)) {
+        return false;
+      }
+      return true;
+    });
 
-  const candidates: Array<{ title: string; year: number | null; fromCaption: boolean }> = [];
+  const candidates: Array<{
+    title: string;
+    year: number | null;
+    hasExplicitLabel: boolean;
+    fromCaption: boolean;
+    lineIdx: number;
+  }> = [];
+
   if (captionLines.length > 0) {
-    for (const line of captionLines.slice(0, 3)) {
-      const parsedLine = cleanSingleTitleLine(line);
+    for (let i = 0; i < Math.min(captionLines.length, 8); i++) {
+      const parsedLine = cleanSingleTitleLine(captionLines[i]);
       if (parsedLine.title) {
-        candidates.push({ ...parsedLine, fromCaption: true });
+        candidates.push({
+          title: parsedLine.title,
+          year: parsedLine.year,
+          hasExplicitLabel: parsedLine.hasExplicitLabel,
+          fromCaption: true,
+          lineIdx: i,
+        });
       }
     }
   }
   const parsedFile = cleanSingleTitleLine(fileName || '');
   if (parsedFile.title) {
-    candidates.push({ ...parsedFile, fromCaption: false });
+    candidates.push({
+      title: parsedFile.title,
+      year: parsedFile.year,
+      hasExplicitLabel: parsedFile.hasExplicitLabel,
+      fromCaption: false,
+      lineIdx: 99,
+    });
   }
 
-  // Prefer a non-generic candidate that includes a valid year (and slight preference for caption line #1 if filename is messy)
+  // Prefer explicit title labels and clean non-generic Movie/Series Name + Year lines
   candidates.sort((a, b) => {
-    const aGen = looksGenericTelegramName(a.title) ? -100 : 0;
-    const bGen = looksGenericTelegramName(b.title) ? -100 : 0;
-    const aYr = a.year ? 20 : 0;
-    const bYr = b.year ? 20 : 0;
-    const aWords = a.title.split(/\s+/).length >= 1 && a.title.length >= 3 ? 10 : 0;
-    const bWords = b.title.split(/\s+/).length >= 1 && b.title.length >= 3 ? 10 : 0;
-    const aCap = a.fromCaption ? 5 : 0;
-    const bCap = b.fromCaption ? 5 : 0;
-    return (bGen + bYr + bWords + bCap) - (aGen + aYr + aWords + aCap);
+    const scoreCand = (c: typeof a) => {
+      let s = 0;
+      if (looksGenericTelegramName(c.title)) s -= 100;
+      if (c.hasExplicitLabel) s += 40;
+      if (c.year) s += 25;
+      if (c.title.length >= 2 && c.title.length <= 65) s += 12;
+      else if (c.title.length > 90) s -= 25;
+      if (c.fromCaption) s += Math.max(2, 10 - c.lineIdx);
+      return s;
+    };
+    return scoreCand(b) - scoreCand(a);
   });
 
   const best = candidates[0] || { title: '', year: null };
-  // If caption had title without year, borrow year from filename (or vice versa)
+  // If caption had title without year, borrow year from another candidate or filename
   const fallbackYear = best.year || candidates.find((c) => c.year)?.year || null;
 
   const quality = detectQualityTag(combined, width, height);
   const { languageHint, isHindiDubbed } = detectLanguageHint(combined);
+  const epDetails = parseSeriesSeasonEpisode(combined);
+  const finalIsSeries = isSeriesEpisode || epDetails.episodeNumber !== null;
 
   const cleanTitle = best.title || stripFileExtension(fileName || '').replace(/[._-]+/g, ' ').trim();
   const normalizedGroupTitle = normalizeTitleKey(cleanTitle).replace(/\s+/g, '');
-  const groupKey = explicitImdbId
+  const groupKey = finalIsSeries && normalizedGroupTitle
+    ? `${normalizedGroupTitle}-s${epDetails.seasonNumber || 1}-e${epDetails.episodeNumber || 0}${epDetails.episodeLabel ? `-${epDetails.episodeLabel}` : ''}`
+    : explicitImdbId
     ? `imdb-${explicitImdbId}`
     : normalizedGroupTitle
     ? `${normalizedGroupTitle}${fallbackYear ? `-${fallbackYear}` : ''}`
@@ -311,7 +453,11 @@ export function parseTelegramMovieMeta(
     quality,
     languageHint,
     isHindiDubbed,
-    isSeriesEpisode,
+    isSeriesEpisode: finalIsSeries,
+    seasonNumber: epDetails.seasonNumber,
+    episodeNumber: epDetails.episodeNumber,
+    episodeLabel: epDetails.episodeLabel,
+    episodeTitle: epDetails.episodeTitle,
     isSampleOrClip,
   };
 }
@@ -367,12 +513,26 @@ function scoreImdbCandidate(
   let score = getTitleSimilarityScore(candidate.title, parsed.cleanTitle);
 
   const candYearNum = parseInt(String(candidate.year || '').slice(0, 4), 10);
+  const typeLower = String(candidate.type || 'movie').toLowerCase();
   if (parsed.year && Number.isFinite(candYearNum)) {
     const diff = Math.abs(candYearNum - parsed.year);
-    if (diff === 0) score += 45;
-    else if (diff === 1) score += 20;
-    else if (diff === 2) score += 0;
-    else score -= 35;
+    if (diff === 0) {
+      score += 45;
+    } else if (diff === 1) {
+      score += 20;
+    } else if (
+      parsed.isSeriesEpisode &&
+      typeLower === 'series' &&
+      candYearNum <= parsed.year &&
+      parsed.year - candYearNum <= 15
+    ) {
+      // Multi-season series (e.g. Mirzapur started 2018, Season 3 uploaded with 2024)
+      score += 25;
+    } else if (diff === 2) {
+      score += 0;
+    } else {
+      score -= 35;
+    }
   } else if (Number.isFinite(candYearNum) && candYearNum >= 1950) {
     // Prefer modern releases over silent-era 1920s entries when filename omits year
     if (candYearNum >= 2000) score += 8;
@@ -386,14 +546,14 @@ function scoreImdbCandidate(
   }
 
   // Content type alignment
-  const typeLower = String(candidate.type || 'movie').toLowerCase();
   if (typeLower === 'game') {
     score -= 70;
   } else if (!parsed.isSeriesEpisode) {
     if (typeLower === 'movie') score += 12;
     else if (typeLower === 'series') score -= 12;
   } else {
-    if (typeLower === 'series') score += 15;
+    if (typeLower === 'series') score += 22;
+    else if (typeLower === 'movie') score -= 14;
   }
 
   return score;
@@ -472,13 +632,19 @@ export async function resolveBestImdbMatch(
   // 2. Build clean search queries
   const queriesToTry: string[] = [];
   if (parsed.cleanTitle && !looksGenericTelegramName(parsed.cleanTitle)) {
-    if (parsed.year) queriesToTry.push(`${parsed.cleanTitle} ${parsed.year}`);
-    queriesToTry.push(parsed.cleanTitle);
+    // For multi-season series, bare series name finds the IMDb series entry even if caption carries a later season year
+    if (parsed.isSeriesEpisode) {
+      queriesToTry.push(parsed.cleanTitle);
+      if (parsed.year) queriesToTry.push(`${parsed.cleanTitle} ${parsed.year}`);
+    } else {
+      if (parsed.year) queriesToTry.push(`${parsed.cleanTitle} ${parsed.year}`);
+      queriesToTry.push(parsed.cleanTitle);
+    }
 
     // Strip subtitle after ":" or "-" as fallback (e.g. "Pushpa 2: The Rule" -> "Pushpa 2")
     const strippedSub = parsed.cleanTitle.split(/\s*[:\-–]\s*/)[0]?.trim();
     if (strippedSub && strippedSub.length >= 3 && strippedSub.toLowerCase() !== parsed.cleanTitle.toLowerCase()) {
-      queriesToTry.push(parsed.year ? `${strippedSub} ${parsed.year}` : strippedSub);
+      queriesToTry.push(parsed.year && !parsed.isSeriesEpisode ? `${strippedSub} ${parsed.year}` : strippedSub);
     }
   }
 
@@ -553,7 +719,14 @@ export async function resolveBestImdbMatch(
 
   const finalYear = Number(d?.releaseYear || parseInt(String(winner.cand.year || ''), 10) || fallbackYear) || fallbackYear;
   const rawSim = getTitleSimilarityScore(d?.title || winner.cand.title, parsed.cleanTitle);
-  const yearMatched = Boolean(parsed.year && Math.abs(finalYear - parsed.year) <= 1);
+  const winnerType = String(winner.cand.type || '').toLowerCase();
+  const isSeriesYearMatch =
+    parsed.isSeriesEpisode &&
+    winnerType === 'series' &&
+    Boolean(parsed.year && finalYear <= parsed.year && parsed.year - finalYear <= 15);
+  const yearMatched = Boolean(
+    (parsed.year && Math.abs(finalYear - parsed.year) <= 1) || isSeriesYearMatch
+  );
   const hasPoster = Boolean(bestPoster && /^https?:\/\//i.test(bestPoster));
 
   let matchConfidence: 'high' | 'medium' | 'low' = 'low';

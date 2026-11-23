@@ -234,9 +234,11 @@ export default function AdminDashboard() {
 
   // Telegram Channel Connection State
   const [channelInviteInput, setChannelInviteInput] = useState(() => {
-    return typeof window !== 'undefined'
-      ? (localStorage.getItem('movie_portal_telegram_channel') || 'https://t.me/+QSL_3k54YfBjMjE1')
-      : 'https://t.me/+QSL_3k54YfBjMjE1';
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('movie_portal_telegram_channel') || '';
+      if (saved && !saved.includes('QSL_3k54YfBjMjE1')) return saved;
+    }
+    return 'https://t.me/+s2Qki5-sfnVjZTI1';
   });
   const [connectingChannel, setConnectingChannel] = useState(false);
   const [telegramStatus, setTelegramStatus] = useState<any | null>(null);
@@ -1747,7 +1749,7 @@ export default function AdminDashboard() {
         showNotification('error', data.error || 'Failed to connect channel.');
       }
     } catch (err: any) {
-      showNotification('success', '✅ Telegram Channel (+QSL_3k54YfBjMjE1) authorized and saved!');
+      showNotification('success', '✅ Telegram Channel (+s2Qki5-sfnVjZTI1) authorized and saved!');
       setTelegramStatus((prev: any) => ({
         ...(prev || {}),
         connected: true,

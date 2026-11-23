@@ -239,6 +239,7 @@ export default function VideoPlayerModal({
   const [forceNativeIosHls, setForceNativeIosHls] = useState(false);
   const [manualRetryNonce, setManualRetryNonce] = useState(0);
   const [exoReconnectNonce, setExoReconnectNonce] = useState(0);
+  const [html5ReconnectNonce, setHtml5ReconnectNonce] = useState(0);
   const [hasDecodedFrame, setHasDecodedFrame] = useState(false);
   const [autoplayBlocked, setAutoplayBlocked] = useState(false);
   const [isAutoplayMuted, setIsAutoplayMuted] = useState(() => !Capacitor.isNativePlatform() && isAppleMobileBrowser());
@@ -267,6 +268,7 @@ export default function VideoPlayerModal({
   const preflightCacheRef = useRef<{ url: string; recommendedMode: 'direct' | 'remux' | 'transcode'; durationSec: number; sourceHeight?: number } | null>(null);
   const userPickedQualityRef = useRef<boolean>(false);
   const exoNetworkRecoveryAttemptsRef = useRef<number>(0);
+  const html5NetworkRecoveryAttemptsRef = useRef<number>(0);
 
   // Runtime Android device and decoder capabilities from native bridge
   const deviceCapabilities = useMemo(() => {
@@ -625,6 +627,7 @@ export default function VideoPlayerModal({
     streamStartOffsetRef.current = 0;
     resumeOffsetRef.current = 0;
     exoNetworkRecoveryAttemptsRef.current = 0;
+    html5NetworkRecoveryAttemptsRef.current = 0;
     setSelectedAudioIdx(0);
     setUseLocalBridgeFallback(false);
     setForceNativeIosHls(false);
@@ -1020,12 +1023,12 @@ export default function VideoPlayerModal({
       return;
     }
 
-    // On iOS Safari / PWA WebKit and Android ExoPlayer (when remote FFmpeg server is available),
-    // route remux/transcode through our seekable VOD Apple HLS (.m3u8) pipeline instead of a single long HTTP pipe
-    // (which avoids 15-min proxy timeouts and fixes iPhone playback completely).
+    // Route server remux/transcode streams through our seekable chunked VOD Apple HLS (.m3u8) pipeline
+    // on ALL Web browsers (Desktop Chrome, Android Chrome, iOS Safari) and native APK remote backends
+    // so short 4s .ts chunk requests never hit reverse-proxy ~10-15 minute single-HTTP-connection timeouts.
     const useHlsPipeline =
       (isServerPipe || (isIosWeb && isTelegram)) &&
-      (isIosWeb || (Capacitor.isNativePlatform() && hasRemoteTranscodeBackend()));
+      (!Capacitor.isNativePlatform() || hasRemoteTranscodeBackend());
 
     if (useHlsPipeline) {
       const durHint = Math.round(preflightCacheRef.current.durationSec || durationRef.current || knownDurationRef.current || 0);
@@ -1744,6 +1747,7 @@ export default function VideoPlayerModal({
       }
     };
 
+    let hlsRetryTimer: ReturnType<typeof setTimeout> | null = null;
     if (usesHlsJs) {
       try {
         video.removeAttribute('src');
@@ -1755,8 +1759,19 @@ export default function VideoPlayerModal({
         lowLatencyMode: false,
         preferManagedMediaSource: true,
         startPosition: pendingSeekTarget !== null ? pendingSeekTarget : -1,
-        manifestLoadingTimeOut: 15000,
-        fragLoadingTimeOut: 30000,
+        maxBufferLength: 45,
+        maxMaxBufferLength: 120,
+        backBufferLength: 30,
+        manifestLoadingTimeOut: 20000,
+        manifestLoadingMaxRetry: 6,
+        manifestLoadingRetryDelay: 1200,
+        levelLoadingTimeOut: 20000,
+        levelLoadingMaxRetry: 6,
+        levelLoadingRetryDelay: 1200,
+        fragLoadingTimeOut: 40000,
+        fragLoadingMaxRetry: 8,
+        fragLoadingRetryDelay: 1000,
+        fragLoadingMaxRetryTimeout: 20000,
         xhrSetup: (xhr, reqUrl) => {
           try {
             if (new URL(reqUrl, window.location.href).origin === window.location.origin) {
@@ -1806,19 +1821,42 @@ export default function VideoPlayerModal({
         startHtml5Playback();
       });
 
-      let hlsRecoverTried = false;
+      let hlsRecoverCount = 0;
+      let lastMediaRecoverAt = 0;
       hlsInstance.on(Hls.Events.ERROR, (_event, data) => {
         if (!data.fatal || cancelled) return;
-        if (!hlsRecoverTried) {
-          hlsRecoverTried = true;
+        if (hlsRecoverCount < 6) {
+          hlsRecoverCount += 1;
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-            hlsInstance?.startLoad();
+            const resumeAt = Math.max(0, Math.floor(currentTimeRef.current || 0));
+            const delayMs = Math.min(4000, 600 * hlsRecoverCount);
+            console.warn(`[VideoPlayer] HLS network error (#${hlsRecoverCount}), retrying load from ${resumeAt}s...`);
+            if (hlsRetryTimer) clearTimeout(hlsRetryTimer);
+            hlsRetryTimer = setTimeout(() => {
+              if (!cancelled) {
+                hlsInstance?.startLoad(resumeAt > 0 ? resumeAt : -1);
+              }
+            }, delayMs);
             return;
           }
           if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            const now = Date.now();
+            if (now - lastMediaRecoverAt < 10000) {
+              try {
+                hlsInstance?.swapAudioCodec();
+              } catch {}
+            }
+            lastMediaRecoverAt = now;
             hlsInstance?.recoverMediaError();
             return;
           }
+        }
+        if (currentTimeRef.current >= 5 && html5NetworkRecoveryAttemptsRef.current < 8) {
+          html5NetworkRecoveryAttemptsRef.current += 1;
+          setIsLoading(true);
+          resumeOffsetRef.current = currentTimeRef.current;
+          setHtml5ReconnectNonce((n) => n + 1);
+          return;
         }
         if (isAppleDevice && !forceNativeIosHls && video.canPlayType('application/vnd.apple.mpegurl')) {
           setIsLoading(true);
@@ -1833,7 +1871,8 @@ export default function VideoPlayerModal({
           return;
         }
         setIsLoading(false);
-        setError('HLS Stream Error: Unable to play playlist stream.');
+        setError('stream_error');
+        setErrorDetail('Stream connection interrupted. Tap Retry to continue from where you stopped.');
       });
     } else if (isHlsUrl && video.canPlayType('application/vnd.apple.mpegurl')) {
       try {
@@ -2111,16 +2150,16 @@ export default function VideoPlayerModal({
         knownDur > 90 &&
         activePos > 10 &&
         activePos < knownDur - 25 &&
-        exoNetworkRecoveryAttemptsRef.current < 4;
+        html5NetworkRecoveryAttemptsRef.current < 8;
       if (isPrematureHtml5End) {
-        exoNetworkRecoveryAttemptsRef.current += 1;
+        html5NetworkRecoveryAttemptsRef.current += 1;
         setIsLoading(true);
-        if (isAppleDevice || isHlsUrl) {
+        if (isAppleDevice || isHlsUrl || streamFallbackModeRef.current === 'direct') {
           resumeOffsetRef.current = activePos;
         } else {
           setStreamStartOffset(Math.floor(activePos));
         }
-        setManualRetryNonce((n) => n + 1);
+        setHtml5ReconnectNonce((n) => n + 1);
         return;
       }
       if (episodeResumeKey) {
@@ -2145,22 +2184,37 @@ export default function VideoPlayerModal({
         // Automatically retry with MKV->HLS/fMP4 remux, then H.264/AAC transcode when using Node backend
         if (streamFallbackMode === 'direct') {
           setIsLoading(true);
-          if (isIosFallbackCandidate) {
+          if (isIosFallbackCandidate || isHlsUrl) {
             resumeOffsetRef.current = currentTimeRef.current;
           } else {
-            setStreamStartOffset(currentTimeRef.current);
+            setStreamStartOffset(Math.floor(currentTimeRef.current));
           }
           setStreamFallbackMode('remux');
           return;
         }
         if (streamFallbackMode === 'remux') {
           setIsLoading(true);
-          if (isIosFallbackCandidate) {
+          if (isIosFallbackCandidate || isHlsUrl) {
             resumeOffsetRef.current = currentTimeRef.current;
           } else {
-            setStreamStartOffset(currentTimeRef.current);
+            setStreamStartOffset(Math.floor(currentTimeRef.current));
           }
           setStreamFallbackMode('transcode');
+          return;
+        }
+        // Same-mode transient mid-stream reconnect (never permanently drop a movie mid-way on transient glitches)
+        if (currentTimeRef.current >= 5 && html5NetworkRecoveryAttemptsRef.current < 8) {
+          html5NetworkRecoveryAttemptsRef.current += 1;
+          const activePos = currentTimeRef.current;
+          setIsLoading(true);
+          if (isIosFallbackCandidate || isHlsUrl || streamFallbackModeRef.current === 'direct') {
+            resumeOffsetRef.current = activePos;
+          } else {
+            setStreamStartOffset(Math.floor(activePos));
+          }
+          setTimeout(() => {
+            if (!cancelled) setHtml5ReconnectNonce((n) => n + 1);
+          }, Math.min(3500, 1000 * html5NetworkRecoveryAttemptsRef.current));
           return;
         }
         // If remote Node backend still failed on native APK, fall back to built-in Android stream bridge
@@ -2171,11 +2225,20 @@ export default function VideoPlayerModal({
           setUseLocalBridgeFallback(true);
           return;
         }
+      } else if (currentTimeRef.current >= 5 && html5NetworkRecoveryAttemptsRef.current < 6) {
+        html5NetworkRecoveryAttemptsRef.current += 1;
+        setIsLoading(true);
+        resumeOffsetRef.current = currentTimeRef.current;
+        setTimeout(() => {
+          if (!cancelled) setHtml5ReconnectNonce((n) => n + 1);
+        }, 1200);
+        return;
       }
 
       setIsLoading(false);
       setIsPlaying(false);
       setError('stream_error');
+      setErrorDetail('Stream connection interrupted. Tap Retry to continue from where you stopped.');
     };
 
     const onVisibilityChange = () => {
@@ -2304,10 +2367,63 @@ export default function VideoPlayerModal({
       }
     }, streamFallbackMode === 'direct' ? 12000 : 28000);
 
+    // Mid-playback stall watchdog: ensures streams never freeze silently around 10-11 minutes
+    let lastWatchPos = video.currentTime || 0;
+    let lastAdvanceAtMs = Date.now();
+    let smoothRunSinceMs = 0;
+    let nudgeTriedForCurrentStall = false;
+    const html5StallWatchdog = setInterval(() => {
+      if (cancelled || autoplayBlockedRef.current) return;
+      if (video.paused || video.ended) {
+        lastAdvanceAtMs = Date.now();
+        smoothRunSinceMs = 0;
+        return;
+      }
+
+      const posNow = video.currentTime || 0;
+      if (Math.abs(posNow - lastWatchPos) >= 0.25) {
+        lastWatchPos = posNow;
+        lastAdvanceAtMs = Date.now();
+        nudgeTriedForCurrentStall = false;
+        if (smoothRunSinceMs === 0) {
+          smoothRunSinceMs = Date.now();
+        } else if (Date.now() - smoothRunSinceMs > 20000) {
+          html5NetworkRecoveryAttemptsRef.current = 0;
+        }
+        return;
+      }
+
+      smoothRunSinceMs = 0;
+      const stallMs = Date.now() - lastAdvanceAtMs;
+      if (hasPlayedAnyFrame && stallMs >= 16000 && !nudgeTriedForCurrentStall) {
+        nudgeTriedForCurrentStall = true;
+        if (hlsInstance) {
+          const resumeAt = Math.max(0, Math.floor(currentTimeRef.current || posNow));
+          try {
+            hlsInstance.startLoad(resumeAt);
+          } catch {}
+        }
+        video.play().catch(() => {});
+      } else if (hasPlayedAnyFrame && stallMs >= 26000 && html5NetworkRecoveryAttemptsRef.current < 8) {
+        html5NetworkRecoveryAttemptsRef.current += 1;
+        const activePos = currentTimeRef.current || posNow;
+        console.warn(`[VideoPlayer] HTML5/HLS stalled >26s at ${activePos.toFixed(1)}s. Reconnecting (#${html5NetworkRecoveryAttemptsRef.current})...`);
+        setIsLoading(true);
+        if (isAppleDevice || isHlsUrl || streamFallbackModeRef.current === 'direct') {
+          resumeOffsetRef.current = activePos;
+        } else {
+          setStreamStartOffset(Math.floor(activePos));
+        }
+        setHtml5ReconnectNonce((n) => n + 1);
+      }
+    }, 1000);
+
     return () => {
       cancelled = true;
       clearTimeout(seekFallbackTimer);
       clearTimeout(safetyTimer);
+      clearInterval(html5StallWatchdog);
+      if (hlsRetryTimer) clearTimeout(hlsRetryTimer);
       if (iosDirectStallTimer) clearTimeout(iosDirectStallTimer);
       if (iosRemuxStallTimer) clearTimeout(iosRemuxStallTimer);
       if (hlsInstance) {
@@ -2337,7 +2453,7 @@ export default function VideoPlayerModal({
       video.removeEventListener('webkitendfullscreen', onWebkitEndFullscreen);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [playableUrl, isYouTube, exoModeActive, episodeResumeKey, streamFallbackMode, manualRetryNonce, forceNativeIosHls]);
+  }, [playableUrl, isYouTube, exoModeActive, episodeResumeKey, streamFallbackMode, manualRetryNonce, html5ReconnectNonce, forceNativeIosHls]);
 
   // Keyboard shortcut listener (Space = play/pause, Left/Right = skip, Escape = close)
   useEffect(() => {
@@ -2607,8 +2723,13 @@ export default function VideoPlayerModal({
       return;
     }
 
-    // HLS multi-audio switch
-    if (hlsRef.current && typeof track.id === 'number') {
+    // HLS multi-audio switch (only use client-side switch when playlist itself contains multiple audio tracks)
+    if (
+      hlsRef.current &&
+      typeof track.id === 'number' &&
+      hlsRef.current.audioTracks &&
+      hlsRef.current.audioTracks.length > 1
+    ) {
       hlsRef.current.audioTrack = track.id;
     } else if (videoRef.current && (videoRef.current as any).audioTracks && (videoRef.current as any).audioTracks.length > 1) {
       const audioTracksApi = (videoRef.current as any).audioTracks;
@@ -2617,12 +2738,13 @@ export default function VideoPlayerModal({
       }
     } else if (/t\.me|telegram\.me/i.test(activeStreamUrl) && typeof track.id === 'number') {
       setIsLoading(true);
+      resumeOffsetRef.current = currentTimeRef.current;
       setSelectedAudioIdx(track.id);
       if (streamFallbackMode === 'direct' && track.id > 0) {
         setStreamFallbackMode('remux');
       }
-      if (isAppleMobileBrowser()) {
-        resumeOffsetRef.current = currentTimeRef.current;
+      if (!Capacitor.isNativePlatform() || hasRemoteTranscodeBackend()) {
+        // HLS playlist pipeline seeks via resumeOffsetRef
       } else {
         setStreamStartOffset(Math.floor(currentTimeRef.current));
       }
@@ -2897,7 +3019,7 @@ export default function VideoPlayerModal({
                 const useHlsJsSrc = Boolean(playableUrl && /\.m3u8/i.test(playableUrl) && Hls.isSupported() && !forceNativeIosHls);
                 return (
                 <video
-                  key={`${playableUrl}|${manualRetryNonce}|${forceNativeIosHls ? 'nat' : 'mse'}`}
+                  key={`${playableUrl}|${manualRetryNonce}|${html5ReconnectNonce}|${forceNativeIosHls ? 'nat' : 'mse'}`}
                   ref={videoRef}
                   src={useHlsJsSrc ? undefined : (playableUrl || undefined)}
                   poster={!hasDecodedFrame && currentTime < 1.2 && posterUrl ? posterUrl : undefined}
