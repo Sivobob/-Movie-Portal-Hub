@@ -18,11 +18,13 @@ import {
 import {
   getNewEpisodesWithin24h,
   getEpisodeDisplayLabel,
+  getTimestampMs,
 } from '../services/movieStorage';
 import { upgradePosterUrl } from '../utils/posterUrl';
 import { getVisibleQualityBadge } from '../utils/qualityBadge';
 import { parseDurationToSeconds } from '../utils/duration';
 import { getAppPreferences, isMatureContent } from '../services/userPreferencesService';
+import MovieViewsCounter from './MovieViewsCounter';
 
 const slideVariants = {
   enter: (direction: number) => ({
@@ -64,11 +66,6 @@ export default function HomePage() {
     [rawMovies, familyMode]
   );
 
-  const featuredMovies = useMemo(() => {
-    const featuredOnly = movies.filter((m: any) => m.featured);
-    return featuredOnly.length > 0 ? featuredOnly : movies;
-  }, [movies]);
-
   const [searchParams, setSearchParams] = useSearchParams();
   const category = searchParams.get('category');
 
@@ -90,6 +87,29 @@ export default function HomePage() {
   // My List state
   const [myListIds, setMyListIds] = useState<Set<string>>(new Set());
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
+
+  const featuredMovies = useMemo(() => {
+    const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+    const validFeatured = movies.filter((m: any) => {
+      if (!m.featured) return false;
+      const featTime = getTimestampMs(m.featuredAt) || getTimestampMs(m.createdAt) || getTimestampMs(m.updatedAt) || 0;
+      if (featTime > 0) {
+        return (nowMs - featTime) < TWENTY_FOUR_HOURS_MS;
+      }
+      return true;
+    });
+
+    if (validFeatured.length > 0) return validFeatured;
+
+    // Fallback if no movies featured within last 24h: show recent movies from last 48h
+    const recentFallback = movies.filter((m: any) => {
+      const t = getTimestampMs(m.createdAt) || getTimestampMs(m.updatedAt) || 0;
+      return t > 0 && (nowMs - t) < (48 * 3600 * 1000);
+    });
+
+    if (recentFallback.length > 0) return recentFallback.slice(0, 5);
+    return movies.slice(0, 5);
+  }, [movies, nowMs]);
 
   const categoryRef = useRef(category);
   const selectedMovieRef = useRef(selectedMovie);
@@ -790,6 +810,8 @@ export default function HomePage() {
                     <span>{currentFeatured.releaseYear || (currentFeatured as any).year || '2026'}</span>
                     <span>•</span>
                     <span className="text-red-400 truncate">{currentFeatured.genre || 'Action'}</span>
+                    <span>•</span>
+                    <MovieViewsCounter movie={currentFeatured} />
                   </div>
                 </div>
               </div>
@@ -859,6 +881,9 @@ export default function HomePage() {
                           </button>
                         </div>
                       </div>
+                      <div className="px-2 py-1 bg-neutral-950/95 border-t border-white/[0.05] flex items-center justify-end">
+                        <MovieViewsCounter movie={item.movie} />
+                      </div>
                     </div>
                   );
                 })}
@@ -886,6 +911,9 @@ export default function HomePage() {
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                       />
                     </div>
+                    <div className="mt-1 px-0.5 flex items-center justify-end">
+                      <MovieViewsCounter movie={movie} />
+                    </div>
                   </div>
                 ))}
               </div>
@@ -907,6 +935,9 @@ export default function HomePage() {
                         alt={movie.title}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                       />
+                    </div>
+                    <div className="mt-1 px-0.5 flex items-center justify-end">
+                      <MovieViewsCounter movie={movie} />
                     </div>
                   </div>
                 ))}
@@ -930,6 +961,9 @@ export default function HomePage() {
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                       />
                     </div>
+                    <div className="mt-1 px-0.5 flex items-center justify-end">
+                      <MovieViewsCounter movie={movie} />
+                    </div>
                   </div>
                 ))}
               </div>
@@ -947,9 +981,9 @@ export default function HomePage() {
                   <div
                     key={movie.id}
                     onClick={() => handleMovieClick(movie)}
-                    className="flex-shrink-0 w-28 sm:w-32 bg-neutral-900 rounded-xl overflow-hidden border border-neutral-800/90 cursor-pointer group relative shadow-md"
+                    className="flex-shrink-0 w-28 sm:w-32 cursor-pointer group relative"
                   >
-                    <div className="relative aspect-[2/3] w-full bg-neutral-950 overflow-hidden">
+                    <div className="relative aspect-[2/3] w-full bg-neutral-950 rounded-xl overflow-hidden border border-neutral-800/90 shadow-md">
                       <img
                         src={upgradePosterUrl(movie.posterUrl || movie.backdropUrl, 400) || movie.posterUrl}
                         alt={movie.title}
@@ -958,6 +992,9 @@ export default function HomePage() {
                       <span className="absolute top-1.5 right-1.5 bg-black/85 text-white font-black text-[11px] px-2 py-0.5 rounded border border-white/20">
                         #{index + 1}
                       </span>
+                    </div>
+                    <div className="mt-1 px-0.5 flex items-center justify-end">
+                      <MovieViewsCounter movie={movie} />
                     </div>
                   </div>
                 ))}
@@ -977,6 +1014,9 @@ export default function HomePage() {
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
                       <img src={upgradePosterUrl(movie.posterUrl, 400) || movie.posterUrl} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                     </div>
+                    <div className="mt-1 px-0.5 flex items-center justify-end">
+                      <MovieViewsCounter movie={movie} />
+                    </div>
                   </div>
                 ))}
               </div>
@@ -994,6 +1034,9 @@ export default function HomePage() {
                   <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
                       <img src={upgradePosterUrl(movie.posterUrl, 400) || movie.posterUrl} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                    </div>
+                    <div className="mt-1 px-0.5 flex items-center justify-end">
+                      <MovieViewsCounter movie={movie} />
                     </div>
                   </div>
                 ))}
@@ -1013,6 +1056,9 @@ export default function HomePage() {
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
                       <img src={upgradePosterUrl(movie.posterUrl, 400) || movie.posterUrl} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                     </div>
+                    <div className="mt-1 px-0.5 flex items-center justify-end">
+                      <MovieViewsCounter movie={movie} />
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1030,6 +1076,9 @@ export default function HomePage() {
                   <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
                       <img src={upgradePosterUrl(movie.posterUrl, 400) || movie.posterUrl} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                    </div>
+                    <div className="mt-1 px-0.5 flex items-center justify-end">
+                      <MovieViewsCounter movie={movie} />
                     </div>
                   </div>
                 ))}

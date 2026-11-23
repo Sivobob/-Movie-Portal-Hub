@@ -1,6 +1,6 @@
 export const CLOUD_RUN_BACKEND_URL = 'https://movie-portalhub-1012526016635.asia-southeast1.run.app';
-export const LIVE_BACKEND_URL = 'https://ais-dev-z5ikji45t6fgwbl74rpxp2-832989141722.asia-southeast1.run.app';
-export const PRE_BACKEND_URL = 'https://ais-pre-z5ikji45t6fgwbl74rpxp2-832989141722.asia-southeast1.run.app';
+export const LIVE_BACKEND_URL = 'https://ais-dev-ariekzqzaudxer5atxkvkw-832989141722.asia-southeast1.run.app';
+export const PRE_BACKEND_URL = 'https://ais-pre-ariekzqzaudxer5atxkvkw-832989141722.asia-southeast1.run.app';
 export const APP_VERSION = 'v3.5.251';
 
 const ENV_BACKEND_URL = (
@@ -123,7 +123,7 @@ interface HealthCheckResult {
   telegramConfigured: boolean;
 }
 
-async function checkBackendHealth(baseUrl: string, timeoutMs = 2200): Promise<HealthCheckResult> {
+async function checkBackendHealth(baseUrl: string, timeoutMs = 3800): Promise<HealthCheckResult> {
   const target = baseUrl.replace(/\/+$/, '');
   if (!target) return { ok: false, transcodeSupported: false, telegramConfigured: false };
   const healthUrl = `${target}/api/health`;
@@ -218,7 +218,7 @@ export async function probeWorkingBackendUrl(force = false): Promise<string | nu
       checks = await Promise.all(
         remoteCandidates.map(async (candidate) => ({
           candidate,
-          ...(await checkBackendHealth(candidate, 2200)),
+          ...(await checkBackendHealth(candidate, 3800)),
         }))
       );
       // Prefer a remote backend that has BOTH FFmpeg/HLS transcoding AND Telegram credentials configured

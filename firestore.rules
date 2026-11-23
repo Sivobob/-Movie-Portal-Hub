@@ -2,7 +2,7 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Movies collection - Public read for all users, write allowed for Admin Panel operations
+    // Movies collection - Public read for all users, write allowed for Admin Panel operations & view count updates
     match /movies/{movieId} {
       allow read, write: if true;
     }

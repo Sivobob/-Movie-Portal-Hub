@@ -45,6 +45,8 @@ import {
   probeTelegramDurationSec,
 } from '../utils/duration';
 import { isEpisodeNewActive, getEpisodeDisplayLabel } from '../services/movieStorage';
+import { recordMovieViewStart } from '../services/movieViewsService';
+import MovieViewsCounter from './MovieViewsCounter';
 
 interface MovieDetailsModalProps {
   movie: any | null;
@@ -503,10 +505,22 @@ export default function MovieDetailsModal({
     ? `${movie.title} - S${String(currentSeason?.seasonNumber || safeSeasonIndex + 1).padStart(2, '0')}E${getEpisodeDisplayLabel(currentEpisodeObj, primaryEpIdx, true)}: ${currentEpisodeObj.title}`
     : String(movie.title || '').replace(/\s*\(Official Trailer\)/i, '');
 
+  const isIosRuntime = useMemo(() => {
+    if (typeof navigator === 'undefined') return false;
+    const ua = navigator.userAgent || '';
+    return (
+      /iPhone|iPad|iPod/i.test(ua) ||
+      ((navigator.platform === 'MacIntel' || /Macintosh/i.test(ua)) && (navigator.maxTouchPoints || 0) > 1)
+    );
+  }, []);
+
   const inlineVideoRef = useRef<HTMLVideoElement | null>(null);
   const [inlineLoaded, setInlineLoaded] = useState(false);
-  const [inlineMuted, setInlineMuted] = useState(false);
-  const mutedByAutoplayRef = useRef(false);
+  const [inlineMuted, setInlineMuted] = useState(() => isIosRuntime);
+  const [inlineNeedsTapToPlay, setInlineNeedsTapToPlay] = useState(false);
+  const [inlineRetryNonce, setInlineRetryNonce] = useState(0);
+  const [inlineTimedOut, setInlineTimedOut] = useState(false);
+  const mutedByAutoplayRef = useRef(isIosRuntime);
   const inlineLastTapRef = useRef<{ time: number; side: 'left' | 'right' | null }>({ time: 0, side: null });
   const inlineSeekBurstRef = useRef<{ time: number; side: 'left' | 'right' | null; total: number }>({ time: 0, side: null, total: 0 });
   const inlineSingleTapTimerRef = useRef<any>(null);
@@ -540,14 +554,19 @@ export default function MovieDetailsModal({
     let cancelled = false;
     let hlsInstance: Hls | null = null;
     const isHls = primaryDownloadUrl.includes('.m3u8');
-    const ua = typeof navigator !== 'undefined' ? (navigator.userAgent || '') : '';
-    const isIosBrowser =
-      /iPhone|iPad|iPod/i.test(ua) ||
-      ((typeof navigator !== 'undefined' &&
-        (navigator.platform === 'MacIntel' || /Macintosh/i.test(ua)) &&
-        (navigator.maxTouchPoints || 0) > 1));
+    const isIosBrowser = isIosRuntime;
     const isTelegramSource = /t\.me|telegram\.me/i.test(rawStreamUrl);
     let currentInlineStage: 'direct' | 'remux_hls' | 'transcode_hls' = isHls ? 'remux_hls' : 'direct';
+    let knownDurHint = knownMovieDurationSec > 0 ? Math.round(knownMovieDurationSec) : 0;
+    let directStallTimer: any = null;
+    let remuxStallTimer: any = null;
+    let globalStallTimer: any = null;
+    let hasPlayedAnyFrame = false;
+
+    try {
+      videoEl.setAttribute('webkit-playsinline', 'true');
+      videoEl.setAttribute('x-webkit-playsinline', 'true');
+    } catch {}
 
     let savedResumeSec = 0;
     if (inlineEpisodeResumeKey) {
@@ -582,125 +601,304 @@ export default function MovieDetailsModal({
       }
     };
 
-    const loadInlineSrc = (urlToLoad: string) => {
+    let hlsNativeFallbackTried = false;
+
+    const loadInlineSrc = (urlToLoad: string, forceNative = false) => {
       if (hlsInstance) {
         hlsInstance.destroy();
         hlsInstance = null;
       }
+      try {
+        videoEl.removeAttribute('src');
+        videoEl.querySelectorAll('source').forEach((s) => s.remove());
+      } catch {}
+
       const nextIsHls = urlToLoad.includes('.m3u8');
-      if (nextIsHls && !isIosBrowser && Hls.isSupported()) {
+      if (nextIsHls && !forceNative && Hls.isSupported()) {
+        try {
+          (videoEl as any).disableRemotePlayback = true;
+        } catch {}
         hlsInstance = new Hls({
+          enableWorker: !isIosBrowser,
+          lowLatencyMode: false,
+          preferManagedMediaSource: true,
           startPosition: pendingResumeSec !== null ? pendingResumeSec : -1,
+          manifestLoadingTimeOut: 15000,
+          fragLoadingTimeOut: 30000,
+          xhrSetup: (xhr, reqUrl) => {
+            try {
+              if (new URL(reqUrl, window.location.href).origin === window.location.origin) {
+                xhr.withCredentials = true;
+              }
+            } catch {}
+          },
+        });
+        let hlsRecovered = false;
+        hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+          if (cancelled) return;
+          tryApplyInlineResume();
+          startPlayback();
+        });
+        hlsInstance.on(Hls.Events.ERROR, (_ev, data) => {
+          if (!data?.fatal || cancelled) return;
+          if (!hlsRecovered) {
+            hlsRecovered = true;
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+              hlsInstance?.startLoad();
+              return;
+            }
+            if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+              hlsInstance?.recoverMediaError();
+              return;
+            }
+          }
+          if (
+            isIosBrowser &&
+            !hlsNativeFallbackTried &&
+            videoEl.canPlayType('application/vnd.apple.mpegurl')
+          ) {
+            hlsNativeFallbackTried = true;
+            loadInlineSrc(urlToLoad, true);
+            try {
+              videoEl.load();
+            } catch {}
+            startPlayback();
+            return;
+          }
+          if (currentInlineStage === 'remux_hls') {
+            escalateInlineToHls('transcode');
+          } else {
+            setInlineTimedOut(true);
+            setInlineLoaded(true);
+          }
         });
         hlsInstance.loadSource(urlToLoad);
         hlsInstance.attachMedia(videoEl);
-      } else if (videoEl.getAttribute('src') !== urlToLoad) {
-        videoEl.src = urlToLoad;
+      } else {
+        try {
+          (videoEl as any).disableRemotePlayback = false;
+        } catch {}
+        if (videoEl.getAttribute('src') !== urlToLoad) {
+          videoEl.src = urlToLoad;
+        }
       }
     };
 
-    videoEl.muted = false;
-    setInlineMuted(false);
-
-    loadInlineSrc(primaryDownloadUrl);
+    const startMutedOnInit = isIosBrowser;
+    videoEl.muted = startMutedOnInit;
+    videoEl.defaultMuted = startMutedOnInit;
+    mutedByAutoplayRef.current = startMutedOnInit;
+    setInlineMuted(startMutedOnInit);
+    setInlineNeedsTapToPlay(false);
+    setInlineTimedOut(false);
     setInlineLoaded(false);
 
+    let playInFlight = false;
+    let autoplayHardBlocked = false;
+
     const startPlayback = () => {
-      if (cancelled) return;
+      if (cancelled || playInFlight || autoplayHardBlocked) return;
+      if (!videoEl.getAttribute('src') && !hlsInstance) return;
       tryApplyInlineResume();
-      videoEl.play().then(() => {
-        if (cancelled) return;
-        mutedByAutoplayRef.current = false;
-        setInlineMuted(videoEl.muted);
-      }).catch(() => {
-        if (cancelled) return;
-        // Fallback to muted autoplay so video never stops on "Tap to play"
-        videoEl.muted = true;
-        mutedByAutoplayRef.current = true;
-        setInlineMuted(true);
-        videoEl.play().catch(() => {});
-      });
+      playInFlight = true;
+      const attempt = videoEl.play();
+      if (attempt && typeof attempt.then === 'function') {
+        attempt
+          .then(() => {
+            playInFlight = false;
+            if (cancelled) return;
+            setInlineNeedsTapToPlay(false);
+            setInlineMuted(videoEl.muted);
+          })
+          .catch((err: any) => {
+            playInFlight = false;
+            if (cancelled) return;
+            if (err?.name === 'AbortError') return;
+            if (!videoEl.muted) {
+              videoEl.muted = true;
+              videoEl.defaultMuted = true;
+              mutedByAutoplayRef.current = true;
+              setInlineMuted(true);
+              videoEl
+                .play()
+                .then(() => {
+                  if (!cancelled) setInlineNeedsTapToPlay(false);
+                })
+                .catch((mutedErr: any) => {
+                  if (cancelled || mutedErr?.name === 'AbortError') return;
+                  // iOS Low Power Mode or strict autoplay block: reveal Tap-to-Play instead of infinite Loading...
+                  autoplayHardBlocked = true;
+                  setInlineNeedsTapToPlay(true);
+                  setInlineLoaded(true);
+                });
+            } else {
+              autoplayHardBlocked = true;
+              setInlineNeedsTapToPlay(true);
+              setInlineLoaded(true);
+            }
+          });
+      } else {
+        playInFlight = false;
+      }
+    };
+
+    const armStallWatchdogs = () => {
+      if (directStallTimer) clearTimeout(directStallTimer);
+      if (remuxStallTimer) clearTimeout(remuxStallTimer);
+      if (globalStallTimer) clearTimeout(globalStallTimer);
+
+      if (isIosBrowser && currentInlineStage === 'direct') {
+        directStallTimer = setTimeout(() => {
+          if (cancelled || hasPlayedAnyFrame || autoplayHardBlocked) return;
+          if (videoEl.readyState < 3 || videoEl.currentTime < 0.1) {
+            escalateInlineToHls('remux');
+          }
+        }, 6500);
+      }
+      if (isIosBrowser && currentInlineStage === 'remux_hls') {
+        remuxStallTimer = setTimeout(() => {
+          if (cancelled || hasPlayedAnyFrame || autoplayHardBlocked) return;
+          if (videoEl.readyState < 3 || videoEl.currentTime < 0.1) {
+            escalateInlineToHls('transcode');
+          }
+        }, 12000);
+      }
+      if (!globalStallTimer) {
+        globalStallTimer = setTimeout(() => {
+          if (cancelled || hasPlayedAnyFrame || autoplayHardBlocked) return;
+          if (videoEl.readyState < 2) {
+            setInlineTimedOut(true);
+            setInlineLoaded(true);
+          }
+        }, 28000);
+      }
     };
 
     const escalateInlineToHls = (targetMode: 'remux' | 'transcode') => {
-      if (cancelled || !isTelegramSource) return;
+      if (cancelled) return;
+      if (!isTelegramSource && !isIosBrowser) return;
       const nextStage = targetMode === 'transcode' ? 'transcode_hls' : 'remux_hls';
       if (currentInlineStage === nextStage) return;
       if (currentInlineStage === 'transcode_hls') return;
       currentInlineStage = nextStage;
+      const sourceForHls = rawStreamUrl || primaryDownloadUrl;
       const hlsUrl = buildApiUrl(
-        `/api/telegram/hls/playlist.m3u8?url=${encodeURIComponent(rawStreamUrl)}&mode=${targetMode}`
+        `/api/telegram/hls/playlist.m3u8?url=${encodeURIComponent(sourceForHls)}&mode=${targetMode}${
+          knownDurHint > 0 ? `&dur=${knownDurHint}` : ''
+        }`
       );
       setInlineLoaded(false);
+      setInlineTimedOut(false);
       loadInlineSrc(hlsUrl);
-      if (typeof videoEl.load === 'function') {
+      if (!hlsInstance && typeof videoEl.load === 'function') {
         try {
           videoEl.load();
         } catch {}
       }
-      startPlayback();
+      armStallWatchdogs();
+      if (!hlsInstance) {
+        startPlayback();
+      }
     };
 
-    // On iOS Safari/PWA, pre-check codec/container so MKV/HEVC immediately uses Apple HLS instead of stalling
+    // On iOS Safari/PWA, pre-check codec/container BEFORE touching /api/stream and route
+    // Telegram videos directly into Apple HLS / ManagedMediaSource so playback starts reliably with cookies.
     if (isIosBrowser && isTelegramSource && !isHls) {
+      const controller = new AbortController();
+      const abortTimer = setTimeout(() => controller.abort(), 16000);
       fetch(buildApiUrl(`/api/telegram/stream-info?url=${encodeURIComponent(rawStreamUrl)}`), {
         cache: 'no-store',
+        signal: controller.signal,
       })
         .then((res) => (res.ok ? res.json() : null))
+        .catch(() => null)
         .then((info) => {
-          if (cancelled || !info || info.status !== 'ok') return;
-          const vCodec = String(info.videoCodec || '').toLowerCase();
-          const cont = String(info.container || '').toLowerCase();
-          const mode =
-            cont.includes('webm') || vCodec === 'vp8' || vCodec === 'vp9' || info.recommendedMode === 'transcode'
-              ? 'transcode'
-              : info.recommendedMode === 'remux'
-                ? 'remux'
-                : null;
-          if (mode && currentInlineStage === 'direct') {
-            escalateInlineToHls(mode);
+          clearTimeout(abortTimer);
+          if (cancelled) return;
+          if (info && info.status === 'ok') {
+            if (typeof info.durationSec === 'number' && info.durationSec > 0) {
+              knownDurHint = Math.round(info.durationSec);
+            }
+            const vCodec = String(info.videoCodec || '').toLowerCase();
+            const cont = String(info.container || '').toLowerCase();
+            const hlsMode =
+              cont.includes('webm') || vCodec === 'vp8' || vCodec === 'vp9' || info.recommendedMode === 'transcode'
+                ? 'transcode'
+                : 'remux';
+            escalateInlineToHls(hlsMode);
+            return;
           }
-        })
-        .catch(() => {});
+          escalateInlineToHls('remux');
+        });
+    } else {
+      loadInlineSrc(primaryDownloadUrl);
+      armStallWatchdogs();
+      startPlayback();
     }
 
     const handleLoadedMetadata = () => {
       tryApplyInlineResume();
-      startPlayback();
+      if (!autoplayHardBlocked) startPlayback();
     };
 
     const handleCanPlay = () => {
       tryApplyInlineResume();
-      if (videoEl.readyState >= 3 || !videoEl.paused) {
+      if (videoEl.readyState >= 3 || !videoEl.paused || autoplayHardBlocked) {
         setInlineLoaded(true);
       }
-      startPlayback();
+      if (!autoplayHardBlocked && videoEl.paused) startPlayback();
     };
 
     const handlePlaying = () => {
+      hasPlayedAnyFrame = true;
+      autoplayHardBlocked = false;
+      if (directStallTimer) clearTimeout(directStallTimer);
+      if (remuxStallTimer) clearTimeout(remuxStallTimer);
+      if (globalStallTimer) clearTimeout(globalStallTimer);
       tryApplyInlineResume();
+      setInlineNeedsTapToPlay(false);
+      setInlineTimedOut(false);
       setInlineLoaded(true);
       setInlineMuted(videoEl.muted);
+      if (movie) {
+        recordMovieViewStart(movie, userId).catch(() => {});
+      }
     };
 
     const handleWaiting = () => {
-      if (!cancelled) {
+      if (!cancelled && !autoplayHardBlocked && !inlineTimedOut) {
         setInlineLoaded(false);
       }
     };
 
     const handleError = () => {
-      if (cancelled || !isTelegramSource) return;
+      if (cancelled) return;
+      const errCode = videoEl.error?.code;
+      if (errCode === 1) return;
+      if (!isTelegramSource && !isIosBrowser) {
+        setInlineTimedOut(true);
+        setInlineLoaded(true);
+        return;
+      }
       if (currentInlineStage === 'direct') {
         escalateInlineToHls('remux');
       } else if (currentInlineStage === 'remux_hls') {
         escalateInlineToHls('transcode');
+      } else {
+        setInlineTimedOut(true);
+        setInlineLoaded(true);
       }
     };
 
     const handleTimeUpdate = () => {
       if (cancelled) return;
       const cur = videoEl.currentTime || 0;
+      if (cur > 0.15) {
+        hasPlayedAnyFrame = true;
+        setInlineLoaded(true);
+        setInlineNeedsTapToPlay(false);
+        setInlineTimedOut(false);
+      }
       if (cur > 2 && inlineEpisodeResumeKey && pendingResumeSec === null) {
         try {
           localStorage.setItem(`resume_pos_${inlineEpisodeResumeKey}`, String(cur));
@@ -716,10 +914,11 @@ export default function MovieDetailsModal({
     videoEl.addEventListener('error', handleError);
     videoEl.addEventListener('timeupdate', handleTimeUpdate);
 
-    startPlayback();
-
     return () => {
       cancelled = true;
+      if (directStallTimer) clearTimeout(directStallTimer);
+      if (remuxStallTimer) clearTimeout(remuxStallTimer);
+      if (globalStallTimer) clearTimeout(globalStallTimer);
       if (inlineSingleTapTimerRef.current) clearTimeout(inlineSingleTapTimerRef.current);
       if (inlineSeekFeedbackTimerRef.current) clearTimeout(inlineSeekFeedbackTimerRef.current);
       if (hlsInstance) {
@@ -734,16 +933,20 @@ export default function MovieDetailsModal({
         videoEl.removeEventListener('error', handleError);
         videoEl.removeEventListener('timeupdate', handleTimeUpdate);
         videoEl.pause();
-        videoEl.src = '';
+        videoEl.removeAttribute('src');
+        try {
+          videoEl.querySelectorAll('source').forEach((s) => s.remove());
+          videoEl.load();
+        } catch {}
       }
     };
-  }, [primaryDownloadUrl, rawStreamUrl, inlineEpisodeResumeKey]);
+  }, [primaryDownloadUrl, rawStreamUrl, inlineEpisodeResumeKey, isIosRuntime, inlineRetryNonce]);
 
   const modalContent = (
     <div
       className="fixed inset-0 z-[90] w-full h-[100dvh] bg-[#111317] text-white flex flex-col overflow-hidden select-none"
       onPointerDown={() => {
-        if (mutedByAutoplayRef.current && inlineVideoRef.current) {
+        if (mutedByAutoplayRef.current && inlineVideoRef.current && !inlineVideoRef.current.paused) {
           inlineVideoRef.current.muted = false;
           mutedByAutoplayRef.current = false;
           setInlineMuted(false);
@@ -774,10 +977,13 @@ export default function MovieDetailsModal({
               ref={inlineVideoRef}
               playsInline
               autoPlay
+              preload="auto"
               muted={inlineMuted}
               className="w-full h-full object-cover cursor-pointer touch-manipulation"
               onPlaying={() => {
                 setInlineLoaded(true);
+                setInlineNeedsTapToPlay(false);
+                setInlineTimedOut(false);
                 if (inlineVideoRef.current) setInlineMuted(inlineVideoRef.current.muted);
               }}
               onClick={(e) => {
@@ -808,16 +1014,27 @@ export default function MovieDetailsModal({
                 inlineLastTapRef.current = { time: now, side: tapSide };
                 if (inlineSingleTapTimerRef.current) clearTimeout(inlineSingleTapTimerRef.current);
                 inlineSingleTapTimerRef.current = setTimeout(() => {
-                  if (inlineVideoRef.current) {
-                    if (inlineVideoRef.current.muted) {
-                      inlineVideoRef.current.muted = false;
+                  const vid = inlineVideoRef.current;
+                  if (!vid) return;
+                  if (vid.paused) {
+                    if (vid.muted) {
+                      vid.muted = false;
                       mutedByAutoplayRef.current = false;
                       setInlineMuted(false);
-                    } else if (inlineVideoRef.current.paused) {
-                      inlineVideoRef.current.play().catch(() => {});
-                    } else {
-                      inlineVideoRef.current.pause();
                     }
+                    setInlineNeedsTapToPlay(false);
+                    vid.play().catch(() => {
+                      vid.muted = true;
+                      mutedByAutoplayRef.current = true;
+                      setInlineMuted(true);
+                      vid.play().catch(() => {});
+                    });
+                  } else if (vid.muted) {
+                    vid.muted = false;
+                    mutedByAutoplayRef.current = false;
+                    setInlineMuted(false);
+                  } else {
+                    vid.pause();
                   }
                 }, 355);
               }}
@@ -836,14 +1053,63 @@ export default function MovieDetailsModal({
               </div>
             )}
 
-            {/* Clean White Loading Spinner & Text while buffering (no Tap to Play overlay) */}
-            {!inlineLoaded && (
+            {/* Clean White Loading Spinner & Text while buffering */}
+            {!inlineLoaded && !inlineNeedsTapToPlay && !inlineTimedOut && (
               <div
                 className="absolute inset-0 bg-black/85 flex flex-col items-center justify-center gap-2.5 z-20 pointer-events-none"
               >
                 <div className="w-8 h-8 border-2 border-white/20 border-t-white rounded-full animate-spin" />
                 <span className="text-white text-xs font-semibold tracking-wide">Loading...</span>
               </div>
+            )}
+
+            {/* Tap-to-Play fallback when iOS Low Power Mode / Safari blocks autoplay */}
+            {inlineNeedsTapToPlay && !inlineTimedOut && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const vid = inlineVideoRef.current;
+                  if (!vid) return;
+                  vid.muted = false;
+                  mutedByAutoplayRef.current = false;
+                  setInlineMuted(false);
+                  setInlineNeedsTapToPlay(false);
+                  setInlineLoaded(false);
+                  vid.play().catch(() => {
+                    vid.muted = true;
+                    mutedByAutoplayRef.current = true;
+                    setInlineMuted(true);
+                    vid.play().catch(() => {
+                      setInlineNeedsTapToPlay(true);
+                      setInlineLoaded(true);
+                    });
+                  });
+                }}
+                className="absolute inset-0 m-auto w-14 h-14 rounded-full bg-black/75 hover:bg-black/90 border border-white/30 text-white flex items-center justify-center z-25 shadow-2xl backdrop-blur-md cursor-pointer active:scale-90 transition-transform"
+                aria-label="Play video"
+              >
+                <Play size={26} className="fill-white ml-0.5" />
+              </button>
+            )}
+
+            {/* Retry fallback if stream timed out */}
+            {inlineTimedOut && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setInlineTimedOut(false);
+                  setInlineLoaded(false);
+                  setInlineRetryNonce((n) => n + 1);
+                }}
+                className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center gap-2 z-25 cursor-pointer"
+              >
+                <div className="w-11 h-11 rounded-full bg-white/15 border border-white/30 flex items-center justify-center text-white">
+                  <Play size={20} className="fill-white ml-0.5" />
+                </div>
+                <span className="text-white text-xs font-semibold">Tap to Retry</span>
+              </button>
             )}
 
             <div className="absolute inset-0 bg-gradient-to-t from-[#111317] via-transparent to-black/40 pointer-events-none" />
@@ -872,6 +1138,7 @@ export default function MovieDetailsModal({
                   mutedByAutoplayRef.current = false;
                   setInlineMuted(nextMuted);
                   if (inlineVideoRef.current.paused) {
+                    setInlineNeedsTapToPlay(false);
                     inlineVideoRef.current.play().catch(() => {});
                   }
                 }
@@ -906,7 +1173,13 @@ export default function MovieDetailsModal({
                     localStorage.setItem(`resume_pos_${inlineEpisodeResumeKey}`, String(exactSec));
                   } catch {}
                 }
-                inlineVideoRef.current?.pause();
+                if (inlineVideoRef.current) {
+                  inlineVideoRef.current.pause();
+                  inlineVideoRef.current.removeAttribute('src');
+                  try {
+                    inlineVideoRef.current.load();
+                  } catch {}
+                }
                 const enriched = enrichMovieWithResolvedDuration(safeSeasonIndex, primaryEpIdx);
                 onWatchNow(
                   {
@@ -992,6 +1265,9 @@ export default function MovieDetailsModal({
                     <span>{seasonsCountLabel}</span>
                   </>
                 )}
+
+                <span className="text-neutral-600">|</span>
+                <MovieViewsCounter movie={movie} showLabel />
               </div>
             </div>
 
@@ -1301,9 +1577,12 @@ export default function MovieDetailsModal({
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                           />
                         </div>
-                        <p className="text-xs text-neutral-200 font-medium truncate mt-1.5">
-                          {item.title}
-                        </p>
+                        <div className="mt-1.5 flex items-center justify-between gap-1.5">
+                          <p className="text-xs text-neutral-200 font-medium truncate min-w-0 flex-1">
+                            {item.title}
+                          </p>
+                          <MovieViewsCounter movie={item} />
+                        </div>
                       </button>
                     ))}
                   </div>

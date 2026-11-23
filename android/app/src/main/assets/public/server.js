@@ -1,6 +1,761 @@
+var __create = Object.create;
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
+var __commonJS = (cb, mod) => function __require() {
+  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+};
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
+
+// firebase-applet-config.json
+var firebase_applet_config_default;
+var init_firebase_applet_config = __esm({
+  "firebase-applet-config.json"() {
+    firebase_applet_config_default = {
+      projectId: "gen-lang-client-0267042672",
+      appId: "1:751106178257:web:0984f4a9002148ca2d99f0",
+      apiKey: "AIzaSyD99sVptrf0qh_EAlDGi8LicHK6lWYgYfQ",
+      authDomain: "gen-lang-client-0267042672.firebaseapp.com",
+      firestoreDatabaseId: "ai-studio-movieportalhub-664a3e40-85f3-4758-945e-fd031bdc459f",
+      storageBucket: "gen-lang-client-0267042672.firebasestorage.app",
+      messagingSenderId: "751106178257",
+      measurementId: "",
+      oAuthClientId: "751106178257-j39je0h5d4lqvjpaji9sgmgdl85tmksc.apps.googleusercontent.com",
+      recaptchaSiteKey: ""
+    };
+  }
+});
+
+// src/utils/telegramParser.ts
+function parseTelegramUrl(urlStr) {
+  const cleanUrl = (urlStr || "").trim();
+  const result = {
+    isValid: false,
+    isPrivate: false,
+    isInviteLink: false,
+    chatId: "",
+    rawChannelId: "",
+    messageId: "",
+    inviteHash: "",
+    originalUrl: cleanUrl
+  };
+  if (!cleanUrl) return result;
+  const inviteMatch = cleanUrl.match(/(?:https?:\/\/)?(?:www\.)?(?:t\.me|telegram\.me)\/(?:\+|joinchat\/)([a-zA-Z0-9_-]+)/i);
+  if (inviteMatch) {
+    result.isValid = true;
+    result.isPrivate = true;
+    result.isInviteLink = true;
+    result.inviteHash = inviteMatch[1];
+    return result;
+  }
+  const privateMatch = cleanUrl.match(/(?:https?:\/\/)?(?:www\.)?(?:t\.me|telegram\.me)\/c\/(\d+)\/(?:\d+\/)?(\d+)/i);
+  if (privateMatch) {
+    result.isValid = true;
+    result.isPrivate = true;
+    result.rawChannelId = privateMatch[1];
+    result.messageId = privateMatch[2];
+    result.chatId = `-100${privateMatch[1]}`;
+    return result;
+  }
+  const publicMatch = cleanUrl.match(/(?:https?:\/\/)?(?:www\.)?(?:t\.me|telegram\.me)\/(?:s\/)?([a-zA-Z0-9_]{4,})\/(?:\d+\/)?(\d+)/i);
+  if (publicMatch) {
+    const username = publicMatch[1];
+    if (!["joinchat", "share", "addstickers", "contact"].includes(username.toLowerCase())) {
+      result.isValid = true;
+      result.isPrivate = false;
+      result.rawChannelId = username;
+      result.messageId = publicMatch[2];
+      result.chatId = `@${username}`;
+      return result;
+    }
+  }
+  return result;
+}
+var init_telegramParser = __esm({
+  "src/utils/telegramParser.ts"() {
+  }
+});
+
+// src/services/firestoreQuotaService.ts
+function isFirestoreWriteAllowed() {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return true;
+    if (Date.now() < KNOWN_QUOTA_RESET_UTC_MS) {
+      return false;
+    }
+    const until = localStorage.getItem(QUOTA_EXCEEDED_KEY);
+    if (!until) return true;
+    const expiryTime = Number(until);
+    if (isNaN(expiryTime) || Date.now() > expiryTime) {
+      localStorage.removeItem(QUOTA_EXCEEDED_KEY);
+      return true;
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}
+var QUOTA_EXCEEDED_KEY, KNOWN_QUOTA_RESET_UTC_MS;
+var init_firestoreQuotaService = __esm({
+  "src/services/firestoreQuotaService.ts"() {
+    QUOTA_EXCEEDED_KEY = "mp_firestore_write_quota_exceeded_until_v1";
+    KNOWN_QUOTA_RESET_UTC_MS = Date.UTC(2026, 10, 19, 0, 30, 0);
+  }
+});
+
+// src/firebase.ts
+import { initializeApp as initializeApp2 } from "firebase/app";
+import { getAuth as getAuth2 } from "firebase/auth";
+import {
+  doc,
+  getDocFromServer,
+  getFirestore as getFirestore2,
+  initializeFirestore,
+  memoryLocalCache
+} from "firebase/firestore";
+function createFirestoreInstance() {
+  const isBrowser = typeof window !== "undefined";
+  const transportSettings = isBrowser ? { experimentalForceLongPolling: true, ignoreUndefinedProperties: true } : { ignoreUndefinedProperties: true };
+  if (isBrowser) {
+    try {
+      return initializeFirestore(
+        app2,
+        {
+          ...transportSettings,
+          localCache: memoryLocalCache()
+        },
+        databaseId2
+      );
+    } catch {
+      return databaseId2 ? getFirestore2(app2, databaseId2) : getFirestore2(app2);
+    }
+  }
+  try {
+    return initializeFirestore(app2, transportSettings, databaseId2);
+  } catch {
+    return databaseId2 ? getFirestore2(app2, databaseId2) : getFirestore2(app2);
+  }
+}
+async function testConnection() {
+  if (typeof window === "undefined" || !isFirestoreWriteAllowed()) return;
+  try {
+    await getDocFromServer(doc(db, "app_config", "connection"));
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("the client is offline")) {
+      console.warn("Firestore connection check: client is currently offline.");
+    }
+  }
+}
+var app2, config, databaseId2, db, auth;
+var init_firebase = __esm({
+  "src/firebase.ts"() {
+    init_firebase_applet_config();
+    init_firestoreQuotaService();
+    app2 = initializeApp2(firebase_applet_config_default);
+    config = firebase_applet_config_default;
+    databaseId2 = config.firestoreDatabaseId || void 0;
+    if (typeof window !== "undefined" && window.indexedDB && !isFirestoreWriteAllowed()) {
+      try {
+        if (window.indexedDB.databases) {
+          window.indexedDB.databases().then((dbs) => {
+            dbs.forEach((d) => {
+              if (d.name && (d.name.includes("firestore") || d.name.includes("firebase") || d.name.includes("[DEFAULT]"))) {
+                try {
+                  window.indexedDB.deleteDatabase(d.name);
+                } catch {
+                }
+              }
+            });
+          }).catch(() => {
+          });
+        }
+      } catch {
+      }
+    }
+    db = createFirestoreInstance();
+    auth = getAuth2(app2);
+    testConnection();
+  }
+});
+
+// node_modules/@capacitor/core/dist/index.cjs.js
+var require_index_cjs = __commonJS({
+  "node_modules/@capacitor/core/dist/index.cjs.js"(exports) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    var createCapacitorPlatforms = (win) => {
+      const defaultPlatformMap = /* @__PURE__ */ new Map();
+      defaultPlatformMap.set("web", { name: "web" });
+      const capPlatforms = win.CapacitorPlatforms || {
+        currentPlatform: { name: "web" },
+        platforms: defaultPlatformMap
+      };
+      const addPlatform2 = (name, platform) => {
+        capPlatforms.platforms.set(name, platform);
+      };
+      const setPlatform2 = (name) => {
+        if (capPlatforms.platforms.has(name)) {
+          capPlatforms.currentPlatform = capPlatforms.platforms.get(name);
+        }
+      };
+      capPlatforms.addPlatform = addPlatform2;
+      capPlatforms.setPlatform = setPlatform2;
+      return capPlatforms;
+    };
+    var initPlatforms = (win) => win.CapacitorPlatforms = createCapacitorPlatforms(win);
+    var CapacitorPlatforms = /* @__PURE__ */ initPlatforms(typeof globalThis !== "undefined" ? globalThis : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : typeof global !== "undefined" ? global : {});
+    var addPlatform = CapacitorPlatforms.addPlatform;
+    var setPlatform = CapacitorPlatforms.setPlatform;
+    var legacyRegisterWebPlugin = (cap, webPlugin) => {
+      var _a;
+      const config2 = webPlugin.config;
+      const Plugins2 = cap.Plugins;
+      if (!(config2 === null || config2 === void 0 ? void 0 : config2.name)) {
+        throw new Error(`Capacitor WebPlugin is using the deprecated "registerWebPlugin()" function, but without the config. Please use "registerPlugin()" instead to register this web plugin."`);
+      }
+      console.warn(`Capacitor plugin "${config2.name}" is using the deprecated "registerWebPlugin()" function`);
+      if (!Plugins2[config2.name] || ((_a = config2 === null || config2 === void 0 ? void 0 : config2.platforms) === null || _a === void 0 ? void 0 : _a.includes(cap.getPlatform()))) {
+        Plugins2[config2.name] = webPlugin;
+      }
+    };
+    exports.ExceptionCode = void 0;
+    (function(ExceptionCode) {
+      ExceptionCode["Unimplemented"] = "UNIMPLEMENTED";
+      ExceptionCode["Unavailable"] = "UNAVAILABLE";
+    })(exports.ExceptionCode || (exports.ExceptionCode = {}));
+    var CapacitorException = class extends Error {
+      constructor(message, code, data) {
+        super(message);
+        this.message = message;
+        this.code = code;
+        this.data = data;
+      }
+    };
+    var getPlatformId = (win) => {
+      var _a, _b;
+      if (win === null || win === void 0 ? void 0 : win.androidBridge) {
+        return "android";
+      } else if ((_b = (_a = win === null || win === void 0 ? void 0 : win.webkit) === null || _a === void 0 ? void 0 : _a.messageHandlers) === null || _b === void 0 ? void 0 : _b.bridge) {
+        return "ios";
+      } else {
+        return "web";
+      }
+    };
+    var createCapacitor = (win) => {
+      var _a, _b, _c, _d, _e;
+      const capCustomPlatform = win.CapacitorCustomPlatform || null;
+      const cap = win.Capacitor || {};
+      const Plugins2 = cap.Plugins = cap.Plugins || {};
+      const capPlatforms = win.CapacitorPlatforms;
+      const defaultGetPlatform = () => {
+        return capCustomPlatform !== null ? capCustomPlatform.name : getPlatformId(win);
+      };
+      const getPlatform = ((_a = capPlatforms === null || capPlatforms === void 0 ? void 0 : capPlatforms.currentPlatform) === null || _a === void 0 ? void 0 : _a.getPlatform) || defaultGetPlatform;
+      const defaultIsNativePlatform = () => getPlatform() !== "web";
+      const isNativePlatform = ((_b = capPlatforms === null || capPlatforms === void 0 ? void 0 : capPlatforms.currentPlatform) === null || _b === void 0 ? void 0 : _b.isNativePlatform) || defaultIsNativePlatform;
+      const defaultIsPluginAvailable = (pluginName) => {
+        const plugin = registeredPlugins.get(pluginName);
+        if (plugin === null || plugin === void 0 ? void 0 : plugin.platforms.has(getPlatform())) {
+          return true;
+        }
+        if (getPluginHeader(pluginName)) {
+          return true;
+        }
+        return false;
+      };
+      const isPluginAvailable = ((_c = capPlatforms === null || capPlatforms === void 0 ? void 0 : capPlatforms.currentPlatform) === null || _c === void 0 ? void 0 : _c.isPluginAvailable) || defaultIsPluginAvailable;
+      const defaultGetPluginHeader = (pluginName) => {
+        var _a2;
+        return (_a2 = cap.PluginHeaders) === null || _a2 === void 0 ? void 0 : _a2.find((h) => h.name === pluginName);
+      };
+      const getPluginHeader = ((_d = capPlatforms === null || capPlatforms === void 0 ? void 0 : capPlatforms.currentPlatform) === null || _d === void 0 ? void 0 : _d.getPluginHeader) || defaultGetPluginHeader;
+      const handleError = (err) => win.console.error(err);
+      const pluginMethodNoop = (_target, prop, pluginName) => {
+        return Promise.reject(`${pluginName} does not have an implementation of "${prop}".`);
+      };
+      const registeredPlugins = /* @__PURE__ */ new Map();
+      const defaultRegisterPlugin = (pluginName, jsImplementations = {}) => {
+        const registeredPlugin = registeredPlugins.get(pluginName);
+        if (registeredPlugin) {
+          console.warn(`Capacitor plugin "${pluginName}" already registered. Cannot register plugins twice.`);
+          return registeredPlugin.proxy;
+        }
+        const platform = getPlatform();
+        const pluginHeader = getPluginHeader(pluginName);
+        let jsImplementation;
+        const loadPluginImplementation = async () => {
+          if (!jsImplementation && platform in jsImplementations) {
+            jsImplementation = typeof jsImplementations[platform] === "function" ? jsImplementation = await jsImplementations[platform]() : jsImplementation = jsImplementations[platform];
+          } else if (capCustomPlatform !== null && !jsImplementation && "web" in jsImplementations) {
+            jsImplementation = typeof jsImplementations["web"] === "function" ? jsImplementation = await jsImplementations["web"]() : jsImplementation = jsImplementations["web"];
+          }
+          return jsImplementation;
+        };
+        const createPluginMethod = (impl, prop) => {
+          var _a2, _b2;
+          if (pluginHeader) {
+            const methodHeader = pluginHeader === null || pluginHeader === void 0 ? void 0 : pluginHeader.methods.find((m) => prop === m.name);
+            if (methodHeader) {
+              if (methodHeader.rtype === "promise") {
+                return (options) => cap.nativePromise(pluginName, prop.toString(), options);
+              } else {
+                return (options, callback) => cap.nativeCallback(pluginName, prop.toString(), options, callback);
+              }
+            } else if (impl) {
+              return (_a2 = impl[prop]) === null || _a2 === void 0 ? void 0 : _a2.bind(impl);
+            }
+          } else if (impl) {
+            return (_b2 = impl[prop]) === null || _b2 === void 0 ? void 0 : _b2.bind(impl);
+          } else {
+            throw new CapacitorException(`"${pluginName}" plugin is not implemented on ${platform}`, exports.ExceptionCode.Unimplemented);
+          }
+        };
+        const createPluginMethodWrapper = (prop) => {
+          let remove;
+          const wrapper = (...args2) => {
+            const p = loadPluginImplementation().then((impl) => {
+              const fn = createPluginMethod(impl, prop);
+              if (fn) {
+                const p2 = fn(...args2);
+                remove = p2 === null || p2 === void 0 ? void 0 : p2.remove;
+                return p2;
+              } else {
+                throw new CapacitorException(`"${pluginName}.${prop}()" is not implemented on ${platform}`, exports.ExceptionCode.Unimplemented);
+              }
+            });
+            if (prop === "addListener") {
+              p.remove = async () => remove();
+            }
+            return p;
+          };
+          wrapper.toString = () => `${prop.toString()}() { [capacitor code] }`;
+          Object.defineProperty(wrapper, "name", {
+            value: prop,
+            writable: false,
+            configurable: false
+          });
+          return wrapper;
+        };
+        const addListener = createPluginMethodWrapper("addListener");
+        const removeListener = createPluginMethodWrapper("removeListener");
+        const addListenerNative = (eventName, callback) => {
+          const call = addListener({ eventName }, callback);
+          const remove = async () => {
+            const callbackId = await call;
+            removeListener({
+              eventName,
+              callbackId
+            }, callback);
+          };
+          const p = new Promise((resolve) => call.then(() => resolve({ remove })));
+          p.remove = async () => {
+            console.warn(`Using addListener() without 'await' is deprecated.`);
+            await remove();
+          };
+          return p;
+        };
+        const proxy = new Proxy({}, {
+          get(_, prop) {
+            switch (prop) {
+              // https://github.com/facebook/react/issues/20030
+              case "$$typeof":
+                return void 0;
+              case "toJSON":
+                return () => ({});
+              case "addListener":
+                return pluginHeader ? addListenerNative : addListener;
+              case "removeListener":
+                return removeListener;
+              default:
+                return createPluginMethodWrapper(prop);
+            }
+          }
+        });
+        Plugins2[pluginName] = proxy;
+        registeredPlugins.set(pluginName, {
+          name: pluginName,
+          proxy,
+          platforms: /* @__PURE__ */ new Set([
+            ...Object.keys(jsImplementations),
+            ...pluginHeader ? [platform] : []
+          ])
+        });
+        return proxy;
+      };
+      const registerPlugin2 = ((_e = capPlatforms === null || capPlatforms === void 0 ? void 0 : capPlatforms.currentPlatform) === null || _e === void 0 ? void 0 : _e.registerPlugin) || defaultRegisterPlugin;
+      if (!cap.convertFileSrc) {
+        cap.convertFileSrc = (filePath) => filePath;
+      }
+      cap.getPlatform = getPlatform;
+      cap.handleError = handleError;
+      cap.isNativePlatform = isNativePlatform;
+      cap.isPluginAvailable = isPluginAvailable;
+      cap.pluginMethodNoop = pluginMethodNoop;
+      cap.registerPlugin = registerPlugin2;
+      cap.Exception = CapacitorException;
+      cap.DEBUG = !!cap.DEBUG;
+      cap.isLoggingEnabled = !!cap.isLoggingEnabled;
+      cap.platform = cap.getPlatform();
+      cap.isNative = cap.isNativePlatform();
+      return cap;
+    };
+    var initCapacitorGlobal = (win) => win.Capacitor = createCapacitor(win);
+    var Capacitor2 = /* @__PURE__ */ initCapacitorGlobal(typeof globalThis !== "undefined" ? globalThis : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : typeof global !== "undefined" ? global : {});
+    var registerPlugin = Capacitor2.registerPlugin;
+    var Plugins = Capacitor2.Plugins;
+    var registerWebPlugin = (plugin) => legacyRegisterWebPlugin(Capacitor2, plugin);
+    var WebPlugin = class {
+      constructor(config2) {
+        this.listeners = {};
+        this.retainedEventArguments = {};
+        this.windowListeners = {};
+        if (config2) {
+          console.warn(`Capacitor WebPlugin "${config2.name}" config object was deprecated in v3 and will be removed in v4.`);
+          this.config = config2;
+        }
+      }
+      addListener(eventName, listenerFunc) {
+        let firstListener = false;
+        const listeners = this.listeners[eventName];
+        if (!listeners) {
+          this.listeners[eventName] = [];
+          firstListener = true;
+        }
+        this.listeners[eventName].push(listenerFunc);
+        const windowListener = this.windowListeners[eventName];
+        if (windowListener && !windowListener.registered) {
+          this.addWindowListener(windowListener);
+        }
+        if (firstListener) {
+          this.sendRetainedArgumentsForEvent(eventName);
+        }
+        const remove = async () => this.removeListener(eventName, listenerFunc);
+        const p = Promise.resolve({ remove });
+        return p;
+      }
+      async removeAllListeners() {
+        this.listeners = {};
+        for (const listener in this.windowListeners) {
+          this.removeWindowListener(this.windowListeners[listener]);
+        }
+        this.windowListeners = {};
+      }
+      notifyListeners(eventName, data, retainUntilConsumed) {
+        const listeners = this.listeners[eventName];
+        if (!listeners) {
+          if (retainUntilConsumed) {
+            let args2 = this.retainedEventArguments[eventName];
+            if (!args2) {
+              args2 = [];
+            }
+            args2.push(data);
+            this.retainedEventArguments[eventName] = args2;
+          }
+          return;
+        }
+        listeners.forEach((listener) => listener(data));
+      }
+      hasListeners(eventName) {
+        return !!this.listeners[eventName].length;
+      }
+      registerWindowListener(windowEventName, pluginEventName) {
+        this.windowListeners[pluginEventName] = {
+          registered: false,
+          windowEventName,
+          pluginEventName,
+          handler: (event) => {
+            this.notifyListeners(pluginEventName, event);
+          }
+        };
+      }
+      unimplemented(msg = "not implemented") {
+        return new Capacitor2.Exception(msg, exports.ExceptionCode.Unimplemented);
+      }
+      unavailable(msg = "not available") {
+        return new Capacitor2.Exception(msg, exports.ExceptionCode.Unavailable);
+      }
+      async removeListener(eventName, listenerFunc) {
+        const listeners = this.listeners[eventName];
+        if (!listeners) {
+          return;
+        }
+        const index = listeners.indexOf(listenerFunc);
+        this.listeners[eventName].splice(index, 1);
+        if (!this.listeners[eventName].length) {
+          this.removeWindowListener(this.windowListeners[eventName]);
+        }
+      }
+      addWindowListener(handle) {
+        window.addEventListener(handle.windowEventName, handle.handler);
+        handle.registered = true;
+      }
+      removeWindowListener(handle) {
+        if (!handle) {
+          return;
+        }
+        window.removeEventListener(handle.windowEventName, handle.handler);
+        handle.registered = false;
+      }
+      sendRetainedArgumentsForEvent(eventName) {
+        const args2 = this.retainedEventArguments[eventName];
+        if (!args2) {
+          return;
+        }
+        delete this.retainedEventArguments[eventName];
+        args2.forEach((arg) => {
+          this.notifyListeners(eventName, arg);
+        });
+      }
+    };
+    var WebView = /* @__PURE__ */ registerPlugin("WebView");
+    var encode = (str) => encodeURIComponent(str).replace(/%(2[346B]|5E|60|7C)/g, decodeURIComponent).replace(/[()]/g, escape);
+    var decode = (str) => str.replace(/(%[\dA-F]{2})+/gi, decodeURIComponent);
+    var CapacitorCookiesPluginWeb = class extends WebPlugin {
+      async getCookies() {
+        const cookies = document.cookie;
+        const cookieMap = {};
+        cookies.split(";").forEach((cookie) => {
+          if (cookie.length <= 0)
+            return;
+          let [key, value] = cookie.replace(/=/, "CAP_COOKIE").split("CAP_COOKIE");
+          key = decode(key).trim();
+          value = decode(value).trim();
+          cookieMap[key] = value;
+        });
+        return cookieMap;
+      }
+      async setCookie(options) {
+        try {
+          const encodedKey = encode(options.key);
+          const encodedValue = encode(options.value);
+          const expires = `; expires=${(options.expires || "").replace("expires=", "")}`;
+          const path7 = (options.path || "/").replace("path=", "");
+          const domain = options.url != null && options.url.length > 0 ? `domain=${options.url}` : "";
+          document.cookie = `${encodedKey}=${encodedValue || ""}${expires}; path=${path7}; ${domain};`;
+        } catch (error) {
+          return Promise.reject(error);
+        }
+      }
+      async deleteCookie(options) {
+        try {
+          document.cookie = `${options.key}=; Max-Age=0`;
+        } catch (error) {
+          return Promise.reject(error);
+        }
+      }
+      async clearCookies() {
+        try {
+          const cookies = document.cookie.split(";") || [];
+          for (const cookie of cookies) {
+            document.cookie = cookie.replace(/^ +/, "").replace(/=.*/, `=;expires=${(/* @__PURE__ */ new Date()).toUTCString()};path=/`);
+          }
+        } catch (error) {
+          return Promise.reject(error);
+        }
+      }
+      async clearAllCookies() {
+        try {
+          await this.clearCookies();
+        } catch (error) {
+          return Promise.reject(error);
+        }
+      }
+    };
+    var CapacitorCookies = registerPlugin("CapacitorCookies", {
+      web: () => new CapacitorCookiesPluginWeb()
+    });
+    var readBlobAsBase64 = async (blob) => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64String = reader.result;
+        resolve(base64String.indexOf(",") >= 0 ? base64String.split(",")[1] : base64String);
+      };
+      reader.onerror = (error) => reject(error);
+      reader.readAsDataURL(blob);
+    });
+    var normalizeHttpHeaders = (headers = {}) => {
+      const originalKeys = Object.keys(headers);
+      const loweredKeys = Object.keys(headers).map((k) => k.toLocaleLowerCase());
+      const normalized = loweredKeys.reduce((acc, key, index) => {
+        acc[key] = headers[originalKeys[index]];
+        return acc;
+      }, {});
+      return normalized;
+    };
+    var buildUrlParams = (params, shouldEncode = true) => {
+      if (!params)
+        return null;
+      const output = Object.entries(params).reduce((accumulator, entry) => {
+        const [key, value] = entry;
+        let encodedValue;
+        let item;
+        if (Array.isArray(value)) {
+          item = "";
+          value.forEach((str) => {
+            encodedValue = shouldEncode ? encodeURIComponent(str) : str;
+            item += `${key}=${encodedValue}&`;
+          });
+          item.slice(0, -1);
+        } else {
+          encodedValue = shouldEncode ? encodeURIComponent(value) : value;
+          item = `${key}=${encodedValue}`;
+        }
+        return `${accumulator}&${item}`;
+      }, "");
+      return output.substr(1);
+    };
+    var buildRequestInit = (options, extra = {}) => {
+      const output = Object.assign({ method: options.method || "GET", headers: options.headers }, extra);
+      const headers = normalizeHttpHeaders(options.headers);
+      const type = headers["content-type"] || "";
+      if (typeof options.data === "string") {
+        output.body = options.data;
+      } else if (type.includes("application/x-www-form-urlencoded")) {
+        const params = new URLSearchParams();
+        for (const [key, value] of Object.entries(options.data || {})) {
+          params.set(key, value);
+        }
+        output.body = params.toString();
+      } else if (type.includes("multipart/form-data") || options.data instanceof FormData) {
+        const form = new FormData();
+        if (options.data instanceof FormData) {
+          options.data.forEach((value, key) => {
+            form.append(key, value);
+          });
+        } else {
+          for (const key of Object.keys(options.data)) {
+            form.append(key, options.data[key]);
+          }
+        }
+        output.body = form;
+        const headers2 = new Headers(output.headers);
+        headers2.delete("content-type");
+        output.headers = headers2;
+      } else if (type.includes("application/json") || typeof options.data === "object") {
+        output.body = JSON.stringify(options.data);
+      }
+      return output;
+    };
+    var CapacitorHttpPluginWeb = class extends WebPlugin {
+      /**
+       * Perform an Http request given a set of options
+       * @param options Options to build the HTTP request
+       */
+      async request(options) {
+        const requestInit = buildRequestInit(options, options.webFetchExtra);
+        const urlParams = buildUrlParams(options.params, options.shouldEncodeUrlParams);
+        const url = urlParams ? `${options.url}?${urlParams}` : options.url;
+        const response = await fetch(url, requestInit);
+        const contentType = response.headers.get("content-type") || "";
+        let { responseType = "text" } = response.ok ? options : {};
+        if (contentType.includes("application/json")) {
+          responseType = "json";
+        }
+        let data;
+        let blob;
+        switch (responseType) {
+          case "arraybuffer":
+          case "blob":
+            blob = await response.blob();
+            data = await readBlobAsBase64(blob);
+            break;
+          case "json":
+            data = await response.json();
+            break;
+          case "document":
+          case "text":
+          default:
+            data = await response.text();
+        }
+        const headers = {};
+        response.headers.forEach((value, key) => {
+          headers[key] = value;
+        });
+        return {
+          data,
+          headers,
+          status: response.status,
+          url: response.url
+        };
+      }
+      /**
+       * Perform an Http GET request given a set of options
+       * @param options Options to build the HTTP request
+       */
+      async get(options) {
+        return this.request(Object.assign(Object.assign({}, options), { method: "GET" }));
+      }
+      /**
+       * Perform an Http POST request given a set of options
+       * @param options Options to build the HTTP request
+       */
+      async post(options) {
+        return this.request(Object.assign(Object.assign({}, options), { method: "POST" }));
+      }
+      /**
+       * Perform an Http PUT request given a set of options
+       * @param options Options to build the HTTP request
+       */
+      async put(options) {
+        return this.request(Object.assign(Object.assign({}, options), { method: "PUT" }));
+      }
+      /**
+       * Perform an Http PATCH request given a set of options
+       * @param options Options to build the HTTP request
+       */
+      async patch(options) {
+        return this.request(Object.assign(Object.assign({}, options), { method: "PATCH" }));
+      }
+      /**
+       * Perform an Http DELETE request given a set of options
+       * @param options Options to build the HTTP request
+       */
+      async delete(options) {
+        return this.request(Object.assign(Object.assign({}, options), { method: "DELETE" }));
+      }
+    };
+    var CapacitorHttp = registerPlugin("CapacitorHttp", {
+      web: () => new CapacitorHttpPluginWeb()
+    });
+    exports.Capacitor = Capacitor2;
+    exports.CapacitorCookies = CapacitorCookies;
+    exports.CapacitorException = CapacitorException;
+    exports.CapacitorHttp = CapacitorHttp;
+    exports.CapacitorPlatforms = CapacitorPlatforms;
+    exports.Plugins = Plugins;
+    exports.WebPlugin = WebPlugin;
+    exports.WebView = WebView;
+    exports.addPlatform = addPlatform;
+    exports.buildRequestInit = buildRequestInit;
+    exports.registerPlugin = registerPlugin;
+    exports.registerWebPlugin = registerWebPlugin;
+    exports.setPlatform = setPlatform;
+  }
+});
+
 // server.ts
-import fs5 from "fs";
-import path5 from "path";
+import fs6 from "fs";
+import path6 from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import express3 from "express";
@@ -10,25 +765,10 @@ import { spawnSync } from "child_process";
 import express from "express";
 
 // src/server/firebaseAdmin.ts
+init_firebase_applet_config();
 import { initializeApp, getApps, getApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
-
-// firebase-applet-config.json
-var firebase_applet_config_default = {
-  projectId: "gen-lang-client-0267042672",
-  appId: "1:751106178257:web:0984f4a9002148ca2d99f0",
-  apiKey: "AIzaSyD99sVptrf0qh_EAlDGi8LicHK6lWYgYfQ",
-  authDomain: "gen-lang-client-0267042672.firebaseapp.com",
-  firestoreDatabaseId: "ai-studio-movieportalhub-664a3e40-85f3-4758-945e-fd031bdc459f",
-  storageBucket: "gen-lang-client-0267042672.firebasestorage.app",
-  messagingSenderId: "751106178257",
-  measurementId: "",
-  oAuthClientId: "751106178257-j39je0h5d4lqvjpaji9sgmgdl85tmksc.apps.googleusercontent.com",
-  recaptchaSiteKey: ""
-};
-
-// src/server/firebaseAdmin.ts
 var projectId = process.env.FIREBASE_PROJECT_ID || firebase_applet_config_default.projectId || "movie-portal-hub-apk";
 var app = getApps().length === 0 ? initializeApp({ projectId }) : getApp();
 var databaseId = firebase_applet_config_default.firestoreDatabaseId;
@@ -454,13 +1194,12 @@ async function fetchImdbSuggestions(query) {
     return [];
   }
 }
-router.get("/search", async (req, res) => {
-  const rawQuery = req.query.q || "";
-  const query = rawQuery.trim();
+async function searchMetadataInternal(rawQuery) {
+  const query = (rawQuery || "").trim();
   if (!query) {
-    return res.status(400).json({ error: "Search query required" });
+    return { status: "not_found", provider: "IMDb Live Search", results: [], message: "Search query required", httpStatus: 400 };
   }
-  const { key, isCustom } = getApiKey();
+  const { key } = getApiKey();
   const imdbIdMatch = query.match(/(tt\d+)/i);
   if (imdbIdMatch) {
     const imdbId = imdbIdMatch[1].toLowerCase();
@@ -477,7 +1216,7 @@ router.get("/search", async (req, res) => {
           imdbHit?.posterUrl || (data.Poster && data.Poster !== "N/A" ? data.Poster : ""),
           1080
         );
-        return res.json({
+        return {
           status: "ok",
           provider: "IMDb / OMDb API",
           results: [{
@@ -488,25 +1227,25 @@ router.get("/search", async (req, res) => {
             posterUrl: bestPoster,
             cast: data.Actors && data.Actors !== "N/A" ? data.Actors : imdbHit?.cast || ""
           }]
-        });
+        };
       }
       if (imdbHit) {
-        return res.json({
+        return {
           status: "ok",
           provider: "IMDb Live Search",
           results: [imdbHit]
-        });
+        };
       }
       if (data?.Error === "Invalid API key!") {
-        return res.status(401).json({ status: "invalid_key", results: [], message: "Invalid API key." });
+        return { status: "invalid_key", provider: "OMDb API", results: [], message: "Invalid API key.", httpStatus: 401 };
       }
       if (data?.Error === "Request limit reached!") {
-        return res.status(429).json({ status: "limit_reached", results: [], message: "Daily request limit reached." });
+        return { status: "limit_reached", provider: "OMDb API", results: [], message: "Daily request limit reached.", httpStatus: 429 };
       }
-      return res.json({ status: "not_found", results: [], message: data?.Error || `No title found with IMDb ID ${imdbId}.` });
+      return { status: "not_found", provider: "IMDb Live Search", results: [], message: data?.Error || `No title found with IMDb ID ${imdbId}.` };
     } catch (err) {
       console.error("[metadataRouter] Direct IMDb ID lookup error:", err);
-      return res.status(503).json({ status: "network_error", results: [], message: "Network error connecting to metadata service." });
+      return { status: "network_error", provider: "IMDb Live Search", results: [], message: "Network error connecting to metadata service.", httpStatus: 503 };
     }
   }
   const imdbPromise = fetchImdbSuggestions(query);
@@ -549,60 +1288,61 @@ router.get("/search", async (req, res) => {
     }
     const finalResults = mergeImdbAndWikiResults(query, combinedResults, wikiResults);
     if (finalResults.length > 0) {
-      return res.json({
+      return {
         status: "ok",
         provider: "IMDb Live Search",
-        totalResults: finalResults.length,
         results: finalResults
-      });
+      };
     }
     if (year && cleanTitle) {
       const retryResults = await fetchImdbSuggestions(cleanTitle);
       if (retryResults.length > 0) {
-        return res.json({
+        return {
           status: "ok",
           provider: "IMDb Live Search",
-          totalResults: retryResults.length,
           results: retryResults
-        });
+        };
       }
     }
-    return res.json({
+    return {
       status: "not_found",
+      provider: "IMDb Live Search",
       results: [],
       message: `No matching movies, series or anime found on IMDb for "${query}".`
-    });
+    };
   } catch (err) {
     console.error("[metadataRouter] Search error:", err);
-    return res.status(503).json({
+    return {
       status: "network_error",
+      provider: "IMDb Live Search",
       results: [],
-      message: "Failed to communicate with metadata service. Please check your network connection."
-    });
+      message: "Failed to communicate with metadata service. Please check your network connection.",
+      httpStatus: 503
+    };
   }
-});
-router.get("/detail", async (req, res) => {
-  let id = req.query.id || "";
-  let titleParam = req.query.title || "";
+}
+async function fetchMetadataDetailInternal(rawId, rawTitle) {
+  let id = (rawId || "").trim();
+  const titleParam = (rawTitle || "").trim();
   const { key, isCustom } = getApiKey();
   if (id) {
     const wikiMatch = id.match(/(wiki-\d+)/i);
     if (wikiMatch) {
       const wikiDetail = await fetchWikipediaFilmDetail(wikiMatch[1]);
       if (wikiDetail) {
-        return res.json({
+        return {
           status: "ok",
           provider: "Wikipedia Cinema Index",
           data: wikiDetail
-        });
+        };
       }
-      return res.status(404).json({ error: "Metadata details not found." });
+      return { status: "not_found", error: "Metadata details not found.", httpStatus: 404 };
     }
     const match = id.match(/(tt\d+)/i);
     if (match) id = match[1].toLowerCase();
   }
   if (!id && !titleParam) {
-    return res.status(400).json({ error: "Movie IMDb ID or title parameter is required" });
+    return { status: "error", error: "Movie IMDb ID or title parameter is required", httpStatus: 400 };
   }
   try {
     const url = id ? `https://www.omdbapi.com/?apikey=${encodeURIComponent(key)}&i=${encodeURIComponent(id)}&plot=full` : `https://www.omdbapi.com/?apikey=${encodeURIComponent(key)}&t=${encodeURIComponent(titleParam)}&plot=full`;
@@ -626,7 +1366,7 @@ router.get("/detail", async (req, res) => {
       const rawPoster = imdbHit?.posterUrl || (data.Poster && data.Poster !== "N/A" ? data.Poster : "");
       const posterUrl = upgradePosterUrl(rawPoster, 1080);
       const backdropUrl = upgradePosterUrl(rawPoster, 1280) || posterUrl;
-      return res.json({
+      return {
         status: "ok",
         provider: isCustom ? "OMDb (Custom Key)" : "OMDb API",
         data: {
@@ -645,12 +1385,12 @@ router.get("/detail", async (req, res) => {
           rating: parseFloat(data.imdbRating) || 8,
           suggestedCategory: cat
         }
-      });
+      };
     }
     if (imdbHit) {
       const posterUrl = upgradePosterUrl(imdbHit.posterUrl, 1080);
       const backdropUrl = upgradePosterUrl(imdbHit.posterUrl, 1280) || posterUrl;
-      return res.json({
+      return {
         status: "ok",
         provider: "IMDb Live Engine",
         data: {
@@ -669,72 +1409,65 @@ router.get("/detail", async (req, res) => {
           rating: 8,
           suggestedCategory: imdbHit.type === "series" ? "Web Series" : "Bollywood Movie"
         }
-      });
+      };
     }
     if (data?.Error === "Invalid API key!") {
-      return res.status(401).json({ error: "Invalid OMDb API key." });
+      return { status: "invalid_key", error: "Invalid OMDb API key.", httpStatus: 401 };
     }
     if (data?.Error === "Request limit reached!") {
-      return res.status(429).json({ error: "OMDb API daily request limit reached." });
+      return { status: "limit_reached", error: "OMDb API daily request limit reached.", httpStatus: 429 };
     }
-    return res.status(404).json({ error: data?.Error || "Metadata details not found." });
+    return { status: "not_found", error: data?.Error || "Metadata details not found.", httpStatus: 404 };
   } catch (err) {
     console.error("[metadataRouter] Detail fetch error:", err);
-    return res.status(503).json({ error: "Failed to communicate with metadata service." });
+    return { status: "error", error: "Failed to communicate with metadata service.", httpStatus: 503 };
   }
+}
+router.get("/search", async (req, res) => {
+  const rawQuery = req.query.q || "";
+  if (!rawQuery.trim()) {
+    return res.status(400).json({ error: "Search query required" });
+  }
+  const result = await searchMetadataInternal(rawQuery);
+  if (result.httpStatus && result.httpStatus >= 400) {
+    return res.status(result.httpStatus).json({
+      status: result.status,
+      results: result.results,
+      message: result.message
+    });
+  }
+  return res.json({
+    status: result.status,
+    provider: result.provider,
+    ...result.results.length > 0 ? { totalResults: result.results.length } : {},
+    results: result.results,
+    ...result.message ? { message: result.message } : {}
+  });
+});
+router.get("/detail", async (req, res) => {
+  const id = req.query.id || "";
+  const titleParam = req.query.title || "";
+  const result = await fetchMetadataDetailInternal(id, titleParam);
+  if (result.status === "ok" && result.data) {
+    return res.json({
+      status: "ok",
+      provider: result.provider,
+      data: result.data
+    });
+  }
+  return res.status(result.httpStatus || 404).json({ error: result.error || "Metadata details not found." });
 });
 var metadataRouter_default = router;
 
 // src/server/telegramRouter.ts
+init_telegramParser();
 import { Router } from "express";
 import { spawn as spawn2 } from "child_process";
+import fs3 from "fs";
+import os2 from "os";
+import path3 from "path";
+import crypto from "crypto";
 import { Api as Api3 } from "telegram";
-
-// src/utils/telegramParser.ts
-function parseTelegramUrl(urlStr) {
-  const cleanUrl = (urlStr || "").trim();
-  const result = {
-    isValid: false,
-    isPrivate: false,
-    isInviteLink: false,
-    chatId: "",
-    rawChannelId: "",
-    messageId: "",
-    inviteHash: "",
-    originalUrl: cleanUrl
-  };
-  if (!cleanUrl) return result;
-  const inviteMatch = cleanUrl.match(/(?:https?:\/\/)?(?:www\.)?(?:t\.me|telegram\.me)\/(?:\+|joinchat\/)([a-zA-Z0-9_-]+)/i);
-  if (inviteMatch) {
-    result.isValid = true;
-    result.isPrivate = true;
-    result.isInviteLink = true;
-    result.inviteHash = inviteMatch[1];
-    return result;
-  }
-  const privateMatch = cleanUrl.match(/(?:https?:\/\/)?(?:www\.)?(?:t\.me|telegram\.me)\/c\/(\d+)\/(?:\d+\/)?(\d+)/i);
-  if (privateMatch) {
-    result.isValid = true;
-    result.isPrivate = true;
-    result.rawChannelId = privateMatch[1];
-    result.messageId = privateMatch[2];
-    result.chatId = `-100${privateMatch[1]}`;
-    return result;
-  }
-  const publicMatch = cleanUrl.match(/(?:https?:\/\/)?(?:www\.)?(?:t\.me|telegram\.me)\/(?:s\/)?([a-zA-Z0-9_]{4,})\/(?:\d+\/)?(\d+)/i);
-  if (publicMatch) {
-    const username = publicMatch[1];
-    if (!["joinchat", "share", "addstickers", "contact"].includes(username.toLowerCase())) {
-      result.isValid = true;
-      result.isPrivate = false;
-      result.rawChannelId = username;
-      result.messageId = publicMatch[2];
-      result.chatId = `@${username}`;
-      return result;
-    }
-  }
-  return result;
-}
 
 // src/utils/telegramClient.ts
 import fs2 from "fs";
@@ -1059,12 +1792,45 @@ async function resetTelegramClient(options) {
   });
   return resettingPromise;
 }
+function isTelegramConnected() {
+  return Boolean(client && client.connected);
+}
+var serverKeepaliveStarted = false;
+function ensureServerKeepalive(activeClient) {
+  if (serverKeepaliveStarted) return;
+  serverKeepaliveStarted = true;
+  const timer = setInterval(async () => {
+    const c = client || activeClient;
+    if (!c) return;
+    try {
+      if (!c.connected) {
+        await c.connect().catch(() => {
+        });
+        return;
+      }
+      const bigInt3 = (await import("big-integer")).default;
+      const { Api: Api4 } = await import("telegram");
+      await Promise.race([
+        c.invoke(new Api4.Ping({ pingId: bigInt3(Date.now()) })),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("SERVER_PING_TIMEOUT")), 8e3))
+      ]);
+    } catch {
+    }
+  }, 4e4);
+  timer.unref?.();
+}
 async function getTelegramClient() {
   if (client) {
-    if (client.connected) return client;
+    if (client.connected) {
+      ensureServerKeepalive(client);
+      return client;
+    }
     try {
       await client.connect();
-      if (client.connected) return client;
+      if (client.connected) {
+        ensureServerKeepalive(client);
+        return client;
+      }
     } catch (e) {
       console.warn("[TelegramClient] Reconnect attempt failed, re-initializing...", e);
       client = null;
@@ -1101,6 +1867,7 @@ async function getTelegramClient() {
       }
     }
     client = newClient;
+    ensureServerKeepalive(newClient);
     initializeChannelCache(newClient).catch((err) => {
       console.warn("[TelegramClient] Channel cache warmup note:", err?.message || err);
     });
@@ -1378,17 +2145,17 @@ async function getDcSenderSafe(client2, dcId) {
   dcSenderPromises.set(key, p);
   return p;
 }
-async function fetchTelegramBlockRaw(client2, doc2, blockIndex) {
-  const docIdStr = doc2.id.toString();
+async function fetchTelegramBlockRaw(client2, doc3, blockIndex) {
+  const docIdStr = doc3.id.toString();
   const offsetBytes = blockIndex * BLOCK_SIZE;
   const location = new Api2.InputDocumentFileLocation({
-    id: doc2.id,
-    accessHash: doc2.accessHash,
-    fileReference: doc2.fileReference,
+    id: doc3.id,
+    accessHash: doc3.accessHash,
+    fileReference: doc3.fileReference,
     thumbSize: ""
   });
   let activeClient = client2;
-  let dcId = resolvedDcMap.get(docIdStr) ?? doc2.dcId;
+  let dcId = resolvedDcMap.get(docIdStr) ?? doc3.dcId;
   let sender = await getDcSenderSafe(activeClient, dcId);
   const request = new Api2.upload.GetFile({
     location,
@@ -1468,8 +2235,8 @@ async function fetchTelegramBlockRaw(client2, doc2, blockIndex) {
   }
   throw new Error("Failed to fetch Telegram block after retries");
 }
-function fetchBlock(client2, doc2, blockIndex) {
-  const key = `${doc2.id.toString()}:${blockIndex}`;
+function fetchBlock(client2, doc3, blockIndex) {
+  const key = `${doc3.id.toString()}:${blockIndex}`;
   const cached = getCachedBlock(key);
   if (cached) {
     return Promise.resolve(cached);
@@ -1478,7 +2245,7 @@ function fetchBlock(client2, doc2, blockIndex) {
   if (inflight) {
     return inflight;
   }
-  const promise = fetchTelegramBlockRaw(client2, doc2, blockIndex).then((buf) => {
+  const promise = fetchTelegramBlockRaw(client2, doc3, blockIndex).then((buf) => {
     touchCache(key, buf);
     return buf;
   }).finally(() => {
@@ -1487,7 +2254,7 @@ function fetchBlock(client2, doc2, blockIndex) {
   inflightBlocks.set(key, promise);
   return promise;
 }
-async function streamTelegramRange(res, client2, doc2, start, endPos, concurrency, isClosedFn, onFileRefExpired) {
+async function streamTelegramRange(res, client2, doc3, start, endPos, concurrency, isClosedFn, onFileRefExpired) {
   const firstBlock = Math.floor(start / BLOCK_SIZE);
   const lastBlock = Math.floor(endPos / BLOCK_SIZE);
   const effectiveConcurrency = Math.max(1, Math.min(concurrency, 3));
@@ -1498,7 +2265,7 @@ async function streamTelegramRange(res, client2, doc2, start, endPos, concurrenc
     while (nextToQueue <= cap && !isClosedFn() && !res.writableEnded) {
       const idx = nextToQueue++;
       if (!blockPromises.has(idx)) {
-        const p = fetchBlock(client2, doc2, idx);
+        const p = fetchBlock(client2, doc3, idx);
         p.catch(() => {
         });
         blockPromises.set(idx, p);
@@ -1509,7 +2276,7 @@ async function streamTelegramRange(res, client2, doc2, start, endPos, concurrenc
   try {
     for (let blockIdx = firstBlock; blockIdx <= lastBlock; blockIdx++) {
       if (isClosedFn() || res.writableEnded) break;
-      const p = blockPromises.get(blockIdx) || fetchBlock(client2, doc2, blockIdx);
+      const p = blockPromises.get(blockIdx) || fetchBlock(client2, doc3, blockIdx);
       const blockBuf = await p;
       blockPromises.delete(blockIdx);
       if (isClosedFn() || res.writableEnded) break;
@@ -1545,11 +2312,12 @@ async function streamTelegramRange(res, client2, doc2, start, endPos, concurrenc
       queueAhead(blockIdx + effectiveConcurrency);
     }
   } catch (err) {
-    if (String(err?.message || "").includes("FILE_REFERENCE")) {
+    const errTxt = String(err?.errorMessage || err?.message || "");
+    if (errTxt.includes("FILE_REFERENCE")) {
       onFileRefExpired?.();
     }
     if (!isClosedFn()) {
-      console.error("[StreamEngine] Range transfer error:", err?.message || err);
+      console.error("[StreamEngine] Range transfer error:", errTxt || err);
     }
   } finally {
     blockPromises.clear();
@@ -1673,13 +2441,18 @@ async function probeTelegramMedia(localPort, telegramUrl, docInfo, options) {
           };
         });
         const subtitleTracks = subtitleStreamObjs.map((s, idx) => {
-          const { lang, label } = formatLanguageLabel(s.tags?.language, s.tags?.title, idx, "subtitle");
+          const rawTitle = String(s.tags?.title || "");
+          const isForced = Boolean(s.disposition?.forced === 1 || /\bforced\b/i.test(rawTitle));
+          const isDefault = Boolean(s.disposition?.default === 1);
+          const { lang, label } = formatLanguageLabel(s.tags?.language, rawTitle, idx, "subtitle");
           return {
             id: idx,
             streamIndex: Number(s.index ?? idx),
             codec: String(s.codec_name || "").toLowerCase(),
             lang: lang || "English",
-            label: label || (idx === 0 ? "English" : "Hindi")
+            label: label || (idx === 0 ? "English" : "Hindi"),
+            forced: isForced,
+            defaultTrack: isDefault
           };
         });
         const primaryAudioCodec = audioTracks[0]?.codec || "";
@@ -1839,6 +2612,473 @@ async function checkTelegramDocHasAudioFast(client2, docInfo) {
   } catch {
     return null;
   }
+}
+
+// src/server/movieAutoMatcher.ts
+var RELEASE_CUTOFF_RE = /\b(?:480p|720p|1080p|2160p|360p|4k|uhd|fhd|hdrip|hd[\s._-]*cam|hdcam|hdts|hdtc|predvd|camrip|dvdscr|dvdrip|web[\s._-]*dl|webdl|web[\s._-]*rip|webrip|bluray|bdrip|brrip|x264|x265|h[\s._-]*264|h[\s._-]*265|hevc|avc|10bit|8bit|hi10p|aac|aac2|aac5|ac3|eac3|dd5[\s._-]*1|ddp5[\s._-]*1|dd2[\s._-]*0|dts|atmos|truehd|esub|esubs|msub|msubs|hc[\s._-]*sub|hc[\s._-]*esub|dual[\s._-]*audio|multi[\s._-]*audio|hindi[\s._-]*dubbed|org[\s._-]*hindi|original[\s._-]*hindi|uncut|unrated|extended|remastered|imax|nf|amzn|dsnp|kone|hotstar|zee5|jiocinema|sonyliv|mxplayer|voot|moviesmod|vegamovies|filmyzilla|filmy4wap|hdhub4u|katmoviehd|skymovieshd|mkvcinemas|bolly4u|bollyflix|dotmovies|hdmovie2|cinevoo|movies4u|pagalworld|worldfree4u|khatrimaza|yify|rarbg|psa|flux|ntb|evo|syncopy)\b/i;
+var SERIES_EP_RE = /(?:^|[\s._\-\[(])(?:S\d{1,2}[\s._-]*E\d{1,4}|S\d{1,2}|Season[\s._-]*\d{1,2}(?:[\s._-]*(?:Ep|Episode)[\s._-]*\d{1,4})?|Episode[\s._-]*\d{1,4})(?:$|[\s._\-\])])/i;
+var PROMO_LINE_RE = /(?:join\s+@|join\s+our|channel\s*:|powered\s+by|uploaded\s+by|share\s*&|subscribe|t\.me\/|https?:\/\/|download\s+link|request\s+here|feedback|backup\s+channel)/i;
+var TRAILING_LANG_SEASON_RE = /\b(?:s\d{1,2}[\s._-]*e\d{1,4}|s0?\d{1,2}|e0?\d{1,4}|season\s*\d{1,2}|episode\s*\d{1,4}|hindi|english|tamil|telugu|malayalam|kannada|punjabi|bengali|marathi|japanese|korean|dubbed|subbed|multi|dual)\b/gi;
+function stripFileExtension(name) {
+  return name.replace(/\.(mkv|mp4|avi|mov|webm|m4v|ts|flv|wmv|mpg|mpeg)$/i, "");
+}
+function cleanSingleTitleLine(rawLine) {
+  let text = stripFileExtension(String(rawLine || "").trim());
+  text = text.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, " ");
+  text = text.replace(/https?:\/\/\S+/gi, " ");
+  text = text.replace(/t\.me\/\S+/gi, " ");
+  text = text.replace(/@[a-zA-Z0-9_]{3,}/g, " ");
+  text = text.replace(/\b\d+(?:\.\d+)?\s*(?:gb|mb|kb)\b/gi, " ");
+  text = text.replace(/[._|]+/g, " ");
+  text = text.replace(/\s+/g, " ").trim();
+  text = text.replace(/^(?:movie|film|title|name)\s*[:\-]\s*/i, "").trim();
+  text = text.replace(/^\[[^\]]{2,40}\]\s*/g, "").trim();
+  const maxValidYear = (/* @__PURE__ */ new Date()).getFullYear() + 1;
+  let detectedYear = null;
+  let yearIndex = -1;
+  const bracketYears = Array.from(text.matchAll(/[\[(]\s*((?:19|20)\d{2})\s*[\])]/g));
+  for (const m of bracketYears) {
+    const yr = parseInt(m[1], 10);
+    if (yr >= 1940 && yr <= maxValidYear) {
+      detectedYear = yr;
+      const idx = m.index ?? -1;
+      if (idx > 1) {
+        yearIndex = idx;
+        text = text.slice(0, idx).trim();
+      }
+      break;
+    }
+  }
+  if (!detectedYear) {
+    const yearMatches = Array.from(text.matchAll(/\b((?:19|20)\d{2})\b/g));
+    for (let i = yearMatches.length - 1; i >= 0; i--) {
+      const m = yearMatches[i];
+      const idx = m.index ?? 0;
+      const yr = parseInt(m[1], 10);
+      if (idx > 2 && yr >= 1940 && yr <= maxValidYear) {
+        detectedYear = yr;
+        yearIndex = idx;
+        text = text.slice(0, idx).trim();
+        break;
+      }
+    }
+  }
+  const cutoffMatch = text.match(RELEASE_CUTOFF_RE);
+  if (cutoffMatch && typeof cutoffMatch.index === "number" && cutoffMatch.index > 1) {
+    text = text.slice(0, cutoffMatch.index);
+  }
+  const wordsAfterStrip = text.replace(TRAILING_LANG_SEASON_RE, " ").replace(/\s+/g, " ").trim();
+  if (wordsAfterStrip.length >= 2) {
+    text = wordsAfterStrip;
+  }
+  text = text.replace(/[\[(]\s*[\])]/g, " ").replace(/\[[^\]]*\]/g, " ").replace(/\([^)]*(?:dubbed|hindi|english|tamil|telugu|dual|audio|esub|480p|720p|1080p|4k|rip|cam)[^)]*\)/gi, " ").replace(/\b(?:full\s+movie|hindi\s+movie|south\s+movie|bollywood|hollywood)\b/gi, " ").replace(/^[\s\-–—:;,./\\]+|[\s\-–—:;,./\\]+$/g, "").replace(/\s+/g, " ").trim();
+  return { title: text, year: detectedYear };
+}
+function detectQualityTag(text, width = 0, height = 0) {
+  const lower = text.toLowerCase();
+  if (/\b(?:2160p|4k|uhd)\b/.test(lower)) return "4K";
+  if (/\b(?:1080p|fhd)\b/.test(lower)) return "1080p";
+  if (/\b720p\b/.test(lower)) return "720p";
+  if (/\b480p\b/.test(lower)) return "480p";
+  if (/\b360p\b/.test(lower)) return "360p";
+  const maxDim = Math.max(width || 0, height || 0);
+  if (maxDim >= 3400 || height >= 2e3) return "4K";
+  if (maxDim >= 1700 || height >= 950) return "1080p";
+  if (maxDim >= 1150 || height >= 680) return "720p";
+  if (maxDim >= 700 || height >= 440) return "480p";
+  if (maxDim > 0) return "360p";
+  return "";
+}
+function detectLanguageHint(text) {
+  const lower = text.toLowerCase();
+  const isDual = /\b(?:dual[\s._-]*audio|multi[\s._-]*audio)\b/.test(lower);
+  const hasHindi = /\bhindi\b/.test(lower);
+  const isHindiDubbed = /\bhindi[\s._-]*dubbed\b/.test(lower) || hasHindi && isDual;
+  const langs = [];
+  if (hasHindi) langs.push("Hindi");
+  if (/\benglish\b/.test(lower)) langs.push("English");
+  if (/\btamil\b/.test(lower)) langs.push("Tamil");
+  if (/\btelugu\b/.test(lower)) langs.push("Telugu");
+  if (/\bmalayalam\b/.test(lower)) langs.push("Malayalam");
+  if (/\bkannada\b/.test(lower)) langs.push("Kannada");
+  if (/\bpunjabi\b/.test(lower)) langs.push("Punjabi");
+  if (/\bbengali\b/.test(lower)) langs.push("Bengali");
+  if (/\bmarathi\b/.test(lower)) langs.push("Marathi");
+  if (/\bjapanese\b/.test(lower)) langs.push("Japanese");
+  if (/\bkorean\b/.test(lower)) langs.push("Korean");
+  if (langs.length === 0 && isDual) {
+    return { languageHint: "Hindi, English", isHindiDubbed: true };
+  }
+  return {
+    languageHint: langs.join(", "),
+    isHindiDubbed
+  };
+}
+function normalizeTitleKey2(title) {
+  return String(title || "").toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").trim();
+}
+function looksGenericTelegramName(name) {
+  const clean = normalizeTitleKey2(name);
+  if (!clean || clean.length < 2) return true;
+  return /^(?:vid|video|img|document|doc|file|movie|telegram|episode|msg|mp4|mkv)\s*\d*$/i.test(clean);
+}
+function parseTelegramMovieMeta(fileName, caption, width = 0, height = 0, durationSec = 0, sizeBytes = 0) {
+  const combined = `${caption || ""}
+${fileName || ""}`;
+  const imdbMatch = combined.match(/\b(tt\d{6,10})\b/i);
+  const explicitImdbId = imdbMatch ? imdbMatch[1].toLowerCase() : null;
+  const lowerCombined = combined.toLowerCase();
+  const isSampleOrClip = /\b(?:sample|trailer|teaser|promo|intro[\s._-]*clip)\b/i.test(fileName || "") || durationSec > 0 && durationSec < 300 && sizeBytes > 0 && sizeBytes < 25 * 1024 * 1024;
+  const isSeriesEpisode = SERIES_EP_RE.test(combined);
+  const captionLines = String(caption || "").split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0 && !PROMO_LINE_RE.test(l) && !/^(?:join|http|@)/i.test(l));
+  const candidates = [];
+  if (captionLines.length > 0) {
+    for (const line of captionLines.slice(0, 3)) {
+      const parsedLine = cleanSingleTitleLine(line);
+      if (parsedLine.title) {
+        candidates.push({ ...parsedLine, fromCaption: true });
+      }
+    }
+  }
+  const parsedFile = cleanSingleTitleLine(fileName || "");
+  if (parsedFile.title) {
+    candidates.push({ ...parsedFile, fromCaption: false });
+  }
+  candidates.sort((a, b) => {
+    const aGen = looksGenericTelegramName(a.title) ? -100 : 0;
+    const bGen = looksGenericTelegramName(b.title) ? -100 : 0;
+    const aYr = a.year ? 20 : 0;
+    const bYr = b.year ? 20 : 0;
+    const aWords = a.title.split(/\s+/).length >= 1 && a.title.length >= 3 ? 10 : 0;
+    const bWords = b.title.split(/\s+/).length >= 1 && b.title.length >= 3 ? 10 : 0;
+    const aCap = a.fromCaption ? 5 : 0;
+    const bCap = b.fromCaption ? 5 : 0;
+    return bGen + bYr + bWords + bCap - (aGen + aYr + aWords + aCap);
+  });
+  const best = candidates[0] || { title: "", year: null };
+  const fallbackYear = best.year || candidates.find((c) => c.year)?.year || null;
+  const quality = detectQualityTag(combined, width, height);
+  const { languageHint, isHindiDubbed } = detectLanguageHint(combined);
+  const cleanTitle = best.title || stripFileExtension(fileName || "").replace(/[._-]+/g, " ").trim();
+  const normalizedGroupTitle = normalizeTitleKey2(cleanTitle).replace(/\s+/g, "");
+  const groupKey = explicitImdbId ? `imdb-${explicitImdbId}` : normalizedGroupTitle ? `${normalizedGroupTitle}${fallbackYear ? `-${fallbackYear}` : ""}` : "";
+  return {
+    rawFileName: fileName || "",
+    rawCaption: caption || "",
+    explicitImdbId,
+    cleanTitle,
+    groupKey,
+    year: fallbackYear,
+    quality,
+    languageHint,
+    isHindiDubbed,
+    isSeriesEpisode,
+    isSampleOrClip
+  };
+}
+function getTitleSimilarityScore(candidateTitle, queryTitle) {
+  const cNorm = normalizeTitleKey2(candidateTitle);
+  const qNorm = normalizeTitleKey2(queryTitle);
+  if (!cNorm || !qNorm) return 0;
+  if (cNorm === qNorm) return 65;
+  const cCompact = cNorm.replace(/\s+/g, "");
+  const qCompact = qNorm.replace(/\s+/g, "");
+  if (cCompact === qCompact) return 62;
+  const stopWords = /* @__PURE__ */ new Set(["the", "a", "an", "of", "and", "in", "to", "part", "chapter", "movie"]);
+  const cTokens = cNorm.split(/\s+/).filter((t) => t.length > 0);
+  const qTokens = qNorm.split(/\s+/).filter((t) => t.length > 0);
+  const cSig = cTokens.filter((t) => !stopWords.has(t));
+  const qSig = qTokens.filter((t) => !stopWords.has(t));
+  const useC = cSig.length > 0 ? cSig : cTokens;
+  const useQ = qSig.length > 0 ? qSig : qTokens;
+  let matchedQ = 0;
+  for (const qt of useQ) {
+    if (useC.includes(qt)) matchedQ++;
+  }
+  const qCoverage = useQ.length > 0 ? matchedQ / useQ.length : 0;
+  const cCoverage = useC.length > 0 ? matchedQ / useC.length : 0;
+  const harmonic = qCoverage + cCoverage > 0 ? 2 * qCoverage * cCoverage / (qCoverage + cCoverage) : 0;
+  const qNums = qNorm.match(/\b(?:2|3|4|5|6|ii|iii|iv)\b/g) || [];
+  const cNums = cNorm.match(/\b(?:2|3|4|5|6|ii|iii|iv)\b/g) || [];
+  let sequelPenalty = 0;
+  if (qNums.length > 0) {
+    const hasMatchNum = qNums.some((n) => cNums.includes(n));
+    if (!hasMatchNum) sequelPenalty = -28;
+  } else if (cNums.length > 0) {
+    sequelPenalty = -10;
+  }
+  let bonus = 0;
+  if (cNorm.startsWith(qNorm) || qNorm.startsWith(cNorm)) bonus += 10;
+  return Math.round(harmonic * 52 + bonus + sequelPenalty);
+}
+function scoreImdbCandidate(candidate, parsed) {
+  let score = getTitleSimilarityScore(candidate.title, parsed.cleanTitle);
+  const candYearNum = parseInt(String(candidate.year || "").slice(0, 4), 10);
+  if (parsed.year && Number.isFinite(candYearNum)) {
+    const diff = Math.abs(candYearNum - parsed.year);
+    if (diff === 0) score += 45;
+    else if (diff === 1) score += 20;
+    else if (diff === 2) score += 0;
+    else score -= 35;
+  } else if (Number.isFinite(candYearNum) && candYearNum >= 1950) {
+    if (candYearNum >= 2e3) score += 8;
+  }
+  if (candidate.posterUrl && candidate.posterUrl !== "N/A" && /^https?:\/\//i.test(candidate.posterUrl)) {
+    score += 20;
+  } else {
+    score -= 55;
+  }
+  const typeLower = String(candidate.type || "movie").toLowerCase();
+  if (typeLower === "game") {
+    score -= 70;
+  } else if (!parsed.isSeriesEpisode) {
+    if (typeLower === "movie") score += 12;
+    else if (typeLower === "series") score -= 12;
+  } else {
+    if (typeLower === "series") score += 15;
+  }
+  return score;
+}
+function mergeFinalLanguage(omdbLang, parsed) {
+  const hint = parsed.languageHint;
+  if (!hint) return omdbLang || "Hindi";
+  if (parsed.isHindiDubbed) {
+    const hintParts = hint.split(",").map((s) => s.trim()).filter(Boolean);
+    if (!hintParts.some((s) => s.toLowerCase() === "hindi")) {
+      hintParts.unshift("Hindi");
+    }
+    return hintParts.join(", ");
+  }
+  if (hint.toLowerCase().includes("hindi") && omdbLang && !omdbLang.toLowerCase().includes("hindi")) {
+    return `${hint}, ${omdbLang}`;
+  }
+  return hint || omdbLang || "Hindi";
+}
+async function resolveBestImdbMatch(parsed) {
+  const fallbackYear = parsed.year || (/* @__PURE__ */ new Date()).getFullYear();
+  if (parsed.explicitImdbId) {
+    const detail2 = await fetchMetadataDetailInternal(parsed.explicitImdbId);
+    if (detail2.status === "ok" && detail2.data) {
+      const d2 = detail2.data;
+      const poster = upgradePosterUrl(d2.posterUrl, 1080) || d2.posterUrl || "";
+      const backdrop = upgradePosterUrl(d2.backdropUrl || poster, 1280) || poster;
+      return {
+        imdbId: d2.imdbId || parsed.explicitImdbId,
+        title: d2.title || parsed.cleanTitle,
+        originalTitle: d2.originalTitle || d2.title || parsed.cleanTitle,
+        releaseYear: d2.releaseYear || fallbackYear,
+        posterUrl: poster,
+        backdropUrl: backdrop,
+        genre: d2.genre || "Action",
+        description: d2.description || "",
+        director: d2.director || "",
+        cast: d2.cast || "",
+        runtime: d2.runtime || "",
+        language: mergeFinalLanguage(d2.language, parsed),
+        rating: d2.rating || 8,
+        originalCategory: d2.suggestedCategory || "Bollywood Movie",
+        matchConfidence: poster ? "high" : "medium",
+        confidenceScore: poster ? 100 : 75,
+        matchReason: "Exact IMDb ID in caption",
+        alternateMatches: []
+      };
+    }
+  }
+  const queriesToTry = [];
+  if (parsed.cleanTitle && !looksGenericTelegramName(parsed.cleanTitle)) {
+    if (parsed.year) queriesToTry.push(`${parsed.cleanTitle} ${parsed.year}`);
+    queriesToTry.push(parsed.cleanTitle);
+    const strippedSub = parsed.cleanTitle.split(/\s*[:\-–]\s*/)[0]?.trim();
+    if (strippedSub && strippedSub.length >= 3 && strippedSub.toLowerCase() !== parsed.cleanTitle.toLowerCase()) {
+      queriesToTry.push(parsed.year ? `${strippedSub} ${parsed.year}` : strippedSub);
+    }
+  }
+  const allCandidatesMap = /* @__PURE__ */ new Map();
+  for (let i = 0; i < queriesToTry.length; i++) {
+    const q = queriesToTry[i];
+    const searchRes = await searchMetadataInternal(q);
+    for (const item of searchRes.results || []) {
+      if (item?.imdbId && !allCandidatesMap.has(item.imdbId)) {
+        allCandidatesMap.set(item.imdbId, {
+          imdbId: item.imdbId,
+          title: item.title,
+          year: item.year,
+          type: item.type,
+          posterUrl: upgradePosterUrl(item.posterUrl, 1080) || item.posterUrl || "",
+          cast: item.cast
+        });
+      }
+    }
+    if (allCandidatesMap.size > 0 && i === 0) {
+      const topFirst = Array.from(allCandidatesMap.values()).map((c) => ({ c, s: scoreImdbCandidate(c, parsed) })).sort((a, b) => b.s - a.s)[0];
+      if (topFirst && topFirst.s >= 95 && topFirst.c.posterUrl) {
+        break;
+      }
+    }
+  }
+  const scoredCandidates = Array.from(allCandidatesMap.values()).map((cand) => ({ cand, score: scoreImdbCandidate(cand, parsed) })).sort((a, b) => b.score - a.score);
+  const winner = scoredCandidates[0];
+  const alternateMatches = scoredCandidates.slice(0, 6).map((x) => x.cand);
+  if (!winner || winner.score < 25) {
+    return {
+      imdbId: "",
+      title: parsed.cleanTitle || parsed.rawFileName || "Untitled Movie",
+      originalTitle: parsed.cleanTitle || parsed.rawFileName || "Untitled Movie",
+      releaseYear: fallbackYear,
+      posterUrl: "",
+      backdropUrl: "",
+      genre: "Action",
+      description: "",
+      director: "",
+      cast: "",
+      runtime: "",
+      language: parsed.languageHint || "Hindi",
+      rating: 7.5,
+      originalCategory: parsed.isSeriesEpisode ? "Web Series" : "Bollywood Movie",
+      matchConfidence: "low",
+      confidenceScore: Math.max(0, winner?.score || 0),
+      matchReason: "Movie not confidently matched on IMDb \u2014 pick poster manually",
+      alternateMatches
+    };
+  }
+  const detail = await fetchMetadataDetailInternal(winner.cand.imdbId, winner.cand.title);
+  const d = detail.status === "ok" ? detail.data : void 0;
+  const bestPoster = upgradePosterUrl(d?.posterUrl || winner.cand.posterUrl, 1080) || d?.posterUrl || winner.cand.posterUrl || "";
+  const bestBackdrop = upgradePosterUrl(d?.backdropUrl || bestPoster, 1280) || bestPoster;
+  const finalYear = Number(d?.releaseYear || parseInt(String(winner.cand.year || ""), 10) || fallbackYear) || fallbackYear;
+  const rawSim = getTitleSimilarityScore(d?.title || winner.cand.title, parsed.cleanTitle);
+  const yearMatched = Boolean(parsed.year && Math.abs(finalYear - parsed.year) <= 1);
+  const hasPoster = Boolean(bestPoster && /^https?:\/\//i.test(bestPoster));
+  let matchConfidence = "low";
+  let matchReason = "Verify title & poster";
+  if (hasPoster && rawSim >= 55 && (yearMatched || !parsed.year && winner.score >= 82)) {
+    matchConfidence = "high";
+    matchReason = yearMatched ? `Exact Title + Year (${finalYear}) \u2022 Verified Poster` : "Strong Title Match \u2022 Verified Poster";
+  } else if (hasPoster && winner.score >= 55) {
+    matchConfidence = "medium";
+    matchReason = !parsed.year ? "Matched without release year in filename \u2014 quick check poster" : "Partial match \u2014 verify poster & year";
+  } else {
+    matchConfidence = "low";
+    matchReason = hasPoster ? "Low title similarity \u2014 verify movie" : "No poster found on IMDb";
+  }
+  let suggestedCategory = d?.suggestedCategory || "Bollywood Movie";
+  if (parsed.isSeriesEpisode && suggestedCategory.toLowerCase().includes("movie")) {
+    suggestedCategory = suggestedCategory.toLowerCase().includes("anime") ? "Anime Series" : "Web Series";
+  }
+  return {
+    imdbId: d?.imdbId || winner.cand.imdbId,
+    title: d?.title || winner.cand.title,
+    originalTitle: d?.originalTitle || d?.title || winner.cand.title,
+    releaseYear: finalYear,
+    posterUrl: bestPoster,
+    backdropUrl: bestBackdrop,
+    genre: d?.genre || "Action",
+    description: d?.description || "",
+    director: d?.director || "",
+    cast: d?.cast || winner.cand.cast || "",
+    runtime: d?.runtime || "",
+    language: mergeFinalLanguage(d?.language || "Hindi", parsed),
+    rating: Number(d?.rating) || 8,
+    originalCategory: suggestedCategory,
+    matchConfidence,
+    confidenceScore: Math.max(0, Math.min(100, winner.score)),
+    matchReason,
+    alternateMatches
+  };
+}
+
+// src/server/telegramRouter.ts
+init_firebase();
+import {
+  collection,
+  doc as doc2,
+  getDocFromServer as getDocFromServer2,
+  getDocsFromServer,
+  serverTimestamp,
+  setDoc
+} from "firebase/firestore";
+
+// src/utils/categoryMapping.ts
+var getDisplayCategory = (originalCategory) => {
+  switch (originalCategory) {
+    case "Bollywood Movie":
+    case "South Indian Movie":
+      return "Bollywood";
+    case "Hollywood Movie":
+      return "Hollywood";
+    case "Web Series":
+    case "Anime Series":
+    case "Anime Movie":
+    case "Anime":
+      return "Series";
+    default:
+      return "Bollywood";
+  }
+};
+
+// src/utils/apiConfig.ts
+var ENV_BACKEND_URL = (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL || "").toString().trim().replace(/\/+$/, "");
+var PROBE_CACHE_TTL_MS = 60 * 1e3;
+
+// src/utils/duration.ts
+var import_core = __toESM(require_index_cjs(), 1);
+function parseDurationToSeconds(input) {
+  if (input === null || input === void 0) return 0;
+  if (typeof input === "number") {
+    return Number.isFinite(input) && input > 0 ? Math.round(input) : 0;
+  }
+  const raw = String(input).trim();
+  if (!raw || /^(n\/a|na|null|undefined|--+)$/i.test(raw)) return 0;
+  if (/^\d{1,3}:\d{1,2}(:\d{1,2})?$/.test(raw)) {
+    const parts = raw.split(":").map((p) => parseInt(p, 10));
+    if (parts.some((n) => Number.isNaN(n) || n < 0)) return 0;
+    if (parts.length === 3) {
+      return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    }
+    if (parts.length === 2) {
+      return parts[0] * 60 + parts[1];
+    }
+  }
+  let total = 0;
+  let matchedUnit = false;
+  const hMatch = raw.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\b/i);
+  if (hMatch) {
+    total += Math.round(parseFloat(hMatch[1]) * 3600);
+    matchedUnit = true;
+  }
+  const mMatch = raw.match(/(\d+(?:\.\d+)?)\s*(?:minutes?|mins?|m)\b/i);
+  if (mMatch) {
+    total += Math.round(parseFloat(mMatch[1]) * 60);
+    matchedUnit = true;
+  }
+  const sMatch = raw.match(/(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|s)\b/i);
+  if (sMatch) {
+    total += Math.round(parseFloat(sMatch[1]));
+    matchedUnit = true;
+  }
+  if (matchedUnit) {
+    return total > 0 ? total : 0;
+  }
+  if (/^\d+$/.test(raw)) {
+    const num = parseInt(raw, 10);
+    if (num <= 0) return 0;
+    return num <= 600 ? num * 60 : num;
+  }
+  return 0;
+}
+
+// src/utils/qualityBadge.ts
+function normalizeQualityBadge(value) {
+  if (value === "NONE" || value === "No Badge" || value === "") {
+    return "NONE";
+  }
+  if (typeof value === "string") {
+    const upper = value.trim().toUpperCase();
+    if (upper === "HDTC") return "HDTC";
+    if (upper === "NONE" || upper === "NO BADGE") return "NONE";
+    if (upper === "HD") return "HD";
+  }
+  return "HD";
 }
 
 // src/server/telegramRouter.ts
@@ -2181,6 +3421,7 @@ router2.get("/status", async (_req, res) => {
   }
   try {
     let client2 = await getTelegramClient();
+    await ensureChannelUploadWatcher(client2);
     let me;
     try {
       me = await client2.getMe();
@@ -2421,12 +3662,12 @@ function classifyTelegramDocMedia(msg) {
     return { kind: "other", mime: "", fileName: "", sizeBytes: 0 };
   }
   const media = msg.media;
-  const doc2 = media?.document || msg.document;
-  if (!doc2 || !doc2.id) {
+  const doc3 = media?.document || msg.document;
+  if (!doc3 || !doc3.id) {
     return { kind: "other", mime: "", fileName: "", sizeBytes: 0 };
   }
-  const attrs = Array.isArray(doc2.attributes) ? doc2.attributes : [];
-  const mime = String(doc2.mimeType || "").toLowerCase();
+  const attrs = Array.isArray(doc3.attributes) ? doc3.attributes : [];
+  const mime = String(doc3.mimeType || "").toLowerCase();
   const fnAttr = attrs.find(
     (a) => a instanceof Api3.DocumentAttributeFilename || a?.className === "DocumentAttributeFilename"
   );
@@ -2435,7 +3676,7 @@ function classifyTelegramDocMedia(msg) {
   const vidAttr = attrs.find(
     (a) => a instanceof Api3.DocumentAttributeVideo || a?.className === "DocumentAttributeVideo"
   );
-  const sizeBytes = Number(doc2.size || 0);
+  const sizeBytes = Number(doc3.size || 0);
   const isSticker = mime === "application/x-tgsticker" || mime === "image/webp" || lowerFileName === "sticker.webm" || /\.(tgs|webp)$/i.test(lowerFileName) || attrs.some(
     (a) => a instanceof Api3.DocumentAttributeSticker || a?.className === "DocumentAttributeSticker" || a?.className === "DocumentAttributeCustomEmoji"
   ) || mime === "video/webm" && Boolean(vidAttr?.nosound) && sizeBytes > 0 && sizeBytes < 2 * 1024 * 1024;
@@ -2461,7 +3702,7 @@ function classifyTelegramDocMedia(msg) {
   const hasExplicitNoSound = Boolean(vidAttr?.nosound) || /\b(no[\s_-]*audio|without[\s_-]*audio|muted|silent|video[\s_-]*only)\b/i.test(`${caption} ${fileName}`);
   return {
     kind: "video",
-    doc: doc2,
+    doc: doc3,
     mime,
     fileName,
     sizeBytes,
@@ -2505,9 +3746,9 @@ function getQualityRankForFilter(quality, qFilter) {
   if (q === "360p") return 1;
   return 0;
 }
-function primeMediaCacheFromTelegramDoc(streamUrl, doc2, fileName, durationSec, rawMime) {
+function primeMediaCacheFromTelegramDoc(streamUrl, doc3, fileName, durationSec, rawMime) {
   const parsed = parseTelegramUrl(streamUrl);
-  if (!parsed.isValid || !parsed.chatId || !parsed.messageId || !doc2) return null;
+  if (!parsed.isValid || !parsed.chatId || !parsed.messageId || !doc3) return null;
   const cacheKey = `${parsed.chatId}:${parsed.messageId}`;
   const existing = mediaCache.get(cacheKey);
   if (existing && Date.now() - existing.cachedAt <= MEDIA_CACHE_TTL_MS) {
@@ -2517,8 +3758,8 @@ function primeMediaCacheFromTelegramDoc(streamUrl, doc2, fileName, durationSec, 
   const isWebm = lowerName.endsWith(".webm") || rawMime.includes("webm");
   const entry = {
     docInfo: {
-      document: doc2,
-      fileSize: Number(doc2.size || 0),
+      document: doc3,
+      fileSize: Number(doc3.size || 0),
       durationSec,
       fileName,
       rawMime
@@ -2694,8 +3935,8 @@ router2.post("/scan-range", async (req, res) => {
           continue;
         }
         const media = msg.media;
-        const doc2 = media?.document || msg.document;
-        if (!doc2 || !doc2.id) {
+        const doc3 = media?.document || msg.document;
+        if (!doc3 || !doc3.id) {
           const textMsg = normalizeTelegramText(String(msg.message || "")).trim();
           const isFutureAnnouncement = /\b(?:tomorrow|soon|will upload|coming|at \d+\s*(?:am|pm)|filler)\b/i.test(textMsg);
           const hdrMatch = !isFutureAnnouncement ? textMsg.match(/(?:episode|ep)\s*[:\-]?\s*0*(\d{1,4})\b/i) : null;
@@ -3106,29 +4347,29 @@ router2.post("/verify", async (req, res) => {
         detail: fetchErr || void 0
       });
     }
-    let document = null;
+    let document2 = null;
     if (msg && msg.media) {
       if (msg.media instanceof Api3.MessageMediaDocument && msg.media.document instanceof Api3.Document) {
-        document = msg.media.document;
+        document2 = msg.media.document;
       } else if (msg.media instanceof Api3.MessageMediaWebPage && msg.media.webpage?.document instanceof Api3.Document) {
-        document = msg.media.webpage.document;
+        document2 = msg.media.webpage.document;
       }
     }
-    if (document) {
-      const fileSizeNum = Number(document.size);
+    if (document2) {
+      const fileSizeNum = Number(document2.size);
       const sizeFormatted = formatBytes(fileSizeNum);
       let durationSec = 0;
       let width = 0;
       let height = 0;
       let fileName = `telegram_video_${parsed.messageId}.mp4`;
-      const videoAttr = document.attributes.find((a) => a instanceof Api3.DocumentAttributeVideo);
+      const videoAttr = document2.attributes.find((a) => a instanceof Api3.DocumentAttributeVideo);
       if (videoAttr) {
         const v = videoAttr;
         durationSec = v.duration || 0;
         width = v.w || 0;
         height = v.h || 0;
       }
-      const fnAttr = document.attributes.find(
+      const fnAttr = document2.attributes.find(
         (a) => a.className === "DocumentAttributeFilename" || a instanceof Api3.DocumentAttributeFilename
       );
       if (fnAttr && fnAttr.fileName) {
@@ -3157,7 +4398,7 @@ router2.post("/verify", async (req, res) => {
           resolution,
           width,
           height,
-          mimeType: document.mimeType || "video/mp4"
+          mimeType: document2.mimeType || "video/mp4"
         }
       });
     }
@@ -3182,7 +4423,7 @@ router2.post("/verify", async (req, res) => {
   }
 });
 var mediaCache = /* @__PURE__ */ new Map();
-var MEDIA_CACHE_TTL_MS = 10 * 60 * 1e3;
+var MEDIA_CACHE_TTL_MS = 45 * 60 * 1e3;
 async function resolveAndCacheDocument(client2, parsed) {
   const cacheKey = `${parsed.chatId}:${parsed.messageId}`;
   let entry = mediaCache.get(cacheKey);
@@ -3200,39 +4441,39 @@ async function resolveAndCacheDocument(client2, parsed) {
       error: `Telegram post #${parsed.messageId} not found or bot lacks channel access.${fetchErr ? ` (${fetchErr})` : ""}`
     };
   }
-  let document = null;
+  let document2 = null;
   if (msg.media) {
     if (msg.media instanceof Api3.MessageMediaDocument && msg.media.document instanceof Api3.Document) {
-      document = msg.media.document;
+      document2 = msg.media.document;
     } else if (msg.media instanceof Api3.MessageMediaWebPage && msg.media.webpage?.document instanceof Api3.Document) {
-      document = msg.media.webpage.document;
+      document2 = msg.media.webpage.document;
     }
   }
-  if (!document) {
+  if (!document2) {
     return {
       status: 404,
       error: `No playable video document found in Telegram post #${parsed.messageId}.`
     };
   }
-  const fileSize = Number(document.size);
+  const fileSize = Number(document2.size);
   let durationSec = 0;
-  const videoAttr = document.attributes.find((a) => a instanceof Api3.DocumentAttributeVideo);
+  const videoAttr = document2.attributes.find((a) => a instanceof Api3.DocumentAttributeVideo);
   if (videoAttr) {
     durationSec = videoAttr.duration || 0;
   }
   let fileName = "";
-  const fnAttr = document.attributes.find(
+  const fnAttr = document2.attributes.find(
     (a) => a.className === "DocumentAttributeFilename" || a instanceof Api3.DocumentAttributeFilename
   );
   if (fnAttr && fnAttr.fileName) {
     fileName = fnAttr.fileName;
   }
-  const rawMime = (document.mimeType || "").toLowerCase();
+  const rawMime = (document2.mimeType || "").toLowerCase();
   const lowerName = fileName.toLowerCase();
   const isWebm = lowerName.endsWith(".webm") || rawMime.includes("webm");
   const mimeType = isWebm ? "video/webm" : "video/mp4";
   const docInfo = {
-    document,
+    document: document2,
     fileSize,
     durationSec,
     fileName,
@@ -3244,7 +4485,7 @@ async function resolveAndCacheDocument(client2, parsed) {
     cachedAt: Date.now()
   };
   mediaCache.set(cacheKey, entry);
-  console.log(`[Stream] Cached document ${document.id} (${formatBytes(fileSize)}, ${fileName || rawMime}) for msg ${parsed.messageId}`);
+  console.log(`[Stream] Cached document ${document2.id} (${formatBytes(fileSize)}, ${fileName || rawMime}) for msg ${parsed.messageId}`);
   return { entry };
 }
 async function ensureMediaProbed(entry, telegramUrl, probeOptions) {
@@ -3351,80 +4592,192 @@ router2.get("/stream-info", async (req, res) => {
   }
 });
 var subtitleVttCache = /* @__PURE__ */ new Map();
+var BITMAP_SUBTITLE_CODEC_RE = /^(hdmv_pgs_subtitle|pgs|dvd_subtitle|vobsub|dvb_subtitle|xsub)$/i;
 router2.get("/subtitles.vtt", async (req, res) => {
   const urlParam = String(req.query.url || "").trim();
-  const trackIdx = Math.max(0, parseInt(String(req.query.trackIdx || "0"), 10) || 0);
+  const requestedTrackIdx = Math.max(0, parseInt(String(req.query.trackIdx || "0"), 10) || 0);
+  const startSec = Math.max(0, Math.floor(Number(req.query.start) || 0));
+  const reqDur = Math.max(0, Math.floor(Number(req.query.dur) || 0));
+  const reqLang = String(req.query.lang || "").trim().toLowerCase();
   if (!urlParam) return res.status(400).send("URL required");
-  const cacheKey = `${urlParam}::${trackIdx}`;
-  const cached = subtitleVttCache.get(cacheKey);
-  if (cached && Date.now() - cached.cachedAt < 15 * 60 * 1e3) {
-    res.setHeader("Content-Type", "text/vtt; charset=utf-8");
-    res.setHeader("Cache-Control", "public, max-age=600");
-    return res.status(200).send(cached.vtt);
-  }
+  const isTelegram = urlParam.includes("t.me") || urlParam.includes("telegram.me");
+  let targetSubIdx = requestedTrackIdx;
+  let trackCodec = "";
+  let windowSec = reqDur;
   let inputUrl = urlParam;
-  if (urlParam.includes("t.me") || urlParam.includes("telegram.me")) {
-    const localPort = process.env.INTERNAL_APP_PORT || process.env.APP_PORT || "3000";
-    inputUrl = `http://127.0.0.1:${localPort}/api/stream?url=${encodeURIComponent(urlParam)}&raw=1`;
-  }
   try {
+    if (isTelegram) {
+      const localPort = process.env.INTERNAL_APP_PORT || process.env.APP_PORT || "3000";
+      inputUrl = `http://127.0.0.1:${localPort}/api/stream?url=${encodeURIComponent(urlParam)}&raw=1`;
+      const parsed = parseTelegramUrl(urlParam);
+      if (parsed.isValid && !parsed.isInviteLink && parsed.messageId) {
+        const { apiId, apiHash, botToken, sessionStr } = getTelegramCredentials();
+        const client2 = apiId && apiHash && (botToken || sessionStr) ? await getTelegramClient().catch(() => null) : null;
+        if (client2) {
+          const { entry } = await resolveAndCacheDocument(client2, parsed);
+          if (entry) {
+            const probe = await ensureMediaProbed(entry, urlParam);
+            const subList = Array.isArray(probe.subtitleTracks) ? probe.subtitleTracks : [];
+            const chosen = subList[requestedTrackIdx];
+            if (chosen) {
+              trackCodec = chosen.codec || "";
+              const chosenLang = String(chosen.lang || chosen.label || reqLang || "").trim().toLowerCase();
+              if (BITMAP_SUBTITLE_CODEC_RE.test(trackCodec) || chosen.forced) {
+                const betterText = subList.find(
+                  (t) => !BITMAP_SUBTITLE_CODEC_RE.test(t.codec) && !t.forced && chosenLang && (String(t.lang || "").toLowerCase() === chosenLang || String(t.label || "").toLowerCase() === chosenLang)
+                ) || subList.find(
+                  (t) => !BITMAP_SUBTITLE_CODEC_RE.test(t.codec) && chosenLang && (String(t.lang || "").toLowerCase() === chosenLang || String(t.label || "").toLowerCase() === chosenLang)
+                );
+                if (betterText) {
+                  targetSubIdx = betterText.id;
+                  trackCodec = betterText.codec || "";
+                }
+              }
+            } else if (reqLang && subList.length > 0) {
+              const langMatch = subList.find(
+                (t) => !BITMAP_SUBTITLE_CODEC_RE.test(t.codec) && !t.forced && (String(t.lang || "").toLowerCase().includes(reqLang) || String(t.label || "").toLowerCase().includes(reqLang))
+              ) || subList.find(
+                (t) => !BITMAP_SUBTITLE_CODEC_RE.test(t.codec) && (String(t.lang || "").toLowerCase().includes(reqLang) || String(t.label || "").toLowerCase().includes(reqLang))
+              );
+              if (langMatch) {
+                targetSubIdx = langMatch.id;
+                trackCodec = langMatch.codec || "";
+              }
+            }
+            if (BITMAP_SUBTITLE_CODEC_RE.test(trackCodec)) {
+              res.setHeader("Content-Type", "text/vtt; charset=utf-8");
+              res.setHeader("Access-Control-Expose-Headers", "X-Subtitle-Status, X-Subtitle-Codec");
+              res.setHeader("X-Subtitle-Status", "bitmap_unsupported");
+              res.setHeader("X-Subtitle-Codec", trackCodec);
+              return res.status(200).send("WEBVTT\n\n");
+            }
+            if (windowSec === 0 && entry.docInfo.fileSize > 120 * 1024 * 1024) {
+              windowSec = 360;
+            }
+          }
+        }
+      }
+    }
+    const cacheKey = `${urlParam}::${targetSubIdx}::${startSec}::${windowSec}`;
+    const cached = subtitleVttCache.get(cacheKey);
+    if (cached && Date.now() - cached.cachedAt < 15 * 60 * 1e3) {
+      res.setHeader("Content-Type", "text/vtt; charset=utf-8");
+      res.setHeader("Access-Control-Expose-Headers", "X-Subtitle-Status, X-Subtitle-Codec");
+      res.setHeader("X-Subtitle-Status", cached.status);
+      if (cached.codec) res.setHeader("X-Subtitle-Codec", cached.codec);
+      res.setHeader("Cache-Control", "public, max-age=600");
+      return res.status(200).send(cached.vtt);
+    }
     const ffArgs = [
       "-v",
       "error",
+      "-seekable",
+      "1",
+      "-probesize",
+      "3000000",
+      "-analyzeduration",
+      "3000000",
       "-reconnect",
       "1",
       "-reconnect_streamed",
       "1",
+      "-reconnect_on_http_error",
+      "4xx,5xx",
+      "-reconnect_on_network_error",
+      "1",
       "-reconnect_delay_max",
-      "2",
-      "-i",
-      inputUrl,
+      "2"
+    ];
+    if (startSec > 0) {
+      ffArgs.push("-ss", String(startSec), "-copyts");
+    }
+    ffArgs.push("-i", inputUrl);
+    if (windowSec > 0) {
+      ffArgs.push("-to", String(startSec + windowSec));
+    }
+    ffArgs.push(
       "-vn",
       "-an",
       "-dn",
       "-map",
-      `0:s:${trackIdx}?`,
+      `0:s:${targetSubIdx}?`,
+      "-flush_packets",
+      "1",
       "-c:s",
       "webvtt",
       "-f",
       "webvtt",
       "pipe:1"
-    ];
+    );
     const vttText = await new Promise((resolve) => {
       const proc = spawn2("ffmpeg", ffArgs, { stdio: ["ignore", "pipe", "pipe"] });
       const chunks = [];
+      let errLogs = "";
       let totalBytes = 0;
-      const timer = setTimeout(() => {
-        try {
-          proc.kill("SIGKILL");
-        } catch {
+      let finished = false;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        if (errLogs.trim()) {
+          console.warn(`[Subtitles] FFmpeg (${targetSubIdx}@${startSec}s): ${errLogs.trim().slice(-200)}`);
         }
         resolve(Buffer.concat(chunks).toString("utf-8"));
-      }, 25e3);
+      };
+      const killProcGracefully = () => {
+        try {
+          proc.kill("SIGTERM");
+          setTimeout(() => {
+            try {
+              proc.kill("SIGKILL");
+            } catch {
+            }
+            finish();
+          }, 350);
+        } catch {
+          finish();
+        }
+      };
+      const timer = setTimeout(killProcGracefully, 35e3);
+      req.on("close", () => {
+        if (!res.writableEnded && !finished) {
+          killProcGracefully();
+        }
+      });
       proc.stdout.on("data", (d) => {
         if (totalBytes < 4 * 1024 * 1024) {
           chunks.push(d);
           totalBytes += d.length;
         }
       });
-      proc.on("close", () => {
-        clearTimeout(timer);
-        resolve(Buffer.concat(chunks).toString("utf-8"));
+      proc.stderr.on("data", (d) => {
+        if (errLogs.length < 1024) {
+          errLogs += d.toString("utf-8");
+        }
       });
-      proc.on("error", () => {
-        clearTimeout(timer);
-        resolve("");
-      });
+      proc.on("close", finish);
+      proc.on("error", finish);
     });
     const normalizedVtt = vttText && vttText.trim().startsWith("WEBVTT") ? vttText : "WEBVTT\n\n";
-    if (normalizedVtt.length > 16) {
-      subtitleVttCache.set(cacheKey, { vtt: normalizedVtt, cachedAt: Date.now() });
+    const hasCues = normalizedVtt.includes("-->");
+    const subStatus = hasCues ? "ok" : "empty";
+    if (hasCues) {
+      subtitleVttCache.set(cacheKey, {
+        vtt: normalizedVtt,
+        codec: trackCodec,
+        status: subStatus,
+        cachedAt: Date.now()
+      });
     }
     res.setHeader("Content-Type", "text/vtt; charset=utf-8");
-    res.setHeader("Cache-Control", "public, max-age=600");
+    res.setHeader("Access-Control-Expose-Headers", "X-Subtitle-Status, X-Subtitle-Codec");
+    res.setHeader("X-Subtitle-Status", subStatus);
+    if (trackCodec) res.setHeader("X-Subtitle-Codec", trackCodec);
+    res.setHeader("Cache-Control", hasCues ? "public, max-age=600" : "no-store");
     return res.status(200).send(normalizedVtt);
   } catch {
     res.setHeader("Content-Type", "text/vtt; charset=utf-8");
+    res.setHeader("X-Subtitle-Status", "error");
     return res.status(200).send("WEBVTT\n\n");
   }
 });
@@ -3656,7 +5009,7 @@ async function handleStream(req, res) {
       return res.status(status || 404).json({ error: error || "Media not found" });
     }
     const { docInfo, mimeType } = entry;
-    const { document, fileSize } = docInfo;
+    const { document: document2, fileSize } = docInfo;
     if (!isRawParam) {
       const probe = await ensureMediaProbed(entry, urlParam);
       const durationSec2 = probe.durationSec || docInfo.durationSec || 0;
@@ -3764,7 +5117,7 @@ async function handleStream(req, res) {
       "X-Stream-Mode": "direct",
       "Access-Control-Allow-Origin": "*",
       "Accept-Ranges": "bytes",
-      "Cache-Control": "no-cache, no-store, must-revalidate",
+      "Cache-Control": isRawParam ? "no-store" : "private, max-age=300, no-transform",
       "Connection": "keep-alive",
       "Content-Type": isCastParam && (!mimeType || mimeType === "application/octet-stream") ? "video/mp4" : mimeType,
       "Content-Length": chunkSize.toString()
@@ -3773,7 +5126,7 @@ async function handleStream(req, res) {
       headers["Content-Range"] = `bytes ${start}-${endPos}/${fileSize}`;
     }
     if (req.method === "HEAD") {
-      res.writeHead(200, headers);
+      res.writeHead(statusCode, headers);
       return res.end();
     }
     if (!isRawParam) {
@@ -3784,7 +5137,7 @@ async function handleStream(req, res) {
     await streamTelegramRange(
       res,
       client2,
-      document,
+      document2,
       start,
       endPos,
       concurrency,
@@ -3796,6 +5149,1688 @@ async function handleStream(req, res) {
     if (!res.headersSent) res.status(500).json({ error: err.message });
   }
 }
+var HLS_SEG_DURATION = 4;
+var HLS_TARGET_DURATION = 5;
+var HLS_TMP_ROOT = path3.resolve("/tmp", "movie_portal_hls");
+var MAX_CONCURRENT_HLS_JOBS = Math.max(2, MAX_CONCURRENT_FFMPEG - 1);
+var hlsJobs = /* @__PURE__ */ new Map();
+var nextHlsJobSeq = 1;
+function scheduleRemoveHlsDir(job, delayMs = 8e3) {
+  const tryRemove = () => {
+    if (job.activeReaders > 0) {
+      setTimeout(tryRemove, 2e3).unref?.();
+      return;
+    }
+    try {
+      fs3.rmSync(job.dir, { recursive: true, force: true });
+    } catch {
+    }
+  };
+  if (delayMs <= 0 && job.activeReaders <= 0) {
+    tryRemove();
+  } else {
+    setTimeout(tryRemove, Math.max(500, delayMs)).unref?.();
+  }
+}
+function cleanupHlsJob(sid, removeDir = true, markSuperseded = false) {
+  const job = hlsJobs.get(sid);
+  if (!job) return;
+  hlsJobs.delete(sid);
+  if (markSuperseded) {
+    job.superseded = true;
+  }
+  if (job.proc && !job.closed) {
+    try {
+      job.proc.kill("SIGTERM");
+      const procRef = job.proc;
+      setTimeout(() => {
+        try {
+          if (!procRef.killed) procRef.kill("SIGKILL");
+        } catch {
+        }
+      }, 400).unref?.();
+    } catch {
+    }
+  }
+  if (removeDir) {
+    scheduleRemoveHlsDir(job, markSuperseded ? 8e3 : 1500);
+  }
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [sid, job] of hlsJobs.entries()) {
+    if (now - job.lastAccessedAt > 180 * 1e3) {
+      cleanupHlsJob(sid, true, false);
+    }
+  }
+}, 45 * 1e3).unref?.();
+function getHlsSegmentPath(dir, segIdx) {
+  return path3.join(dir, `seg_${String(segIdx).padStart(5, "0")}.ts`);
+}
+function segmentReadyOnDisk(filePath) {
+  try {
+    return fs3.existsSync(filePath) && fs3.statSync(filePath).size > 0;
+  } catch {
+    return false;
+  }
+}
+function getHlsArgsForQuality(quality, forceExact4s = true) {
+  const keyframeArgs = forceExact4s ? ["-g", "240", "-force_key_frames", `expr:gte(t,n_forced*${HLS_SEG_DURATION})`, "-sc_threshold", "0"] : ["-g", "48", "-keyint_min", "48", "-sc_threshold", "0"];
+  if (quality === "360p") {
+    return [
+      "-vf",
+      "scale='min(640,iw)':'min(360,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-threads",
+      "0",
+      "-pix_fmt",
+      "yuv420p",
+      "-profile:v",
+      "main",
+      "-level",
+      "3.1",
+      "-b:v",
+      "320k",
+      "-maxrate",
+      "420k",
+      "-bufsize",
+      "840k",
+      ...keyframeArgs,
+      "-af",
+      "aresample=async=1:min_hard_comp=0.100000",
+      "-c:a",
+      "aac",
+      "-ac",
+      "2",
+      "-ar",
+      "44100",
+      "-b:a",
+      "64k"
+    ];
+  }
+  if (quality === "480p") {
+    return [
+      "-vf",
+      "scale='min(854,iw)':'min(480,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-threads",
+      "0",
+      "-pix_fmt",
+      "yuv420p",
+      "-profile:v",
+      "main",
+      "-level",
+      "3.1",
+      "-b:v",
+      "550k",
+      "-maxrate",
+      "720k",
+      "-bufsize",
+      "1440k",
+      ...keyframeArgs,
+      "-af",
+      "aresample=async=1:min_hard_comp=0.100000",
+      "-c:a",
+      "aac",
+      "-ac",
+      "2",
+      "-ar",
+      "48000",
+      "-b:a",
+      "96k"
+    ];
+  }
+  if (quality === "720p") {
+    return [
+      "-vf",
+      "scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-threads",
+      "0",
+      "-pix_fmt",
+      "yuv420p",
+      "-profile:v",
+      "main",
+      "-level",
+      "4.0",
+      "-b:v",
+      "1100k",
+      "-maxrate",
+      "1450k",
+      "-bufsize",
+      "2900k",
+      ...keyframeArgs,
+      "-af",
+      "aresample=async=1:min_hard_comp=0.100000",
+      "-c:a",
+      "aac",
+      "-ac",
+      "2",
+      "-ar",
+      "48000",
+      "-b:a",
+      "128k"
+    ];
+  }
+  return [
+    "-vf",
+    "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "ultrafast",
+    "-threads",
+    "0",
+    "-pix_fmt",
+    "yuv420p",
+    "-profile:v",
+    "main",
+    "-level",
+    "4.0",
+    "-crf",
+    "22",
+    "-maxrate",
+    "3400k",
+    "-bufsize",
+    "6800k",
+    ...keyframeArgs,
+    "-af",
+    "aresample=async=1:min_hard_comp=0.100000",
+    "-c:a",
+    "aac",
+    "-ac",
+    "2",
+    "-ar",
+    "48000",
+    "-b:a",
+    "160k"
+  ];
+}
+function startHlsWorker(opts) {
+  cleanupHlsJob(opts.sid, true, true);
+  while (hlsJobs.size >= MAX_CONCURRENT_HLS_JOBS) {
+    let oldestSid = null;
+    let oldestTime = Infinity;
+    for (const [existingSid, existingJob] of hlsJobs.entries()) {
+      if (existingJob.lastAccessedAt < oldestTime) {
+        oldestTime = existingJob.lastAccessedAt;
+        oldestSid = existingSid;
+      }
+    }
+    if (oldestSid) {
+      cleanupHlsJob(oldestSid, true, true);
+    } else {
+      break;
+    }
+  }
+  const jobId = nextHlsJobSeq++;
+  const dir = path3.join(HLS_TMP_ROOT, `${opts.sid.replace(/[^a-zA-Z0-9_-]/g, "_")}_j${jobId}`);
+  fs3.mkdirSync(dir, { recursive: true });
+  const startSec = opts.startSeg * HLS_SEG_DURATION;
+  const ffArgs = [
+    "-probesize",
+    "1800000",
+    "-analyzeduration",
+    "1800000",
+    "-fflags",
+    "+discardcorrupt",
+    "-reconnect",
+    "1",
+    "-reconnect_streamed",
+    "1",
+    "-reconnect_on_http_error",
+    "4xx,5xx",
+    "-reconnect_on_network_error",
+    "1",
+    "-reconnect_delay_max",
+    "2"
+  ];
+  if (startSec > 0) {
+    ffArgs.push("-ss", String(startSec));
+  }
+  ffArgs.push(
+    "-i",
+    opts.inputUrl,
+    "-sn",
+    "-dn",
+    "-map_chapters",
+    "-1",
+    "-map",
+    "0:V:0",
+    "-map",
+    `0:a:${opts.audioIdx}?`,
+    "-max_muxing_queue_size",
+    "4096"
+  );
+  if (opts.remuxOnly && !opts.requestedQuality) {
+    ffArgs.push(
+      "-vf",
+      "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-threads",
+      "0",
+      "-pix_fmt",
+      "yuv420p",
+      "-profile:v",
+      "main",
+      "-level",
+      "4.0",
+      "-crf",
+      "21",
+      "-maxrate",
+      "3600k",
+      "-bufsize",
+      "7200k",
+      "-g",
+      "240",
+      "-force_key_frames",
+      `expr:gte(t,n_forced*${HLS_SEG_DURATION})`,
+      "-sc_threshold",
+      "0"
+    );
+    if (opts.canCopyAudio) {
+      ffArgs.push("-c:a", "copy");
+    } else {
+      ffArgs.push("-af", "aresample=async=1:min_hard_comp=0.100000", "-c:a", "aac", "-ac", "2", "-ar", "48000", "-b:a", "160k");
+    }
+  } else {
+    ffArgs.push(...getHlsArgsForQuality(opts.requestedQuality, true));
+  }
+  if (startSec > 0) {
+    ffArgs.push("-output_ts_offset", String(startSec));
+  }
+  ffArgs.push(
+    "-f",
+    "hls",
+    "-hls_time",
+    String(HLS_SEG_DURATION),
+    "-hls_list_size",
+    "0",
+    "-start_number",
+    String(opts.startSeg),
+    "-hls_flags",
+    "independent_segments+temp_file",
+    "-hls_segment_filename",
+    path3.join(dir, "seg_%05d.ts"),
+    path3.join(dir, "index.m3u8")
+  );
+  const proc = spawn2("ffmpeg", ffArgs, { stdio: ["ignore", "ignore", "pipe"] });
+  const job = {
+    jobId,
+    sid: opts.sid,
+    urlParam: opts.urlParam,
+    dir,
+    startSeg: opts.startSeg,
+    highestSeg: opts.startSeg - 1,
+    proc,
+    closed: false,
+    superseded: false,
+    activeReaders: 0,
+    lastAccessedAt: Date.now(),
+    lastErrLine: ""
+  };
+  proc.stderr?.on("data", (d) => {
+    const s = d.toString().trim();
+    if (s) job.lastErrLine = s.slice(-240);
+  });
+  proc.on("close", (code) => {
+    job.closed = true;
+    job.proc = null;
+    if (!job.superseded && code && code !== 0 && job.lastErrLine) {
+      console.warn(`[HLS Worker ${opts.sid}] FFmpeg exited (${code}): ${job.lastErrLine}`);
+    }
+  });
+  proc.on("error", (err) => {
+    job.closed = true;
+    job.proc = null;
+    job.lastErrLine = err?.message || "spawn error";
+  });
+  hlsJobs.set(opts.sid, job);
+  return job;
+}
+async function resolveHlsSourceParams(req) {
+  const urlParam = String(req.query.url || "").trim();
+  const modeParam = String(req.query.mode || "remux").trim().toLowerCase();
+  const requestedQuality = normalizeRequestedQuality(req.query.quality);
+  const audioIdx = Math.max(0, parseInt(String(req.query.audioIdx || "0"), 10) || 0);
+  const isTelegram = urlParam.includes("t.me") || urlParam.includes("telegram.me");
+  let inputUrl = urlParam;
+  let durationSec = Math.max(0, Number(req.query.dur || 0) || 0);
+  let remuxOnly = modeParam !== "transcode" && !requestedQuality;
+  let canCopyAudio = false;
+  if (isTelegram) {
+    const parsed = parseTelegramUrl(urlParam);
+    if (!parsed.isValid || parsed.isInviteLink || !parsed.messageId) {
+      throw new Error("Invalid Telegram post URL");
+    }
+    const client2 = await getTelegramClient();
+    const { entry, error } = await resolveAndCacheDocument(client2, parsed);
+    if (!entry) {
+      throw new Error(error || "Media not found");
+    }
+    const probe = await ensureMediaProbed(entry, urlParam);
+    durationSec = probe.durationSec || entry.docInfo.durationSec || durationSec;
+    const localPort = process.env.INTERNAL_APP_PORT || process.env.APP_PORT || "3000";
+    inputUrl = `http://127.0.0.1:${localPort}/api/stream?url=${encodeURIComponent(urlParam)}&raw=1`;
+    const vc = (probe.videoCodec || "").toLowerCase();
+    const pixFmt = (probe.pixFmt || "").toLowerCase();
+    const isH264Safe = vc === "h264" && !probe.is10Bit && (pixFmt === "" || pixFmt === "yuv420p" || pixFmt === "yuvj420p" || pixFmt === "nv12") && (probe.height === 0 || probe.height <= 1088) && (probe.videoLevel === 0 || probe.videoLevel <= 42);
+    if (modeParam === "transcode" || Boolean(requestedQuality && requestedQuality !== "1080p") || !isH264Safe) {
+      remuxOnly = false;
+    } else {
+      remuxOnly = true;
+    }
+    const selectedTrack = probe.audioTracks[audioIdx] || probe.audioTracks[0];
+    const ac = (selectedTrack?.codec || probe.audioCodec || "").toLowerCase();
+    const ch = selectedTrack?.channels || 2;
+    const videoStart = probe.videoStartTime || 0;
+    const audioStart = selectedTrack?.startTime || 0;
+    const hasStreamOffset = Math.abs(audioStart - videoStart) > 0.04;
+    canCopyAudio = ac === "aac" && ch <= 2 && audioIdx === 0 && !hasStreamOffset;
+  } else {
+    if (durationSec <= 0) {
+      const info = await probeDirectHttpInfo(urlParam).catch(() => null);
+      if (info && info.durationSec > 0) durationSec = info.durationSec;
+    }
+    remuxOnly = modeParam !== "transcode" && !requestedQuality;
+  }
+  return { urlParam, modeParam, requestedQuality, audioIdx, inputUrl, durationSec, remuxOnly, canCopyAudio };
+}
+async function handleHlsPlaylistRequest(req, res) {
+  try {
+    const urlParam = String(req.query.url || "").trim();
+    if (!urlParam) return res.status(400).send("URL required");
+    const resolved = await resolveHlsSourceParams(req);
+    const sid = crypto.createHash("sha1").update(`${resolved.urlParam}|${resolved.remuxOnly ? "remux" : "transcode"}|${resolved.requestedQuality}|${resolved.audioIdx}`).digest("hex").slice(0, 16);
+    const commonQs = `sid=${encodeURIComponent(sid)}&url=${encodeURIComponent(resolved.urlParam)}&mode=${resolved.remuxOnly ? "remux" : "transcode"}` + (resolved.requestedQuality ? `&quality=${encodeURIComponent(resolved.requestedQuality)}` : "") + `&audioIdx=${resolved.audioIdx}`;
+    const existingJob = hlsJobs.get(sid);
+    if (!existingJob || existingJob.closed) {
+      startHlsWorker({
+        sid,
+        urlParam: resolved.urlParam,
+        startSeg: 0,
+        inputUrl: resolved.inputUrl,
+        remuxOnly: resolved.remuxOnly,
+        canCopyAudio: resolved.canCopyAudio,
+        requestedQuality: resolved.requestedQuality,
+        audioIdx: resolved.audioIdx
+      });
+    } else {
+      existingJob.lastAccessedAt = Date.now();
+    }
+    const lines = [
+      "#EXTM3U",
+      "#EXT-X-VERSION:3",
+      `#EXT-X-TARGETDURATION:${HLS_TARGET_DURATION}`,
+      "#EXT-X-MEDIA-SEQUENCE:0",
+      "#EXT-X-PLAYLIST-TYPE:VOD",
+      "#EXT-X-INDEPENDENT-SEGMENTS"
+    ];
+    const effectiveDur = resolved.durationSec > 0 ? resolved.durationSec : 10800;
+    const segCount = Math.max(1, Math.ceil(effectiveDur / HLS_SEG_DURATION));
+    for (let i = 0; i < segCount; i++) {
+      const remaining = effectiveDur - i * HLS_SEG_DURATION;
+      const segDur = Math.max(0.5, Math.min(HLS_SEG_DURATION, remaining));
+      lines.push(`#EXTINF:${segDur.toFixed(3)},`);
+      lines.push(`/api/telegram/hls/seg.ts?${commonQs}&i=${i}`);
+    }
+    lines.push("#EXT-X-ENDLIST");
+    const body = lines.join("\n") + "\n";
+    res.setHeader("Content-Type", "application/vnd.apple.mpegurl; charset=utf-8");
+    res.setHeader("Content-Length", String(Buffer.byteLength(body, "utf8")));
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    if (req.method === "HEAD") {
+      return res.status(200).end();
+    }
+    return res.status(200).send(body);
+  } catch (err) {
+    console.error("[HLS Playlist] Error:", err?.message || err);
+    return res.status(500).send(err?.message || "Failed to build HLS playlist");
+  }
+}
+router2.get("/hls/playlist.m3u8", handleHlsPlaylistRequest);
+router2.head("/hls/playlist.m3u8", handleHlsPlaylistRequest);
+async function handleHlsSegmentRequest(req, res) {
+  try {
+    const segIdx = Math.max(0, parseInt(String(req.query.i || "0"), 10) || 0);
+    const resolved = await resolveHlsSourceParams(req);
+    const sid = String(
+      req.query.sid || crypto.createHash("sha1").update(`${resolved.urlParam}|${resolved.remuxOnly ? "remux" : "transcode"}|${resolved.requestedQuality}|${resolved.audioIdx}`).digest("hex").slice(0, 16)
+    ).replace(/[^a-zA-Z0-9_-]/g, "_");
+    let clientDisconnected = false;
+    req.on("close", () => {
+      clientDisconnected = true;
+    });
+    let activeJob;
+    let targetFile = "";
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (clientDisconnected) return;
+      let job = attempt === 0 ? hlsJobs.get(sid) : void 0;
+      const candidatePath = job ? getHlsSegmentPath(job.dir, segIdx) : "";
+      const alreadyExists = Boolean(job && candidatePath && segmentReadyOnDisk(candidatePath));
+      const needRestart = !job || !alreadyExists && (segIdx < job.startSeg || segIdx > Math.max(job.startSeg, job.highestSeg) + 18) || !alreadyExists && job.closed;
+      if (needRestart) {
+        const forceSafeTranscode = attempt > 0;
+        job = startHlsWorker({
+          sid,
+          urlParam: resolved.urlParam,
+          startSeg: segIdx,
+          inputUrl: resolved.inputUrl,
+          remuxOnly: forceSafeTranscode ? false : resolved.remuxOnly,
+          canCopyAudio: forceSafeTranscode ? false : resolved.canCopyAudio,
+          requestedQuality: resolved.requestedQuality,
+          audioIdx: resolved.audioIdx
+        });
+      }
+      if (!job) {
+        return res.status(503).send("HLS job unavailable");
+      }
+      job.lastAccessedAt = Date.now();
+      if (segIdx > job.highestSeg) {
+        job.highestSeg = segIdx;
+      }
+      const waitStart = Date.now();
+      targetFile = getHlsSegmentPath(job.dir, segIdx);
+      while (!clientDisconnected && !segmentReadyOnDisk(targetFile)) {
+        job.lastAccessedAt = Date.now();
+        if (job.closed) {
+          const latestJob = hlsJobs.get(sid);
+          if (latestJob && latestJob.jobId !== job.jobId && latestJob.startSeg <= segIdx) {
+            job = latestJob;
+            targetFile = getHlsSegmentPath(job.dir, segIdx);
+            continue;
+          }
+          break;
+        }
+        if (Date.now() - waitStart > 45e3) {
+          res.setHeader("Cache-Control", "no-store");
+          return res.status(504).send("HLS segment timed out");
+        }
+        await new Promise((r) => setTimeout(r, 80));
+      }
+      if (clientDisconnected) return;
+      if (segmentReadyOnDisk(targetFile)) {
+        activeJob = job;
+        break;
+      }
+    }
+    if (clientDisconnected) return;
+    if (!activeJob || !segmentReadyOnDisk(targetFile)) {
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(503).send("Segment temporarily unavailable");
+    }
+    const stat = fs3.statSync(targetFile);
+    res.setHeader("Content-Type", "video/mp2t");
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader(
+      "Access-Control-Expose-Headers",
+      "Content-Range, Accept-Ranges, Content-Length, Content-Type"
+    );
+    const rangeHeader = req.headers.range;
+    let streamStart = 0;
+    let streamEnd = stat.size - 1;
+    let isRange = false;
+    if (rangeHeader) {
+      const match = String(rangeHeader).match(/bytes=(\d*)-(\d*)/i);
+      if (!match || !match[1] && !match[2]) {
+        res.setHeader("Content-Range", `bytes */${stat.size}`);
+        return res.status(416).end();
+      }
+      const hasStart = Boolean(match[1]);
+      const hasEnd = Boolean(match[2]);
+      if (hasStart) {
+        streamStart = parseInt(match[1], 10);
+        streamEnd = hasEnd ? parseInt(match[2], 10) : stat.size - 1;
+      } else {
+        const suffixLen = parseInt(match[2], 10);
+        streamStart = Math.max(0, stat.size - suffixLen);
+        streamEnd = stat.size - 1;
+      }
+      if (!Number.isFinite(streamStart) || !Number.isFinite(streamEnd) || streamStart < 0 || streamStart >= stat.size || streamEnd < streamStart) {
+        res.setHeader("Content-Range", `bytes */${stat.size}`);
+        return res.status(416).end();
+      }
+      streamEnd = Math.min(streamEnd, stat.size - 1);
+      isRange = true;
+    }
+    const responseLength = streamEnd - streamStart + 1;
+    res.setHeader("Content-Length", String(responseLength));
+    if (isRange) {
+      res.setHeader("Content-Range", `bytes ${streamStart}-${streamEnd}/${stat.size}`);
+    }
+    if (req.method === "HEAD") {
+      return res.status(isRange ? 206 : 200).end();
+    }
+    res.status(isRange ? 206 : 200);
+    activeJob.activeReaders += 1;
+    let readerReleased = false;
+    const releaseReader = () => {
+      if (readerReleased) return;
+      readerReleased = true;
+      if (activeJob) {
+        activeJob.activeReaders = Math.max(0, activeJob.activeReaders - 1);
+      }
+    };
+    const stream = fs3.createReadStream(targetFile, { start: streamStart, end: streamEnd });
+    stream.on("error", () => {
+      releaseReader();
+      if (!res.writableEnded) res.end();
+    });
+    stream.on("close", releaseReader);
+    res.on("close", () => {
+      releaseReader();
+      stream.destroy();
+    });
+    stream.pipe(res);
+    try {
+      const pruneUpTo = segIdx - 15;
+      if (pruneUpTo > activeJob.startSeg) {
+        for (let oldIdx = Math.max(activeJob.startSeg, pruneUpTo - 5); oldIdx < pruneUpTo; oldIdx++) {
+          const oldFile = getHlsSegmentPath(activeJob.dir, oldIdx);
+          if (fs3.existsSync(oldFile)) {
+            fs3.unlinkSync(oldFile);
+          }
+        }
+      }
+    } catch {
+    }
+  } catch (err) {
+    console.error("[HLS Seg] Error:", err?.message || err);
+    if (!res.headersSent) res.status(500).send(err?.message || "HLS segment error");
+  }
+}
+router2.get("/hls/seg.ts", handleHlsSegmentRequest);
+router2.head("/hls/seg.ts", handleHlsSegmentRequest);
+var RECENT_POSTS_CACHE_FILE = path3.join(os2.tmpdir(), ".movie_hub_tg_recent_movies.json");
+var recentChannelVideoPosts = [];
+var channelMaxKnownMsgId = /* @__PURE__ */ new Map();
+var watcherAttachedClients = /* @__PURE__ */ new WeakSet();
+function loadRecentChannelPostsFromDisk() {
+  try {
+    if (fs3.existsSync(RECENT_POSTS_CACHE_FILE)) {
+      const parsed = JSON.parse(fs3.readFileSync(RECENT_POSTS_CACHE_FILE, "utf-8"));
+      if (Array.isArray(parsed?.posts)) {
+        recentChannelVideoPosts.splice(0, recentChannelVideoPosts.length, ...parsed.posts.slice(-250));
+      }
+      if (parsed?.maxIds && typeof parsed.maxIds === "object") {
+        for (const [k, v] of Object.entries(parsed.maxIds)) {
+          const n = Number(v);
+          if (k && Number.isFinite(n) && n > 0) channelMaxKnownMsgId.set(k, n);
+        }
+      }
+    }
+  } catch {
+  }
+}
+function saveRecentChannelPostsToDisk() {
+  try {
+    const maxIds = {};
+    for (const [k, v] of channelMaxKnownMsgId.entries()) {
+      maxIds[k] = v;
+    }
+    fs3.writeFileSync(
+      RECENT_POSTS_CACHE_FILE,
+      JSON.stringify({ posts: recentChannelVideoPosts.slice(-250), maxIds }),
+      "utf-8"
+    );
+  } catch {
+  }
+}
+loadRecentChannelPostsFromDisk();
+function recordChannelVideoPost(post) {
+  const prevMax = channelMaxKnownMsgId.get(post.channelId) || 0;
+  if (post.msgId > prevMax) {
+    channelMaxKnownMsgId.set(post.channelId, post.msgId);
+  }
+  const dupIdx = recentChannelVideoPosts.findIndex(
+    (p) => p.channelId === post.channelId && p.msgId === post.msgId
+  );
+  if (dupIdx >= 0) {
+    recentChannelVideoPosts[dupIdx] = post;
+  } else {
+    recentChannelVideoPosts.push(post);
+    if (recentChannelVideoPosts.length > 250) {
+      recentChannelVideoPosts.splice(0, recentChannelVideoPosts.length - 250);
+    }
+  }
+  saveRecentChannelPostsToDisk();
+}
+async function ensureChannelUploadWatcher(client2) {
+  if (!client2 || watcherAttachedClients.has(client2)) return;
+  watcherAttachedClients.add(client2);
+  try {
+    const { NewMessage } = await import("telegram/events/index.js");
+    client2.addEventHandler(async (event) => {
+      try {
+        const msg = event?.message;
+        if (!msg || !msg.id) return;
+        const rawChanId = msg?.peerId?.channelId?.toString?.() || msg?.chatId?.toString?.()?.replace(/^-100/, "") || "";
+        if (!rawChanId) return;
+        const cleanChannelId = rawChanId.replace(/^-100/, "");
+        const prevMax = channelMaxKnownMsgId.get(cleanChannelId) || 0;
+        if (Number(msg.id) > prevMax) {
+          channelMaxKnownMsgId.set(cleanChannelId, Number(msg.id));
+          saveRecentChannelPostsToDisk();
+        }
+        const classified = classifyTelegramDocMedia(msg);
+        if (classified.kind !== "video") return;
+        const chat = event?.chat || await msg.getChat?.().catch(() => null);
+        const username = chat?.username || "";
+        const channelTitle = chat?.title || `Channel (${cleanChannelId})`;
+        if (chat?.accessHash) {
+          saveChannelEntity(cleanChannelId, chat.accessHash.toString(), channelTitle, username);
+        }
+        const streamUrl = username ? `https://t.me/${username}/${msg.id}` : `https://t.me/c/${cleanChannelId}/${msg.id}`;
+        recordChannelVideoPost({
+          channelId: cleanChannelId,
+          channelTitle,
+          msgId: Number(msg.id),
+          streamUrl,
+          fileName: classified.fileName || `Movie_Msg_${msg.id}`,
+          caption: classified.caption || "",
+          sizeBytes: classified.sizeBytes,
+          durationSec: classified.durationSec,
+          width: classified.width,
+          height: classified.height,
+          mime: classified.mime,
+          receivedAt: Date.now()
+        });
+        console.log(
+          `[TelegramAutoWatcher] New channel video detected: "${classified.fileName || msg.id}" (${streamUrl})`
+        );
+        scheduleServerAutoSync(`new_video_${cleanChannelId}_${msg.id}`, 12e3);
+      } catch (watchErr) {
+        console.warn("[TelegramAutoWatcher] Handler warning:", watchErr?.message || watchErr);
+      }
+    }, new NewMessage({}));
+  } catch (err) {
+    console.warn("[TelegramAutoWatcher] Could not attach NewMessage watcher:", err?.message || err);
+  }
+}
+router2.get("/recent-channel-posts", async (_req, res) => {
+  try {
+    const client2 = await getTelegramClient().catch(() => null);
+    if (client2) await ensureChannelUploadWatcher(client2);
+  } catch {
+  }
+  const maxIds = {};
+  for (const [k, v] of channelMaxKnownMsgId.entries()) {
+    maxIds[k] = v;
+  }
+  return res.json({
+    success: true,
+    posts: recentChannelVideoPosts.slice(-100),
+    highestMsgIds: maxIds
+  });
+});
+async function discoverChannelLatestMsgId(client2, peer, cleanChannelId) {
+  let highest = channelMaxKnownMsgId.get(cleanChannelId) || 0;
+  try {
+    const { botToken } = getTelegramCredentials();
+    if (botToken && /^\d+$/.test(cleanChannelId)) {
+      const targetChatId = `-100${cleanChannelId}`;
+      const updResp = await fetch(`https://api.telegram.org/bot${botToken}/getUpdates?limit=100`);
+      const updJson = await updResp.json();
+      for (const u of updJson?.result || []) {
+        const src = u?.channel_post || u?.edited_channel_post || u?.message;
+        if (src && String(src?.chat?.id || "") === targetChatId) {
+          const mid = Number(src.message_id || 0);
+          if (mid > highest) highest = mid;
+        }
+      }
+    }
+  } catch {
+  }
+  try {
+    const base = highest > 0 ? highest : 0;
+    const probeIds = base > 0 ? [base + 1, base + 5, base + 15, base + 30, base + 60, base + 120, base + 250] : [1, 10, 25, 50, 75, 100, 125, 150, 175, 200, 250, 300, 400, 500, 750, 1e3, 1500, 2e3];
+    const msgs = await client2.getMessages(peer, { ids: probeIds });
+    let bestCheckpoint = highest;
+    for (const m of msgs || []) {
+      if (m && m.id && Number(m.id) > bestCheckpoint) {
+        bestCheckpoint = Number(m.id);
+      }
+    }
+    if (bestCheckpoint > 0) {
+      const tailStart = bestCheckpoint + 1;
+      const tailEnd = bestCheckpoint + 60;
+      const tailIds = [];
+      for (let i = tailStart; i <= tailEnd; i++) tailIds.push(i);
+      const tailMsgs = await client2.getMessages(peer, { ids: tailIds });
+      for (const m of tailMsgs || []) {
+        if (m && m.id && Number(m.id) > bestCheckpoint) {
+          bestCheckpoint = Number(m.id);
+        }
+      }
+      highest = Math.max(highest, bestCheckpoint);
+    }
+  } catch {
+  }
+  if (highest > (channelMaxKnownMsgId.get(cleanChannelId) || 0)) {
+    channelMaxKnownMsgId.set(cleanChannelId, highest);
+    saveRecentChannelPostsToDisk();
+  }
+  return highest;
+}
+async function resolveChannelPeerFromLinkOrId(client2, rawChannelRef) {
+  const ref = String(rawChannelRef || "").trim();
+  if (!ref) return null;
+  const parsed = parseTelegramUrl(ref);
+  let peer = null;
+  let cleanChannelId = "";
+  let channelTitle = ref;
+  let publicUsername = "";
+  if (parsed.isValid && !parsed.isInviteLink) {
+    if (parsed.isPrivate && parsed.rawChannelId) {
+      cleanChannelId = parsed.rawChannelId.replace(/^-100/, "");
+      channelTitle = `Private Channel (${cleanChannelId})`;
+    } else if (parsed.chatId && parsed.chatId.startsWith("@")) {
+      publicUsername = parsed.rawChannelId;
+      channelTitle = parsed.chatId;
+    }
+  } else if (/^-100\d+$/.test(ref) || /^\d{6,}$/.test(ref)) {
+    cleanChannelId = ref.replace(/^-100/, "");
+    channelTitle = `Private Channel (${cleanChannelId})`;
+  } else if (!parsed.isInviteLink && /^@?[a-zA-Z0-9_]{4,}$/.test(ref.replace(/^https?:\/\/(?:t\.me|telegram\.me)\//i, ""))) {
+    const u = ref.replace(/^https?:\/\/(?:t\.me|telegram\.me)\//i, "").replace(/^@/, "");
+    publicUsername = u;
+    channelTitle = `@${u}`;
+  }
+  if (parsed.isInviteLink && parsed.inviteHash) {
+    const hash = parsed.inviteHash;
+    try {
+      const checkRes = await client2.invoke(new Api3.messages.CheckChatInvite({ hash }));
+      const chat = checkRes?.chat || checkRes?.channel;
+      if (chat && chat.id) {
+        cleanChannelId = chat.id.toString().replace(/^-100/, "");
+        channelTitle = chat.title || channelTitle;
+        if (chat.accessHash) {
+          saveChannelEntity(cleanChannelId, chat.accessHash.toString(), channelTitle, chat.username || "");
+        }
+      }
+    } catch {
+    }
+    if (!cleanChannelId) {
+      try {
+        const { botToken } = getTelegramCredentials();
+        if (botToken) {
+          const updResp = await fetch(`https://api.telegram.org/bot${botToken}/getUpdates?limit=100`);
+          const updJson = await updResp.json();
+          const updates = Array.isArray(updJson?.result) ? updJson.result : [];
+          const recentChatIds = [];
+          for (let i = updates.length - 1; i >= 0; i--) {
+            const src = updates[i]?.my_chat_member || updates[i]?.channel_post || updates[i]?.edited_channel_post || updates[i]?.message;
+            const cId = src?.chat?.id ? String(src.chat.id) : "";
+            if (cId && cId.startsWith("-100") && !recentChatIds.includes(cId)) {
+              recentChatIds.push(cId);
+            }
+          }
+          const cachedNumericIds = getAllCachedChannels().filter((c) => /^\d+$/.test(c.channelId) && c.accessHash && c.accessHash !== "0").map((c) => `-100${c.channelId}`);
+          const allCandidates = Array.from(/* @__PURE__ */ new Set([...recentChatIds, ...cachedNumericIds]));
+          for (const cId of allCandidates) {
+            try {
+              const chatResp = await fetch(`https://api.telegram.org/bot${botToken}/getChat?chat_id=${encodeURIComponent(cId)}`);
+              const chatJson = await chatResp.json();
+              const inv = String(chatJson?.result?.invite_link || "");
+              if (inv.includes(hash)) {
+                cleanChannelId = cId.replace(/^-100/, "");
+                channelTitle = chatJson?.result?.title || channelTitle;
+                break;
+              }
+            } catch {
+            }
+          }
+          if (!cleanChannelId) {
+            const movieCached = getAllCachedChannels().find(
+              (c) => c.channelId === "3850537977" && c.accessHash && c.accessHash !== "0"
+            );
+            if (hash === "QSL_3k54YfBjMjE1" && movieCached) {
+              cleanChannelId = movieCached.channelId;
+              channelTitle = movieCached.title || "app Databas";
+            } else if (recentChatIds.length > 0) {
+              cleanChannelId = recentChatIds[0].replace(/^-100/, "");
+            } else if (movieCached) {
+              cleanChannelId = movieCached.channelId;
+              channelTitle = movieCached.title || "app Databas";
+            }
+          }
+        }
+      } catch {
+      }
+    }
+    if (!cleanChannelId) {
+      const cachedList = getAllCachedChannels().filter(
+        (c) => c.accessHash && c.accessHash !== "0" && /^\d+$/.test(c.channelId)
+      );
+      const preferred = cachedList.find((c) => c.channelId === "3850537977") || cachedList.find((c) => !/naruto/i.test(c.title || "")) || cachedList[0];
+      if (preferred) {
+        cleanChannelId = preferred.channelId;
+        channelTitle = preferred.title || cleanChannelId;
+        publicUsername = preferred.username || "";
+      }
+    }
+  }
+  if (publicUsername && !cleanChannelId) {
+    try {
+      const entity = await client2.getEntity(`@${publicUsername}`);
+      if (entity) {
+        peer = entity;
+        cleanChannelId = entity.id ? entity.id.toString().replace(/^-100/, "") : publicUsername;
+        channelTitle = entity.title || `@${publicUsername}`;
+        publicUsername = entity.username || publicUsername;
+        if (entity.accessHash) {
+          saveChannelEntity(cleanChannelId, entity.accessHash.toString(), channelTitle, publicUsername);
+        }
+      }
+    } catch {
+    }
+  }
+  if (!peer && cleanChannelId) {
+    const cachedHash = getCachedAccessHash(cleanChannelId);
+    if (cachedHash && cachedHash !== "0") {
+      const bigInt3 = (await import("big-integer")).default;
+      peer = new Api3.InputPeerChannel({
+        channelId: bigInt3(cleanChannelId),
+        accessHash: bigInt3(cachedHash)
+      });
+      const cached = getAllCachedChannels().find((c) => c.channelId === cleanChannelId);
+      if (cached?.title) channelTitle = cached.title;
+      if (cached?.username && !cached.username.startsWith("+")) publicUsername = cached.username;
+    } else {
+      try {
+        const entity = await client2.getEntity(`-100${cleanChannelId}`);
+        if (entity) {
+          peer = entity;
+          channelTitle = entity.title || channelTitle;
+          publicUsername = entity.username || publicUsername;
+          if (entity.accessHash) {
+            saveChannelEntity(cleanChannelId, entity.accessHash.toString(), channelTitle, publicUsername);
+          }
+        }
+      } catch {
+      }
+    }
+    if (!peer) peer = `-100${cleanChannelId}`;
+  }
+  if (!peer) return null;
+  return { peer, cleanChannelId: cleanChannelId || publicUsername, channelTitle, publicUsername };
+}
+router2.post("/resolve-channel-info", async (req, res) => {
+  const channelRef = String(req.body?.channelRef || req.body?.channelUrl || "").trim();
+  if (!channelRef) {
+    return res.status(400).json({ error: "Channel link or @username is required." });
+  }
+  try {
+    const client2 = await getTelegramClient();
+    await ensureChannelUploadWatcher(client2);
+    const resolved = await resolveChannelPeerFromLinkOrId(client2, channelRef);
+    if (!resolved) {
+      return res.status(404).json({ error: "Could not resolve channel. Make sure the bot is Admin in this channel." });
+    }
+    const latestMsgId = await discoverChannelLatestMsgId(
+      client2,
+      resolved.peer,
+      resolved.cleanChannelId
+    );
+    return res.json({
+      success: true,
+      channelId: resolved.cleanChannelId,
+      channelTitle: resolved.channelTitle,
+      publicUsername: resolved.publicUsername,
+      latestMsgId
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err?.message || "Failed to resolve Telegram channel." });
+  }
+});
+router2.post("/scan-movies-channel", async (req, res) => {
+  const {
+    mode = "range",
+    startUrl = "",
+    endUrl = "",
+    channelRef = "",
+    startMsgId: rawStartId,
+    endMsgId: rawEndId,
+    sinceMsgId: rawSinceId,
+    existingUrls = [],
+    existingImdbIds = [],
+    existingTitles = []
+  } = req.body || {};
+  try {
+    const client2 = await getTelegramClient();
+    await ensureChannelUploadWatcher(client2);
+    const refSource = String(startUrl || endUrl || channelRef || "").trim();
+    const resolved = await resolveChannelPeerFromLinkOrId(client2, refSource);
+    if (!resolved) {
+      return res.status(400).json({
+        error: "Could not resolve Telegram channel. Make sure @Movies_Direct_Group_Bot is Admin in your channel."
+      });
+    }
+    const { peer, cleanChannelId, channelTitle, publicUsername } = resolved;
+    const startParsed = parseTelegramUrl(String(startUrl || ""));
+    const endParsed = parseTelegramUrl(String(endUrl || ""));
+    const existingUrlSet = new Set(
+      (Array.isArray(existingUrls) ? existingUrls : []).map((u) => String(u || "").trim().toLowerCase()).filter(Boolean)
+    );
+    const existingImdbSet = new Set(
+      (Array.isArray(existingImdbIds) ? existingImdbIds : []).map((id) => String(id || "").trim().toLowerCase()).filter(Boolean)
+    );
+    const existingTitleList = (Array.isArray(existingTitles) ? existingTitles : []).map((t) => buildExistingTitleDupEntry(t?.title, t?.originalTitle, t?.releaseYear, t?.category)).filter((e) => e.normTitle.length >= 2);
+    const collectedMessages = [];
+    let scanFromId = 0;
+    let scanToId = 0;
+    let highestSeenMsgId = Math.max(
+      Number(rawSinceId) || 0,
+      channelMaxKnownMsgId.get(cleanChannelId) || 0
+    );
+    if (mode === "since_latest") {
+      let baseline = Math.max(0, Number(rawSinceId) || 0);
+      if (baseline <= 0) {
+        const discoveredLatest = await discoverChannelLatestMsgId(client2, peer, cleanChannelId);
+        if (discoveredLatest > 0) {
+          baseline = Math.max(0, discoveredLatest - 25);
+        } else {
+          return res.json({
+            success: true,
+            channelId: cleanChannelId,
+            channelTitle,
+            scannedFromMsgId: 0,
+            scannedToMsgId: 0,
+            highestMsgId: 0,
+            totalVideosFound: 0,
+            skippedStickers: 0,
+            skippedSamples: 0,
+            skippedOther: 0,
+            skippedAlreadyAdded: 0,
+            items: []
+          });
+        }
+      }
+      scanFromId = baseline + 1;
+      scanToId = baseline;
+      let consecutiveEmptyBatches = 0;
+      const MAX_PROBE_AHEAD = 500;
+      const BATCH = 100;
+      for (let cursor = baseline + 1; cursor <= baseline + MAX_PROBE_AHEAD; cursor += BATCH) {
+        const batchEnd = Math.min(cursor + BATCH - 1, baseline + MAX_PROBE_AHEAD);
+        const ids = [];
+        for (let id = cursor; id <= batchEnd; id++) ids.push(id);
+        const msgs = await client2.getMessages(peer, { ids });
+        const valid = (msgs || []).filter((m) => m && m.id);
+        if (valid.length === 0) {
+          consecutiveEmptyBatches++;
+          if (consecutiveEmptyBatches >= 2) break;
+        } else {
+          consecutiveEmptyBatches = 0;
+          for (const m of valid) {
+            collectedMessages.push(m);
+            if (Number(m.id) > scanToId) scanToId = Number(m.id);
+            if (Number(m.id) > highestSeenMsgId) highestSeenMsgId = Number(m.id);
+          }
+        }
+        await new Promise((r) => setTimeout(r, 80));
+      }
+    } else {
+      const startId = (Number(rawStartId) > 0 ? Math.floor(Number(rawStartId)) : 0) || (startParsed.messageId ? parseInt(startParsed.messageId, 10) : 0) || 1;
+      let endId = (Number(rawEndId) > 0 ? Math.floor(Number(rawEndId)) : 0) || (endParsed.messageId ? parseInt(endParsed.messageId, 10) : 0) || 0;
+      if (endId <= 0) {
+        const discoveredLatest = await discoverChannelLatestMsgId(client2, peer, cleanChannelId);
+        endId = Math.max(startId, Math.min(startId + 399, discoveredLatest || startId + 200));
+      }
+      if (endId < startId) {
+        return res.status(400).json({ error: "Ending message ID must be >= Starting message ID." });
+      }
+      if (endId - startId + 1 > 400) {
+        return res.status(400).json({ error: "Max 400 messages per chunk." });
+      }
+      scanFromId = startId;
+      scanToId = endId;
+      const BATCH = 100;
+      for (let cursor = startId; cursor <= endId; cursor += BATCH) {
+        const batchEnd = Math.min(cursor + BATCH - 1, endId);
+        const ids = [];
+        for (let id = cursor; id <= batchEnd; id++) ids.push(id);
+        const msgs = await client2.getMessages(peer, { ids });
+        for (const m of msgs || []) {
+          if (m && m.id) {
+            collectedMessages.push(m);
+            if (Number(m.id) > highestSeenMsgId) highestSeenMsgId = Number(m.id);
+          }
+        }
+        if (batchEnd < endId) {
+          await new Promise((r) => setTimeout(r, 90));
+        }
+      }
+    }
+    if (highestSeenMsgId > (channelMaxKnownMsgId.get(cleanChannelId) || 0)) {
+      channelMaxKnownMsgId.set(cleanChannelId, highestSeenMsgId);
+      saveRecentChannelPostsToDisk();
+    }
+    collectedMessages.sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
+    let skippedStickers = 0;
+    let skippedSamples = 0;
+    let skippedOther = 0;
+    let skippedAlreadyAdded = 0;
+    const videoCandidates = [];
+    for (const msg of collectedMessages) {
+      const classified = classifyTelegramDocMedia(msg);
+      if (classified.kind === "sticker") {
+        skippedStickers++;
+        continue;
+      }
+      if (classified.kind !== "video") {
+        skippedOther++;
+        continue;
+      }
+      const streamUrl = publicUsername ? `https://t.me/${publicUsername}/${msg.id}` : `https://t.me/c/${cleanChannelId}/${msg.id}`;
+      const parsedMeta = parseTelegramMovieMeta(
+        classified.fileName,
+        classified.caption,
+        classified.width,
+        classified.height,
+        classified.durationSec,
+        classified.sizeBytes
+      );
+      if (parsedMeta.isSampleOrClip) {
+        skippedSamples++;
+        continue;
+      }
+      if (existingUrlSet.has(streamUrl.toLowerCase())) {
+        skippedAlreadyAdded++;
+        continue;
+      }
+      primeMediaCacheFromTelegramDoc(
+        streamUrl,
+        classified.doc,
+        classified.fileName,
+        classified.durationSec,
+        classified.mime
+      );
+      videoCandidates.push({
+        msgId: Number(msg.id),
+        streamUrl,
+        durationSec: classified.durationSec,
+        sizeBytes: classified.sizeBytes,
+        fileName: classified.fileName || `Movie_${msg.id}`,
+        caption: classified.caption || "",
+        parsed: parsedMeta
+      });
+    }
+    const groupedList = [];
+    const groupIndexByKey = /* @__PURE__ */ new Map();
+    for (const v of videoCandidates) {
+      const gKey = v.parsed.groupKey && !v.parsed.isSeriesEpisode ? v.parsed.groupKey : `msg-${v.msgId}`;
+      const existingIdx = v.parsed.groupKey ? groupIndexByKey.get(gKey) : void 0;
+      if (existingIdx !== void 0) {
+        const grp = groupedList[existingIdx];
+        grp.members.push(v);
+        if (v.parsed.quality) {
+          const prevSize = grp.qualitySizes[v.parsed.quality] || 0;
+          if (!grp.videoQualities[v.parsed.quality] || v.sizeBytes > prevSize) {
+            grp.videoQualities[v.parsed.quality] = v.streamUrl;
+            grp.qualitySizes[v.parsed.quality] = v.sizeBytes;
+          }
+        }
+        if (!grp.primary.parsed.year && v.parsed.year || !grp.primary.parsed.explicitImdbId && v.parsed.explicitImdbId || v.parsed.quality === "1080p") {
+          grp.primary = v;
+        }
+      } else {
+        const vq = {};
+        const qs = {};
+        if (v.parsed.quality) {
+          vq[v.parsed.quality] = v.streamUrl;
+          qs[v.parsed.quality] = v.sizeBytes;
+        }
+        const newIdx = groupedList.length;
+        groupedList.push({
+          groupKey: gKey,
+          primary: v,
+          members: [v],
+          videoQualities: vq,
+          qualitySizes: qs
+        });
+        if (v.parsed.groupKey && !v.parsed.isSeriesEpisode) {
+          groupIndexByKey.set(gKey, newIdx);
+        }
+      }
+    }
+    let aborted = false;
+    res.on("close", () => {
+      if (!res.writableEnded) aborted = true;
+    });
+    const drafts = await mapWithConcurrency(
+      groupedList,
+      3,
+      async (grp) => {
+        if (aborted) return null;
+        const bestStream = grp.videoQualities["1080p"] || grp.videoQualities["720p"] || grp.videoQualities["480p"] || grp.videoQualities["4K"] || grp.videoQualities["360p"] || grp.primary.streamUrl;
+        const mergedParsed = {
+          ...grp.primary.parsed,
+          year: grp.primary.parsed.year || grp.members.find((m) => m.parsed.year)?.parsed.year || null,
+          languageHint: grp.primary.parsed.languageHint || grp.members.find((m) => m.parsed.languageHint)?.parsed.languageHint || "",
+          isHindiDubbed: grp.members.some((m) => m.parsed.isHindiDubbed)
+        };
+        const matched = await resolveBestImdbMatch(mergedParsed);
+        if (matched.imdbId && existingImdbSet.has(matched.imdbId.toLowerCase())) {
+          skippedAlreadyAdded++;
+          return null;
+        }
+        if (isDuplicateByTitleAndYear(
+          existingTitleList,
+          [matched.title, matched.originalTitle, mergedParsed.cleanTitle],
+          matched.releaseYear || mergedParsed.year || 0,
+          mergedParsed.isSeriesEpisode || String(matched.originalCategory || "").toLowerCase().includes("series")
+        )) {
+          skippedAlreadyAdded++;
+          return null;
+        }
+        const bestDurSec = Math.max(0, ...grp.members.map((m) => m.durationSec || 0));
+        const durationFormatted = bestDurSec > 0 ? formatDuration(bestDurSec) : "";
+        const qualityBadge = grp.videoQualities["4K"] ? "4K" : "HD";
+        return {
+          draftId: `tg-${cleanChannelId}-${grp.primary.msgId}`,
+          channelId: cleanChannelId,
+          channelTitle,
+          msgId: grp.primary.msgId,
+          sourceMsgIds: grp.members.map((m) => m.msgId),
+          streamUrl: bestStream,
+          videoQualities: grp.videoQualities,
+          qualityBadge,
+          durationSec: bestDurSec,
+          runtime: matched.runtime || durationFormatted,
+          sourceFileName: grp.primary.fileName,
+          sourceCaption: grp.primary.caption.slice(0, 240),
+          parsedTitle: mergedParsed.cleanTitle,
+          parsedYear: mergedParsed.year,
+          imdbId: matched.imdbId,
+          title: matched.title,
+          originalTitle: matched.originalTitle,
+          releaseYear: matched.releaseYear,
+          posterUrl: matched.posterUrl,
+          backdropUrl: matched.backdropUrl,
+          genre: matched.genre,
+          description: matched.description,
+          director: matched.director,
+          cast: matched.cast,
+          language: matched.language,
+          rating: matched.rating,
+          originalCategory: matched.originalCategory,
+          matchConfidence: matched.matchConfidence,
+          confidenceScore: matched.confidenceScore,
+          matchReason: matched.matchReason,
+          isSeriesEpisode: mergedParsed.isSeriesEpisode,
+          alternateMatches: matched.alternateMatches
+        };
+      },
+      () => aborted
+    );
+    if (aborted) return;
+    const finalItems = drafts.filter((d) => Boolean(d));
+    console.log(
+      `[TelegramScanMovies] Channel "${channelTitle}" (${scanFromId}-${scanToId}, mode=${mode}): ${finalItems.length} movies matched (${videoCandidates.length} video files, ${skippedAlreadyAdded} already in app)`
+    );
+    return res.json({
+      success: true,
+      channelId: cleanChannelId,
+      channelTitle,
+      scannedFromMsgId: scanFromId,
+      scannedToMsgId: scanToId,
+      highestMsgId: highestSeenMsgId,
+      totalVideosFound: videoCandidates.length,
+      skippedStickers,
+      skippedSamples,
+      skippedOther,
+      skippedAlreadyAdded,
+      items: finalItems
+    });
+  } catch (err) {
+    console.error("[TelegramScanMovies] Error:", err);
+    return res.status(500).json({
+      error: err?.message || "Failed to scan Telegram channel movies."
+    });
+  }
+});
+function normalizeDupTitleKey(title) {
+  return String(title || "").toLowerCase().replace(/\((?:tv\s*series|film|movie|series|\d{4})\)/gi, "").replace(/&/g, "and").replace(/[^a-z0-9]+/g, "");
+}
+function buildExistingTitleDupEntry(title, origTitle, releaseYear, category) {
+  const catLower = String(category || "").toLowerCase();
+  return {
+    normTitle: normalizeDupTitleKey(String(title || "")),
+    normOrigTitle: normalizeDupTitleKey(String(origTitle || "")),
+    releaseYear: Number(releaseYear) || 0,
+    isSeries: catLower.includes("series")
+  };
+}
+function isDuplicateByTitleAndYear(existingList, candidateTitles, candidateYear, candidateIsSeries) {
+  const normCandidates = candidateTitles.map((t) => normalizeDupTitleKey(t || "")).filter((k) => k.length >= 2);
+  if (normCandidates.length === 0) return false;
+  for (const ex of existingList) {
+    const exKeys = [ex.normTitle, ex.normOrigTitle].filter((k) => k.length >= 2);
+    for (const ck of normCandidates) {
+      for (const ek of exKeys) {
+        if (ck !== ek) continue;
+        if (ex.isSeries || candidateIsSeries) return true;
+        if (!candidateYear || !ex.releaseYear) return true;
+        if (Math.abs(candidateYear - ex.releaseYear) <= 1) return true;
+      }
+    }
+  }
+  return false;
+}
+var DEFAULT_AUTO_SYNC_CHANNEL_URL = "https://t.me/+QSL_3k54YfBjMjE1";
+var PENDING_DRAFTS_FILE = path3.join(os2.tmpdir(), ".movie_hub_tg_pending_drafts.json");
+var pendingServerDrafts = [];
+function loadPendingServerDrafts() {
+  try {
+    if (fs3.existsSync(PENDING_DRAFTS_FILE)) {
+      const raw = JSON.parse(fs3.readFileSync(PENDING_DRAFTS_FILE, "utf-8"));
+      if (Array.isArray(raw)) {
+        pendingServerDrafts = raw;
+      }
+    }
+  } catch {
+  }
+}
+function savePendingServerDrafts() {
+  try {
+    fs3.writeFileSync(PENDING_DRAFTS_FILE, JSON.stringify(pendingServerDrafts.slice(0, 100)), "utf-8");
+  } catch {
+  }
+}
+loadPendingServerDrafts();
+router2.get("/pending-review-drafts", (_req, res) => {
+  return res.json({ success: true, drafts: pendingServerDrafts });
+});
+router2.post("/dismiss-review-draft", (req, res) => {
+  const draftId = String(req.body?.draftId || "").trim();
+  if (draftId) {
+    pendingServerDrafts = pendingServerDrafts.filter((d) => d.draftId !== draftId);
+    savePendingServerDrafts();
+  }
+  return res.json({ success: true, remaining: pendingServerDrafts.length });
+});
+var serverAutoSyncTimer = null;
+var serverAutoSyncRunning = false;
+var cachedSyncConfig = null;
+function scheduleServerAutoSync(reason, delayMs = 12e3) {
+  if (serverAutoSyncTimer) clearTimeout(serverAutoSyncTimer);
+  serverAutoSyncTimer = setTimeout(() => {
+    serverAutoSyncTimer = null;
+    runServerAutoSyncPass(reason).catch(
+      (e) => console.warn("[ServerAutoSync] Pass warning:", e?.message || e)
+    );
+  }, delayMs);
+}
+async function getServerAutoSyncConfig(forceRefresh = false) {
+  if (!forceRefresh && cachedSyncConfig && Date.now() - cachedSyncConfig.fetchedAt < 9e4) {
+    return cachedSyncConfig;
+  }
+  try {
+    const snap = await getDocFromServer2(doc2(db, "app_config", "telegram_auto_sync"));
+    const d = snap.exists() ? snap.data() : {};
+    cachedSyncConfig = {
+      channelUrl: String(d?.channelUrl || DEFAULT_AUTO_SYNC_CHANNEL_URL).trim(),
+      lastSyncedMsgId: Number(d?.lastSyncedMsgId) || 0,
+      autoWatchEnabled: typeof d?.autoWatchEnabled === "boolean" ? d.autoWatchEnabled : true,
+      autoPublishVerified: typeof d?.autoPublishVerified === "boolean" ? d.autoPublishVerified : true,
+      notifyOnNewPublish: typeof d?.notifyOnNewPublish === "boolean" ? d.notifyOnNewPublish : true,
+      fetchedAt: Date.now()
+    };
+  } catch {
+    if (!cachedSyncConfig) {
+      cachedSyncConfig = {
+        channelUrl: DEFAULT_AUTO_SYNC_CHANNEL_URL,
+        lastSyncedMsgId: 0,
+        autoWatchEnabled: true,
+        autoPublishVerified: true,
+        notifyOnNewPublish: true,
+        fetchedAt: Date.now()
+      };
+    }
+  }
+  return cachedSyncConfig;
+}
+async function runServerAutoSyncPass(reason) {
+  if (serverAutoSyncRunning) return;
+  serverAutoSyncRunning = true;
+  try {
+    const cfg = await getServerAutoSyncConfig(reason.startsWith("new_video") || reason === "boot");
+    if (!cfg.autoWatchEnabled || !cfg.channelUrl) return;
+    const client2 = await getTelegramClient().catch(() => null);
+    if (!client2) return;
+    await ensureChannelUploadWatcher(client2);
+    const resolved = await resolveChannelPeerFromLinkOrId(client2, cfg.channelUrl);
+    if (!resolved) return;
+    const { peer, cleanChannelId, channelTitle, publicUsername } = resolved;
+    let baseline = cfg.lastSyncedMsgId;
+    if (baseline <= 0) {
+      const latest = await discoverChannelLatestMsgId(client2, peer, cleanChannelId);
+      if (latest <= 0) return;
+      baseline = Math.max(0, latest - 10);
+    }
+    const probeIds = [];
+    for (let id = baseline + 1; id <= baseline + 50; id++) probeIds.push(id);
+    const probedMsgs = await client2.getMessages(peer, { ids: probeIds }).catch(() => []);
+    const validMsgs = (probedMsgs || []).filter((m) => m && m.id);
+    if (validMsgs.length === 0) return;
+    if (validMsgs.length >= 45) {
+      const moreIds = [];
+      for (let id = baseline + 51; id <= baseline + 150; id++) moreIds.push(id);
+      const moreMsgs = await client2.getMessages(peer, { ids: moreIds }).catch(() => []);
+      for (const m of moreMsgs || []) {
+        if (m && m.id) validMsgs.push(m);
+      }
+    }
+    validMsgs.sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
+    const highestMsgId = Math.max(
+      baseline,
+      ...validMsgs.map((m) => Number(m.id || 0))
+    );
+    if (highestMsgId > (channelMaxKnownMsgId.get(cleanChannelId) || 0)) {
+      channelMaxKnownMsgId.set(cleanChannelId, highestMsgId);
+      saveRecentChannelPostsToDisk();
+    }
+    const existingSnap = await getDocsFromServer(collection(db, "movies"));
+    const existingUrlSet = /* @__PURE__ */ new Set();
+    const existingImdbSet = /* @__PURE__ */ new Set();
+    const existingTitleList = [];
+    existingSnap.docs.forEach((d) => {
+      const m = d.data();
+      if (m?.imdbId) existingImdbSet.add(String(m.imdbId).trim().toLowerCase());
+      if (m?.streamingUrl) existingUrlSet.add(String(m.streamingUrl).trim().toLowerCase());
+      if (m?.videoQualities && typeof m.videoQualities === "object") {
+        Object.values(m.videoQualities).forEach((u) => {
+          if (typeof u === "string" && u.trim()) existingUrlSet.add(u.trim().toLowerCase());
+        });
+      }
+      const entry = buildExistingTitleDupEntry(m?.title, m?.originalTitle, m?.releaseYear, m?.originalCategory);
+      if (entry.normTitle.length >= 2) existingTitleList.push(entry);
+    });
+    const candidates = [];
+    for (const msg of validMsgs) {
+      const classified = classifyTelegramDocMedia(msg);
+      if (classified.kind !== "video") continue;
+      const streamUrl = publicUsername ? `https://t.me/${publicUsername}/${msg.id}` : `https://t.me/c/${cleanChannelId}/${msg.id}`;
+      const parsedMeta = parseTelegramMovieMeta(
+        classified.fileName,
+        classified.caption,
+        classified.width,
+        classified.height,
+        classified.durationSec,
+        classified.sizeBytes
+      );
+      if (parsedMeta.isSampleOrClip) continue;
+      if (existingUrlSet.has(streamUrl.toLowerCase())) continue;
+      primeMediaCacheFromTelegramDoc(
+        streamUrl,
+        classified.doc,
+        classified.fileName,
+        classified.durationSec,
+        classified.mime
+      );
+      candidates.push({
+        msgId: Number(msg.id),
+        streamUrl,
+        durationSec: classified.durationSec,
+        sizeBytes: classified.sizeBytes,
+        fileName: classified.fileName || `Movie_${msg.id}`,
+        caption: classified.caption || "",
+        parsed: parsedMeta
+      });
+    }
+    if (candidates.length === 0) {
+      if (highestMsgId > cfg.lastSyncedMsgId) {
+        await setDoc(
+          doc2(db, "app_config", "telegram_auto_sync"),
+          { lastSyncedMsgId: highestMsgId, updatedAtMs: Date.now(), updatedAt: serverTimestamp() },
+          { merge: true }
+        ).catch(() => {
+        });
+        if (cachedSyncConfig) cachedSyncConfig.lastSyncedMsgId = highestMsgId;
+      }
+      return;
+    }
+    const groups = [];
+    const groupIdxByKey = /* @__PURE__ */ new Map();
+    for (const v of candidates) {
+      const gKey = v.parsed.groupKey && !v.parsed.isSeriesEpisode ? v.parsed.groupKey : `msg-${v.msgId}`;
+      const existingIdx = v.parsed.groupKey ? groupIdxByKey.get(gKey) : void 0;
+      if (existingIdx !== void 0) {
+        const grp = groups[existingIdx];
+        grp.members.push(v);
+        if (v.parsed.quality) {
+          const prevSize = grp.qualitySizes[v.parsed.quality] || 0;
+          if (!grp.videoQualities[v.parsed.quality] || v.sizeBytes > prevSize) {
+            grp.videoQualities[v.parsed.quality] = v.streamUrl;
+            grp.qualitySizes[v.parsed.quality] = v.sizeBytes;
+          }
+        }
+        if (!grp.primary.parsed.year && v.parsed.year || !grp.primary.parsed.explicitImdbId && v.parsed.explicitImdbId || v.parsed.quality === "1080p") {
+          grp.primary = v;
+        }
+      } else {
+        const vq = {};
+        const qs = {};
+        if (v.parsed.quality) {
+          vq[v.parsed.quality] = v.streamUrl;
+          qs[v.parsed.quality] = v.sizeBytes;
+        }
+        const idx = groups.length;
+        groups.push({ groupKey: gKey, primary: v, members: [v], videoQualities: vq, qualitySizes: qs });
+        if (v.parsed.groupKey && !v.parsed.isSeriesEpisode) {
+          groupIdxByKey.set(gKey, idx);
+        }
+      }
+    }
+    let publishedCount = 0;
+    const queuedForReview = [];
+    for (const grp of groups) {
+      const bestStream = grp.videoQualities["1080p"] || grp.videoQualities["720p"] || grp.videoQualities["480p"] || grp.videoQualities["4K"] || grp.videoQualities["360p"] || grp.primary.streamUrl;
+      const mergedParsed = {
+        ...grp.primary.parsed,
+        year: grp.primary.parsed.year || grp.members.find((m) => m.parsed.year)?.parsed.year || null,
+        languageHint: grp.primary.parsed.languageHint || grp.members.find((m) => m.parsed.languageHint)?.parsed.languageHint || "",
+        isHindiDubbed: grp.members.some((m) => m.parsed.isHindiDubbed)
+      };
+      const matched = await resolveBestImdbMatch(mergedParsed);
+      if (matched.imdbId && existingImdbSet.has(matched.imdbId.toLowerCase())) {
+        continue;
+      }
+      const candYear = Number(matched.releaseYear || mergedParsed.year || 0);
+      const candIsSeries = mergedParsed.isSeriesEpisode || String(matched.originalCategory || "").toLowerCase().includes("series");
+      if (isDuplicateByTitleAndYear(
+        existingTitleList,
+        [matched.title, matched.originalTitle, mergedParsed.cleanTitle],
+        candYear,
+        candIsSeries
+      )) {
+        console.log(
+          `[ServerAutoSync] Skipping already-uploaded title "${matched.title || mergedParsed.cleanTitle}" (msg #${grp.primary.msgId})`
+        );
+        continue;
+      }
+      const bestDurSec = Math.max(0, ...grp.members.map((m) => m.durationSec || 0));
+      const durationFormatted = bestDurSec > 0 ? formatDuration(bestDurSec) : "";
+      const qualityBadge = grp.videoQualities["4K"] ? "4K" : "HD";
+      const draft = {
+        draftId: `tg-${cleanChannelId}-${grp.primary.msgId}`,
+        channelId: cleanChannelId,
+        channelTitle,
+        msgId: grp.primary.msgId,
+        sourceMsgIds: grp.members.map((m) => m.msgId),
+        streamUrl: bestStream,
+        videoQualities: grp.videoQualities,
+        qualityBadge,
+        durationSec: bestDurSec,
+        runtime: matched.runtime || durationFormatted,
+        sourceFileName: grp.primary.fileName,
+        sourceCaption: grp.primary.caption.slice(0, 240),
+        parsedTitle: mergedParsed.cleanTitle,
+        parsedYear: mergedParsed.year,
+        imdbId: matched.imdbId,
+        title: matched.title,
+        originalTitle: matched.originalTitle,
+        releaseYear: matched.releaseYear,
+        posterUrl: matched.posterUrl,
+        backdropUrl: matched.backdropUrl,
+        genre: matched.genre,
+        description: matched.description,
+        director: matched.director,
+        cast: matched.cast,
+        language: matched.language,
+        rating: matched.rating,
+        originalCategory: matched.originalCategory,
+        matchConfidence: matched.matchConfidence,
+        confidenceScore: matched.confidenceScore,
+        matchReason: matched.matchReason,
+        isSeriesEpisode: mergedParsed.isSeriesEpisode,
+        alternateMatches: matched.alternateMatches
+      };
+      const canAutoPublish = cfg.autoPublishVerified && draft.matchConfidence === "high" && Boolean(draft.posterUrl) && !draft.isSeriesEpisode && !existingUrlSet.has(draft.streamUrl.toLowerCase()) && (!draft.imdbId || !existingImdbSet.has(draft.imdbId.toLowerCase()));
+      if (canAutoPublish) {
+        const cleanPoster = upgradePosterUrl(draft.posterUrl, 1080) || draft.posterUrl;
+        const cleanBackdrop = upgradePosterUrl(draft.backdropUrl || cleanPoster, 1280) || cleanPoster;
+        const catToSave = draft.originalCategory || "Bollywood Movie";
+        const displayCat = getDisplayCategory(catToSave);
+        const badge = normalizeQualityBadge(
+          /cam|hdtc|predvd/i.test(`${draft.sourceFileName} ${draft.sourceCaption}`) ? "HDTC" : draft.qualityBadge === "4K" ? "HD" : draft.qualityBadge
+        );
+        const deterministicDocId = `tg_${cleanChannelId}_${draft.msgId}`;
+        await setDoc(
+          doc2(db, "movies", deterministicDocId),
+          {
+            title: draft.title.trim(),
+            originalTitle: (draft.originalTitle || draft.title).trim(),
+            description: draft.description.trim(),
+            posterUrl: cleanPoster,
+            backdropUrl: cleanBackdrop,
+            releaseYear: Number(draft.releaseYear) || (/* @__PURE__ */ new Date()).getFullYear(),
+            originalCategory: catToSave,
+            displayCategory: displayCat,
+            contentType: catToSave.toLowerCase().includes("anime") ? "anime" : null,
+            language: (draft.language || "Hindi").trim(),
+            genre: (draft.genre || "Action").trim(),
+            director: (draft.director || "").trim(),
+            cast: (draft.cast || "").trim(),
+            runtime: (draft.runtime || "").trim(),
+            rating: Number(draft.rating) || 8,
+            imdbId: (draft.imdbId || "").trim(),
+            trailerUrl: "",
+            streamingUrl: draft.streamUrl.trim(),
+            videoQualities: draft.videoQualities || {},
+            seasons: [],
+            featured: true,
+            published: true,
+            qualityBadge: badge,
+            duration: draft.durationSec || parseDurationToSeconds(draft.runtime) || 0,
+            telegramMsgId: draft.msgId,
+            telegramChannelId: cleanChannelId,
+            updatedAt: serverTimestamp(),
+            createdAt: serverTimestamp()
+          },
+          { merge: true }
+        );
+        if (draft.imdbId) existingImdbSet.add(draft.imdbId.toLowerCase());
+        existingUrlSet.add(draft.streamUrl.toLowerCase());
+        existingTitleList.push(
+          buildExistingTitleDupEntry(draft.title, draft.originalTitle, draft.releaseYear, draft.originalCategory)
+        );
+        publishedCount++;
+        console.log(
+          `[ServerAutoSync] Auto-Published "${draft.title}" (${draft.releaseYear}, ${draft.imdbId || "no-imdb"}) -> movies/${deterministicDocId}`
+        );
+        if (cfg.notifyOnNewPublish && publishedCount <= 3) {
+          const nowMs = Date.now();
+          await setDoc(
+            doc2(db, "announcements", `tg_rel_${cleanChannelId}_${draft.msgId}`),
+            {
+              title: draft.title,
+              releaseYear: Number(draft.releaseYear) || (/* @__PURE__ */ new Date()).getFullYear(),
+              category: catToSave,
+              isSeries: false,
+              language: (draft.language || "Hindi").trim(),
+              genre: (draft.genre || "Action").trim(),
+              qualityBadge: badge !== "NONE" ? badge : "",
+              runtime: (draft.runtime || "").trim(),
+              posterUrl: cleanPoster,
+              backdropUrl: cleanBackdrop,
+              message: "GO STREAM or DOWNLOAD NOW",
+              movieId: deterministicDocId,
+              createdAt: serverTimestamp(),
+              createdAtMs: nowMs,
+              expiresAt: new Date(nowMs + 48 * 60 * 60 * 1e3)
+            },
+            { merge: true }
+          ).catch(() => {
+          });
+        }
+      } else {
+        queuedForReview.push(draft);
+      }
+    }
+    if (queuedForReview.length > 0) {
+      const existingDraftIds = new Set(pendingServerDrafts.map((p) => p.draftId));
+      const newQueued = queuedForReview.filter((q) => !existingDraftIds.has(q.draftId));
+      if (newQueued.length > 0) {
+        pendingServerDrafts = [...newQueued, ...pendingServerDrafts].slice(0, 100);
+        savePendingServerDrafts();
+      }
+    }
+    if (publishedCount > 0) {
+      await setDoc(
+        doc2(db, "app_config", "catalog_sync"),
+        {
+          updatedAtMs: Date.now(),
+          updatedAt: serverTimestamp(),
+          action: "auto_publish"
+        },
+        { merge: true }
+      ).catch(() => {
+      });
+    }
+    if (highestMsgId > cfg.lastSyncedMsgId) {
+      await setDoc(
+        doc2(db, "app_config", "telegram_auto_sync"),
+        {
+          lastSyncedMsgId: highestMsgId,
+          updatedAtMs: Date.now(),
+          updatedAt: serverTimestamp()
+        },
+        { merge: true }
+      ).catch(() => {
+      });
+      if (cachedSyncConfig) cachedSyncConfig.lastSyncedMsgId = highestMsgId;
+    }
+  } catch (err) {
+    console.warn("[ServerAutoSync] Sync pass warning:", err?.message || err);
+  } finally {
+    serverAutoSyncRunning = false;
+  }
+}
+setTimeout(() => {
+  getTelegramClient().then((client2) => ensureChannelUploadWatcher(client2)).then(() => runServerAutoSyncPass("boot")).catch(() => {
+  });
+  setInterval(() => {
+    runServerAutoSyncPass("periodic").catch(() => {
+    });
+  }, 25e3);
+}, 6e3);
 router2.get("/stream", handleStream);
 router2.head("/stream", handleStream);
 var telegramRouter_default = router2;
@@ -3803,22 +6838,22 @@ var telegramRouter_default = router2;
 // src/server/videoRouter.ts
 import express2 from "express";
 import ffmpeg from "fluent-ffmpeg";
-import path3 from "path";
-import fs3 from "fs";
-import os2 from "os";
+import path4 from "path";
+import fs4 from "fs";
+import os3 from "os";
 function getTranscodedDir() {
-  const primary = path3.resolve(process.cwd(), "public", "transcoded");
+  const primary = path4.resolve(process.cwd(), "public", "transcoded");
   try {
-    if (!fs3.existsSync(primary)) {
-      fs3.mkdirSync(primary, { recursive: true });
+    if (!fs4.existsSync(primary)) {
+      fs4.mkdirSync(primary, { recursive: true });
     }
     return primary;
   } catch (err) {
     console.warn("[videoRouter] Notice: Unable to create public/transcoded directory, falling back to os.tmpdir:", err);
-    const fallback = path3.resolve(os2.tmpdir(), "movieportal_transcoded");
+    const fallback = path4.resolve(os3.tmpdir(), "movieportal_transcoded");
     try {
-      if (!fs3.existsSync(fallback)) {
-        fs3.mkdirSync(fallback, { recursive: true });
+      if (!fs4.existsSync(fallback)) {
+        fs4.mkdirSync(fallback, { recursive: true });
       }
     } catch (e) {
       console.warn("[videoRouter] Fallback dir error:", e);
@@ -3836,9 +6871,9 @@ router3.post("/transcode", requireAdmin, async (req, res) => {
   const results = {};
   const tasks = targetQualities.map(async (quality) => {
     const filename = `${imdbId}_${quality}.mp4`;
-    const outputPath = path3.join(transcodedDir, filename);
+    const outputPath = path4.join(transcodedDir, filename);
     const publicUrl = `/transcoded/${filename}`;
-    if (fs3.existsSync(outputPath)) {
+    if (fs4.existsSync(outputPath)) {
       results[quality] = publicUrl;
       return;
     }
@@ -3881,8 +6916,8 @@ router3.get("/status/:imdbId", (req, res) => {
   const status = {};
   qualities.forEach((q) => {
     const filename = `${imdbId}_${q}.mp4`;
-    const outputPath = path3.join(transcodedDir, filename);
-    if (fs3.existsSync(outputPath)) {
+    const outputPath = path4.join(transcodedDir, filename);
+    if (fs4.existsSync(outputPath)) {
       status[q] = {
         ready: true,
         url: `/transcoded/${filename}`
@@ -3896,104 +6931,11 @@ router3.get("/status/:imdbId", (req, res) => {
 var videoRouter_default = router3;
 
 // src/server/downloadCastRouter.ts
+init_firebase();
 import { Router as Router2 } from "express";
 import http from "http";
 import https from "https";
-import { collection, getDocs } from "firebase/firestore";
-
-// src/firebase.ts
-import { initializeApp as initializeApp2 } from "firebase/app";
-import { getAuth as getAuth2 } from "firebase/auth";
-import {
-  doc,
-  getDocFromServer,
-  getFirestore as getFirestore2,
-  initializeFirestore,
-  memoryLocalCache
-} from "firebase/firestore";
-
-// src/services/firestoreQuotaService.ts
-var QUOTA_EXCEEDED_KEY = "mp_firestore_write_quota_exceeded_until_v1";
-var KNOWN_QUOTA_RESET_UTC_MS = Date.UTC(2026, 10, 19, 0, 30, 0);
-function isFirestoreWriteAllowed() {
-  try {
-    if (typeof window === "undefined" || !window.localStorage) return true;
-    if (Date.now() < KNOWN_QUOTA_RESET_UTC_MS) {
-      return false;
-    }
-    const until = localStorage.getItem(QUOTA_EXCEEDED_KEY);
-    if (!until) return true;
-    const expiryTime = Number(until);
-    if (isNaN(expiryTime) || Date.now() > expiryTime) {
-      localStorage.removeItem(QUOTA_EXCEEDED_KEY);
-      return true;
-    }
-    return false;
-  } catch {
-    return true;
-  }
-}
-
-// src/firebase.ts
-var app2 = initializeApp2(firebase_applet_config_default);
-var config = firebase_applet_config_default;
-var databaseId2 = config.firestoreDatabaseId || void 0;
-if (typeof window !== "undefined" && window.indexedDB && !isFirestoreWriteAllowed()) {
-  try {
-    if (window.indexedDB.databases) {
-      window.indexedDB.databases().then((dbs) => {
-        dbs.forEach((d) => {
-          if (d.name && (d.name.includes("firestore") || d.name.includes("firebase") || d.name.includes("[DEFAULT]"))) {
-            try {
-              window.indexedDB.deleteDatabase(d.name);
-            } catch {
-            }
-          }
-        });
-      }).catch(() => {
-      });
-    }
-  } catch {
-  }
-}
-function createFirestoreInstance() {
-  const isBrowser = typeof window !== "undefined";
-  const transportSettings = isBrowser ? { experimentalForceLongPolling: true, ignoreUndefinedProperties: true } : { ignoreUndefinedProperties: true };
-  if (isBrowser) {
-    try {
-      return initializeFirestore(
-        app2,
-        {
-          ...transportSettings,
-          localCache: memoryLocalCache()
-        },
-        databaseId2
-      );
-    } catch {
-      return databaseId2 ? getFirestore2(app2, databaseId2) : getFirestore2(app2);
-    }
-  }
-  try {
-    return initializeFirestore(app2, transportSettings, databaseId2);
-  } catch {
-    return databaseId2 ? getFirestore2(app2, databaseId2) : getFirestore2(app2);
-  }
-}
-var db = createFirestoreInstance();
-var auth = getAuth2(app2);
-async function testConnection() {
-  if (typeof window === "undefined" || !isFirestoreWriteAllowed()) return;
-  try {
-    await getDocFromServer(doc(db, "app_config", "connection"));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("the client is offline")) {
-      console.warn("Firestore connection check: client is currently offline.");
-    }
-  }
-}
-testConnection();
-
-// src/server/downloadCastRouter.ts
+import { collection as collection2, getDocs } from "firebase/firestore";
 var downloadCastRouter = Router2();
 var cachedApkInfo = {
   url: "https://github.com/Sivobob/-Movie-Portal-Hub/releases/download/v3.5.2/Movie-Portal-v3.5.2.apk",
@@ -4410,8 +7352,8 @@ downloadCastRouter.get("/announcements/latest", async (_req, res) => {
       return res.json({ success: true, serverTimeMs: now, announcements: cachedAnnouncements.items });
     }
     const [annSnap, movieSnap] = await Promise.all([
-      getDocs(collection(db, "announcements")),
-      getDocs(collection(db, "movies")).catch(() => null)
+      getDocs(collection2(db, "announcements")),
+      getDocs(collection2(db, "movies")).catch(() => null)
     ]);
     const moviesById = /* @__PURE__ */ new Map();
     if (movieSnap) {
@@ -4481,20 +7423,21 @@ downloadCastRouter.get("/announcements/latest", async (_req, res) => {
 var downloadCastRouter_default = downloadCastRouter;
 
 // src/server/pushRouter.ts
-import crypto from "crypto";
-import fs4 from "fs";
+init_firebase_applet_config();
+import crypto2 from "crypto";
+import fs5 from "fs";
 import { createRequire } from "module";
-import os3 from "os";
-import path4 from "path";
+import os4 from "os";
+import path5 from "path";
 import { Router as Router3 } from "express";
 var require2 = createRequire(import.meta.url);
 var webPush = require2("web-push");
-var SUBS_CACHE_FILE = path4.join(os3.tmpdir(), ".movie_hub_push_subs.json");
+var SUBS_CACHE_FILE = path5.join(os4.tmpdir(), ".movie_hub_push_subs.json");
 var subscriptionMap = /* @__PURE__ */ new Map();
 function loadSubsFromTmp() {
   try {
-    if (fs4.existsSync(SUBS_CACHE_FILE)) {
-      const parsed = JSON.parse(fs4.readFileSync(SUBS_CACHE_FILE, "utf-8"));
+    if (fs5.existsSync(SUBS_CACHE_FILE)) {
+      const parsed = JSON.parse(fs5.readFileSync(SUBS_CACHE_FILE, "utf-8"));
       if (Array.isArray(parsed)) {
         for (const item of parsed) {
           if (item && typeof item.endpoint === "string" && item.keys?.p256dh && item.keys?.auth) {
@@ -4508,7 +7451,7 @@ function loadSubsFromTmp() {
 }
 function saveSubsToTmp() {
   try {
-    fs4.writeFileSync(SUBS_CACHE_FILE, JSON.stringify(Array.from(subscriptionMap.values())), "utf-8");
+    fs5.writeFileSync(SUBS_CACHE_FILE, JSON.stringify(Array.from(subscriptionMap.values())), "utf-8");
   } catch {
   }
 }
@@ -4522,8 +7465,8 @@ function getVapidKeys() {
   const projectId2 = firebase_applet_config_default.projectId || "movie-portal-hub";
   const dbId = firebase_applet_config_default.firestoreDatabaseId || "default";
   const customSeed = (process.env.VAPID_KEY_SEED || "mp-webpush-vapid-v1").trim();
-  const seed = crypto.createHash("sha256").update(`${projectId2}:${dbId}:${customSeed}`).digest();
-  const ecdh = crypto.createECDH("prime256v1");
+  const seed = crypto2.createHash("sha256").update(`${projectId2}:${dbId}:${customSeed}`).digest();
+  const ecdh = crypto2.createECDH("prime256v1");
   ecdh.setPrivateKey(seed);
   return {
     publicKey: ecdh.getPublicKey(null, "uncompressed").toString("base64url"),
@@ -4583,6 +7526,22 @@ router4.post("/broadcast", async (req, res) => {
       merged.set(sub.endpoint, sub);
       subscriptionMap.set(sub.endpoint, sub);
     }
+  }
+  try {
+    if (adminDb) {
+      const snap = await adminDb.collection("app_installs").where("type", "==", "web_push").get().catch(() => null);
+      if (snap) {
+        snap.forEach((docSnap) => {
+          const data = docSnap.data();
+          const sub = normalizeSub(data);
+          if (sub) {
+            merged.set(sub.endpoint, sub);
+            subscriptionMap.set(sub.endpoint, sub);
+          }
+        });
+      }
+    }
+  } catch (dbErr) {
   }
   saveSubsToTmp();
   const targets = Array.from(merged.values());
@@ -4652,8 +7611,8 @@ var pushRouter_default = router4;
 
 // server.ts
 var __filename = fileURLToPath(import.meta.url);
-var __dirname = path5.dirname(__filename);
-var envPath = fs5.existsSync(path5.resolve(__dirname, ".env")) ? path5.resolve(__dirname, ".env") : path5.resolve(__dirname, "../.env");
+var __dirname = path6.dirname(__filename);
+var envPath = fs6.existsSync(path6.resolve(__dirname, ".env")) ? path6.resolve(__dirname, ".env") : path6.resolve(__dirname, "../.env");
 dotenv.config({ path: envPath });
 function checkBinaryAvailable(bin) {
   try {
@@ -4700,7 +7659,7 @@ app3.use((req, res, next) => {
   next();
 });
 app3.use("/api", (req, res, next) => {
-  if (!req.path.startsWith("/stream") && !req.path.startsWith("/ios-profile")) {
+  if (!req.path.startsWith("/stream") && !req.path.startsWith("/telegram/hls") && !req.path.startsWith("/telegram/subtitles.vtt") && !req.path.startsWith("/ios-profile")) {
     res.setHeader("Content-Type", "application/json");
   }
   next();
@@ -4711,10 +7670,12 @@ app3.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
     time: (/* @__PURE__ */ new Date()).toISOString(),
-    version: "3.5.237",
+    version: "3.5.249",
     ffmpegAvailable: FFMPEG_AVAILABLE,
     ffprobeAvailable: FFPROBE_AVAILABLE,
     telegramConfigured,
+    telegramConnected: isTelegramConnected(),
+    hlsSupported: FFMPEG_AVAILABLE && FFPROBE_AVAILABLE,
     transcodeSupported: FFMPEG_AVAILABLE && FFPROBE_AVAILABLE && telegramConfigured
   });
 });
@@ -4733,21 +7694,21 @@ app3.get("/api/ios-profile", (req, res) => {
     const rawProto = String(req.headers["x-forwarded-proto"] || req.protocol || "https").split(",")[0].trim();
     const isLocal = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(rawHost);
     const scheme = isLocal ? rawProto : "https";
-    const appOrigin = rawHost ? `${scheme}://${rawHost}/` : "https://ais-pre-ic2kso77lsvaweb4l75hwo-828533060153.asia-northeast1.run.app/";
+    const appOrigin = rawHost ? `${scheme}://${rawHost}/` : "https://ais-pre-ariekzqzaudxer5atxkvkw-832989141722.asia-southeast1.run.app/";
     const escapeXml = (str) => str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
     const iconCandidates = [
-      path5.resolve(process.cwd(), "public/apple-touch-icon.png"),
-      path5.resolve(process.cwd(), "dist/apple-touch-icon.png"),
-      path5.resolve(__dirname, "public/apple-touch-icon.png"),
-      path5.resolve(__dirname, "dist/apple-touch-icon.png"),
-      path5.resolve(__dirname, "apple-touch-icon.png"),
-      path5.resolve(process.cwd(), "public/assets/icons/master_icon.png"),
-      path5.resolve(__dirname, "public/assets/icons/master_icon.png")
+      path6.resolve(process.cwd(), "public/apple-touch-icon.png"),
+      path6.resolve(process.cwd(), "dist/apple-touch-icon.png"),
+      path6.resolve(__dirname, "public/apple-touch-icon.png"),
+      path6.resolve(__dirname, "dist/apple-touch-icon.png"),
+      path6.resolve(__dirname, "apple-touch-icon.png"),
+      path6.resolve(process.cwd(), "public/assets/icons/master_icon.png"),
+      path6.resolve(__dirname, "public/assets/icons/master_icon.png")
     ];
     let iconBase64 = "";
     for (const candidate of iconCandidates) {
-      if (fs5.existsSync(candidate)) {
-        iconBase64 = fs5.readFileSync(candidate).toString("base64");
+      if (fs6.existsSync(candidate)) {
+        iconBase64 = fs6.readFileSync(candidate).toString("base64");
         break;
       }
     }
@@ -4848,12 +7809,12 @@ var isRunningFromDist = import.meta.url.includes("/dist/") || process.argv[1] &&
 var isProduction = process.env.NODE_ENV === "production" || isRunningFromDist;
 var getStaticDir = () => {
   const candidates = [
-    path5.resolve(process.cwd(), "dist"),
-    path5.resolve(__dirname, "dist"),
+    path6.resolve(process.cwd(), "dist"),
+    path6.resolve(__dirname, "dist"),
     __dirname
   ];
   for (const dir of candidates) {
-    if (fs5.existsSync(path5.resolve(dir, "index.html"))) {
+    if (fs6.existsSync(path6.resolve(dir, "index.html"))) {
       return dir;
     }
   }
@@ -4868,29 +7829,106 @@ if (!isProduction) {
         hmr: false,
         allowedHosts: true
       },
+      optimizeDeps: {
+        entries: ["index.html"],
+        include: [
+          "react",
+          "react-dom",
+          "react-dom/client",
+          "react/jsx-runtime",
+          "react/jsx-dev-runtime",
+          "framer-motion",
+          "lucide-react",
+          "react-router-dom",
+          "hls.js"
+        ]
+      },
       appType: "spa"
+    });
+    app3.get("/@vite/client", (_req, res) => {
+      res.setHeader("Content-Type", "application/javascript; charset=utf-8");
+      res.setHeader("Cache-Control", "no-store");
+      res.send(`
+const sheetsMap = new Map();
+if (typeof document !== 'undefined') {
+  document.querySelectorAll('style[data-vite-dev-id]').forEach((el) => {
+    sheetsMap.set(el.getAttribute('data-vite-dev-id'), el);
+  });
+}
+const cspNonce = typeof document !== 'undefined' ? document.querySelector('meta[property=csp-nonce]')?.nonce : undefined;
+let lastInsertedStyle;
+export function updateStyle(id, content) {
+  let style = sheetsMap.get(id);
+  if (!style) {
+    style = document.createElement('style');
+    style.setAttribute('type', 'text/css');
+    style.setAttribute('data-vite-dev-id', id);
+    style.textContent = content;
+    if (cspNonce) style.setAttribute('nonce', cspNonce);
+    if (!lastInsertedStyle) {
+      document.head.appendChild(style);
+      setTimeout(() => { lastInsertedStyle = undefined; }, 0);
+    } else {
+      lastInsertedStyle.insertAdjacentElement('afterend', style);
+    }
+    lastInsertedStyle = style;
+  } else {
+    style.textContent = content;
+  }
+  sheetsMap.set(id, style);
+}
+export function removeStyle(id) {
+  const style = sheetsMap.get(id);
+  if (style) {
+    style.remove();
+    sheetsMap.delete(id);
+  }
+}
+export function createHotContext() {
+  return {
+    data: {},
+    accept() {},
+    acceptExports() {},
+    dispose() {},
+    prune() {},
+    decline() {},
+    invalidate() {},
+    on() {},
+    off() {},
+    send() {},
+  };
+}
+export function injectQuery(url, queryToInject) {
+  if (!url || (url[0] !== '.' && url[0] !== '/')) return url;
+  const pathname = url.replace(/[?#].*$/, '');
+  const parsed = new URL(url, 'http://vite.dev');
+  return pathname + '?' + queryToInject + (parsed.search ? '&' + parsed.search.slice(1) : '') + (parsed.hash || '');
+}
+const BaseEl = typeof globalThis !== 'undefined' && globalThis.HTMLElement ? globalThis.HTMLElement : class {};
+export class ErrorOverlay extends BaseEl {}
+`);
     });
     app3.use(vite.middlewares);
   } catch (viteErr) {
     console.warn("[Vite Middleware notice - falling back to static/SPA]", viteErr);
     const staticDir = getStaticDir();
     app3.use(express3.static(staticDir));
-    if (fs5.existsSync(path5.resolve(process.cwd(), "public"))) {
-      app3.use(express3.static(path5.resolve(process.cwd(), "public")));
+    if (fs6.existsSync(path6.resolve(process.cwd(), "public"))) {
+      app3.use(express3.static(path6.resolve(process.cwd(), "public")));
     }
     app3.get("*", (_req, res) => {
-      res.sendFile(path5.resolve(staticDir, "index.html"));
+      res.sendFile(path6.resolve(staticDir, "index.html"));
     });
   }
 } else {
   const staticDir = getStaticDir();
   console.log(`[Production] Serving static files from: ${staticDir}`);
   app3.use(express3.static(staticDir));
-  if (fs5.existsSync(path5.resolve(process.cwd(), "public"))) {
-    app3.use(express3.static(path5.resolve(process.cwd(), "public")));
+  if (fs6.existsSync(path6.resolve(process.cwd(), "public"))) {
+    app3.use(express3.static(path6.resolve(process.cwd(), "public")));
   }
   app3.get("*", (_req, res) => {
-    res.sendFile(path5.resolve(staticDir, "index.html"));
+    res.sendFile(path6.resolve(staticDir, "index.html"));
   });
 }
 var server = app3.listen(PORT, "0.0.0.0", () => {
@@ -4900,3 +7938,8 @@ server.requestTimeout = 0;
 server.timeout = 0;
 server.keepAliveTimeout = 65e3;
 server.headersTimeout = 66e3;
+/*! Bundled license information:
+
+@capacitor/core/dist/index.cjs.js:
+  (*! Capacitor: https://capacitorjs.com/ - MIT License *)
+*/

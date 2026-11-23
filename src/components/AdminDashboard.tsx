@@ -1799,18 +1799,23 @@ export default function AdminDashboard() {
   const handleQuickPushCurrentRelease = async () => {
     setSavingUpdateConfig(true);
     try {
+      const parts = CURRENT_VERSION_NAME.split('.');
+      const patch = (parseInt(parts[2] || '0', 10) || 0) + 1;
+      const bumpedVersion = `${parts[0]}.${parts[1]}.${patch}`;
+      const bumpedCode = CURRENT_VERSION_CODE + 1;
+
       const saved = await saveRemoteUpdateConfig({
         ...updateConfigForm,
-        latestVersion: CURRENT_VERSION_NAME,
-        minimumRequiredVersion: CURRENT_VERSION_NAME,
-        latestVersionCode: CURRENT_VERSION_CODE,
-        minimumRequiredVersionCode: CURRENT_VERSION_CODE,
+        latestVersion: bumpedVersion,
+        minimumRequiredVersion: bumpedVersion,
+        latestVersionCode: bumpedCode,
+        minimumRequiredVersionCode: bumpedCode,
         apkDownloadUrl: updateConfigForm.apkDownloadUrl || DEFAULT_REMOTE_UPDATE_CONFIG.apkDownloadUrl,
-        updateMessage: `Movie Hub v${CURRENT_VERSION_NAME} update is ready! Update now for push release notifications with movie posters and bug fixes.`,
+        updateMessage: `Movie Hub v${bumpedVersion} update is ready! Update now for push release notifications with movie posters and bug fixes.`,
       });
       setUpdateConfigForm(saved);
       setFirebaseUpdateVersion(saved.minimumRequiredVersion || saved.latestVersion);
-      showNotification('success', `✅ Pushed v${CURRENT_VERSION_NAME} update popup to all user phones!`);
+      showNotification('success', `✅ Pushed v${bumpedVersion} update popup to all user phones and browsers!`);
     } catch (err: any) {
       showNotification('error', `Failed to update Firebase: ${err?.message || 'Permission denied'}`);
     } finally {

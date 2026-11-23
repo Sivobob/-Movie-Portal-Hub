@@ -139,27 +139,8 @@ export function useAppUpdate() {
   }, [startUpdateDownload]);
 
   const openBrowserDownloadFallback = useCallback(async () => {
-    const rawUrl = (remoteConfigRef.current?.apkDownloadUrl || OFFICIAL_APK_DIRECT_URL).trim();
-    const url = rawUrl || OFFICIAL_APK_DIRECT_URL;
-    recordApkDownloadClick('in_app_update').catch(() => {});
-
-    const bridge = typeof window !== 'undefined' ? (window as any).AndroidPlayerBridge : null;
-    if (bridge && typeof bridge.openApkDownloadInBrowser === 'function') {
-      try {
-        bridge.openApkDownloadInBrowser(url);
-        return;
-      } catch (err) {
-        console.warn('Native openApkDownloadInBrowser error:', err);
-      }
-    }
-
-    try {
-      const { Browser } = await import('@capacitor/browser');
-      await Browser.open({ url });
-    } catch {
-      window.location.href = url;
-    }
-  }, []);
+    startUpdateDownload();
+  }, [startUpdateDownload]);
 
   return {
     isMandatoryUpdate,

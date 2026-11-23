@@ -209,8 +209,12 @@ export default function SettingsPage() {
       window.location.reload();
       return;
     }
-    const url = remoteConfig?.apkDownloadUrl || OFFICIAL_APK_DIRECT_URL;
-    if (isNativeAndroid()) {
+
+    const isNativeApp =
+      Capacitor.isNativePlatform() ||
+      Boolean(typeof window !== 'undefined' && (window as any).AndroidPlayerBridge);
+
+    if (isNativeApp) {
       try {
         const bridge = (window as any).AndroidPlayerBridge;
         if (bridge && typeof bridge.downloadAndInstallApk === 'function') {
@@ -219,24 +223,23 @@ export default function SettingsPage() {
             progress: 2,
             message: 'Starting in-app update download...',
           });
+          const url = remoteConfig?.apkDownloadUrl || OFFICIAL_APK_DIRECT_URL;
           bridge.downloadAndInstallApk(url);
           return;
         }
-        if (bridge && typeof bridge.openApkDownloadInBrowser === 'function') {
-          bridge.openApkDownloadInBrowser(url);
-          return;
-        }
-      } catch {}
+      } catch (err) {
+        console.warn('Native downloadAndInstallApk error:', err);
+      }
+      setApkStatus({
+        state: 'error',
+        progress: 0,
+        message: 'In-app update service not ready. Please tap Retry.',
+      });
+      return;
     }
-    const a = document.createElement('a');
-    a.href = url;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => {
-      if (document.body.contains(a)) document.body.removeChild(a);
-    }, 300);
+
+    // On Web / Chrome browser: No update or download needed, browser version is kept up to date
+    window.location.reload();
   };
 
   const handleAuthAction = async () => {
@@ -260,8 +263,12 @@ export default function SettingsPage() {
     }
   };
 
+  const isNativeApp =
+    Capacitor.isNativePlatform() ||
+    Boolean(typeof window !== 'undefined' && (window as any).AndroidPlayerBridge);
+
   const hasNewerVersion =
-    installedVer && remoteConfig
+    isNativeApp && installedVer && remoteConfig
       ? compareVersions(installedVer.versionName, remoteConfig.latestVersion) < 0 ||
         (compareVersions(installedVer.versionName, remoteConfig.latestVersion) === 0 &&
           installedVer.versionCode < (remoteConfig.latestVersionCode || 0))

@@ -27,6 +27,7 @@ export interface MovieData {
   qualityBadge?: 'HD' | 'HDTC' | 'NONE' | string;
   createdAt?: any;
   updatedAt?: any;
+  viewsCount?: number;
   contentType?: string | null;
   seasons?: Array<{
     seasonNumber: number;

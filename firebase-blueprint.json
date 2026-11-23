@@ -21,9 +21,21 @@
         "createdAt": { "type": "number" },
         "updatedAt": { "type": "number" },
         "duration": { "type": "number" },
+        "viewsCount": { "type": "number", "description": "Real count of unique users/devices who started watching this movie or series" },
         "seasons": { "type": "array", "description": "Series seasons and episodes with optional showInNewEpisodes (boolean) and newEpisodeEnabledAt (number) 24h spotlight fields" }
       },
       "required": ["title", "posterUrl", "originalCategory", "displayCategory", "published"]
+    },
+    "movieViewer": {
+      "title": "Movie Viewer",
+      "description": "Deduplicated record of a real user/device that started playing a movie or series",
+      "type": "object",
+      "properties": {
+        "viewerKey": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "movieId": { "type": "string", "maxLength": 128 },
+        "startedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["viewerKey", "movieId", "startedAt"]
     },
     "admin": {
       "title": "Admin",
@@ -87,6 +99,10 @@
     "/movies/{movieId}": {
       "schema": "movie",
       "description": "Collection of all movies"
+    },
+    "/users/{userId}/watched_movies/{movieId}": {
+      "schema": "movieViewer",
+      "description": "Per-user/device deduplicated watch records for accurate real movie and series watch counts"
     },
     "/admins/{uid}": {
       "schema": "admin",

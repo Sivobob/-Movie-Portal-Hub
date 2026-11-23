@@ -39,6 +39,7 @@ import android.view.WindowManager;
 import android.webkit.CookieManager;
 import android.net.wifi.WifiManager;
 import android.webkit.JavascriptInterface;
+import android.webkit.JsResult;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -519,6 +520,15 @@ public class MainActivity extends BridgeActivity {
                 settings.setTextZoom(100);
 
                 webView.setWebChromeClient(new BridgeWebChromeClient(getBridge()) {
+                    @Override
+                    public boolean onJsAlert(WebView view, String url, String message, JsResult result) {
+                        if (message != null && message.contains("Missing MTProto Entity")) {
+                            if (result != null) result.confirm();
+                            return true;
+                        }
+                        return super.onJsAlert(view, url, message, result);
+                    }
+
                     @Override
                     public void onShowCustomView(View view, CustomViewCallback callback) {
                         runOnUiThread(() -> showCustomFullscreenView(view, callback));
@@ -3002,14 +3012,7 @@ public class MainActivity extends BridgeActivity {
                 : lastApkDownloadUrl;
             if (targetUrl == null || targetUrl.isEmpty()) return;
             runOnUiThread(() -> {
-                try {
-                    Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl));
-                    browserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    startActivity(browserIntent);
-                } catch (Exception e) {
-                    apkUpdateState = "error";
-                    apkUpdateMessage = "Could not open browser. Download manually from GitHub Releases.";
-                }
+                startApkDownloadManager(targetUrl);
             });
         }
 

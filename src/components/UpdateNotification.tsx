@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { Download, RefreshCw, ShieldAlert, Smartphone, ExternalLink } from 'lucide-react';
+import { Download, RefreshCw, ShieldAlert, Smartphone } from 'lucide-react';
 import {
   RemoteUpdateConfig,
   InstalledAppVersion,
@@ -17,9 +17,10 @@ interface ApkBridgeStatus {
   progress: number;
   message: string;
 }
-
 export default function UpdateNotification() {
-  const isNative = typeof window !== 'undefined' && Capacitor.isNativePlatform();
+  const isNative =
+    typeof window !== 'undefined' &&
+    (Capacitor.isNativePlatform() || Boolean((window as any).AndroidPlayerBridge));
   const [installed, setInstalled] = useState<InstalledAppVersion | null>(null);
   const [remoteConfig, setRemoteConfig] = useState<RemoteUpdateConfig | null>(null);
   const [updateRequired, setUpdateRequired] = useState(false);
@@ -164,29 +165,25 @@ export default function UpdateNotification() {
 
     setApkStatus({
       state: 'downloading',
-      progress: 100,
-      message: 'Opening official APK download...',
+      progress: 1,
+      message: 'Starting in-app download...',
     });
 
     try {
       const bridge = (window as any).AndroidPlayerBridge;
-      if (bridge && typeof bridge.openApkDownloadInBrowser === 'function') {
-        bridge.openApkDownloadInBrowser(downloadUrl);
-        return;
-      }
       if (bridge && typeof bridge.downloadAndInstallApk === 'function') {
         bridge.downloadAndInstallApk(downloadUrl);
         return;
       }
-    } catch {}
+    } catch (err) {
+      console.warn('Native in-app update error:', err);
+    }
 
-    try {
-      const { Browser } = await import('@capacitor/browser');
-      await Browser.open({ url: downloadUrl });
-      return;
-    } catch {}
-
-    window.location.href = downloadUrl;
+    setApkStatus({
+      state: 'error',
+      progress: 0,
+      message: 'In-app update service not ready. Please tap Retry In-App Update.',
+    });
   };
 
   const handleOpenPermissionSettings = () => {
@@ -204,26 +201,6 @@ export default function UpdateNotification() {
       }
       handleStartDownload();
     } catch {}
-  };
-
-  const handleDownloadInBrowser = async () => {
-    try {
-      const bridge = (window as any).AndroidPlayerBridge;
-      if (bridge && typeof bridge.openApkDownloadInBrowser === 'function') {
-        bridge.openApkDownloadInBrowser(downloadUrl);
-        return;
-      }
-      if (Capacitor.isNativePlatform()) {
-        try {
-          const { Browser } = await import('@capacitor/browser');
-          await Browser.open({ url: downloadUrl });
-          return;
-        } catch {}
-      }
-      window.open(downloadUrl, '_blank');
-    } catch {
-      window.open(downloadUrl, '_blank');
-    }
   };
 
   return (
@@ -316,14 +293,6 @@ export default function UpdateNotification() {
             </button>
           )}
 
-          <button
-            type="button"
-            onClick={handleDownloadInBrowser}
-            className="w-full bg-neutral-800 hover:bg-neutral-700 text-gray-200 font-bold text-xs py-3 px-4 rounded-xl border border-neutral-700 flex items-center justify-center gap-2 cursor-pointer transition-colors"
-          >
-            <ExternalLink size={14} />
-            <span>Download APK in Browser</span>
-          </button>
 
           <button
             type="button"

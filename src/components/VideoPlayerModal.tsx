@@ -10,6 +10,7 @@ import {
   Minimize,
   Settings,
   Volume2,
+  VolumeX,
   Captions,
   Gauge,
   Languages,
@@ -41,6 +42,8 @@ import {
 import { formatClockTime, parseDurationToSeconds } from '../utils/duration';
 import { isEpisodeNewActive, getEpisodeDisplayLabel } from '../services/movieStorage';
 import { normalizePlayerTrackList } from '../utils/videoQuality';
+import { useAuth } from '../context/AuthContext';
+import { recordMovieViewStart } from '../services/movieViewsService';
 
 interface ParsedSubtitleCue {
   start: number;
@@ -207,9 +210,11 @@ export default function VideoPlayerModal({
   onProgress,
   manageHistory = true,
 }: VideoPlayerModalProps) {
+  const { user } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const recordedViewMovieIdRef = useRef<string | null>(null);
 
   // Playback state
   const [isPlaying, setIsPlaying] = useState(false);
@@ -231,14 +236,18 @@ export default function VideoPlayerModal({
   const [streamStartOffset, setStreamStartOffset] = useState<number>(0);
   const [selectedAudioIdx, setSelectedAudioIdx] = useState<number>(0);
   const [useLocalBridgeFallback, setUseLocalBridgeFallback] = useState(false);
+  const [forceNativeIosHls, setForceNativeIosHls] = useState(false);
   const [manualRetryNonce, setManualRetryNonce] = useState(0);
   const [exoReconnectNonce, setExoReconnectNonce] = useState(0);
   const [hasDecodedFrame, setHasDecodedFrame] = useState(false);
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false);
+  const [isAutoplayMuted, setIsAutoplayMuted] = useState(() => !Capacitor.isNativePlatform() && isAppleMobileBrowser());
   const [seekPreviewTime, setSeekPreviewTime] = useState<number | null>(null);
   const isDraggingSeekRef = useRef(false);
   const seekPreviewTimeRef = useRef<number | null>(null);
   const handleSeekCommitRef = useRef<() => void>(() => {});
-  const wasMutedByAutoplayRef = useRef(false);
+  const wasMutedByAutoplayRef = useRef(!Capacitor.isNativePlatform() && isAppleMobileBrowser());
+  const autoplayBlockedRef = useRef(false);
   const durationRef = useRef(initialDuration || 0);
   const knownDurationRef = useRef(initialDuration || 0);
   const currentTimeRef = useRef(0);
@@ -476,9 +485,10 @@ export default function VideoPlayerModal({
 
   const ensureUnmutedOnInteraction = () => {
     const vid = videoRef.current;
-    if (vid && wasMutedByAutoplayRef.current) {
+    if (vid && (wasMutedByAutoplayRef.current || vid.muted)) {
       vid.muted = false;
       wasMutedByAutoplayRef.current = false;
+      setIsAutoplayMuted(false);
     }
   };
 
@@ -617,6 +627,7 @@ export default function VideoPlayerModal({
     exoNetworkRecoveryAttemptsRef.current = 0;
     setSelectedAudioIdx(0);
     setUseLocalBridgeFallback(false);
+    setForceNativeIosHls(false);
     setRealAudioTracks([]);
     setRealSubtitleTracks([]);
     serverProbedSubTracksRef.current = [];
@@ -627,6 +638,15 @@ export default function VideoPlayerModal({
     setSubtitleNotice(null);
     setSelectedSubtitle('Off');
     setHasDecodedFrame(false);
+    const activeMovieId = String(movie?.id || movie?.imdbId || '').trim();
+    if (!activeMovieId || recordedViewMovieIdRef.current !== activeMovieId) {
+      recordedViewMovieIdRef.current = null;
+    }
+    setAutoplayBlocked(false);
+    autoplayBlockedRef.current = false;
+    const iosStartMuted = !Capacitor.isNativePlatform() && isAppleMobileBrowser() && manualRetryNonce === 0;
+    setIsAutoplayMuted(iosStartMuted);
+    wasMutedByAutoplayRef.current = iosStartMuted;
     setError(null);
     setErrorDetail(null);
     setSeekPreviewTime(null);
@@ -758,7 +778,7 @@ export default function VideoPlayerModal({
       try {
         const infoUrl = buildApiUrl(`/api/telegram/stream-info?url=${encodeURIComponent(trimmed)}`);
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), isUsingLocalNativeBridge() ? 4500 : 20000);
+        const timer = setTimeout(() => controller.abort(), isUsingLocalNativeBridge() ? 14000 : 20000);
         const res = await fetch(infoUrl, { cache: 'no-store', signal: controller.signal }).finally(() => clearTimeout(timer));
         if (res.ok) {
           const info = await res.json();
@@ -792,6 +812,8 @@ export default function VideoPlayerModal({
                 const cont = String(info.container || '').toLowerCase();
                 if (cont.includes('webm') || vCodec === 'vp8' || vCodec === 'vp9') {
                   chosenMode = 'transcode';
+                } else if (chosenMode === 'direct') {
+                  chosenMode = 'remux';
                 }
               }
               chosenStage =
@@ -901,6 +923,10 @@ export default function VideoPlayerModal({
         }
       } catch (err) {
         console.warn('[VideoPlayer] stream-info preflight notice:', err);
+        if (!exoCapable && isAppleMobileBrowser() && isTelegram && chosenMode === 'direct') {
+          chosenMode = 'remux';
+          chosenStage = 'level2_remux';
+        }
       }
 
       if (cancelled) return;
@@ -983,10 +1009,13 @@ export default function VideoPlayerModal({
         (qTier === '720p' && (sourceHeight <= 0 || sourceHeight > 780)));
 
     const isIosWeb = !Capacitor.isNativePlatform() && isAppleMobileBrowser();
-    const effectiveMode = needsScaledTranscode ? 'transcode' : streamFallbackMode;
+    const isIncompatibleNonTgIos =
+      isIosWeb && !isTelegram && /\.(mkv|avi|flv|wmv|webm)(\?|#|$)/i.test(sourceUrl);
+    const effectiveMode =
+      needsScaledTranscode || isIncompatibleNonTgIos ? 'transcode' : streamFallbackMode;
     const isServerPipe = effectiveMode === 'remux' || effectiveMode === 'transcode';
 
-    if (!isTelegram && !needsScaledTranscode && streamFallbackMode === 'direct') {
+    if (!isTelegram && !needsScaledTranscode && !isIncompatibleNonTgIos && streamFallbackMode === 'direct') {
       setPlayableUrl(sourceUrl);
       return;
     }
@@ -995,13 +1024,15 @@ export default function VideoPlayerModal({
     // route remux/transcode through our seekable VOD Apple HLS (.m3u8) pipeline instead of a single long HTTP pipe
     // (which avoids 15-min proxy timeouts and fixes iPhone playback completely).
     const useHlsPipeline =
-      isServerPipe &&
+      (isServerPipe || (isIosWeb && isTelegram)) &&
       (isIosWeb || (Capacitor.isNativePlatform() && hasRemoteTranscodeBackend()));
 
     if (useHlsPipeline) {
       const durHint = Math.round(preflightCacheRef.current.durationSec || durationRef.current || knownDurationRef.current || 0);
       let hlsQs = `?url=${encodeURIComponent(sourceUrl)}&mode=${effectiveMode}`;
-      if (isExplicitTier) hlsQs += `&quality=${qTier}`;
+      if (isExplicitTier && (userPickedQualityRef.current || needsScaledTranscode)) {
+        hlsQs += `&quality=${qTier}`;
+      }
       if (selectedAudioIdx > 0) hlsQs += `&audioIdx=${selectedAudioIdx}`;
       if (durHint > 0) hlsQs += `&dur=${durHint}`;
       if (Capacitor.isNativePlatform()) {
@@ -1458,6 +1489,11 @@ export default function VideoPlayerModal({
         if (st.firstFrameRendered || renderedCount > 0) {
           setHasDecodedFrame(true);
           if (st.isPlaying && !st.isBuffering) {
+            const targetMovieId = String(movie?.id || movie?.imdbId || '').trim();
+            if (movie && targetMovieId && recordedViewMovieIdRef.current !== targetMovieId) {
+              recordedViewMovieIdRef.current = targetMovieId;
+              recordMovieViewStart(movie, user?.uid).catch(() => {});
+            }
             if (smoothPlaybackSinceMs === 0) {
               smoothPlaybackSinceMs = Date.now();
             } else if (Date.now() - smoothPlaybackSinceMs > 20000) {
@@ -1575,9 +1611,8 @@ export default function VideoPlayerModal({
     let hlsInstance: Hls | null = null;
     const isHlsUrl = /\.m3u8/i.test(playableUrl);
     const isAppleDevice = isAppleMobileBrowser();
-    // Critical: On iOS 17.1+ Safari, ManagedMediaSource makes Hls.isSupported() return true,
-    // which intercepts Apple HLS inside MSE and breaks iPhone playback. Always use native AVPlayer HLS on iOS/iPadOS!
-    const usesHlsJs = isHlsUrl && !isAppleDevice && Hls.isSupported();
+    // Use hls.js (ManagedMediaSource on iOS 17.1+ / MSE elsewhere) unless native iOS fallback was triggered
+    const usesHlsJs = isHlsUrl && Hls.isSupported() && !forceNativeIosHls;
     const canSeekDirectTimeline = streamFallbackModeRef.current === 'direct' || isHlsUrl;
 
     // Determine exact initial seek position before starting HTML5/HLS playback
@@ -1604,7 +1639,10 @@ export default function VideoPlayerModal({
 
     let seekAttempts = 0;
     let seekConfirmed = pendingSeekTarget === null;
-    let playAttemptStarted = false;
+    let isPlayInFlight = false;
+    let hasPlayedAnyFrame = false;
+    autoplayBlockedRef.current = false;
+    setAutoplayBlocked(false);
 
     const tryApplyPendingSeek = () => {
       if (cancelled || seekConfirmed || pendingSeekTarget === null || !canSeekDirectTimeline) {
@@ -1622,7 +1660,7 @@ export default function VideoPlayerModal({
         pendingSeekTarget = null;
         return;
       }
-      if (seekAttempts < 6) {
+      if (seekAttempts < 4) {
         seekAttempts += 1;
         try {
           video.currentTime = pendingSeekTarget;
@@ -1636,53 +1674,96 @@ export default function VideoPlayerModal({
     };
 
     const startHtml5Playback = () => {
-      if (cancelled || playAttemptStarted) return;
-      playAttemptStarted = true;
-      video.muted = false;
-      wasMutedByAutoplayRef.current = false;
+      if (cancelled || isPlayInFlight || autoplayBlockedRef.current || !video.paused) return;
+      isPlayInFlight = true;
+
+      // On iOS Safari/WebKit, async preflight fetch expires the tap gesture token, so start muted cleanly
+      // and show a one-tap Sound button unless user explicitly tapped Sound/Retry/Play.
+      if (isAppleDevice && manualRetryNonce === 0 && wasMutedByAutoplayRef.current) {
+        video.muted = true;
+        video.defaultMuted = true;
+      } else if (!wasMutedByAutoplayRef.current) {
+        video.muted = false;
+        setIsAutoplayMuted(false);
+      }
+
       const playPromise = video.play();
       if (playPromise !== undefined) {
         playPromise.then(() => {
+          isPlayInFlight = false;
           if (!cancelled) {
+            autoplayBlockedRef.current = false;
+            setAutoplayBlocked(false);
             tryApplyPendingSeek();
             setIsPlaying(true);
-            if (video.readyState >= 3 && pendingSeekTarget === null) {
+            if (video.readyState >= 3) {
               setIsLoading(false);
             }
           }
-        }).catch(() => {
-          if (cancelled) return;
-          // Fallback muted autoplay if WebView blocks unmuted autoplay; unmutes on first user tap
-          video.muted = true;
-          wasMutedByAutoplayRef.current = true;
-          video.play().then(() => {
-            if (!cancelled) {
-              tryApplyPendingSeek();
-              setIsPlaying(true);
-              if (video.readyState >= 3 && pendingSeekTarget === null) {
-                setIsLoading(false);
+        }).catch((firstErr: any) => {
+          isPlayInFlight = false;
+          if (cancelled || firstErr?.name === 'AbortError') return;
+          if (!video.muted) {
+            // Fallback muted autoplay if WebView/Safari blocks unmuted autoplay; unmutes on first user tap
+            video.muted = true;
+            video.defaultMuted = true;
+            wasMutedByAutoplayRef.current = true;
+            setIsAutoplayMuted(true);
+            isPlayInFlight = true;
+            video.play().then(() => {
+              isPlayInFlight = false;
+              if (!cancelled) {
+                autoplayBlockedRef.current = false;
+                setAutoplayBlocked(false);
+                tryApplyPendingSeek();
+                setIsPlaying(true);
+                if (video.readyState >= 3) {
+                  setIsLoading(false);
+                }
               }
-            }
-          }).catch((playErr: any) => {
-            if (!cancelled) {
-              video.muted = false;
-              wasMutedByAutoplayRef.current = false;
-              playAttemptStarted = false;
-              if (playErr?.name !== 'AbortError') {
+            }).catch((playErr: any) => {
+              isPlayInFlight = false;
+              if (!cancelled && playErr?.name !== 'AbortError') {
+                autoplayBlockedRef.current = true;
+                setAutoplayBlocked(true);
                 setIsLoading(false);
+                setIsPlaying(false);
+                showControlsWithTimer();
               }
-              setIsPlaying(false);
-            }
-          });
+            });
+          } else {
+            autoplayBlockedRef.current = true;
+            setAutoplayBlocked(true);
+            setIsLoading(false);
+            setIsPlaying(false);
+            showControlsWithTimer();
+          }
         });
+      } else {
+        isPlayInFlight = false;
       }
     };
 
     if (usesHlsJs) {
+      try {
+        video.removeAttribute('src');
+        video.querySelectorAll('source').forEach((s) => s.remove());
+        (video as any).disableRemotePlayback = true;
+      } catch {}
       hlsInstance = new Hls({
-        enableWorker: true,
-        lowLatencyMode: true,
+        enableWorker: !isAppleDevice,
+        lowLatencyMode: false,
+        preferManagedMediaSource: true,
         startPosition: pendingSeekTarget !== null ? pendingSeekTarget : -1,
+        manifestLoadingTimeOut: 15000,
+        fragLoadingTimeOut: 30000,
+        xhrSetup: (xhr, reqUrl) => {
+          try {
+            if (new URL(reqUrl, window.location.href).origin === window.location.origin) {
+              xhr.withCredentials = true;
+            }
+          } catch {}
+        },
       });
       hlsRef.current = hlsInstance;
       hlsInstance.loadSource(playableUrl);
@@ -1739,6 +1820,12 @@ export default function VideoPlayerModal({
             return;
           }
         }
+        if (isAppleDevice && !forceNativeIosHls && video.canPlayType('application/vnd.apple.mpegurl')) {
+          setIsLoading(true);
+          resumeOffsetRef.current = currentTimeRef.current;
+          setForceNativeIosHls(true);
+          return;
+        }
         if (/t\.me|telegram\.me/i.test(activeStreamUrl) && streamFallbackModeRef.current !== 'transcode') {
           setIsLoading(true);
           setStreamStartOffset(Math.floor(currentTimeRef.current));
@@ -1749,6 +1836,9 @@ export default function VideoPlayerModal({
         setError('HLS Stream Error: Unable to play playlist stream.');
       });
     } else if (isHlsUrl && video.canPlayType('application/vnd.apple.mpegurl')) {
+      try {
+        (video as any).disableRemotePlayback = false;
+      } catch {}
       if (video.getAttribute('src') !== playableUrl) {
         video.src = playableUrl;
       }
@@ -1826,14 +1916,22 @@ export default function VideoPlayerModal({
         }
       }
 
+      if (video.currentTime > 0.15) {
+        hasPlayedAnyFrame = true;
+        setIsLoading(false);
+        autoplayBlockedRef.current = false;
+        setAutoplayBlocked(false);
+      }
+
       // Black Screen & Audio-Only Auto-Recovery Guard:
-      // If audio is playing (video.currentTime > 1.5s and not paused), but browser decodes 0 video frames
-      // (videoWidth === 0 or totalVideoFrames === 0), auto-escalate straight to clean H.264 MP4.
+      // On Apple WebKit native HLS, getVideoPlaybackQuality().totalVideoFrames can report 0 even when hardware AVPlayer is rendering normally.
       if (video.currentTime > 1.5 && !video.paused && video.readyState >= 2 && /t\.me|telegram\.me/i.test(activeStreamUrl)) {
         const isBlackScreen = video.videoWidth === 0 || video.videoHeight === 0;
-        const quality = typeof video.getVideoPlaybackQuality === 'function' ? video.getVideoPlaybackQuality() : null;
-        const decodedFrames = quality ? quality.totalVideoFrames : (video as any).webkitDecodedFrameCount;
-        const hasZeroFrames = typeof decodedFrames === 'number' && decodedFrames === 0 && video.currentTime > 1.8;
+        const quality = !isAppleDevice && typeof video.getVideoPlaybackQuality === 'function' ? video.getVideoPlaybackQuality() : null;
+        const decodedFrames = !isAppleDevice
+          ? (quality ? quality.totalVideoFrames : (video as any).webkitDecodedFrameCount)
+          : undefined;
+        const hasZeroFrames = !isAppleDevice && typeof decodedFrames === 'number' && decodedFrames === 0 && video.currentTime > 1.8;
 
         if (isBlackScreen || hasZeroFrames) {
           if (streamFallbackMode !== 'transcode') {
@@ -1960,25 +2058,33 @@ export default function VideoPlayerModal({
     };
 
     const onPlaying = () => {
+      hasPlayedAnyFrame = true;
+      autoplayBlockedRef.current = false;
+      setAutoplayBlocked(false);
       tryApplyPendingSeek();
       setIsLoading(false);
       setIsPlaying(true);
+      const targetMovieId = String(movie?.id || movie?.imdbId || '').trim();
+      if (movie && targetMovieId && recordedViewMovieIdRef.current !== targetMovieId) {
+        recordedViewMovieIdRef.current = targetMovieId;
+        recordMovieViewStart(movie, user?.uid).catch(() => {});
+      }
       if (showControlsRef.current) scheduleAutoHideTimer();
     };
 
     const onCanPlay = () => {
       tryApplyPendingSeek();
-      if (pendingSeekTarget === null) {
+      if (pendingSeekTarget === null || video.readyState >= 3) {
         setIsLoading(false);
       }
-      if (!usesHlsJs && playableUrl && video.paused) {
+      if (playableUrl && video.paused && !autoplayBlockedRef.current) {
         startHtml5Playback();
       }
     };
 
     const onLoadedData = () => {
       tryApplyPendingSeek();
-      if (pendingSeekTarget === null && video.readyState >= 3) {
+      if (video.readyState >= 3) {
         setIsLoading(false);
       }
     };
@@ -2136,37 +2242,83 @@ export default function VideoPlayerModal({
     }
 
     const seekFallbackTimer = setTimeout(() => {
-      if (!cancelled && !usesHlsJs && playableUrl && !playAttemptStarted) {
+      if (!cancelled && playableUrl && video.paused && !autoplayBlockedRef.current && (!usesHlsJs || video.readyState >= 1)) {
         tryApplyPendingSeek();
         startHtml5Playback();
       }
-    }, 1500);
+    }, 1200);
 
-    const iosMetadataStallTimer =
-      isAppleDevice && streamFallbackMode === 'direct' && /t\.me|telegram\.me/i.test(activeStreamUrl)
+    const iosDirectStallTimer =
+      isAppleDevice && streamFallbackMode === 'direct' && (/t\.me|telegram\.me/i.test(activeStreamUrl) || /\.mp4/i.test(playableUrl))
         ? setTimeout(() => {
-            if (!cancelled && video.readyState < 1 && !video.error) {
-              console.warn('[VideoPlayer] iOS Safari direct stream did not load metadata in 10s, escalating to HLS remux');
+            if (
+              !cancelled &&
+              !hasPlayedAnyFrame &&
+              !autoplayBlockedRef.current &&
+              !video.error &&
+              video.readyState < 3 &&
+              video.currentTime < 0.2
+            ) {
+              console.warn('[VideoPlayer] iOS Safari direct stream stalled >6.5s, escalating to HLS remux');
               setIsLoading(true);
               resumeOffsetRef.current = currentTimeRef.current;
               setStreamFallbackMode('remux');
             }
-          }, 10000)
+          }, 6500)
+        : null;
+
+    const iosRemuxStallTimer =
+      isAppleDevice && streamFallbackMode === 'remux'
+        ? setTimeout(() => {
+            if (
+              !cancelled &&
+              !hasPlayedAnyFrame &&
+              !autoplayBlockedRef.current &&
+              !video.error &&
+              video.readyState < 3 &&
+              video.currentTime < 0.2
+            ) {
+              console.warn('[VideoPlayer] iOS HLS remux stalled >18s, escalating to HLS transcode');
+              setIsLoading(true);
+              resumeOffsetRef.current = currentTimeRef.current;
+              setStreamFallbackMode('transcode');
+            }
+          }, 18000)
         : null;
 
     const safetyTimer = setTimeout(() => {
-      if (!cancelled) setIsLoading(false);
-    }, streamFallbackMode === 'direct' ? 12000 : 22000);
+      if (cancelled) return;
+      if (video.readyState >= 2 || autoplayBlockedRef.current) {
+        setIsLoading(false);
+      } else if (isAppleDevice && !hasPlayedAnyFrame) {
+        if (streamFallbackMode === 'direct') {
+          setStreamFallbackMode('remux');
+        } else if (streamFallbackMode === 'remux') {
+          setStreamFallbackMode('transcode');
+        } else {
+          autoplayBlockedRef.current = true;
+          setAutoplayBlocked(true);
+          setIsLoading(false);
+          setIsPlaying(false);
+        }
+      }
+    }, streamFallbackMode === 'direct' ? 12000 : 28000);
 
     return () => {
       cancelled = true;
       clearTimeout(seekFallbackTimer);
       clearTimeout(safetyTimer);
-      if (iosMetadataStallTimer) clearTimeout(iosMetadataStallTimer);
+      if (iosDirectStallTimer) clearTimeout(iosDirectStallTimer);
+      if (iosRemuxStallTimer) clearTimeout(iosRemuxStallTimer);
       if (hlsInstance) {
         hlsInstance.destroy();
         hlsRef.current = null;
       }
+      try {
+        video.pause();
+        video.removeAttribute('src');
+        video.querySelectorAll('source').forEach((s) => s.remove());
+      } catch {}
       video.removeEventListener('play', onPlay);
       video.removeEventListener('pause', onPause);
       video.removeEventListener('timeupdate', onTimeUpdate);
@@ -2185,7 +2337,7 @@ export default function VideoPlayerModal({
       video.removeEventListener('webkitendfullscreen', onWebkitEndFullscreen);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [playableUrl, isYouTube, exoModeActive, episodeResumeKey, streamFallbackMode, manualRetryNonce]);
+  }, [playableUrl, isYouTube, exoModeActive, episodeResumeKey, streamFallbackMode, manualRetryNonce, forceNativeIosHls]);
 
   // Keyboard shortcut listener (Space = play/pause, Left/Right = skip, Escape = close)
   useEffect(() => {
@@ -2232,6 +2384,8 @@ export default function VideoPlayerModal({
 
     if (!videoRef.current) return;
     ensureUnmutedOnInteraction();
+    autoplayBlockedRef.current = false;
+    setAutoplayBlocked(false);
     if (!videoRef.current.paused) {
       videoRef.current.pause();
     } else {
@@ -2739,19 +2893,24 @@ export default function VideoPlayerModal({
         >
           {!isYouTube ? (
             <>
-              {!canUseNativeExo && (
+              {!canUseNativeExo && (() => {
+                const useHlsJsSrc = Boolean(playableUrl && /\.m3u8/i.test(playableUrl) && Hls.isSupported() && !forceNativeIosHls);
+                return (
                 <video
-                  key={`${playableUrl}|${manualRetryNonce}`}
+                  key={`${playableUrl}|${manualRetryNonce}|${forceNativeIosHls ? 'nat' : 'mse'}`}
                   ref={videoRef}
-                  src={playableUrl || undefined}
+                  src={useHlsJsSrc ? undefined : (playableUrl || undefined)}
                   poster={!hasDecodedFrame && currentTime < 1.2 && posterUrl ? posterUrl : undefined}
                   playsInline
+                  autoPlay
+                  muted={isAutoplayMuted}
                   preload="auto"
                   controlsList="nodownload"
                   disablePictureInPicture
                   className={`w-full h-full ${objectFitClass} pointer-events-none bg-black transition-all`}
                 />
-              )}
+                );
+              })()}
 
               {/* Double-Tap / Double-Click Seek Ripple Feedback (+10s / -10s) */}
               {seekFeedback && (
@@ -2771,12 +2930,28 @@ export default function VideoPlayerModal({
                 </div>
               )}
 
-              {/* Loading Indicator (White only, stays cleanly visible during loading/buffering without "Tap to Play" prompt) */}
-              {isLoading && !error && (
+              {/* Loading Indicator */}
+              {isLoading && !error && !autoplayBlocked && (
                 <div className="absolute inset-0 m-auto w-24 h-24 flex flex-col items-center justify-center gap-2 bg-black/65 backdrop-blur-sm rounded-2xl z-30 pointer-events-none">
                   <RefreshCw className="animate-spin text-white" size={28} />
                   <span className="text-[11px] text-white/95 font-semibold tracking-wide">Loading...</span>
                 </div>
+              )}
+
+              {/* Subtle Unmute Pill when iPhone WebKit starts muted autoplay */}
+              {isAutoplayMuted && !isLoading && !error && !isLocked && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    ensureUnmutedOnInteraction();
+                    resetAutoHideTimer();
+                  }}
+                  className="absolute top-16 left-1/2 -translate-x-1/2 z-45 flex items-center gap-1.5 bg-black/80 hover:bg-black/95 border border-white/25 px-3.5 py-1.5 rounded-full text-white text-xs font-semibold shadow-xl backdrop-blur-md cursor-pointer active:scale-95 transition-transform"
+                >
+                  <VolumeX size={14} className="text-amber-400" />
+                  <span>Tap for Sound</span>
+                </button>
               )}
 
               {/* Active Subtitle Overlay (Real extracted cues only, crisp legible white text at bottom) */}
@@ -3107,7 +3282,7 @@ export default function VideoPlayerModal({
         {/* CENTER CONTROLS: 10s Rewind, Solid White Play/Pause, 10s Forward */}
         <div
           className={`absolute inset-0 m-auto w-fit h-fit flex items-center justify-center gap-12 sm:gap-20 z-40 transition-opacity duration-300 pointer-events-none ${
-            showControls && !isLocked && !isLoading ? 'opacity-100' : 'opacity-0'
+            (showControls || autoplayBlocked) && !isLocked && (!isLoading || autoplayBlocked) ? 'opacity-100' : 'opacity-0'
           }`}
         >
           {/* 10-Second Rewind Button */}
@@ -3122,7 +3297,7 @@ export default function VideoPlayerModal({
             onPointerCancel={handleControlInteractionEnd}
             title="Rewind 10 seconds"
             className={`text-white hover:text-white/80 flex items-center justify-center transition-transform hover:scale-110 active:scale-90 cursor-pointer drop-shadow-xl ${
-              showControls && !isLocked && !isLoading ? 'pointer-events-auto' : 'pointer-events-none'
+              (showControls || autoplayBlocked) && !isLocked && (!isLoading || autoplayBlocked) ? 'pointer-events-auto' : 'pointer-events-none'
             }`}
           >
             <Rewind10Icon className="w-10 h-10 sm:w-12 sm:h-12" />
@@ -3140,7 +3315,7 @@ export default function VideoPlayerModal({
             onPointerCancel={handleControlInteractionEnd}
             title={isPlaying ? "Pause" : "Play"}
             className={`text-white hover:text-white/80 flex items-center justify-center transition-transform hover:scale-110 active:scale-90 cursor-pointer drop-shadow-2xl ${
-              showControls && !isLocked && !isLoading ? 'pointer-events-auto' : 'pointer-events-none'
+              (showControls || autoplayBlocked) && !isLocked && (!isLoading || autoplayBlocked) ? 'pointer-events-auto' : 'pointer-events-none'
             }`}
           >
             {isPlaying ? (
@@ -3162,7 +3337,7 @@ export default function VideoPlayerModal({
             onPointerCancel={handleControlInteractionEnd}
             title="Forward 10 seconds"
             className={`text-white hover:text-white/80 flex items-center justify-center transition-transform hover:scale-110 active:scale-90 cursor-pointer drop-shadow-xl ${
-              showControls && !isLocked && !isLoading ? 'pointer-events-auto' : 'pointer-events-none'
+              (showControls || autoplayBlocked) && !isLocked && (!isLoading || autoplayBlocked) ? 'pointer-events-auto' : 'pointer-events-none'
             }`}
           >
             <Forward10Icon className="w-10 h-10 sm:w-12 sm:h-12" />

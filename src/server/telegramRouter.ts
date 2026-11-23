@@ -2496,7 +2496,7 @@ export async function handleStream(req: Request, res: Response) {
       'X-Stream-Mode': 'direct',
       'Access-Control-Allow-Origin': '*',
       'Accept-Ranges': 'bytes',
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Cache-Control': isRawParam ? 'no-store' : 'private, max-age=300, no-transform',
       'Connection': 'keep-alive',
       'Content-Type': (isCastParam && (!mimeType || mimeType === 'application/octet-stream')) ? 'video/mp4' : mimeType,
       'Content-Length': chunkSize.toString(),
@@ -2537,17 +2537,21 @@ export async function handleStream(req: Request, res: Response) {
 // NATIVE APPLE HLS STREAMING PIPELINE (/api/telegram/hls/*) FOR iOS & ANDROID
 // ============================================================================
 const HLS_SEG_DURATION = 4;
-const HLS_TARGET_DURATION = 10;
+const HLS_TARGET_DURATION = 5;
 const HLS_TMP_ROOT = path.resolve('/tmp', 'movie_portal_hls');
+const MAX_CONCURRENT_HLS_JOBS = Math.max(2, MAX_CONCURRENT_FFMPEG - 1);
 
 interface HlsWorkerJob {
   jobId: number;
   sid: string;
+  urlParam: string;
   dir: string;
   startSeg: number;
   highestSeg: number;
   proc: ChildProcess | null;
   closed: boolean;
+  superseded: boolean;
+  activeReaders: number;
   lastAccessedAt: number;
   lastErrLine: string;
 }
@@ -2555,10 +2559,30 @@ interface HlsWorkerJob {
 const hlsJobs = new Map<string, HlsWorkerJob>();
 let nextHlsJobSeq = 1;
 
-function cleanupHlsJob(sid: string, removeDir = true) {
+function scheduleRemoveHlsDir(job: HlsWorkerJob, delayMs = 8000) {
+  const tryRemove = () => {
+    if (job.activeReaders > 0) {
+      setTimeout(tryRemove, 2000).unref?.();
+      return;
+    }
+    try {
+      fs.rmSync(job.dir, { recursive: true, force: true });
+    } catch {}
+  };
+  if (delayMs <= 0 && job.activeReaders <= 0) {
+    tryRemove();
+  } else {
+    setTimeout(tryRemove, Math.max(500, delayMs)).unref?.();
+  }
+}
+
+function cleanupHlsJob(sid: string, removeDir = true, markSuperseded = false) {
   const job = hlsJobs.get(sid);
   if (!job) return;
   hlsJobs.delete(sid);
+  if (markSuperseded) {
+    job.superseded = true;
+  }
   if (job.proc && !job.closed) {
     try {
       job.proc.kill('SIGTERM');
@@ -2567,13 +2591,11 @@ function cleanupHlsJob(sid: string, removeDir = true) {
         try {
           if (!procRef.killed) procRef.kill('SIGKILL');
         } catch {}
-      }, 400);
+      }, 400).unref?.();
     } catch {}
   }
   if (removeDir) {
-    try {
-      fs.rmSync(job.dir, { recursive: true, force: true });
-    } catch {}
+    scheduleRemoveHlsDir(job, markSuperseded ? 8000 : 1500);
   }
 }
 
@@ -2581,7 +2603,7 @@ setInterval(() => {
   const now = Date.now();
   for (const [sid, job] of hlsJobs.entries()) {
     if (now - job.lastAccessedAt > 180 * 1000) {
-      cleanupHlsJob(sid, true);
+      cleanupHlsJob(sid, true, false);
     }
   }
 }, 45 * 1000).unref?.();
@@ -2590,14 +2612,26 @@ function getHlsSegmentPath(dir: string, segIdx: number): string {
   return path.join(dir, `seg_${String(segIdx).padStart(5, '0')}.ts`);
 }
 
-function getHlsArgsForQuality(quality: VideoQualityTier | ''): string[] {
+function segmentReadyOnDisk(filePath: string): boolean {
+  try {
+    return fs.existsSync(filePath) && fs.statSync(filePath).size > 0;
+  } catch {
+    return false;
+  }
+}
+
+function getHlsArgsForQuality(quality: VideoQualityTier | '', forceExact4s = true): string[] {
+  const keyframeArgs = forceExact4s
+    ? ['-g', '240', '-force_key_frames', `expr:gte(t,n_forced*${HLS_SEG_DURATION})`, '-sc_threshold', '0']
+    : ['-g', '48', '-keyint_min', '48', '-sc_threshold', '0'];
+
   if (quality === '360p') {
     return [
       '-vf', "scale='min(640,iw)':'min(360,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
       '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '0', '-pix_fmt', 'yuv420p',
       '-profile:v', 'main', '-level', '3.1',
       '-b:v', '320k', '-maxrate', '420k', '-bufsize', '840k',
-      '-g', '48', '-keyint_min', '48', '-sc_threshold', '0',
+      ...keyframeArgs,
       '-af', 'aresample=async=1:min_hard_comp=0.100000',
       '-c:a', 'aac', '-ac', '2', '-ar', '44100', '-b:a', '64k',
     ];
@@ -2608,7 +2642,7 @@ function getHlsArgsForQuality(quality: VideoQualityTier | ''): string[] {
       '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '0', '-pix_fmt', 'yuv420p',
       '-profile:v', 'main', '-level', '3.1',
       '-b:v', '550k', '-maxrate', '720k', '-bufsize', '1440k',
-      '-g', '48', '-keyint_min', '48', '-sc_threshold', '0',
+      ...keyframeArgs,
       '-af', 'aresample=async=1:min_hard_comp=0.100000',
       '-c:a', 'aac', '-ac', '2', '-ar', '48000', '-b:a', '96k',
     ];
@@ -2619,7 +2653,7 @@ function getHlsArgsForQuality(quality: VideoQualityTier | ''): string[] {
       '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '0', '-pix_fmt', 'yuv420p',
       '-profile:v', 'main', '-level', '4.0',
       '-b:v', '1100k', '-maxrate', '1450k', '-bufsize', '2900k',
-      '-g', '48', '-keyint_min', '48', '-sc_threshold', '0',
+      ...keyframeArgs,
       '-af', 'aresample=async=1:min_hard_comp=0.100000',
       '-c:a', 'aac', '-ac', '2', '-ar', '48000', '-b:a', '128k',
     ];
@@ -2629,7 +2663,7 @@ function getHlsArgsForQuality(quality: VideoQualityTier | ''): string[] {
     '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '0', '-pix_fmt', 'yuv420p',
     '-profile:v', 'main', '-level', '4.0',
     '-crf', '22', '-maxrate', '3400k', '-bufsize', '6800k',
-    '-g', '48', '-keyint_min', '48', '-sc_threshold', '0',
+    ...keyframeArgs,
     '-af', 'aresample=async=1:min_hard_comp=0.100000',
     '-c:a', 'aac', '-ac', '2', '-ar', '48000', '-b:a', '160k',
   ];
@@ -2637,6 +2671,7 @@ function getHlsArgsForQuality(quality: VideoQualityTier | ''): string[] {
 
 function startHlsWorker(opts: {
   sid: string;
+  urlParam: string;
   startSeg: number;
   inputUrl: string;
   remuxOnly: boolean;
@@ -2644,14 +2679,33 @@ function startHlsWorker(opts: {
   requestedQuality: VideoQualityTier | '';
   audioIdx: number;
 }): HlsWorkerJob {
-  cleanupHlsJob(opts.sid, true);
-  const dir = path.join(HLS_TMP_ROOT, opts.sid.replace(/[^a-zA-Z0-9_-]/g, '_'));
+  cleanupHlsJob(opts.sid, true, true);
+
+  // Enforce active worker cap so concurrent FFmpeg transcodes never starve the container CPU
+  while (hlsJobs.size >= MAX_CONCURRENT_HLS_JOBS) {
+    let oldestSid: string | null = null;
+    let oldestTime = Infinity;
+    for (const [existingSid, existingJob] of hlsJobs.entries()) {
+      if (existingJob.lastAccessedAt < oldestTime) {
+        oldestTime = existingJob.lastAccessedAt;
+        oldestSid = existingSid;
+      }
+    }
+    if (oldestSid) {
+      cleanupHlsJob(oldestSid, true, true);
+    } else {
+      break;
+    }
+  }
+
+  const jobId = nextHlsJobSeq++;
+  const dir = path.join(HLS_TMP_ROOT, `${opts.sid.replace(/[^a-zA-Z0-9_-]/g, '_')}_j${jobId}`);
   fs.mkdirSync(dir, { recursive: true });
 
   const startSec = opts.startSeg * HLS_SEG_DURATION;
   const ffArgs: string[] = [
-    '-probesize', '5000000',
-    '-analyzeduration', '5000000',
+    '-probesize', '1800000',
+    '-analyzeduration', '1800000',
     '-fflags', '+discardcorrupt',
     '-reconnect', '1',
     '-reconnect_streamed', '1',
@@ -2660,9 +2714,6 @@ function startHlsWorker(opts: {
     '-reconnect_delay_max', '2',
   ];
   if (startSec > 0) {
-    if (opts.remuxOnly) {
-      ffArgs.push('-noaccurate_seek');
-    }
     ffArgs.push('-ss', String(startSec));
   }
   ffArgs.push(
@@ -2670,18 +2721,27 @@ function startHlsWorker(opts: {
     '-sn', '-dn',
     '-map_chapters', '-1',
     '-map', '0:V:0',
-    '-map', `0:a:${opts.audioIdx}?`
+    '-map', `0:a:${opts.audioIdx}?`,
+    '-max_muxing_queue_size', '4096'
   );
 
+  // Static VOD HLS playlists require exact 4.000s IDR-aligned segments so Apple AVPlayer
+  // never encounters keyframe/PTS drift, TARGETDURATION violations, or 404 tail mismatches.
   if (opts.remuxOnly && !opts.requestedQuality) {
-    ffArgs.push('-c:v', 'copy');
+    ffArgs.push(
+      '-vf', "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '0', '-pix_fmt', 'yuv420p',
+      '-profile:v', 'main', '-level', '4.0',
+      '-crf', '21', '-maxrate', '3600k', '-bufsize', '7200k',
+      '-g', '240', '-force_key_frames', `expr:gte(t,n_forced*${HLS_SEG_DURATION})`, '-sc_threshold', '0'
+    );
     if (opts.canCopyAudio) {
       ffArgs.push('-c:a', 'copy');
     } else {
       ffArgs.push('-af', 'aresample=async=1:min_hard_comp=0.100000', '-c:a', 'aac', '-ac', '2', '-ar', '48000', '-b:a', '160k');
     }
   } else {
-    ffArgs.push(...getHlsArgsForQuality(opts.requestedQuality));
+    ffArgs.push(...getHlsArgsForQuality(opts.requestedQuality, true));
   }
 
   if (startSec > 0) {
@@ -2700,13 +2760,16 @@ function startHlsWorker(opts: {
 
   const proc = spawn('ffmpeg', ffArgs, { stdio: ['ignore', 'ignore', 'pipe'] });
   const job: HlsWorkerJob = {
-    jobId: nextHlsJobSeq++,
+    jobId,
     sid: opts.sid,
+    urlParam: opts.urlParam,
     dir,
     startSeg: opts.startSeg,
     highestSeg: opts.startSeg - 1,
     proc,
     closed: false,
+    superseded: false,
+    activeReaders: 0,
     lastAccessedAt: Date.now(),
     lastErrLine: '',
   };
@@ -2718,7 +2781,7 @@ function startHlsWorker(opts: {
   proc.on('close', (code) => {
     job.closed = true;
     job.proc = null;
-    if (code && code !== 0 && job.lastErrLine) {
+    if (!job.superseded && code && code !== 0 && job.lastErrLine) {
       console.warn(`[HLS Worker ${opts.sid}] FFmpeg exited (${code}): ${job.lastErrLine}`);
     }
   });
@@ -2767,7 +2830,7 @@ async function resolveHlsSourceParams(req: Request) {
       (pixFmt === '' || pixFmt === 'yuv420p' || pixFmt === 'yuvj420p' || pixFmt === 'nv12') &&
       (probe.height === 0 || probe.height <= 1088) &&
       (probe.videoLevel === 0 || probe.videoLevel <= 42);
-    if (modeParam === 'transcode' || Boolean(requestedQuality) || !isH264Safe) {
+    if (modeParam === 'transcode' || Boolean(requestedQuality && requestedQuality !== '1080p') || !isH264Safe) {
       remuxOnly = false;
     } else {
       remuxOnly = true;
@@ -2776,7 +2839,10 @@ async function resolveHlsSourceParams(req: Request) {
     const selectedTrack = probe.audioTracks[audioIdx] || probe.audioTracks[0];
     const ac = (selectedTrack?.codec || probe.audioCodec || '').toLowerCase();
     const ch = selectedTrack?.channels || 2;
-    canCopyAudio = (ac === 'aac' || ac === 'mp3') && ch <= 2 && audioIdx === 0;
+    const videoStart = probe.videoStartTime || 0;
+    const audioStart = selectedTrack?.startTime || 0;
+    const hasStreamOffset = Math.abs(audioStart - videoStart) > 0.04;
+    canCopyAudio = ac === 'aac' && ch <= 2 && audioIdx === 0 && !hasStreamOffset;
   } else {
     if (durationSec <= 0) {
       const info = await probeDirectHttpInfo(urlParam).catch(() => null);
@@ -2788,7 +2854,7 @@ async function resolveHlsSourceParams(req: Request) {
   return { urlParam, modeParam, requestedQuality, audioIdx, inputUrl, durationSec, remuxOnly, canCopyAudio };
 }
 
-router.get('/hls/playlist.m3u8', async (req: Request, res: Response) => {
+async function handleHlsPlaylistRequest(req: Request, res: Response) {
   try {
     const urlParam = String(req.query.url || '').trim();
     if (!urlParam) return res.status(400).send('URL required');
@@ -2812,6 +2878,7 @@ router.get('/hls/playlist.m3u8', async (req: Request, res: Response) => {
     if (!existingJob || existingJob.closed) {
       startHlsWorker({
         sid,
+        urlParam: resolved.urlParam,
         startSeg: 0,
         inputUrl: resolved.inputUrl,
         remuxOnly: resolved.remuxOnly,
@@ -2829,6 +2896,7 @@ router.get('/hls/playlist.m3u8', async (req: Request, res: Response) => {
       `#EXT-X-TARGETDURATION:${HLS_TARGET_DURATION}`,
       '#EXT-X-MEDIA-SEQUENCE:0',
       '#EXT-X-PLAYLIST-TYPE:VOD',
+      '#EXT-X-INDEPENDENT-SEGMENTS',
     ];
 
     const effectiveDur = resolved.durationSec > 0 ? resolved.durationSec : 10800; // 3h safe ceiling if metadata omitted duration
@@ -2841,18 +2909,26 @@ router.get('/hls/playlist.m3u8', async (req: Request, res: Response) => {
       lines.push(`/api/telegram/hls/seg.ts?${commonQs}&i=${i}`);
     }
     lines.push('#EXT-X-ENDLIST');
+    const body = lines.join('\n') + '\n';
 
-    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
+    res.setHeader('Content-Length', String(Buffer.byteLength(body, 'utf8')));
+    res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Access-Control-Allow-Origin', '*');
-    return res.status(200).send(lines.join('\n') + '\n');
+    if (req.method === 'HEAD') {
+      return res.status(200).end();
+    }
+    return res.status(200).send(body);
   } catch (err: any) {
     console.error('[HLS Playlist] Error:', err?.message || err);
     return res.status(500).send(err?.message || 'Failed to build HLS playlist');
   }
-});
+}
 
-router.get('/hls/seg.ts', async (req: Request, res: Response) => {
+router.get('/hls/playlist.m3u8', handleHlsPlaylistRequest);
+router.head('/hls/playlist.m3u8', handleHlsPlaylistRequest);
+
+async function handleHlsSegmentRequest(req: Request, res: Response) {
   try {
     const segIdx = Math.max(0, parseInt(String(req.query.i || '0'), 10) || 0);
     const resolved = await resolveHlsSourceParams(req);
@@ -2865,85 +2941,165 @@ router.get('/hls/seg.ts', async (req: Request, res: Response) => {
           .slice(0, 16)
     ).replace(/[^a-zA-Z0-9_-]/g, '_');
 
-    let job = hlsJobs.get(sid);
-    const segPath = job ? getHlsSegmentPath(job.dir, segIdx) : '';
-    const alreadyExists = Boolean(job && segPath && fs.existsSync(segPath));
-
-    const needRestart =
-      !job ||
-      (!alreadyExists && (segIdx < job.startSeg || segIdx > Math.max(job.startSeg, job.highestSeg) + 8)) ||
-      (!alreadyExists && job.closed);
-
-    if (needRestart) {
-      job = startHlsWorker({
-        sid,
-        startSeg: segIdx,
-        inputUrl: resolved.inputUrl,
-        remuxOnly: resolved.remuxOnly,
-        canCopyAudio: resolved.canCopyAudio,
-        requestedQuality: resolved.requestedQuality,
-        audioIdx: resolved.audioIdx,
-      });
-    }
-
-    if (!job) {
-      return res.status(500).send('HLS job unavailable');
-    }
-    job.lastAccessedAt = Date.now();
-    if (segIdx > job.highestSeg) {
-      job.highestSeg = segIdx;
-    }
-
     let clientDisconnected = false;
     req.on('close', () => {
       clientDisconnected = true;
     });
 
-    const waitStart = Date.now();
-    let targetFile = getHlsSegmentPath(job.dir, segIdx);
-    while (!clientDisconnected && !fs.existsSync(targetFile)) {
+    let activeJob: HlsWorkerJob | undefined;
+    let targetFile = '';
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (clientDisconnected) return;
+
+      let job = attempt === 0 ? hlsJobs.get(sid) : undefined;
+      const candidatePath = job ? getHlsSegmentPath(job.dir, segIdx) : '';
+      const alreadyExists = Boolean(job && candidatePath && segmentReadyOnDisk(candidatePath));
+
+      const needRestart =
+        !job ||
+        (!alreadyExists && (segIdx < job.startSeg || segIdx > Math.max(job.startSeg, job.highestSeg) + 18)) ||
+        (!alreadyExists && job.closed);
+
+      if (needRestart) {
+        const forceSafeTranscode = attempt > 0;
+        job = startHlsWorker({
+          sid,
+          urlParam: resolved.urlParam,
+          startSeg: segIdx,
+          inputUrl: resolved.inputUrl,
+          remuxOnly: forceSafeTranscode ? false : resolved.remuxOnly,
+          canCopyAudio: forceSafeTranscode ? false : resolved.canCopyAudio,
+          requestedQuality: resolved.requestedQuality,
+          audioIdx: resolved.audioIdx,
+        });
+      }
+
+      if (!job) {
+        return res.status(503).send('HLS job unavailable');
+      }
       job.lastAccessedAt = Date.now();
-      if (job.closed) {
-        // Check if another concurrent seek restarted this job covering segIdx
-        const latestJob = hlsJobs.get(sid);
-        if (latestJob && latestJob.jobId !== job.jobId && latestJob.startSeg <= segIdx) {
-          job = latestJob;
-          targetFile = getHlsSegmentPath(job.dir, segIdx);
-          continue;
+      if (segIdx > job.highestSeg) {
+        job.highestSeg = segIdx;
+      }
+
+      const waitStart = Date.now();
+      targetFile = getHlsSegmentPath(job.dir, segIdx);
+      while (!clientDisconnected && !segmentReadyOnDisk(targetFile)) {
+        job.lastAccessedAt = Date.now();
+        if (job.closed) {
+          const latestJob = hlsJobs.get(sid);
+          if (latestJob && latestJob.jobId !== job.jobId && latestJob.startSeg <= segIdx) {
+            job = latestJob;
+            targetFile = getHlsSegmentPath(job.dir, segIdx);
+            continue;
+          }
+          break;
         }
+        if (Date.now() - waitStart > 45000) {
+          res.setHeader('Cache-Control', 'no-store');
+          return res.status(504).send('HLS segment timed out');
+        }
+        await new Promise((r) => setTimeout(r, 80));
+      }
+
+      if (clientDisconnected) return;
+      if (segmentReadyOnDisk(targetFile)) {
+        activeJob = job;
         break;
       }
-      if (Date.now() - waitStart > 45000) {
-        res.setHeader('Cache-Control', 'no-store');
-        return res.status(504).send('HLS segment timed out');
-      }
-      await new Promise((r) => setTimeout(r, 80));
     }
 
     if (clientDisconnected) return;
-    if (!fs.existsSync(targetFile)) {
+    if (!activeJob || !segmentReadyOnDisk(targetFile)) {
       res.setHeader('Cache-Control', 'no-store');
-      return res.status(404).send(job.lastErrLine || 'Segment ended');
+      return res.status(503).send('Segment temporarily unavailable');
     }
 
     const stat = fs.statSync(targetFile);
     res.setHeader('Content-Type', 'video/mp2t');
-    res.setHeader('Content-Length', String(stat.size));
+    res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Cache-Control', 'public, max-age=300');
     res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader(
+      'Access-Control-Expose-Headers',
+      'Content-Range, Accept-Ranges, Content-Length, Content-Type'
+    );
 
-    const stream = fs.createReadStream(targetFile);
+    const rangeHeader = req.headers.range;
+    let streamStart = 0;
+    let streamEnd = stat.size - 1;
+    let isRange = false;
+
+    if (rangeHeader) {
+      const match = String(rangeHeader).match(/bytes=(\d*)-(\d*)/i);
+      if (!match || (!match[1] && !match[2])) {
+        res.setHeader('Content-Range', `bytes */${stat.size}`);
+        return res.status(416).end();
+      }
+      const hasStart = Boolean(match[1]);
+      const hasEnd = Boolean(match[2]);
+      if (hasStart) {
+        streamStart = parseInt(match[1], 10);
+        streamEnd = hasEnd ? parseInt(match[2], 10) : stat.size - 1;
+      } else {
+        const suffixLen = parseInt(match[2], 10);
+        streamStart = Math.max(0, stat.size - suffixLen);
+        streamEnd = stat.size - 1;
+      }
+      if (
+        !Number.isFinite(streamStart) ||
+        !Number.isFinite(streamEnd) ||
+        streamStart < 0 ||
+        streamStart >= stat.size ||
+        streamEnd < streamStart
+      ) {
+        res.setHeader('Content-Range', `bytes */${stat.size}`);
+        return res.status(416).end();
+      }
+      streamEnd = Math.min(streamEnd, stat.size - 1);
+      isRange = true;
+    }
+
+    const responseLength = streamEnd - streamStart + 1;
+    res.setHeader('Content-Length', String(responseLength));
+    if (isRange) {
+      res.setHeader('Content-Range', `bytes ${streamStart}-${streamEnd}/${stat.size}`);
+    }
+
+    if (req.method === 'HEAD') {
+      return res.status(isRange ? 206 : 200).end();
+    }
+
+    res.status(isRange ? 206 : 200);
+    activeJob.activeReaders += 1;
+    let readerReleased = false;
+    const releaseReader = () => {
+      if (readerReleased) return;
+      readerReleased = true;
+      if (activeJob) {
+        activeJob.activeReaders = Math.max(0, activeJob.activeReaders - 1);
+      }
+    };
+
+    const stream = fs.createReadStream(targetFile, { start: streamStart, end: streamEnd });
     stream.on('error', () => {
+      releaseReader();
       if (!res.writableEnded) res.end();
+    });
+    stream.on('close', releaseReader);
+    res.on('close', () => {
+      releaseReader();
+      stream.destroy();
     });
     stream.pipe(res);
 
     // Prune older segments (> 15 behind current) to keep /tmp light
     try {
       const pruneUpTo = segIdx - 15;
-      if (pruneUpTo > job.startSeg) {
-        for (let oldIdx = Math.max(job.startSeg, pruneUpTo - 5); oldIdx < pruneUpTo; oldIdx++) {
-          const oldFile = getHlsSegmentPath(job.dir, oldIdx);
+      if (pruneUpTo > activeJob.startSeg) {
+        for (let oldIdx = Math.max(activeJob.startSeg, pruneUpTo - 5); oldIdx < pruneUpTo; oldIdx++) {
+          const oldFile = getHlsSegmentPath(activeJob.dir, oldIdx);
           if (fs.existsSync(oldFile)) {
             fs.unlinkSync(oldFile);
           }
@@ -2954,7 +3110,10 @@ router.get('/hls/seg.ts', async (req: Request, res: Response) => {
     console.error('[HLS Seg] Error:', err?.message || err);
     if (!res.headersSent) res.status(500).send(err?.message || 'HLS segment error');
   }
-});
+}
+
+router.get('/hls/seg.ts', handleHlsSegmentRequest);
+router.head('/hls/seg.ts', handleHlsSegmentRequest);
 
 // ============================================================================
 // TELEGRAM CHANNEL AUTO-SYNC & MOVIE AUTO-IMDb ENGINE

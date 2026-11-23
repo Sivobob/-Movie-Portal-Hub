@@ -14,8 +14,8 @@ import { checkAndHandleQuotaError } from './firestoreQuotaService';
 export const APP_UPDATE_COLLECTION = 'admins';
 export const APP_UPDATE_DOC_ID = 'android_update';
 
-export const CURRENT_VERSION_NAME = '3.5.251';
-export const CURRENT_VERSION_CODE = 3471;
+export const CURRENT_VERSION_NAME = '3.5.263';
+export const CURRENT_VERSION_CODE = 35263;
 
 export const OFFICIAL_APK_DIRECT_URL =
   'https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk';
@@ -139,22 +139,30 @@ export function isAppUpdateRequired(
   remote: RemoteUpdateConfig | null | undefined
 ): boolean {
   if (!remote) return false;
-  const targetVersion = String(remote.latestVersion || '').trim();
-  const targetCode = Number(remote.latestVersionCode || 0);
+  const minVersion = String(remote.minimumRequiredVersion || '1.0.0').trim();
+  const minCode = Number(remote.minimumRequiredVersionCode || 1);
+  const latestVer = String(remote.latestVersion || '').trim();
+  const latestCode = Number(remote.latestVersionCode || 0);
 
   // Explicit kill-switch sentinel when admin sets version to 1.0.0
-  if (targetVersion === '1.0.0' && targetCode <= 1) {
+  if (minVersion === '1.0.0' && minCode <= 1 && (!latestVer || latestVer === '1.0.0')) {
     return false;
   }
 
-  if (targetVersion && installed.versionName) {
-    const cmp = compareVersions(installed.versionName, targetVersion);
-    if (cmp < 0) return true;
-    if (cmp > 0) return false;
+  // Check minimum required version
+  if (minVersion && minVersion !== '1.0.0' && installed.versionName) {
+    if (compareVersions(installed.versionName, minVersion) < 0) return true;
+  }
+  if (minCode > 1 && installed.versionCode > 0) {
+    if (installed.versionCode < minCode) return true;
   }
 
-  if (targetCode > 0 && installed.versionCode > 0) {
-    return installed.versionCode < targetCode;
+  // Check latest version (if a newer release is published, show update prompt)
+  if (latestVer && installed.versionName) {
+    if (compareVersions(installed.versionName, latestVer) < 0) return true;
+  }
+  if (latestCode > 0 && installed.versionCode > 0) {
+    if (installed.versionCode < latestCode) return true;
   }
 
   return false;
@@ -168,23 +176,24 @@ export function normalizeRemoteUpdateConfig(raw: any): RemoteUpdateConfig {
   const latestVersion = String(raw?.latestVersion || CURRENT_VERSION_NAME)
     .trim()
     .replace(/^v/i, '');
+  
+  const isMandatory = Boolean(raw?.isMandatory);
   const minimumRequiredVersion = String(
-    raw?.minimumRequiredVersion || (raw?.isMandatory ? raw?.latestVersion : '1.0.0') || '1.0.0'
+    raw?.minimumRequiredVersion || (isMandatory ? latestVersion : '1.0.0')
   )
     .trim()
     .replace(/^v/i, '');
 
   const latestVersionCode = Number(raw?.latestVersionCode) || CURRENT_VERSION_CODE;
   const minimumRequiredVersionCode = Number(
-    raw?.minimumRequiredVersionCode ??
-      (compareVersions(minimumRequiredVersion, latestVersion) === 0 ? latestVersionCode : 0)
+    raw?.minimumRequiredVersionCode ?? (isMandatory ? latestVersionCode : 1)
   );
 
   return {
     latestVersion,
     minimumRequiredVersion,
     latestVersionCode,
-    minimumRequiredVersionCode: minimumRequiredVersionCode > 0 ? minimumRequiredVersionCode : undefined,
+    minimumRequiredVersionCode: minimumRequiredVersionCode > 1 ? minimumRequiredVersionCode : undefined,
     apkDownloadUrl: apkDownloadUrl || OFFICIAL_APK_DIRECT_URL,
     updateMessage: String(raw?.updateMessage || raw?.releaseNotes || DEFAULT_UPDATE_MESSAGE).trim() || DEFAULT_UPDATE_MESSAGE,
     updatedAt: raw?.updatedAt,

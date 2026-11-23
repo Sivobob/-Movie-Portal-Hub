@@ -56,5 +56,6 @@ export function normalizeMoviePosters<T extends Record<string, any>>(movie: T): 
     ...movie,
     posterUrl: hdPoster || movie.posterUrl || '',
     backdropUrl: hdBackdrop || movie.backdropUrl || hdPoster || movie.posterUrl || '',
+    viewsCount: Math.max(0, Math.floor(Number(movie.viewsCount || 0) || 0)),
   };
 }

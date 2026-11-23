@@ -247,6 +247,19 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
       syncFromServer(true);
     };
 
+    const handleMovieViewRecorded = (event: Event) => {
+      const targetId = String((event as CustomEvent)?.detail?.movieId || '').trim();
+      if (!targetId || !isMountedRef.current) return;
+      setMovies((prev) =>
+        prev.map((m) =>
+          m.id === targetId
+            ? { ...m, viewsCount: Math.max(0, Math.floor(Number(m.viewsCount || 0) || 0)) + 1 }
+            : m
+        )
+      );
+    };
+    window.addEventListener('movie_view_recorded', handleMovieViewRecorded);
+
     window.addEventListener('focus', handleResume);
     window.addEventListener('pageshow', handleResume);
     window.addEventListener('online', handleOnline);
@@ -272,6 +285,7 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
         } catch {}
       }
       window.removeEventListener('movies_updated', handleLocalMoviesUpdated);
+      window.removeEventListener('movie_view_recorded', handleMovieViewRecorded);
       window.removeEventListener('focus', handleResume);
       window.removeEventListener('pageshow', handleResume);
       window.removeEventListener('online', handleOnline);

@@ -93,7 +93,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     time: new Date().toISOString(),
-    version: '3.5.249',
+    version: '3.5.263',
     ffmpegAvailable: FFMPEG_AVAILABLE,
     ffprobeAvailable: FFPROBE_AVAILABLE,
     telegramConfigured,
@@ -120,7 +120,7 @@ app.get('/api/ios-profile', (req, res) => {
     const rawProto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0].trim();
     const isLocal = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(rawHost);
     const scheme = isLocal ? rawProto : 'https';
-    const appOrigin = rawHost ? `${scheme}://${rawHost}/` : 'https://ais-pre-z5ikji45t6fgwbl74rpxp2-832989141722.asia-southeast1.run.app/';
+    const appOrigin = rawHost ? `${scheme}://${rawHost}/` : 'https://ais-pre-ariekzqzaudxer5atxkvkw-832989141722.asia-southeast1.run.app/';
 
     const escapeXml = (str: string) =>
       str
@@ -277,6 +277,20 @@ if (!isProduction) {
         middlewareMode: true,
         hmr: false,
         allowedHosts: true,
+      },
+      optimizeDeps: {
+        entries: ['index.html'],
+        include: [
+          'react',
+          'react-dom',
+          'react-dom/client',
+          'react/jsx-runtime',
+          'react/jsx-dev-runtime',
+          'framer-motion',
+          'lucide-react',
+          'react-router-dom',
+          'hls.js',
+        ],
       },
       appType: 'spa',
     });
