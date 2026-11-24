@@ -174,7 +174,7 @@ export async function registerActiveDeviceInstall(versionName?: string): Promise
 
 export function normalizeFirestoreAppStats(data: any, realCount = 0): FirestoreAppStats {
   const storedCount = Number(data?.installedAppUsers) || 0;
-  const effectiveCount = Math.max(storedCount, realCount);
+  const effectiveCount = realCount > 0 ? realCount : storedCount;
 
   return {
     totalApkClicks: Math.max(0, Number(data?.totalApkClicks) || 0),

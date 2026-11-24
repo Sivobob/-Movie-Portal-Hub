@@ -1,5 +1,6 @@
 import './shims/globals';
-import { TelegramClient, Api } from 'telegram';
+import { TelegramClient, Api, Logger } from 'telegram';
+import { LogLevel } from 'telegram/extensions/Logger.js';
 import { StringSession } from 'telegram/sessions/index.js';
 import bigInt from 'big-integer';
 import { parseTelegramUrl } from './telegramParser';
@@ -13,9 +14,7 @@ const CHANNEL_HASH_STORAGE_KEY = 'tg_known_channel_hashes_v1';
 
 // Known channel access hashes (same registry used by backend)
 const KNOWN_ACCESS_HASHES: Record<string, string> = {
-  '3850537977': '5272514172729841892',
-  '4340768605': '1132591071925895642',
-  '3432917101': '-4482230480674919611',
+  '4498557265': '113338100892344891',
 };
 
 interface CachedBrowserMedia {
@@ -171,6 +170,13 @@ export async function resetBrowserTelegramClient(opts?: { clearSession?: boolean
   return resettingPromise;
 }
 
+const BROWSER_TELEGRAM_DCS: Array<{ id: number; ip: string; port: number }> = [
+  { id: 5, ip: '91.108.56.130', port: 443 },
+  { id: 2, ip: '149.154.167.51', port: 443 },
+  { id: 1, ip: '149.154.175.53', port: 443 },
+  { id: 4, ip: '149.154.167.91', port: 443 },
+];
+
 export async function getBrowserTelegramClient(forceReconnect = false): Promise<TelegramClient> {
   if (forceReconnect) {
     return resetBrowserTelegramClient({ clearSession: false });
@@ -201,10 +207,13 @@ export async function getBrowserTelegramClient(forceReconnect = false): Promise<
       try {
         const client = new TelegramClient(new StringSession(saved), TG_API_ID, TG_API_HASH, {
           connectionRetries: 10,
+          requestRetries: 5,
+          retryDelay: 2500,
           autoReconnect: true,
           useWSS: true,
           floodSleepThreshold: 60,
           maxConcurrentDownloads: 8,
+          baseLogger: new Logger(LogLevel.ERROR),
         });
         await client.connect();
         if (client.connected) {
@@ -212,6 +221,7 @@ export async function getBrowserTelegramClient(forceReconnect = false): Promise<
           ensureKeepaliveLoop();
           return client;
         }
+        try { await client.disconnect(); } catch {}
       } catch (err: any) {
         if (isAuthSessionFatalError(err)) {
           clearSavedBrowserSession();
@@ -219,19 +229,33 @@ export async function getBrowserTelegramClient(forceReconnect = false): Promise<
       }
     }
 
-    const freshClient = new TelegramClient(new StringSession(''), TG_API_ID, TG_API_HASH, {
-      connectionRetries: 10,
-      autoReconnect: true,
-      useWSS: true,
-      floodSleepThreshold: 60,
-      maxConcurrentDownloads: 8,
-    });
-    await freshClient.start({ botAuthToken: TG_BOT_TOKEN });
-    const exported = freshClient.session.save() as unknown as string;
-    saveBrowserSession(exported);
-    browserClient = freshClient;
-    ensureKeepaliveLoop();
-    return freshClient;
+    let lastErr: any = null;
+    for (const dc of BROWSER_TELEGRAM_DCS) {
+      const sess = new StringSession('');
+      sess.setDC(dc.id, dc.ip, dc.port);
+      const freshClient = new TelegramClient(sess, TG_API_ID, TG_API_HASH, {
+        connectionRetries: 6,
+        requestRetries: 3,
+        retryDelay: 1800,
+        autoReconnect: true,
+        useWSS: true,
+        floodSleepThreshold: 60,
+        maxConcurrentDownloads: 8,
+        baseLogger: new Logger(LogLevel.ERROR),
+      });
+      try {
+        await freshClient.start({ botAuthToken: TG_BOT_TOKEN });
+        const exported = freshClient.session.save() as unknown as string;
+        saveBrowserSession(exported);
+        browserClient = freshClient;
+        ensureKeepaliveLoop();
+        return freshClient;
+      } catch (dcErr: any) {
+        lastErr = dcErr;
+        try { await freshClient.disconnect(); } catch {}
+      }
+    }
+    throw lastErr || new Error('Failed to start browser Telegram client');
   })()
     .catch((err) => {
       browserClient = null;

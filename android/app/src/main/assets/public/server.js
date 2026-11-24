@@ -1473,7 +1473,8 @@ import { Api as Api3 } from "telegram";
 import fs2 from "fs";
 import os from "os";
 import path2 from "path";
-import { TelegramClient as TelegramClient2 } from "telegram";
+import { TelegramClient as TelegramClient2, Logger } from "telegram";
+import { LogLevel } from "telegram/extensions/Logger.js";
 import { StringSession } from "telegram/sessions/index.js";
 
 // src/utils/channelRegistry.ts
@@ -1495,39 +1496,39 @@ function loadCacheFromDisk() {
   } catch (err) {
     console.warn("[ChannelRegistry] Error loading cache from disk:", err?.message || err);
   }
-  const defaultChannelKey = "QSL_3k54YfBjMjE1";
-  if (!inMemoryCache[defaultChannelKey] && !inMemoryCache["priv-QSL_3k54YfBjMjE1"]) {
-    inMemoryCache[defaultChannelKey] = {
-      channelId: defaultChannelKey,
-      accessHash: "0",
-      title: "Movie Portal Private Channel (+QSL_3k54YfBjMjE1)",
-      username: "",
+  if (!inMemoryCache["4498557265"]) {
+    const movieHubDbEntry = {
+      channelId: "4498557265",
+      accessHash: "113338100892344891",
+      title: "Movie Hub Database",
+      username: "+s2Qki5-sfnVjZTI1",
       updatedAt: Date.now()
     };
-  }
-  if (!inMemoryCache["4340768605"]) {
-    const narutoEntry = {
-      channelId: "4340768605",
-      accessHash: "1132591071925895642",
-      title: "Naruto Shippuden All Episode Sony Yay Hindi Dub | Official Hindi Dubbed",
-      username: "Naruto_Shippuden_HindiiDubb",
-      updatedAt: Date.now()
-    };
-    inMemoryCache["4340768605"] = narutoEntry;
-    inMemoryCache["-1004340768605"] = narutoEntry;
-  }
-  if (!inMemoryCache["3432917101"]) {
-    const narutoPrivEntry = {
-      channelId: "3432917101",
-      accessHash: "-4482230480674919611",
-      title: "Naruto Shippuden Hindi Dub | Official Hindi Dub Sony Yay",
-      username: "+QrZpe437skZiNTg1",
-      updatedAt: Date.now()
-    };
-    inMemoryCache["3432917101"] = narutoPrivEntry;
-    inMemoryCache["-1003432917101"] = narutoPrivEntry;
+    inMemoryCache["4498557265"] = movieHubDbEntry;
+    inMemoryCache["-1004498557265"] = movieHubDbEntry;
   }
   return inMemoryCache;
+}
+function removeChannelEntity(channelId) {
+  loadCacheFromDisk();
+  const cleanId = String(channelId || "").replace(/^-100/, "").trim();
+  if (!cleanId) return false;
+  let removed = false;
+  for (const key of Object.keys(inMemoryCache)) {
+    const entry = inMemoryCache[key];
+    if (key === cleanId || key === `-100${cleanId}` || entry?.channelId === cleanId || entry?.channelId === `-100${cleanId}`) {
+      delete inMemoryCache[key];
+      removed = true;
+    }
+  }
+  if (removed) {
+    try {
+      fs.writeFileSync(CACHE_FILE, JSON.stringify(inMemoryCache, null, 2), "utf-8");
+    } catch (err) {
+      console.warn("[ChannelRegistry] Failed writing cache after remove:", err?.message || err);
+    }
+  }
+  return removed;
 }
 function saveChannelEntity(channelId, accessHash, title, username) {
   const cleanId = channelId.toString().replace("-100", "");
@@ -1819,6 +1820,13 @@ function ensureServerKeepalive(activeClient) {
   }, 4e4);
   timer.unref?.();
 }
+var TELEGRAM_DC_ENDPOINTS = [
+  { id: 5, ip: "91.108.56.130", port: 443 },
+  { id: 2, ip: "149.154.167.51", port: 443 },
+  { id: 1, ip: "149.154.175.53", port: 443 },
+  { id: 4, ip: "149.154.167.91", port: 443 },
+  { id: 3, ip: "149.154.175.100", port: 443 }
+];
 async function getTelegramClient() {
   if (client) {
     if (client.connected) {
@@ -1842,36 +1850,91 @@ async function getTelegramClient() {
     if (!apiId || !apiHash || !botToken && !sessionStr) {
       throw new Error("Telegram credentials incomplete in environment.");
     }
-    const stringSession = new StringSession(sessionStr || "");
-    const newClient = new TelegramClient2(stringSession, apiId, apiHash, {
-      connectionRetries: 15,
-      autoReconnect: true,
-      useWSS: false,
-      floodSleepThreshold: 60,
-      maxConcurrentDownloads: 20
-    });
+    let connectedClient = null;
     if (sessionStr) {
-      await newClient.connect();
-      console.log("[TelegramClient] Connected using Telegram Account Session String");
-    } else if (botToken) {
-      await newClient.start({ botAuthToken: botToken });
-      console.log("[TelegramClient] Connected using Telegram Bot Auth Token");
-      const savedSession = newClient.session.save();
-      if (savedSession && typeof savedSession === "string" && savedSession.length > 10) {
-        try {
-          fs2.writeFileSync(SESSION_FILE_PATH, savedSession, "utf-8");
-          console.log("[TelegramClient] New session cached in tmpdir");
-        } catch (e) {
-          console.warn("[TelegramClient] Failed to save session:", e);
+      const savedSessionClient = new TelegramClient2(new StringSession(sessionStr), apiId, apiHash, {
+        connectionRetries: 10,
+        requestRetries: 5,
+        retryDelay: 2e3,
+        autoReconnect: true,
+        useWSS: false,
+        floodSleepThreshold: 60,
+        maxConcurrentDownloads: 20,
+        baseLogger: new Logger(LogLevel.ERROR)
+      });
+      try {
+        await savedSessionClient.connect();
+        if (savedSessionClient.connected) {
+          connectedClient = savedSessionClient;
+          console.log("[TelegramClient] Connected using cached Telegram Session");
+        } else {
+          try {
+            await savedSessionClient.disconnect();
+          } catch {
+          }
         }
+      } catch (savedErr) {
+        console.warn("[TelegramClient] Cached session connect failed, refreshing bot session:", savedErr?.message || savedErr);
+        try {
+          await savedSessionClient.disconnect();
+        } catch {
+        }
+        try {
+          if (fs2.existsSync(SESSION_FILE_PATH)) fs2.unlinkSync(SESSION_FILE_PATH);
+        } catch {
+        }
+        if (!botToken) throw savedErr;
       }
     }
-    client = newClient;
-    ensureServerKeepalive(newClient);
-    initializeChannelCache(newClient).catch((err) => {
+    if (!connectedClient && botToken) {
+      let lastErr = null;
+      for (const dc of TELEGRAM_DC_ENDPOINTS) {
+        const dcSession = new StringSession("");
+        dcSession.setDC(dc.id, dc.ip, dc.port);
+        const attemptClient = new TelegramClient2(dcSession, apiId, apiHash, {
+          connectionRetries: 6,
+          requestRetries: 3,
+          retryDelay: 1500,
+          autoReconnect: true,
+          useWSS: false,
+          floodSleepThreshold: 60,
+          maxConcurrentDownloads: 20,
+          baseLogger: new Logger(LogLevel.ERROR)
+        });
+        try {
+          await attemptClient.start({ botAuthToken: botToken });
+          connectedClient = attemptClient;
+          console.log(`[TelegramClient] Connected via DC ${dc.id} using Telegram Bot Auth Token`);
+          const savedSession = attemptClient.session.save();
+          if (savedSession && typeof savedSession === "string" && savedSession.length > 10) {
+            try {
+              fs2.writeFileSync(SESSION_FILE_PATH, savedSession, "utf-8");
+            } catch {
+            }
+          }
+          break;
+        } catch (dcErr) {
+          lastErr = dcErr;
+          console.warn(`[TelegramClient] DC ${dc.id} bot login fallback (${dcErr?.errorMessage || dcErr?.message || dcErr})`);
+          try {
+            await attemptClient.disconnect();
+          } catch {
+          }
+        }
+      }
+      if (!connectedClient) {
+        throw lastErr || new Error("Failed to connect Telegram Bot across all DCs.");
+      }
+    }
+    if (!connectedClient) {
+      throw new Error("Failed to establish Telegram client connection.");
+    }
+    client = connectedClient;
+    ensureServerKeepalive(connectedClient);
+    initializeChannelCache(connectedClient).catch((err) => {
       console.warn("[TelegramClient] Channel cache warmup note:", err?.message || err);
     });
-    return newClient;
+    return connectedClient;
   })().catch((err) => {
     client = null;
     throw err;
@@ -2135,11 +2198,45 @@ function getCachedBlock(key) {
   return hit;
 }
 var dcSenderPromises = /* @__PURE__ */ new Map();
+var activeDcSenders = /* @__PURE__ */ new Map();
+var dcKeepaliveTimer = null;
+function ensureDcKeepaliveLoop() {
+  if (dcKeepaliveTimer) return;
+  dcKeepaliveTimer = setInterval(async () => {
+    const now = Date.now();
+    for (const [key, entry] of activeDcSenders.entries()) {
+      if (now - entry.lastUsedAt > 15 * 60 * 1e3) {
+        activeDcSenders.delete(key);
+        continue;
+      }
+      try {
+        await Promise.race([
+          entry.client.invokeWithSender(new Api2.Ping({ pingId: bigInt2(now) }), entry.sender),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("ping timeout")), 8e3))
+        ]);
+      } catch {
+        try {
+          entry.sender?.reconnect?.();
+        } catch {
+        }
+      }
+    }
+  }, 35 * 1e3);
+  dcKeepaliveTimer.unref?.();
+}
 async function getDcSenderSafe(client2, dcId) {
   const key = dcId !== void 0 ? String(dcId) : "default";
+  const cachedEntry = activeDcSenders.get(key);
+  if (cachedEntry && cachedEntry.client === client2 && cachedEntry.sender) {
+    cachedEntry.lastUsedAt = Date.now();
+  }
   const existing = dcSenderPromises.get(key);
   if (existing) return existing;
-  const p = client2.getSender(dcId).finally(() => {
+  const p = client2.getSender(dcId).then((sender) => {
+    activeDcSenders.set(key, { client: client2, sender, dcId, lastUsedAt: Date.now() });
+    ensureDcKeepaliveLoop();
+    return sender;
+  }).finally(() => {
     dcSenderPromises.delete(key);
   });
   dcSenderPromises.set(key, p);
@@ -2203,9 +2300,11 @@ async function fetchTelegramBlockRaw(client2, doc3, blockIndex) {
         continue;
       }
       const upperMsg = msg.toUpperCase();
-      const isTransientNetErr = upperMsg.includes("TIMEOUT") || upperMsg.includes("ECONNRESET") || upperMsg.includes("ETIMEDOUT") || upperMsg.includes("CONNECTION") || upperMsg.includes("NOT CONNECTED") || upperMsg.includes("WEBSOCKET");
+      const isTransientNetErr = upperMsg.includes("TIMEOUT") || upperMsg.includes("ECONNRESET") || upperMsg.includes("ETIMEDOUT") || upperMsg.includes("EPIPE") || upperMsg.includes("CONNECTION") || upperMsg.includes("NOT CONNECTED") || upperMsg.includes("WEBSOCKET") || upperMsg.includes("RPC_CALL_FAIL") || upperMsg.includes("INTERNAL");
       if (isTransientNetErr && attempts < maxAttempts) {
+        const senderKey = dcId !== void 0 ? String(dcId) : "default";
         if (attempts >= 2) {
+          activeDcSenders.delete(senderKey);
           try {
             sender?.reconnect?.();
           } catch {
@@ -2254,10 +2353,14 @@ function fetchBlock(client2, doc3, blockIndex) {
   inflightBlocks.set(key, promise);
   return promise;
 }
-async function streamTelegramRange(res, client2, doc3, start, endPos, concurrency, isClosedFn, onFileRefExpired) {
+async function streamTelegramRange(res, client2, doc3, start, endPos, concurrency, isClosedFn, onFileRefExpired, refreshDocFn) {
   const firstBlock = Math.floor(start / BLOCK_SIZE);
   const lastBlock = Math.floor(endPos / BLOCK_SIZE);
   const effectiveConcurrency = Math.max(1, Math.min(concurrency, 3));
+  let currentDoc = doc3;
+  let refRefreshAttempts = 0;
+  let bytesWritten = 0;
+  let reachedEndOfRange = false;
   const blockPromises = /* @__PURE__ */ new Map();
   let nextToQueue = firstBlock;
   const queueAhead = (upToBlock) => {
@@ -2265,7 +2368,7 @@ async function streamTelegramRange(res, client2, doc3, start, endPos, concurrenc
     while (nextToQueue <= cap && !isClosedFn() && !res.writableEnded) {
       const idx = nextToQueue++;
       if (!blockPromises.has(idx)) {
-        const p = fetchBlock(client2, doc3, idx);
+        const p = fetchBlock(client2, currentDoc, idx);
         p.catch(() => {
         });
         blockPromises.set(idx, p);
@@ -2275,17 +2378,51 @@ async function streamTelegramRange(res, client2, doc3, start, endPos, concurrenc
   queueAhead(firstBlock + effectiveConcurrency - 1);
   try {
     for (let blockIdx = firstBlock; blockIdx <= lastBlock; blockIdx++) {
-      if (isClosedFn() || res.writableEnded) break;
-      const p = blockPromises.get(blockIdx) || fetchBlock(client2, doc3, blockIdx);
-      const blockBuf = await p;
-      blockPromises.delete(blockIdx);
-      if (isClosedFn() || res.writableEnded) break;
-      if (!blockBuf || blockBuf.length === 0) break;
+      if (isClosedFn() || res.writableEnded) {
+        reachedEndOfRange = true;
+        break;
+      }
+      let blockBuf;
+      try {
+        const p = blockPromises.get(blockIdx) || fetchBlock(client2, currentDoc, blockIdx);
+        blockBuf = await p;
+        blockPromises.delete(blockIdx);
+      } catch (blockErr) {
+        blockPromises.delete(blockIdx);
+        const errMsg = String(blockErr?.errorMessage || blockErr?.message || "");
+        const canRefreshDoc = Boolean(refreshDocFn) && refRefreshAttempts < 3 && (errMsg.includes("FILE_REFERENCE") || bytesWritten > 0);
+        if (canRefreshDoc && !isClosedFn() && !res.writableEnded) {
+          refRefreshAttempts += 1;
+          onFileRefExpired?.();
+          try {
+            const refreshedDoc = await refreshDocFn();
+            if (refreshedDoc) {
+              currentDoc = refreshedDoc;
+              blockPromises.clear();
+              nextToQueue = blockIdx;
+              queueAhead(blockIdx + effectiveConcurrency - 1);
+              blockIdx -= 1;
+              continue;
+            }
+          } catch {
+          }
+        }
+        throw blockErr;
+      }
+      if (isClosedFn() || res.writableEnded) {
+        reachedEndOfRange = true;
+        break;
+      }
+      if (!blockBuf || blockBuf.length === 0) {
+        reachedEndOfRange = true;
+        break;
+      }
       const blockFileStart = blockIdx * BLOCK_SIZE;
       const sliceStart = Math.max(0, start - blockFileStart);
       const sliceEnd = Math.min(blockBuf.length, endPos - blockFileStart + 1);
       if (sliceEnd > sliceStart) {
         const chunk = sliceStart === 0 && sliceEnd === blockBuf.length ? blockBuf : blockBuf.subarray(sliceStart, sliceEnd);
+        bytesWritten += chunk.length;
         const canWrite = res.write(chunk);
         if (!canWrite && !isClosedFn() && !res.writableEnded) {
           await new Promise((resolve) => {
@@ -2306,8 +2443,9 @@ async function streamTelegramRange(res, client2, doc3, start, endPos, concurrenc
           });
         }
       }
-      if (blockBuf.length < BLOCK_SIZE) {
-        break;
+      if (blockBuf.length < BLOCK_SIZE || blockIdx === lastBlock) {
+        reachedEndOfRange = true;
+        if (blockBuf.length < BLOCK_SIZE) break;
       }
       queueAhead(blockIdx + effectiveConcurrency);
     }
@@ -2322,7 +2460,15 @@ async function streamTelegramRange(res, client2, doc3, start, endPos, concurrenc
   } finally {
     blockPromises.clear();
     if (!res.writableEnded) {
-      res.end();
+      if (!reachedEndOfRange && bytesWritten > 0 && !isClosedFn()) {
+        try {
+          res.destroy(new Error("Telegram mid-stream range aborted"));
+        } catch {
+          res.end();
+        }
+      } else {
+        res.end();
+      }
     }
   }
 }
@@ -2413,9 +2559,11 @@ async function probeTelegramMedia(localPort, telegramUrl, docInfo, options) {
         const format = parsed.format || {};
         const formatDuration2 = parseFloat(format.duration || "0");
         const durationSec = Number.isFinite(formatDuration2) && formatDuration2 > 0 ? Math.round(formatDuration2) : docInfo.durationSec || 0;
-        const videoStream = streams.find(
-          (s) => s.codec_type === "video" && (!s.disposition || s.disposition.attached_pic !== 1)
-        );
+        const videoStreamObj = streams.find(
+          (s) => s.codec_type === "video" && (!s.disposition || s.disposition.attached_pic !== 1) && !["png", "mjpeg", "webp", "bmp", "mjpg", "gif", "image"].includes(String(s.codec_name || "").toLowerCase())
+        ) || streams.find((s) => s.codec_type === "video");
+        const videoStreamIndex = Number(videoStreamObj?.index ?? 0);
+        const videoStream = videoStreamObj;
         const audioStreamObjs = streams.filter((s) => s.codec_type === "audio");
         const subtitleStreamObjs = streams.filter((s) => s.codec_type === "subtitle");
         const videoCodec = String(videoStream?.codec_name || "").toLowerCase();
@@ -2425,7 +2573,7 @@ async function probeTelegramMedia(localPort, telegramUrl, docInfo, options) {
         const level = Number(videoStream?.level || 0);
         const width = Number(videoStream?.width || 0);
         const height = Number(videoStream?.height || 0);
-        const is10Bit = pixFmt.includes("10le") || pixFmt.includes("10be") || pixFmt.includes("12le") || profile.includes("10");
+        const is10Bit = pixFmt.includes("10le") || pixFmt.includes("10be") || pixFmt.includes("p10") || pixFmt.includes("12le") || pixFmt.includes("12be") || pixFmt.includes("p12") || pixFmt.includes("yuv422") || pixFmt.includes("yuv444") || profile.includes("10");
         const videoStartTime = parseFloat(videoStream?.start_time || "0");
         const audioTracks = audioStreamObjs.map((s, idx) => {
           const { lang, label } = formatLanguageLabel(s.tags?.language, s.tags?.title, idx, "audio");
@@ -2495,7 +2643,8 @@ async function probeTelegramMedia(localPort, telegramUrl, docInfo, options) {
           recommendedMode,
           needsAudioTranscode,
           probedByFfprobe: true,
-          videoStartTime: Number.isFinite(videoStartTime) ? videoStartTime : 0
+          videoStartTime: Number.isFinite(videoStartTime) ? videoStartTime : 0,
+          videoStreamIndex
         });
       } catch {
         resolve(fallbackProbeFromMetadata(docInfo));
@@ -2615,23 +2764,41 @@ async function checkTelegramDocHasAudioFast(client2, docInfo) {
 }
 
 // src/server/movieAutoMatcher.ts
-var RELEASE_CUTOFF_RE = /\b(?:480p|720p|1080p|2160p|360p|4k|uhd|fhd|hdrip|hd[\s._-]*cam|hdcam|hdts|hdtc|predvd|camrip|dvdscr|dvdrip|web[\s._-]*dl|webdl|web[\s._-]*rip|webrip|bluray|bdrip|brrip|x264|x265|h[\s._-]*264|h[\s._-]*265|hevc|avc|10bit|8bit|hi10p|aac|aac2|aac5|ac3|eac3|dd5[\s._-]*1|ddp5[\s._-]*1|dd2[\s._-]*0|dts|atmos|truehd|esub|esubs|msub|msubs|hc[\s._-]*sub|hc[\s._-]*esub|dual[\s._-]*audio|multi[\s._-]*audio|hindi[\s._-]*dubbed|org[\s._-]*hindi|original[\s._-]*hindi|uncut|unrated|extended|remastered|imax|nf|amzn|dsnp|kone|hotstar|zee5|jiocinema|sonyliv|mxplayer|voot|moviesmod|vegamovies|filmyzilla|filmy4wap|hdhub4u|katmoviehd|skymovieshd|mkvcinemas|bolly4u|bollyflix|dotmovies|hdmovie2|cinevoo|movies4u|pagalworld|worldfree4u|khatrimaza|yify|rarbg|psa|flux|ntb|evo|syncopy)\b/i;
-var SERIES_EP_RE = /(?:^|[\s._\-\[(])(?:S\d{1,2}[\s._-]*E\d{1,4}|S\d{1,2}|Season[\s._-]*\d{1,2}(?:[\s._-]*(?:Ep|Episode)[\s._-]*\d{1,4})?|Episode[\s._-]*\d{1,4})(?:$|[\s._\-\])])/i;
-var PROMO_LINE_RE = /(?:join\s+@|join\s+our|channel\s*:|powered\s+by|uploaded\s+by|share\s*&|subscribe|t\.me\/|https?:\/\/|download\s+link|request\s+here|feedback|backup\s+channel)/i;
-var TRAILING_LANG_SEASON_RE = /\b(?:s\d{1,2}[\s._-]*e\d{1,4}|s0?\d{1,2}|e0?\d{1,4}|season\s*\d{1,2}|episode\s*\d{1,4}|hindi|english|tamil|telugu|malayalam|kannada|punjabi|bengali|marathi|japanese|korean|dubbed|subbed|multi|dual)\b/gi;
+var RELEASE_CUTOFF_RE = /\b(?:480p|720p|1080p|2160p|360p|4k|uhd|fhd|hdrip|hd[\s._-]*cam|hdcam|hdts|hdtc|predvd|camrip|dvdscr|dvdrip|web[\s._-]*dl|webdl|web[\s._-]*rip|webrip|bluray|bdrip|brrip|x264|x265|h[\s._-]*264|h[\s._-]*265|hevc|avc|10bit|8bit|hi10p|aac|aac2|aac5|ac3|eac3|dd5[\s._-]*1|ddp5[\s._-]*1|dd2[\s._-]*0|dts|atmos|truehd|esub|esubs|msub|msubs|hc[\s._-]*sub|hc[\s._-]*esub|dual[\s._-]*audio|multi[\s._-]*audio|full[\s._-]+(?:hindi|dubbed|hd|movie)|hindi[\s._-]*dubbed|org[\s._-]*hindi|original[\s._-]*hindi|uncut|unrated|extended|remastered|imax|nf|amzn|dsnp|kone|hotstar|zee5|jiocinema|sonyliv|mxplayer|voot|moviesmod|vegamovies|filmyzilla|filmy4wap|hdhub4u|katmoviehd|skymovieshd|mkvcinemas|bolly4u|bollyflix|dotmovies|hdmovie2|cinevoo|movies4u|pagalworld|worldfree4u|khatrimaza|yify|rarbg|psa|flux|ntb|evo|syncopy|watch[\s._-]+online|free[\s._-]+download|download[\s._-]+now)\b/i;
+var SERIES_EP_RE = /(?:^|[\s._\-\[(])(?:S\d{1,2}[\s._-]*E\d{1,4}|S\d{1,2}|Season[\s._-]*\d{1,2}(?:[\s._-]*(?:Ep|Episode)[\s._-]*\d{1,4})?|Episode[\s._-]*\d{1,4}|Ep\.?[\s._-]*\d{1,4}|E0*\d{1,3}(?:[\s._-]*[-–—][\s._-]*E?0*\d{1,3})?|\d{1,2}x\d{1,4})(?:$|[\s._\-\])])/i;
+var SERIES_CUTOFF_RE = /(?:^|[\s._\-\[(])(?:S0?\d{1,2}[\s._-]*E0?\d{1,4}|S0?\d{1,2}|Season[\s._-]*\d{1,2}|Episode[\s._-]*\d{1,4}|Ep\.?[\s._-]*\d{1,4}|E0*\d{1,3}(?:[\s._-]*[-–—][\s._-]*E?0*\d{1,3})?|\d{1,2}x\d{1,4})\b/i;
+var PROMO_LINE_RE = /(?:join\s+@|join\s+our|join\s+channel|channel\s*[:\-–—]|powered\s+by|uploaded\s+by|upload\s+by|shared\s+by|share\s*&|subscribe|t\.me\/|https?:\/\/|download\s+link|request\s+here|feedback|backup\s+channel|follow\s+us|telegram\.me|watch\s+online|click\s+here|more\s+movies|visit\s+our|copyright|dmca|disclaimer)/i;
+var NON_TITLE_META_LINE_RE = /^(?:imdb(?:\s+rating)?|tmdb|rotten\s*tomatoes|rating|score|genre|genres|story(?:\s*line)?|plot|synopsis|overview|about|summary|tagline|cast|starring|star\s*cast|actors?|actress|director|directed\s+by|writer|written\s+by|music(?:\s+by)?|producer|produced\s+by|language|languages|audio|voice|subtitle|subtitles|subs?|quality|format|resolution|codec|bitrate|size|file\s*size|duration|runtime|release(?:\s*(?:date|year))?|released|year|country|ott|platform|network|studio|banner|note|warning|info|screens?(?:hots?)?|links?|watch(?:\s+online)?|download|telegram|channel|backup|bot|credit|credits|uploaded(?:\s*by)?|posted(?:\s*by)?|source|rip|encoder?|episode\s*(?:title|name)?|episodes?|season|seasons?|status|part)\s*[:\-–—=|]/i;
+var EXPLICIT_TITLE_LABEL_RE = /^(?:movie\s*(?:name|title)?|web\s*series|anime(?:\s*series)?|series\s*(?:name|title)?|show\s*(?:name|title)?|film\s*(?:name|title)?|title|name)\s*[:\-–—=|]\s*(.+)$/i;
+var EXPLICIT_YEAR_LINE_RE = /^(?:release\s*)?(?:year|released|release\s*date)\s*[:\-–—=|]\s*.*?((?:19|20)\d{2})\b/i;
+var INLINE_META_CUTOFF_RE = /\s+(?:imdb(?:\s*rating)?|rating|genre|genres|story(?:\s*line)?|plot|synopsis|summary|cast|starring|star\s*cast|actors?|director|directed\s+by|language|languages|audio|voice|quality|resolution|duration|runtime|release\s*(?:date|year)|year|subtitles?|subs?|size|download|watch\s+online|uploaded\s*by|join\s+@?)\s*[:\-–—=|]/i;
+var TRAILING_LANG_SEASON_RE = /\b(?:s\d{1,2}[\s._-]*e\d{1,4}|s0?\d{1,2}|e0?\d{1,4}|ep\.?\s*0*\d{1,4}|season\s*\d{1,2}|episode\s*\d{1,4}|hindi|english|tamil|telugu|malayalam|kannada|punjabi|bengali|marathi|japanese|korean|dubbed|subbed|multi|dual)\b/gi;
+function stripDecorativeSymbols(input) {
+  return String(input || "").replace(/[\u{1F000}-\u{1FAFF}\u{2190}-\u{2BFF}\u{FE00}-\u{FE0F}\u{200D}\u{20E3}★☆⭐🎬📺🔥✨👉👇━═─│┃•●◆◇■□▪▫»«›‹➤➜➞➣]+/gu, " ").replace(/\s+/g, " ").trim();
+}
 function stripFileExtension(name) {
   return name.replace(/\.(mkv|mp4|avi|mov|webm|m4v|ts|flv|wmv|mpg|mpeg)$/i, "");
 }
 function cleanSingleTitleLine(rawLine) {
   let text = stripFileExtension(String(rawLine || "").trim());
-  text = text.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, " ");
+  text = stripDecorativeSymbols(text);
   text = text.replace(/https?:\/\/\S+/gi, " ");
   text = text.replace(/t\.me\/\S+/gi, " ");
   text = text.replace(/@[a-zA-Z0-9_]{3,}/g, " ");
+  text = text.replace(/(?:^|\s)#[^\s]+/g, " ");
   text = text.replace(/\b\d+(?:\.\d+)?\s*(?:gb|mb|kb)\b/gi, " ");
   text = text.replace(/[._|]+/g, " ");
   text = text.replace(/\s+/g, " ").trim();
-  text = text.replace(/^(?:movie|film|title|name)\s*[:\-]\s*/i, "").trim();
+  let hasExplicitLabel = false;
+  const labelMatch = text.match(EXPLICIT_TITLE_LABEL_RE);
+  if (labelMatch) {
+    hasExplicitLabel = true;
+    text = labelMatch[1].trim();
+  }
+  const inlineMetaMatch = text.match(INLINE_META_CUTOFF_RE);
+  if (inlineMetaMatch && typeof inlineMetaMatch.index === "number" && inlineMetaMatch.index > 1) {
+    text = text.slice(0, inlineMetaMatch.index).trim();
+  }
   text = text.replace(/^\[[^\]]{2,40}\]\s*/g, "").trim();
   const maxValidYear = (/* @__PURE__ */ new Date()).getFullYear() + 1;
   let detectedYear = null;
@@ -2642,9 +2809,11 @@ function cleanSingleTitleLine(rawLine) {
     if (yr >= 1940 && yr <= maxValidYear) {
       detectedYear = yr;
       const idx = m.index ?? -1;
+      yearIndex = idx;
       if (idx > 1) {
-        yearIndex = idx;
         text = text.slice(0, idx).trim();
+      } else if (idx >= 0) {
+        text = `${text.slice(0, idx)} ${text.slice(idx + m[0].length)}`.trim();
       }
       break;
     }
@@ -2663,6 +2832,10 @@ function cleanSingleTitleLine(rawLine) {
       }
     }
   }
+  const seriesCut = text.match(SERIES_CUTOFF_RE);
+  if (seriesCut && typeof seriesCut.index === "number" && seriesCut.index > 1) {
+    text = text.slice(0, seriesCut.index);
+  }
   const cutoffMatch = text.match(RELEASE_CUTOFF_RE);
   if (cutoffMatch && typeof cutoffMatch.index === "number" && cutoffMatch.index > 1) {
     text = text.slice(0, cutoffMatch.index);
@@ -2671,8 +2844,57 @@ function cleanSingleTitleLine(rawLine) {
   if (wordsAfterStrip.length >= 2) {
     text = wordsAfterStrip;
   }
-  text = text.replace(/[\[(]\s*[\])]/g, " ").replace(/\[[^\]]*\]/g, " ").replace(/\([^)]*(?:dubbed|hindi|english|tamil|telugu|dual|audio|esub|480p|720p|1080p|4k|rip|cam)[^)]*\)/gi, " ").replace(/\b(?:full\s+movie|hindi\s+movie|south\s+movie|bollywood|hollywood)\b/gi, " ").replace(/^[\s\-–—:;,./\\]+|[\s\-–—:;,./\\]+$/g, "").replace(/\s+/g, " ").trim();
-  return { title: text, year: detectedYear };
+  text = text.replace(/[\[(]\s*[\])]/g, " ").replace(/\[[^\]]*\]/g, " ").replace(/\([^)]*(?:dubbed|hindi|english|tamil|telugu|dual|audio|esub|480p|720p|1080p|4k|rip|cam)[^)]*\)/gi, " ").replace(/\b(?:full\s+movie|hindi\s+movie|south\s+movie|english\s+movie|new\s+movie|bollywood\s+movie|hollywood\s+movie|bollywood|hollywood|web\s+series|complete\s+series|complete\s+season|all\s+episodes|watch\s+online|free\s+download|download\s+now)\b/gi, " ").replace(/^[\s\-–—:;,./\\]+|[\s\-–—:;,./\\]+$/g, "").replace(/\s+/g, " ").trim();
+  return { title: text, year: detectedYear, hasExplicitLabel };
+}
+function parseSeriesSeasonEpisode(rawText) {
+  const norm = String(rawText || "").replace(/[._]+/g, " ");
+  let seasonNumber = null;
+  let episodeNumber = null;
+  let episodeLabel = "";
+  const seRange = norm.match(/\bS0*(\d{1,2})\s*[-–—]?\s*E0*(\d{1,4})\s*[-–—]\s*E?0*(\d{1,4})\b/i);
+  const seSingle = norm.match(/\bS0*(\d{1,2})\s*[-–—]?\s*E0*(\d{1,4})\b/i);
+  const xMatch = norm.match(/\b0*(\d{1,2})x0*(\d{1,4})\b/i);
+  const seasonWord = norm.match(/\b(?:Season|S)\s*0*(\d{1,2})\b/i);
+  const epRange = norm.match(/\b(?:Episodes?|Eps?)\s*[:\-]?\s*0*(\d{1,4})\s*(?:-|–|to)\s*0*(\d{1,4})\b/i);
+  const epWord = norm.match(/\b(?:Episode|Ep)\s*[:\-]?\s*0*(\d{1,4})\b/i);
+  const standaloneEpRange = norm.match(/(?:^|[\s\-\[(])E0*(\d{1,3})\s*[-–—]\s*E?0*(\d{1,3})(?:$|[\s\-\])])/i);
+  const standaloneEpSingle = norm.match(/(?:^|[\s\-\[(])E0*(\d{1,3})(?:$|[\s\-\])])/i);
+  if (seRange) {
+    seasonNumber = parseInt(seRange[1], 10);
+    const eStart = parseInt(seRange[2], 10);
+    const eEnd = parseInt(seRange[3], 10);
+    episodeNumber = eStart;
+    if (eEnd > eStart) episodeLabel = `${eStart}-${eEnd}`;
+  } else if (seSingle) {
+    seasonNumber = parseInt(seSingle[1], 10);
+    episodeNumber = parseInt(seSingle[2], 10);
+  } else if (xMatch) {
+    seasonNumber = parseInt(xMatch[1], 10);
+    episodeNumber = parseInt(xMatch[2], 10);
+  } else {
+    if (seasonWord) seasonNumber = parseInt(seasonWord[1], 10);
+    if (epRange) {
+      const eStart = parseInt(epRange[1], 10);
+      const eEnd = parseInt(epRange[2], 10);
+      episodeNumber = eStart;
+      if (eEnd > eStart) episodeLabel = `${eStart}-${eEnd}`;
+    } else if (epWord) {
+      episodeNumber = parseInt(epWord[1], 10);
+    } else if (standaloneEpRange) {
+      const eStart = parseInt(standaloneEpRange[1], 10);
+      const eEnd = parseInt(standaloneEpRange[2], 10);
+      episodeNumber = eStart;
+      if (eEnd > eStart) episodeLabel = `${eStart}-${eEnd}`;
+    } else if (standaloneEpSingle) {
+      episodeNumber = parseInt(standaloneEpSingle[1], 10);
+    }
+  }
+  if (episodeNumber !== null && seasonNumber === null) {
+    seasonNumber = 1;
+  }
+  const episodeTitle = episodeLabel ? `Episodes ${episodeLabel}` : episodeNumber !== null ? `Episode ${episodeNumber}` : "";
+  return { seasonNumber, episodeNumber, episodeLabel, episodeTitle };
 }
 function detectQualityTag(text, width = 0, height = 0) {
   const lower = text.toLowerCase();
@@ -2720,48 +2942,108 @@ function normalizeTitleKey2(title) {
 function looksGenericTelegramName(name) {
   const clean = normalizeTitleKey2(name);
   if (!clean || clean.length < 2) return true;
-  return /^(?:vid|video|img|document|doc|file|movie|telegram|episode|msg|mp4|mkv)\s*\d*$/i.test(clean);
+  return /^(?:vid|video|img|document|doc|file|movie|telegram|episode|msg|mp4|mkv|year|title|name)\s*\d*$/i.test(clean);
 }
 function parseTelegramMovieMeta(fileName, caption, width = 0, height = 0, durationSec = 0, sizeBytes = 0) {
-  const combined = `${caption || ""}
-${fileName || ""}`;
-  const imdbMatch = combined.match(/\b(tt\d{6,10})\b/i);
-  const explicitImdbId = imdbMatch ? imdbMatch[1].toLowerCase() : null;
-  const lowerCombined = combined.toLowerCase();
-  const isSampleOrClip = /\b(?:sample|trailer|teaser|promo|intro[\s._-]*clip)\b/i.test(fileName || "") || durationSec > 0 && durationSec < 300 && sizeBytes > 0 && sizeBytes < 25 * 1024 * 1024;
-  const isSeriesEpisode = SERIES_EP_RE.test(combined);
-  const captionLines = String(caption || "").split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0 && !PROMO_LINE_RE.test(l) && !/^(?:join|http|@)/i.test(l));
-  const candidates = [];
-  if (captionLines.length > 0) {
-    for (const line of captionLines.slice(0, 3)) {
-      const parsedLine = cleanSingleTitleLine(line);
-      if (parsedLine.title) {
-        candidates.push({ ...parsedLine, fromCaption: true });
+  const rawLines = String(caption || "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const maxValidYear = (/* @__PURE__ */ new Date()).getFullYear() + 1;
+  let explicitCaptionYear = null;
+  let explicitImdbId = null;
+  const seasonEpisodeLines = [];
+  for (const rawLine of rawLines) {
+    const plain = stripDecorativeSymbols(rawLine);
+    if (!plain) continue;
+    if (!explicitCaptionYear) {
+      const yMatch = plain.match(EXPLICIT_YEAR_LINE_RE);
+      if (yMatch) {
+        const yr = parseInt(yMatch[1], 10);
+        if (yr >= 1940 && yr <= maxValidYear) explicitCaptionYear = yr;
       }
+    }
+    if (!explicitImdbId && (EXPLICIT_TITLE_LABEL_RE.test(plain) || /^imdb\b/i.test(plain))) {
+      const im = plain.match(/\b(tt\d{6,10})\b/i);
+      if (im) explicitImdbId = im[1].toLowerCase();
+    }
+    if (/^(?:season|episode|ep)\s*[:\-–—=]/i.test(plain)) {
+      seasonEpisodeLines.push(plain);
+    }
+  }
+  if (!explicitImdbId && fileName) {
+    const im = fileName.match(/\b(tt\d{6,10})\b/i);
+    if (im) explicitImdbId = im[1].toLowerCase();
+  }
+  const isSampleOrClip = /\b(?:sample|trailer|teaser|promo|intro[\s._-]*clip)\b/i.test(fileName || "") || durationSec > 0 && durationSec < 60 && sizeBytes > 0 && sizeBytes < 5 * 1024 * 1024;
+  const captionLines = rawLines.filter((l) => {
+    const plain = stripDecorativeSymbols(l);
+    if (!plain || plain.length < 2) return false;
+    if (/^[\s\-_=*~.,:;!?/\\|]+$/.test(plain)) return false;
+    if (/^(?:#[^\s]+\s*)+$/.test(plain)) return false;
+    if (PROMO_LINE_RE.test(plain) || /^(?:join|http|@|visit|follow|share|download|click)/i.test(plain)) return false;
+    if (NON_TITLE_META_LINE_RE.test(plain)) return false;
+    if (/^[\[(]?\s*(?:19|20)\d{2}\s*[\])]?$/.test(plain)) return false;
+    if (!EXPLICIT_TITLE_LABEL_RE.test(plain) && (plain.length > 85 || plain.split(/\s+/).length > 12) && !/^\s*.{2,45}[\[(]\s*(?:19|20)\d{2}\s*[\])]/.test(plain)) {
+      return false;
+    }
+    return true;
+  });
+  const candidates = [];
+  for (let i = 0; i < Math.min(captionLines.length, 6); i++) {
+    const parsedLine = cleanSingleTitleLine(captionLines[i]);
+    if (parsedLine.title && !looksGenericTelegramName(parsedLine.title)) {
+      candidates.push({
+        title: parsedLine.title,
+        year: parsedLine.year,
+        hasExplicitLabel: parsedLine.hasExplicitLabel,
+        fromCaption: true,
+        lineIdx: i,
+        rawLine: captionLines[i]
+      });
     }
   }
   const parsedFile = cleanSingleTitleLine(fileName || "");
   if (parsedFile.title) {
-    candidates.push({ ...parsedFile, fromCaption: false });
+    candidates.push({
+      title: parsedFile.title,
+      year: parsedFile.year,
+      hasExplicitLabel: parsedFile.hasExplicitLabel,
+      fromCaption: false,
+      lineIdx: 99,
+      rawLine: fileName || ""
+    });
   }
   candidates.sort((a, b) => {
-    const aGen = looksGenericTelegramName(a.title) ? -100 : 0;
-    const bGen = looksGenericTelegramName(b.title) ? -100 : 0;
-    const aYr = a.year ? 20 : 0;
-    const bYr = b.year ? 20 : 0;
-    const aWords = a.title.split(/\s+/).length >= 1 && a.title.length >= 3 ? 10 : 0;
-    const bWords = b.title.split(/\s+/).length >= 1 && b.title.length >= 3 ? 10 : 0;
-    const aCap = a.fromCaption ? 5 : 0;
-    const bCap = b.fromCaption ? 5 : 0;
-    return bGen + bYr + bWords + bCap - (aGen + aYr + aWords + aCap);
+    const scoreCand = (c) => {
+      let s = 0;
+      if (looksGenericTelegramName(c.title)) s -= 100;
+      if (c.hasExplicitLabel) s += 45;
+      if (c.year) s += 25;
+      if (c.title.length >= 2 && c.title.length <= 65) s += 14;
+      else if (c.title.length > 85) s -= 30;
+      if (c.fromCaption) s += Math.max(2, 12 - c.lineIdx * 2);
+      return s;
+    };
+    return scoreCand(b) - scoreCand(a);
   });
-  const best = candidates[0] || { title: "", year: null };
-  const fallbackYear = best.year || candidates.find((c) => c.year)?.year || null;
-  const quality = detectQualityTag(combined, width, height);
-  const { languageHint, isHindiDubbed } = detectLanguageHint(combined);
+  const best = candidates[0] || { title: "", year: null, rawLine: "" };
+  let adjacentYear = null;
+  if (rawLines.length >= 2) {
+    const secondPlain = stripDecorativeSymbols(rawLines[1]);
+    const adjMatch = secondPlain.match(/^[\[(]?\s*((?:19|20)\d{2})\s*[\])]?$/);
+    if (adjMatch) {
+      const yr = parseInt(adjMatch[1], 10);
+      if (yr >= 1940 && yr <= maxValidYear) adjacentYear = yr;
+    }
+  }
+  const fallbackYear = best.year || explicitCaptionYear || adjacentYear || parsedFile.year || null;
+  const focusedMetaText = [best.rawLine, ...seasonEpisodeLines, fileName || ""].filter(Boolean).join("\n");
+  const isSeriesEpisode = SERIES_EP_RE.test(focusedMetaText);
+  const quality = detectQualityTag(focusedMetaText, width, height);
+  const { languageHint, isHindiDubbed } = detectLanguageHint(focusedMetaText);
+  const epDetails = parseSeriesSeasonEpisode(focusedMetaText);
+  const finalIsSeries = isSeriesEpisode || epDetails.episodeNumber !== null;
   const cleanTitle = best.title || stripFileExtension(fileName || "").replace(/[._-]+/g, " ").trim();
   const normalizedGroupTitle = normalizeTitleKey2(cleanTitle).replace(/\s+/g, "");
-  const groupKey = explicitImdbId ? `imdb-${explicitImdbId}` : normalizedGroupTitle ? `${normalizedGroupTitle}${fallbackYear ? `-${fallbackYear}` : ""}` : "";
+  const groupKey = finalIsSeries && normalizedGroupTitle ? `${normalizedGroupTitle}-s${epDetails.seasonNumber || 1}-e${epDetails.episodeNumber || 0}${epDetails.episodeLabel ? `-${epDetails.episodeLabel}` : ""}` : explicitImdbId ? `imdb-${explicitImdbId}` : normalizedGroupTitle ? `${normalizedGroupTitle}${fallbackYear ? `-${fallbackYear}` : ""}` : "";
   return {
     rawFileName: fileName || "",
     rawCaption: caption || "",
@@ -2772,7 +3054,11 @@ ${fileName || ""}`;
     quality,
     languageHint,
     isHindiDubbed,
-    isSeriesEpisode,
+    isSeriesEpisode: finalIsSeries,
+    seasonNumber: epDetails.seasonNumber,
+    episodeNumber: epDetails.episodeNumber,
+    episodeLabel: epDetails.episodeLabel,
+    episodeTitle: epDetails.episodeTitle,
     isSampleOrClip
   };
 }
@@ -2814,12 +3100,20 @@ function getTitleSimilarityScore(candidateTitle, queryTitle) {
 function scoreImdbCandidate(candidate, parsed) {
   let score = getTitleSimilarityScore(candidate.title, parsed.cleanTitle);
   const candYearNum = parseInt(String(candidate.year || "").slice(0, 4), 10);
+  const typeLower = String(candidate.type || "movie").toLowerCase();
   if (parsed.year && Number.isFinite(candYearNum)) {
     const diff = Math.abs(candYearNum - parsed.year);
-    if (diff === 0) score += 45;
-    else if (diff === 1) score += 20;
-    else if (diff === 2) score += 0;
-    else score -= 35;
+    if (diff === 0) {
+      score += 45;
+    } else if (diff === 1) {
+      score += 20;
+    } else if (parsed.isSeriesEpisode && typeLower === "series" && candYearNum <= parsed.year && parsed.year - candYearNum <= 15) {
+      score += 25;
+    } else if (diff === 2) {
+      score += 0;
+    } else {
+      score -= 35;
+    }
   } else if (Number.isFinite(candYearNum) && candYearNum >= 1950) {
     if (candYearNum >= 2e3) score += 8;
   }
@@ -2828,14 +3122,14 @@ function scoreImdbCandidate(candidate, parsed) {
   } else {
     score -= 55;
   }
-  const typeLower = String(candidate.type || "movie").toLowerCase();
   if (typeLower === "game") {
     score -= 70;
   } else if (!parsed.isSeriesEpisode) {
     if (typeLower === "movie") score += 12;
     else if (typeLower === "series") score -= 12;
   } else {
-    if (typeLower === "series") score += 15;
+    if (typeLower === "series") score += 22;
+    else if (typeLower === "movie") score -= 14;
   }
   return score;
 }
@@ -2886,11 +3180,16 @@ async function resolveBestImdbMatch(parsed) {
   }
   const queriesToTry = [];
   if (parsed.cleanTitle && !looksGenericTelegramName(parsed.cleanTitle)) {
-    if (parsed.year) queriesToTry.push(`${parsed.cleanTitle} ${parsed.year}`);
-    queriesToTry.push(parsed.cleanTitle);
+    if (parsed.isSeriesEpisode) {
+      queriesToTry.push(parsed.cleanTitle);
+      if (parsed.year) queriesToTry.push(`${parsed.cleanTitle} ${parsed.year}`);
+    } else {
+      if (parsed.year) queriesToTry.push(`${parsed.cleanTitle} ${parsed.year}`);
+      queriesToTry.push(parsed.cleanTitle);
+    }
     const strippedSub = parsed.cleanTitle.split(/\s*[:\-–]\s*/)[0]?.trim();
     if (strippedSub && strippedSub.length >= 3 && strippedSub.toLowerCase() !== parsed.cleanTitle.toLowerCase()) {
-      queriesToTry.push(parsed.year ? `${strippedSub} ${parsed.year}` : strippedSub);
+      queriesToTry.push(parsed.year && !parsed.isSeriesEpisode ? `${strippedSub} ${parsed.year}` : strippedSub);
     }
   }
   const allCandidatesMap = /* @__PURE__ */ new Map();
@@ -2947,7 +3246,11 @@ async function resolveBestImdbMatch(parsed) {
   const bestBackdrop = upgradePosterUrl(d?.backdropUrl || bestPoster, 1280) || bestPoster;
   const finalYear = Number(d?.releaseYear || parseInt(String(winner.cand.year || ""), 10) || fallbackYear) || fallbackYear;
   const rawSim = getTitleSimilarityScore(d?.title || winner.cand.title, parsed.cleanTitle);
-  const yearMatched = Boolean(parsed.year && Math.abs(finalYear - parsed.year) <= 1);
+  const winnerType = String(winner.cand.type || "").toLowerCase();
+  const isSeriesYearMatch = parsed.isSeriesEpisode && winnerType === "series" && Boolean(parsed.year && finalYear <= parsed.year && parsed.year - finalYear <= 15);
+  const yearMatched = Boolean(
+    parsed.year && Math.abs(finalYear - parsed.year) <= 1 || isSeriesYearMatch
+  );
   const hasPoster = Boolean(bestPoster && /^https?:\/\//i.test(bestPoster));
   let matchConfidence = "low";
   let matchReason = "Verify title & poster";
@@ -3068,17 +3371,8 @@ function parseDurationToSeconds(input) {
 }
 
 // src/utils/qualityBadge.ts
-function normalizeQualityBadge(value) {
-  if (value === "NONE" || value === "No Badge" || value === "") {
-    return "NONE";
-  }
-  if (typeof value === "string") {
-    const upper = value.trim().toUpperCase();
-    if (upper === "HDTC") return "HDTC";
-    if (upper === "NONE" || upper === "NO BADGE") return "NONE";
-    if (upper === "HD") return "HD";
-  }
-  return "HD";
+function normalizeQualityBadge(_value) {
+  return "NONE";
 }
 
 // src/server/telegramRouter.ts
@@ -3215,7 +3509,7 @@ function getFfmpegQualityArgs(quality, _isDownload) {
   if (quality === "360p") {
     args2.push(
       "-vf",
-      "scale='min(640,iw)':'min(360,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
+      "scale='min(640,iw)':'min(360,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=fast_bilinear,setsar=1,format=yuv420p",
       "-c:v",
       "libx264",
       "-preset",
@@ -3231,11 +3525,11 @@ function getFfmpegQualityArgs(quality, _isDownload) {
       "-vsync",
       "vfr",
       "-b:v",
-      "280k",
+      "190k",
       "-maxrate",
-      "360k",
+      "250k",
       "-bufsize",
-      "720k",
+      "500k",
       "-g",
       "48",
       "-keyint_min",
@@ -3258,7 +3552,7 @@ function getFfmpegQualityArgs(quality, _isDownload) {
   if (quality === "480p") {
     args2.push(
       "-vf",
-      "scale='min(854,iw)':'min(480,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
+      "scale='min(854,iw)':'min(480,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=fast_bilinear,setsar=1,format=yuv420p",
       "-c:v",
       "libx264",
       "-preset",
@@ -3274,11 +3568,11 @@ function getFfmpegQualityArgs(quality, _isDownload) {
       "-vsync",
       "vfr",
       "-b:v",
-      "520k",
+      "380k",
       "-maxrate",
-      "650k",
+      "480k",
       "-bufsize",
-      "1300k",
+      "960k",
       "-g",
       "48",
       "-keyint_min",
@@ -3292,7 +3586,7 @@ function getFfmpegQualityArgs(quality, _isDownload) {
       "-ac",
       "2",
       "-ar",
-      "48000",
+      "44100",
       "-b:a",
       "96k"
     );
@@ -3301,7 +3595,7 @@ function getFfmpegQualityArgs(quality, _isDownload) {
   if (quality === "720p") {
     args2.push(
       "-vf",
-      "scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
+      "scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos,setsar=1,format=yuv420p",
       "-c:v",
       "libx264",
       "-preset",
@@ -3316,12 +3610,12 @@ function getFfmpegQualityArgs(quality, _isDownload) {
       "4.0",
       "-vsync",
       "vfr",
-      "-b:v",
-      "1050k",
+      "-crf",
+      "20",
       "-maxrate",
-      "1300k",
+      "2800k",
       "-bufsize",
-      "2600k",
+      "5600k",
       "-g",
       "48",
       "-keyint_min",
@@ -3337,13 +3631,13 @@ function getFfmpegQualityArgs(quality, _isDownload) {
       "-ar",
       "48000",
       "-b:a",
-      "128k"
+      "160k"
     );
     return args2;
   }
   args2.push(
     "-vf",
-    "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
+    "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos,setsar=1,format=yuv420p",
     "-c:v",
     "libx264",
     "-preset",
@@ -3365,11 +3659,11 @@ function getFfmpegQualityArgs(quality, _isDownload) {
     "-vsync",
     "vfr",
     "-crf",
-    "22",
+    "18",
     "-maxrate",
-    "3400k",
+    "5500k",
     "-bufsize",
-    "6800k",
+    "11000k",
     "-g",
     "48",
     "-keyint_min",
@@ -3385,7 +3679,7 @@ function getFfmpegQualityArgs(quality, _isDownload) {
     "-ar",
     "48000",
     "-b:a",
-    "160k"
+    "192k"
   );
   return args2;
 }
@@ -3457,6 +3751,15 @@ router2.get("/status", async (_req, res) => {
 router2.get("/channels", (_req, res) => {
   const channels = getAllCachedChannels();
   res.json({ status: "ok", channels });
+});
+router2.post("/remove-channel", (req, res) => {
+  const channelId = String(req.body?.channelId || "").trim();
+  if (!channelId) {
+    return res.status(400).json({ error: "channelId is required" });
+  }
+  const removed = removeChannelEntity(channelId);
+  const channels = getAllCachedChannels();
+  res.json({ success: true, removed, channels });
 });
 router2.post("/connect-channel", async (req, res) => {
   const { inviteUrl, channelUsername } = req.body || {};
@@ -4423,7 +4726,7 @@ router2.post("/verify", async (req, res) => {
   }
 });
 var mediaCache = /* @__PURE__ */ new Map();
-var MEDIA_CACHE_TTL_MS = 45 * 60 * 1e3;
+var MEDIA_CACHE_TTL_MS = 20 * 60 * 1e3;
 async function resolveAndCacheDocument(client2, parsed) {
   const cacheKey = `${parsed.chatId}:${parsed.messageId}`;
   let entry = mediaCache.get(cacheKey);
@@ -4795,7 +5098,8 @@ function pipeFfmpegMp4Stream(opts) {
     isDownload,
     commonHeaders,
     req,
-    res
+    res,
+    videoStreamIndex
   } = opts;
   if (activeFfmpegProcs.size >= MAX_CONCURRENT_FFMPEG) {
     console.warn(`[Stream] Active FFmpeg limit reached (${activeFfmpegProcs.size}/${MAX_CONCURRENT_FFMPEG})`);
@@ -4834,7 +5138,7 @@ function pipeFfmpegMp4Stream(opts) {
     "-map_chapters",
     "-1",
     "-map",
-    "0:V:0",
+    `0:v:${opts.videoStreamIndex ?? 0}`,
     "-map",
     `0:a:${audioIdx}?`
   );
@@ -4850,6 +5154,8 @@ function pipeFfmpegMp4Stream(opts) {
     ffArgs.push(...getFfmpegQualityArgs(requestedQuality, isDownload));
   }
   ffArgs.push(
+    "-max_muxing_queue_size",
+    "4096",
     "-avoid_negative_ts",
     "make_zero",
     "-movflags",
@@ -5078,7 +5384,8 @@ async function handleStream(req, res) {
           isDownload: isDownloadParam,
           commonHeaders,
           req,
-          res
+          res,
+          videoStreamIndex: probe.videoStreamIndex ?? 0
         });
       }
     }
@@ -5086,7 +5393,7 @@ async function handleStream(req, res) {
     const rangeHeader = req.headers.range;
     let start = 0;
     let endPos = fileSize - 1;
-    const MAX_RANGE_CHUNK = 16 * 1024 * 1024;
+    const MAX_RANGE_CHUNK = 8 * 1024 * 1024;
     if (rangeHeader) {
       const match = rangeHeader.match(/bytes=(\d+)-(\d+)?/);
       if (match) {
@@ -5142,7 +5449,12 @@ async function handleStream(req, res) {
       endPos,
       concurrency,
       () => isClosed,
-      () => mediaCache.delete(cacheKey)
+      () => mediaCache.delete(cacheKey),
+      async () => {
+        mediaCache.delete(cacheKey);
+        const refreshed = await resolveAndCacheDocument(client2, parsed);
+        return refreshed.entry?.docInfo.document || null;
+      }
     );
   } catch (err) {
     console.error("[Stream] Global streaming error:", err.message);
@@ -5155,6 +5467,30 @@ var HLS_TMP_ROOT = path3.resolve("/tmp", "movie_portal_hls");
 var MAX_CONCURRENT_HLS_JOBS = Math.max(2, MAX_CONCURRENT_FFMPEG - 1);
 var hlsJobs = /* @__PURE__ */ new Map();
 var nextHlsJobSeq = 1;
+function resumeHlsWorkerIfPaused(job) {
+  if (job.pausedForBackpressure && job.proc && !job.closed) {
+    try {
+      job.proc.kill("SIGCONT");
+      job.pausedForBackpressure = false;
+    } catch {
+    }
+  }
+}
+function getHighestProducedHlsSeg(dir, fallbackSeg) {
+  let maxSeg = fallbackSeg;
+  try {
+    const files = fs3.readdirSync(dir);
+    for (const f of files) {
+      const m = f.match(/^seg_(\d+)\.ts$/);
+      if (m) {
+        const idx = parseInt(m[1], 10);
+        if (idx > maxSeg) maxSeg = idx;
+      }
+    }
+  } catch {
+  }
+  return maxSeg;
+}
 function scheduleRemoveHlsDir(job, delayMs = 8e3) {
   const tryRemove = () => {
     if (job.activeReaders > 0) {
@@ -5176,16 +5512,27 @@ function cleanupHlsJob(sid, removeDir = true, markSuperseded = false) {
   const job = hlsJobs.get(sid);
   if (!job) return;
   hlsJobs.delete(sid);
+  if (job.backpressureTimer) {
+    clearInterval(job.backpressureTimer);
+    job.backpressureTimer = null;
+  }
   if (markSuperseded) {
     job.superseded = true;
   }
   if (job.proc && !job.closed) {
     try {
+      resumeHlsWorkerIfPaused(job);
       job.proc.kill("SIGTERM");
       const procRef = job.proc;
       setTimeout(() => {
         try {
-          if (!procRef.killed) procRef.kill("SIGKILL");
+          if (!procRef.killed) {
+            try {
+              procRef.kill("SIGCONT");
+            } catch {
+            }
+            procRef.kill("SIGKILL");
+          }
         } catch {
         }
       }, 400).unref?.();
@@ -5199,7 +5546,7 @@ function cleanupHlsJob(sid, removeDir = true, markSuperseded = false) {
 setInterval(() => {
   const now = Date.now();
   for (const [sid, job] of hlsJobs.entries()) {
-    if (now - job.lastAccessedAt > 180 * 1e3) {
+    if (job.activeReaders === 0 && now - job.lastAccessedAt > 900 * 1e3) {
       cleanupHlsJob(sid, true, false);
     }
   }
@@ -5219,7 +5566,7 @@ function getHlsArgsForQuality(quality, forceExact4s = true) {
   if (quality === "360p") {
     return [
       "-vf",
-      "scale='min(640,iw)':'min(360,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
+      "scale='min(640,iw)':'min(360,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=fast_bilinear,setsar=1,format=yuv420p",
       "-c:v",
       "libx264",
       "-preset",
@@ -5233,11 +5580,11 @@ function getHlsArgsForQuality(quality, forceExact4s = true) {
       "-level",
       "3.1",
       "-b:v",
-      "320k",
+      "190k",
       "-maxrate",
-      "420k",
+      "250k",
       "-bufsize",
-      "840k",
+      "500k",
       ...keyframeArgs,
       "-af",
       "aresample=async=1:min_hard_comp=0.100000",
@@ -5254,7 +5601,7 @@ function getHlsArgsForQuality(quality, forceExact4s = true) {
   if (quality === "480p") {
     return [
       "-vf",
-      "scale='min(854,iw)':'min(480,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
+      "scale='min(854,iw)':'min(480,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=fast_bilinear,setsar=1,format=yuv420p",
       "-c:v",
       "libx264",
       "-preset",
@@ -5268,11 +5615,11 @@ function getHlsArgsForQuality(quality, forceExact4s = true) {
       "-level",
       "3.1",
       "-b:v",
-      "550k",
+      "380k",
       "-maxrate",
-      "720k",
+      "480k",
       "-bufsize",
-      "1440k",
+      "960k",
       ...keyframeArgs,
       "-af",
       "aresample=async=1:min_hard_comp=0.100000",
@@ -5281,7 +5628,7 @@ function getHlsArgsForQuality(quality, forceExact4s = true) {
       "-ac",
       "2",
       "-ar",
-      "48000",
+      "44100",
       "-b:a",
       "96k"
     ];
@@ -5289,7 +5636,7 @@ function getHlsArgsForQuality(quality, forceExact4s = true) {
   if (quality === "720p") {
     return [
       "-vf",
-      "scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
+      "scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos,setsar=1,format=yuv420p",
       "-c:v",
       "libx264",
       "-preset",
@@ -5302,12 +5649,12 @@ function getHlsArgsForQuality(quality, forceExact4s = true) {
       "main",
       "-level",
       "4.0",
-      "-b:v",
-      "1100k",
+      "-crf",
+      "20",
       "-maxrate",
-      "1450k",
+      "2800k",
       "-bufsize",
-      "2900k",
+      "5600k",
       ...keyframeArgs,
       "-af",
       "aresample=async=1:min_hard_comp=0.100000",
@@ -5318,12 +5665,12 @@ function getHlsArgsForQuality(quality, forceExact4s = true) {
       "-ar",
       "48000",
       "-b:a",
-      "128k"
+      "160k"
     ];
   }
   return [
     "-vf",
-    "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
+    "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos,setsar=1,format=yuv420p",
     "-c:v",
     "libx264",
     "-preset",
@@ -5337,11 +5684,11 @@ function getHlsArgsForQuality(quality, forceExact4s = true) {
     "-level",
     "4.0",
     "-crf",
-    "22",
+    "18",
     "-maxrate",
-    "3400k",
+    "5500k",
     "-bufsize",
-    "6800k",
+    "11000k",
     ...keyframeArgs,
     "-af",
     "aresample=async=1:min_hard_comp=0.100000",
@@ -5352,7 +5699,7 @@ function getHlsArgsForQuality(quality, forceExact4s = true) {
     "-ar",
     "48000",
     "-b:a",
-    "160k"
+    "192k"
   ];
 }
 function startHlsWorker(opts) {
@@ -5405,7 +5752,7 @@ function startHlsWorker(opts) {
     "-map_chapters",
     "-1",
     "-map",
-    "0:V:0",
+    `0:v:${opts.videoStreamIndex ?? 0}`,
     "-map",
     `0:a:${opts.audioIdx}?`,
     "-max_muxing_queue_size",
@@ -5474,6 +5821,9 @@ function startHlsWorker(opts) {
     dir,
     startSeg: opts.startSeg,
     highestSeg: opts.startSeg - 1,
+    lastServedSeg: opts.startSeg,
+    pausedForBackpressure: false,
+    backpressureTimer: null,
     proc,
     closed: false,
     superseded: false,
@@ -5481,6 +5831,24 @@ function startHlsWorker(opts) {
     lastAccessedAt: Date.now(),
     lastErrLine: ""
   };
+  job.backpressureTimer = setInterval(() => {
+    if (job.closed || !job.proc) return;
+    const highestProduced = getHighestProducedHlsSeg(job.dir, job.highestSeg);
+    if (highestProduced > job.highestSeg) {
+      job.highestSeg = highestProduced;
+    }
+    const leadSegs = highestProduced - job.lastServedSeg;
+    if (!job.pausedForBackpressure && leadSegs > 45) {
+      try {
+        job.proc.kill("SIGSTOP");
+        job.pausedForBackpressure = true;
+      } catch {
+      }
+    } else if (job.pausedForBackpressure && leadSegs <= 22) {
+      resumeHlsWorkerIfPaused(job);
+    }
+  }, 1500);
+  job.backpressureTimer.unref?.();
   proc.stderr?.on("data", (d) => {
     const s = d.toString().trim();
     if (s) job.lastErrLine = s.slice(-240);
@@ -5488,6 +5856,11 @@ function startHlsWorker(opts) {
   proc.on("close", (code) => {
     job.closed = true;
     job.proc = null;
+    job.pausedForBackpressure = false;
+    if (job.backpressureTimer) {
+      clearInterval(job.backpressureTimer);
+      job.backpressureTimer = null;
+    }
     if (!job.superseded && code && code !== 0 && job.lastErrLine) {
       console.warn(`[HLS Worker ${opts.sid}] FFmpeg exited (${code}): ${job.lastErrLine}`);
     }
@@ -5495,6 +5868,11 @@ function startHlsWorker(opts) {
   proc.on("error", (err) => {
     job.closed = true;
     job.proc = null;
+    job.pausedForBackpressure = false;
+    if (job.backpressureTimer) {
+      clearInterval(job.backpressureTimer);
+      job.backpressureTimer = null;
+    }
     job.lastErrLine = err?.message || "spawn error";
   });
   hlsJobs.set(opts.sid, job);
@@ -5510,6 +5888,7 @@ async function resolveHlsSourceParams(req) {
   let durationSec = Math.max(0, Number(req.query.dur || 0) || 0);
   let remuxOnly = modeParam !== "transcode" && !requestedQuality;
   let canCopyAudio = false;
+  let videoStreamIndex = 0;
   if (isTelegram) {
     const parsed = parseTelegramUrl(urlParam);
     if (!parsed.isValid || parsed.isInviteLink || !parsed.messageId) {
@@ -5539,6 +5918,7 @@ async function resolveHlsSourceParams(req) {
     const audioStart = selectedTrack?.startTime || 0;
     const hasStreamOffset = Math.abs(audioStart - videoStart) > 0.04;
     canCopyAudio = ac === "aac" && ch <= 2 && audioIdx === 0 && !hasStreamOffset;
+    videoStreamIndex = probe.videoStreamIndex ?? 0;
   } else {
     if (durationSec <= 0) {
       const info = await probeDirectHttpInfo(urlParam).catch(() => null);
@@ -5546,7 +5926,7 @@ async function resolveHlsSourceParams(req) {
     }
     remuxOnly = modeParam !== "transcode" && !requestedQuality;
   }
-  return { urlParam, modeParam, requestedQuality, audioIdx, inputUrl, durationSec, remuxOnly, canCopyAudio };
+  return { urlParam, modeParam, requestedQuality, audioIdx, inputUrl, durationSec, remuxOnly, canCopyAudio, videoStreamIndex };
 }
 async function handleHlsPlaylistRequest(req, res) {
   try {
@@ -5565,7 +5945,8 @@ async function handleHlsPlaylistRequest(req, res) {
         remuxOnly: resolved.remuxOnly,
         canCopyAudio: resolved.canCopyAudio,
         requestedQuality: resolved.requestedQuality,
-        audioIdx: resolved.audioIdx
+        audioIdx: resolved.audioIdx,
+        videoStreamIndex: resolved.videoStreamIndex
       });
     } else {
       existingJob.lastAccessedAt = Date.now();
@@ -5632,20 +6013,26 @@ async function handleHlsSegmentRequest(req, res) {
           remuxOnly: forceSafeTranscode ? false : resolved.remuxOnly,
           canCopyAudio: forceSafeTranscode ? false : resolved.canCopyAudio,
           requestedQuality: resolved.requestedQuality,
-          audioIdx: resolved.audioIdx
+          audioIdx: resolved.audioIdx,
+          videoStreamIndex: resolved.videoStreamIndex
         });
       }
       if (!job) {
         return res.status(503).send("HLS job unavailable");
       }
       job.lastAccessedAt = Date.now();
+      if (segIdx > job.lastServedSeg) {
+        job.lastServedSeg = segIdx;
+      }
       if (segIdx > job.highestSeg) {
         job.highestSeg = segIdx;
       }
+      resumeHlsWorkerIfPaused(job);
       const waitStart = Date.now();
       targetFile = getHlsSegmentPath(job.dir, segIdx);
       while (!clientDisconnected && !segmentReadyOnDisk(targetFile)) {
         job.lastAccessedAt = Date.now();
+        resumeHlsWorkerIfPaused(job);
         if (job.closed) {
           const latestJob = hlsJobs.get(sid);
           if (latestJob && latestJob.jobId !== job.jobId && latestJob.startSeg <= segIdx) {
@@ -5853,7 +6240,7 @@ async function ensureChannelUploadWatcher(client2) {
         console.log(
           `[TelegramAutoWatcher] New channel video detected: "${classified.fileName || msg.id}" (${streamUrl})`
         );
-        scheduleServerAutoSync(`new_video_${cleanChannelId}_${msg.id}`, 12e3);
+        scheduleServerAutoSync(`new_video_${cleanChannelId}_${msg.id}`, 8e3);
       } catch (watchErr) {
         console.warn("[TelegramAutoWatcher] Handler warning:", watchErr?.message || watchErr);
       }
@@ -5896,9 +6283,21 @@ async function discoverChannelLatestMsgId(client2, peer, cleanChannelId) {
     }
   } catch {
   }
+  let base = highest;
+  if (base > 0) {
+    try {
+      const verifyIds = [base, Math.max(1, base - 1), Math.max(1, base - 5)];
+      const verifyMsgs = await client2.getMessages(peer, { ids: verifyIds });
+      const hasAnyAtBase = (verifyMsgs || []).some((m) => m && m.id);
+      if (!hasAnyAtBase) {
+        base = 0;
+        highest = 0;
+      }
+    } catch {
+    }
+  }
   try {
-    const base = highest > 0 ? highest : 0;
-    const probeIds = base > 0 ? [base + 1, base + 5, base + 15, base + 30, base + 60, base + 120, base + 250] : [1, 10, 25, 50, 75, 100, 125, 150, 175, 200, 250, 300, 400, 500, 750, 1e3, 1500, 2e3];
+    const probeIds = base > 0 ? [base + 1, base + 5, base + 15, base + 30, base + 60, base + 120, base + 250] : [1, 2, 3, 5, 7, 10, 15, 25, 50, 75, 100, 125, 150, 200, 300, 500, 750, 1e3, 1500, 2e3];
     const msgs = await client2.getMessages(peer, { ids: probeIds });
     let bestCheckpoint = highest;
     for (const m of msgs || []) {
@@ -5921,7 +6320,7 @@ async function discoverChannelLatestMsgId(client2, peer, cleanChannelId) {
     }
   } catch {
   }
-  if (highest > (channelMaxKnownMsgId.get(cleanChannelId) || 0)) {
+  if (highest > 0) {
     channelMaxKnownMsgId.set(cleanChannelId, highest);
     saveRecentChannelPostsToDisk();
   }
@@ -5953,17 +6352,29 @@ async function resolveChannelPeerFromLinkOrId(client2, rawChannelRef) {
   }
   if (parsed.isInviteLink && parsed.inviteHash) {
     const hash = parsed.inviteHash;
-    try {
-      const checkRes = await client2.invoke(new Api3.messages.CheckChatInvite({ hash }));
-      const chat = checkRes?.chat || checkRes?.channel;
-      if (chat && chat.id) {
-        cleanChannelId = chat.id.toString().replace(/^-100/, "");
-        channelTitle = chat.title || channelTitle;
-        if (chat.accessHash) {
-          saveChannelEntity(cleanChannelId, chat.accessHash.toString(), channelTitle, chat.username || "");
-        }
+    const directCached = getAllCachedChannels().find(
+      (c) => /^\d+$/.test(c.channelId) && c.accessHash && c.accessHash !== "0" && ((c.username || "").replace(/^\+/, "") === hash || hash === "s2Qki5-sfnVjZTI1" && c.channelId === "4498557265")
+    );
+    if (directCached) {
+      cleanChannelId = directCached.channelId;
+      channelTitle = directCached.title || channelTitle;
+      if (directCached.username && !directCached.username.startsWith("+")) {
+        publicUsername = directCached.username;
       }
-    } catch {
+    }
+    if (!cleanChannelId) {
+      try {
+        const checkRes = await client2.invoke(new Api3.messages.CheckChatInvite({ hash }));
+        const chat = checkRes?.chat || checkRes?.channel;
+        if (chat && chat.id) {
+          cleanChannelId = chat.id.toString().replace(/^-100/, "");
+          channelTitle = chat.title || channelTitle;
+          if (chat.accessHash) {
+            saveChannelEntity(cleanChannelId, chat.accessHash.toString(), channelTitle, `+${hash}`);
+          }
+        }
+      } catch {
+      }
     }
     if (!cleanChannelId) {
       try {
@@ -5995,33 +6406,11 @@ async function resolveChannelPeerFromLinkOrId(client2, rawChannelRef) {
             } catch {
             }
           }
-          if (!cleanChannelId) {
-            const movieCached = getAllCachedChannels().find(
-              (c) => c.channelId === "3850537977" && c.accessHash && c.accessHash !== "0"
-            );
-            if (hash === "QSL_3k54YfBjMjE1" && movieCached) {
-              cleanChannelId = movieCached.channelId;
-              channelTitle = movieCached.title || "app Databas";
-            } else if (recentChatIds.length > 0) {
-              cleanChannelId = recentChatIds[0].replace(/^-100/, "");
-            } else if (movieCached) {
-              cleanChannelId = movieCached.channelId;
-              channelTitle = movieCached.title || "app Databas";
-            }
+          if (!cleanChannelId && recentChatIds.length > 0) {
+            cleanChannelId = recentChatIds[0].replace(/^-100/, "");
           }
         }
       } catch {
-      }
-    }
-    if (!cleanChannelId) {
-      const cachedList = getAllCachedChannels().filter(
-        (c) => c.accessHash && c.accessHash !== "0" && /^\d+$/.test(c.channelId)
-      );
-      const preferred = cachedList.find((c) => c.channelId === "3850537977") || cachedList.find((c) => !/naruto/i.test(c.title || "")) || cachedList[0];
-      if (preferred) {
-        cleanChannelId = preferred.channelId;
-        channelTitle = preferred.title || cleanChannelId;
-        publicUsername = preferred.username || "";
       }
     }
   }
@@ -6274,7 +6663,7 @@ router2.post("/scan-movies-channel", async (req, res) => {
     const groupedList = [];
     const groupIndexByKey = /* @__PURE__ */ new Map();
     for (const v of videoCandidates) {
-      const gKey = v.parsed.groupKey && !v.parsed.isSeriesEpisode ? v.parsed.groupKey : `msg-${v.msgId}`;
+      const gKey = v.parsed.groupKey || `msg-${v.msgId}`;
       const existingIdx = v.parsed.groupKey ? groupIndexByKey.get(gKey) : void 0;
       if (existingIdx !== void 0) {
         const grp = groupedList[existingIdx];
@@ -6304,7 +6693,7 @@ router2.post("/scan-movies-channel", async (req, res) => {
           videoQualities: vq,
           qualitySizes: qs
         });
-        if (v.parsed.groupKey && !v.parsed.isSeriesEpisode) {
+        if (v.parsed.groupKey) {
           groupIndexByKey.set(gKey, newIdx);
         }
       }
@@ -6326,18 +6715,21 @@ router2.post("/scan-movies-channel", async (req, res) => {
           isHindiDubbed: grp.members.some((m) => m.parsed.isHindiDubbed)
         };
         const matched = await resolveBestImdbMatch(mergedParsed);
-        if (matched.imdbId && existingImdbSet.has(matched.imdbId.toLowerCase())) {
-          skippedAlreadyAdded++;
-          return null;
-        }
-        if (isDuplicateByTitleAndYear(
-          existingTitleList,
-          [matched.title, matched.originalTitle, mergedParsed.cleanTitle],
-          matched.releaseYear || mergedParsed.year || 0,
-          mergedParsed.isSeriesEpisode || String(matched.originalCategory || "").toLowerCase().includes("series")
-        )) {
-          skippedAlreadyAdded++;
-          return null;
+        const isSeriesItem = mergedParsed.isSeriesEpisode || String(matched.originalCategory || "").toLowerCase().includes("series");
+        if (!isSeriesItem) {
+          if (matched.imdbId && existingImdbSet.has(matched.imdbId.toLowerCase())) {
+            skippedAlreadyAdded++;
+            return null;
+          }
+          if (isDuplicateByTitleAndYear(
+            existingTitleList,
+            [matched.title, matched.originalTitle, mergedParsed.cleanTitle],
+            matched.releaseYear || mergedParsed.year || 0,
+            false
+          )) {
+            skippedAlreadyAdded++;
+            return null;
+          }
         }
         const bestDurSec = Math.max(0, ...grp.members.map((m) => m.durationSec || 0));
         const durationFormatted = bestDurSec > 0 ? formatDuration(bestDurSec) : "";
@@ -6354,7 +6746,7 @@ router2.post("/scan-movies-channel", async (req, res) => {
           durationSec: bestDurSec,
           runtime: matched.runtime || durationFormatted,
           sourceFileName: grp.primary.fileName,
-          sourceCaption: grp.primary.caption.slice(0, 240),
+          sourceCaption: `${mergedParsed.cleanTitle}${mergedParsed.year ? ` (${mergedParsed.year})` : ""}`,
           parsedTitle: mergedParsed.cleanTitle,
           parsedYear: mergedParsed.year,
           imdbId: matched.imdbId,
@@ -6374,6 +6766,10 @@ router2.post("/scan-movies-channel", async (req, res) => {
           confidenceScore: matched.confidenceScore,
           matchReason: matched.matchReason,
           isSeriesEpisode: mergedParsed.isSeriesEpisode,
+          seasonNumber: mergedParsed.seasonNumber,
+          episodeNumber: mergedParsed.episodeNumber,
+          episodeLabel: mergedParsed.episodeLabel,
+          episodeTitle: mergedParsed.episodeTitle,
           alternateMatches: matched.alternateMatches
         };
       },
@@ -6433,7 +6829,9 @@ function isDuplicateByTitleAndYear(existingList, candidateTitles, candidateYear,
   }
   return false;
 }
-var DEFAULT_AUTO_SYNC_CHANNEL_URL = "https://t.me/+QSL_3k54YfBjMjE1";
+var DEFAULT_AUTO_SYNC_CHANNEL_URL = "https://t.me/+s2Qki5-sfnVjZTI1";
+var DEFAULT_AUTO_SYNC_CHANNEL_ID = "4498557265";
+var AUTO_SYNC_CONFIG_VERSION = 2;
 var PENDING_DRAFTS_FILE = path3.join(os2.tmpdir(), ".movie_hub_tg_pending_drafts.json");
 var pendingServerDrafts = [];
 function loadPendingServerDrafts() {
@@ -6465,10 +6863,21 @@ router2.post("/dismiss-review-draft", (req, res) => {
   }
   return res.json({ success: true, remaining: pendingServerDrafts.length });
 });
+router2.post("/trigger-auto-sync", async (_req, res) => {
+  try {
+    await runServerAutoSyncPass("manual_trigger");
+    return res.json({
+      success: true,
+      pendingDrafts: pendingServerDrafts.length
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err?.message || "Auto-sync trigger failed." });
+  }
+});
 var serverAutoSyncTimer = null;
 var serverAutoSyncRunning = false;
 var cachedSyncConfig = null;
-function scheduleServerAutoSync(reason, delayMs = 12e3) {
+function scheduleServerAutoSync(reason, delayMs = 8e3) {
   if (serverAutoSyncTimer) clearTimeout(serverAutoSyncTimer);
   serverAutoSyncTimer = setTimeout(() => {
     serverAutoSyncTimer = null;
@@ -6478,23 +6887,54 @@ function scheduleServerAutoSync(reason, delayMs = 12e3) {
   }, delayMs);
 }
 async function getServerAutoSyncConfig(forceRefresh = false) {
-  if (!forceRefresh && cachedSyncConfig && Date.now() - cachedSyncConfig.fetchedAt < 9e4) {
+  if (!forceRefresh && cachedSyncConfig && Date.now() - cachedSyncConfig.fetchedAt < 6e4) {
     return cachedSyncConfig;
   }
   try {
-    const snap = await getDocFromServer2(doc2(db, "app_config", "telegram_auto_sync"));
+    const ref = doc2(db, "app_config", "telegram_auto_sync");
+    const snap = await getDocFromServer2(ref);
     const d = snap.exists() ? snap.data() : {};
-    cachedSyncConfig = {
-      channelUrl: String(d?.channelUrl || DEFAULT_AUTO_SYNC_CHANNEL_URL).trim(),
-      lastSyncedMsgId: Number(d?.lastSyncedMsgId) || 0,
-      autoWatchEnabled: typeof d?.autoWatchEnabled === "boolean" ? d.autoWatchEnabled : true,
-      autoPublishVerified: typeof d?.autoPublishVerified === "boolean" ? d.autoPublishVerified : true,
-      notifyOnNewPublish: typeof d?.notifyOnNewPublish === "boolean" ? d.notifyOnNewPublish : true,
-      fetchedAt: Date.now()
-    };
+    const rawUrl = String(d?.channelUrl || "").trim();
+    const rawVer = Number(d?.configVersion) || 1;
+    const isOldDefaultChannel = rawUrl.includes("QSL_3k54YfBjMjE1");
+    if (!snap.exists() || rawVer < AUTO_SYNC_CONFIG_VERSION || isOldDefaultChannel || !rawUrl) {
+      const migrated = {
+        configVersion: AUTO_SYNC_CONFIG_VERSION,
+        channelUrl: DEFAULT_AUTO_SYNC_CHANNEL_URL,
+        activeChannelId: DEFAULT_AUTO_SYNC_CHANNEL_ID,
+        lastSyncedMsgId: 0,
+        autoWatchEnabled: true,
+        autoPublishVerified: true,
+        notifyOnNewPublish: true,
+        updatedAtMs: Date.now(),
+        updatedAt: serverTimestamp()
+      };
+      await setDoc(ref, migrated, { merge: true }).catch(() => {
+      });
+      cachedSyncConfig = {
+        configVersion: AUTO_SYNC_CONFIG_VERSION,
+        channelUrl: DEFAULT_AUTO_SYNC_CHANNEL_URL,
+        lastSyncedMsgId: 0,
+        autoWatchEnabled: true,
+        autoPublishVerified: true,
+        notifyOnNewPublish: true,
+        fetchedAt: Date.now()
+      };
+    } else {
+      cachedSyncConfig = {
+        configVersion: rawVer,
+        channelUrl: rawUrl,
+        lastSyncedMsgId: Number(d?.lastSyncedMsgId) || 0,
+        autoWatchEnabled: typeof d?.autoWatchEnabled === "boolean" ? d.autoWatchEnabled : true,
+        autoPublishVerified: typeof d?.autoPublishVerified === "boolean" ? d.autoPublishVerified : true,
+        notifyOnNewPublish: typeof d?.notifyOnNewPublish === "boolean" ? d.notifyOnNewPublish : true,
+        fetchedAt: Date.now()
+      };
+    }
   } catch {
     if (!cachedSyncConfig) {
       cachedSyncConfig = {
+        configVersion: AUTO_SYNC_CONFIG_VERSION,
         channelUrl: DEFAULT_AUTO_SYNC_CHANNEL_URL,
         lastSyncedMsgId: 0,
         autoWatchEnabled: true,
@@ -6506,11 +6946,72 @@ async function getServerAutoSyncConfig(forceRefresh = false) {
   }
   return cachedSyncConfig;
 }
+function findMatchingExistingRecord(records, imdbId, titles, year, isSeries) {
+  const cleanImdb = String(imdbId || "").trim().toLowerCase();
+  if (cleanImdb) {
+    const byImdb = records.find((r) => r.imdbId && r.imdbId.toLowerCase() === cleanImdb);
+    if (byImdb) return byImdb;
+  }
+  const candKeys = titles.map((t) => normalizeDupTitleKey(t || "")).filter((k) => k.length >= 2);
+  for (const r of records) {
+    const rKeys = [normalizeDupTitleKey(r.title), normalizeDupTitleKey(r.originalTitle)].filter((k) => k.length >= 2);
+    for (const ck of candKeys) {
+      for (const rk of rKeys) {
+        if (ck !== rk) continue;
+        if (isSeries || r.isSeries) return r;
+        if (!year || !r.releaseYear || Math.abs(year - r.releaseYear) <= 1) return r;
+      }
+    }
+  }
+  return null;
+}
+function mergeEpisodeIntoSeasons(existingSeasons, seasonNum, newEpisode) {
+  const cloned = Array.isArray(existingSeasons) ? existingSeasons.map((s) => ({
+    seasonNumber: Number(s?.seasonNumber) || 1,
+    episodes: Array.isArray(s?.episodes) ? [...s.episodes] : []
+  })) : [];
+  let targetSeason = cloned.find((s) => s.seasonNumber === seasonNum);
+  if (!targetSeason) {
+    targetSeason = { seasonNumber: seasonNum, episodes: [] };
+    cloned.push(targetSeason);
+  }
+  const cleanStream = newEpisode.streamUrl.trim().toLowerCase();
+  const alreadyByUrl = targetSeason.episodes.some(
+    (ep) => String(ep?.streamUrl || "").trim().toLowerCase() === cleanStream
+  );
+  if (alreadyByUrl) {
+    return { mergedSeasons: cloned, added: false };
+  }
+  const sameEpIdx = targetSeason.episodes.findIndex(
+    (ep) => Number(ep?.episodeNumber) === newEpisode.episodeNumber && String(ep?.streamUrl || "").trim() !== ""
+  );
+  if (sameEpIdx >= 0) {
+    return { mergedSeasons: cloned, added: false };
+  }
+  const emptyEpIdx = targetSeason.episodes.findIndex(
+    (ep) => Number(ep?.episodeNumber) === newEpisode.episodeNumber && !String(ep?.streamUrl || "").trim()
+  );
+  if (emptyEpIdx >= 0) {
+    targetSeason.episodes[emptyEpIdx] = newEpisode;
+  } else {
+    targetSeason.episodes.push(newEpisode);
+  }
+  targetSeason.episodes.sort((a, b) => (Number(a?.episodeNumber) || 0) - (Number(b?.episodeNumber) || 0));
+  cloned.sort((a, b) => a.seasonNumber - b.seasonNumber);
+  return { mergedSeasons: cloned, added: true };
+}
+function buildFallbackPosterDataUri(title, year) {
+  const safeTitle = String(title || "Movie Hub").replace(/[<>&"']/g, " ").trim().slice(0, 34);
+  const safeYear = String(year || "").replace(/[^0-9]/g, "").slice(0, 4);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 900" width="600" height="900"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#111827"/><stop offset="55%" stop-color="#0f172a"/><stop offset="100%" stop-color="#064e3b"/></linearGradient></defs><rect width="600" height="900" fill="url(#bg)"/><circle cx="300" cy="360" r="88" fill="#10b981" opacity="0.16"/><polygon points="275,320 275,400 345,360" fill="#10b981"/><text x="300" y="545" text-anchor="middle" fill="#f9fafb" font-family="system-ui,-apple-system,sans-serif" font-size="36" font-weight="700">${safeTitle}</text>${safeYear ? `<text x="300" y="605" text-anchor="middle" fill="#34d399" font-family="system-ui,-apple-system,sans-serif" font-size="26" font-weight="600">${safeYear}</text>` : ""}</svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+var lastReconcileCheckAt = 0;
 async function runServerAutoSyncPass(reason) {
   if (serverAutoSyncRunning) return;
   serverAutoSyncRunning = true;
   try {
-    const cfg = await getServerAutoSyncConfig(reason.startsWith("new_video") || reason === "boot");
+    const cfg = await getServerAutoSyncConfig(reason.startsWith("new_video") || reason === "boot" || reason === "manual_trigger");
     if (!cfg.autoWatchEnabled || !cfg.channelUrl) return;
     const client2 = await getTelegramClient().catch(() => null);
     if (!client2) return;
@@ -6519,19 +7020,54 @@ async function runServerAutoSyncPass(reason) {
     if (!resolved) return;
     const { peer, cleanChannelId, channelTitle, publicUsername } = resolved;
     let baseline = cfg.lastSyncedMsgId;
+    let reconciledStaleBaseline = false;
     if (baseline <= 0) {
       const latest = await discoverChannelLatestMsgId(client2, peer, cleanChannelId);
       if (latest <= 0) return;
-      baseline = Math.max(0, latest - 10);
+      baseline = Math.max(0, latest - 25);
     }
     const probeIds = [];
-    for (let id = baseline + 1; id <= baseline + 50; id++) probeIds.push(id);
+    for (let id = baseline + 1; id <= baseline + 20; id++) probeIds.push(id);
     const probedMsgs = await client2.getMessages(peer, { ids: probeIds }).catch(() => []);
-    const validMsgs = (probedMsgs || []).filter((m) => m && m.id);
-    if (validMsgs.length === 0) return;
-    if (validMsgs.length >= 45) {
+    let validMsgs = (probedMsgs || []).filter((m) => m && m.id);
+    const shouldReconcile = validMsgs.length === 0 && (reason === "boot" || reason === "manual_trigger" || Date.now() - lastReconcileCheckAt > 45e3);
+    if (shouldReconcile) {
+      lastReconcileCheckAt = Date.now();
+      const realLatest = await discoverChannelLatestMsgId(client2, peer, cleanChannelId);
+      if (realLatest > 0 && (baseline > realLatest || reason === "boot" || reason === "manual_trigger")) {
+        if (baseline > realLatest) {
+          reconciledStaleBaseline = true;
+          baseline = 0;
+        }
+        const scanStart = reconciledStaleBaseline ? 1 : Math.max(1, realLatest - 100);
+        const recMsgs = [];
+        for (let cur = scanStart; cur <= realLatest; cur += 100) {
+          const endCur = Math.min(realLatest, cur + 99);
+          const batch = [];
+          for (let id = cur; id <= endCur; id++) batch.push(id);
+          const got = await client2.getMessages(peer, { ids: batch }).catch(() => []);
+          for (const m of got || []) {
+            if (m && m.id) recMsgs.push(m);
+          }
+        }
+        validMsgs = recMsgs;
+      }
+    }
+    if (validMsgs.length === 0) {
+      if (reconciledStaleBaseline) {
+        await setDoc(
+          doc2(db, "app_config", "telegram_auto_sync"),
+          { lastSyncedMsgId: 0, updatedAtMs: Date.now(), updatedAt: serverTimestamp() },
+          { merge: true }
+        ).catch(() => {
+        });
+        if (cachedSyncConfig) cachedSyncConfig.lastSyncedMsgId = 0;
+      }
+      return;
+    }
+    if (!reconciledStaleBaseline && validMsgs.length >= 18) {
       const moreIds = [];
-      for (let id = baseline + 51; id <= baseline + 150; id++) moreIds.push(id);
+      for (let id = baseline + 21; id <= baseline + 150; id++) moreIds.push(id);
       const moreMsgs = await client2.getMessages(peer, { ids: moreIds }).catch(() => []);
       for (const m of moreMsgs || []) {
         if (m && m.id) validMsgs.push(m);
@@ -6542,25 +7078,44 @@ async function runServerAutoSyncPass(reason) {
       baseline,
       ...validMsgs.map((m) => Number(m.id || 0))
     );
-    if (highestMsgId > (channelMaxKnownMsgId.get(cleanChannelId) || 0)) {
+    if (highestMsgId > (channelMaxKnownMsgId.get(cleanChannelId) || 0) || reconciledStaleBaseline) {
       channelMaxKnownMsgId.set(cleanChannelId, highestMsgId);
       saveRecentChannelPostsToDisk();
     }
     const existingSnap = await getDocsFromServer(collection(db, "movies"));
     const existingUrlSet = /* @__PURE__ */ new Set();
-    const existingImdbSet = /* @__PURE__ */ new Set();
-    const existingTitleList = [];
+    const existingRecords = [];
     existingSnap.docs.forEach((d) => {
       const m = d.data();
-      if (m?.imdbId) existingImdbSet.add(String(m.imdbId).trim().toLowerCase());
+      const cat = String(m?.originalCategory || "");
+      const isSeries = cat.toLowerCase().includes("series") || Array.isArray(m?.seasons) && m.seasons.length > 0;
       if (m?.streamingUrl) existingUrlSet.add(String(m.streamingUrl).trim().toLowerCase());
       if (m?.videoQualities && typeof m.videoQualities === "object") {
         Object.values(m.videoQualities).forEach((u) => {
           if (typeof u === "string" && u.trim()) existingUrlSet.add(u.trim().toLowerCase());
         });
       }
-      const entry = buildExistingTitleDupEntry(m?.title, m?.originalTitle, m?.releaseYear, m?.originalCategory);
-      if (entry.normTitle.length >= 2) existingTitleList.push(entry);
+      if (Array.isArray(m?.seasons)) {
+        m.seasons.forEach((s) => {
+          if (Array.isArray(s?.episodes)) {
+            s.episodes.forEach((ep) => {
+              if (ep?.streamUrl) existingUrlSet.add(String(ep.streamUrl).trim().toLowerCase());
+            });
+          }
+        });
+      }
+      existingRecords.push({
+        id: d.id,
+        imdbId: String(m?.imdbId || "").trim(),
+        title: String(m?.title || ""),
+        originalTitle: String(m?.originalTitle || ""),
+        releaseYear: Number(m?.releaseYear) || 0,
+        originalCategory: cat,
+        isSeries,
+        streamingUrl: String(m?.streamingUrl || "").trim(),
+        videoQualities: m?.videoQualities && typeof m.videoQualities === "object" ? { ...m.videoQualities } : {},
+        seasons: Array.isArray(m?.seasons) ? m.seasons : []
+      });
     });
     const candidates = [];
     for (const msg of validMsgs) {
@@ -6609,7 +7164,7 @@ async function runServerAutoSyncPass(reason) {
     const groups = [];
     const groupIdxByKey = /* @__PURE__ */ new Map();
     for (const v of candidates) {
-      const gKey = v.parsed.groupKey && !v.parsed.isSeriesEpisode ? v.parsed.groupKey : `msg-${v.msgId}`;
+      const gKey = v.parsed.groupKey || `msg-${v.msgId}`;
       const existingIdx = v.parsed.groupKey ? groupIdxByKey.get(gKey) : void 0;
       if (existingIdx !== void 0) {
         const grp = groups[existingIdx];
@@ -6633,7 +7188,7 @@ async function runServerAutoSyncPass(reason) {
         }
         const idx = groups.length;
         groups.push({ groupKey: gKey, primary: v, members: [v], videoQualities: vq, qualitySizes: qs });
-        if (v.parsed.groupKey && !v.parsed.isSeriesEpisode) {
+        if (v.parsed.groupKey) {
           groupIdxByKey.set(gKey, idx);
         }
       }
@@ -6649,22 +7204,8 @@ async function runServerAutoSyncPass(reason) {
         isHindiDubbed: grp.members.some((m) => m.parsed.isHindiDubbed)
       };
       const matched = await resolveBestImdbMatch(mergedParsed);
-      if (matched.imdbId && existingImdbSet.has(matched.imdbId.toLowerCase())) {
-        continue;
-      }
       const candYear = Number(matched.releaseYear || mergedParsed.year || 0);
-      const candIsSeries = mergedParsed.isSeriesEpisode || String(matched.originalCategory || "").toLowerCase().includes("series");
-      if (isDuplicateByTitleAndYear(
-        existingTitleList,
-        [matched.title, matched.originalTitle, mergedParsed.cleanTitle],
-        candYear,
-        candIsSeries
-      )) {
-        console.log(
-          `[ServerAutoSync] Skipping already-uploaded title "${matched.title || mergedParsed.cleanTitle}" (msg #${grp.primary.msgId})`
-        );
-        continue;
-      }
+      const isSeriesItem = mergedParsed.isSeriesEpisode || String(matched.originalCategory || "").toLowerCase().includes("series");
       const bestDurSec = Math.max(0, ...grp.members.map((m) => m.durationSec || 0));
       const durationFormatted = bestDurSec > 0 ? formatDuration(bestDurSec) : "";
       const qualityBadge = grp.videoQualities["4K"] ? "4K" : "HD";
@@ -6680,7 +7221,7 @@ async function runServerAutoSyncPass(reason) {
         durationSec: bestDurSec,
         runtime: matched.runtime || durationFormatted,
         sourceFileName: grp.primary.fileName,
-        sourceCaption: grp.primary.caption.slice(0, 240),
+        sourceCaption: `${mergedParsed.cleanTitle}${mergedParsed.year ? ` (${mergedParsed.year})` : ""}`,
         parsedTitle: mergedParsed.cleanTitle,
         parsedYear: mergedParsed.year,
         imdbId: matched.imdbId,
@@ -6700,17 +7241,209 @@ async function runServerAutoSyncPass(reason) {
         confidenceScore: matched.confidenceScore,
         matchReason: matched.matchReason,
         isSeriesEpisode: mergedParsed.isSeriesEpisode,
+        seasonNumber: mergedParsed.seasonNumber,
+        episodeNumber: mergedParsed.episodeNumber,
+        episodeLabel: mergedParsed.episodeLabel,
+        episodeTitle: mergedParsed.episodeTitle,
         alternateMatches: matched.alternateMatches
       };
-      const canAutoPublish = cfg.autoPublishVerified && draft.matchConfidence === "high" && Boolean(draft.posterUrl) && !draft.isSeriesEpisode && !existingUrlSet.has(draft.streamUrl.toLowerCase()) && (!draft.imdbId || !existingImdbSet.has(draft.imdbId.toLowerCase()));
-      if (canAutoPublish) {
-        const cleanPoster = upgradePosterUrl(draft.posterUrl, 1080) || draft.posterUrl;
-        const cleanBackdrop = upgradePosterUrl(draft.backdropUrl || cleanPoster, 1280) || cleanPoster;
-        const catToSave = draft.originalCategory || "Bollywood Movie";
+      const existingRec = findMatchingExistingRecord(
+        existingRecords,
+        draft.imdbId,
+        [draft.title, draft.originalTitle, mergedParsed.cleanTitle],
+        candYear,
+        isSeriesItem
+      );
+      if (cfg.autoPublishVerified) {
+        const nowMs = Date.now();
+        const fallbackSvg = buildFallbackPosterDataUri(draft.title || mergedParsed.cleanTitle, candYear);
+        const cleanPoster = (draft.posterUrl ? upgradePosterUrl(draft.posterUrl, 1080) || draft.posterUrl : "") || fallbackSvg;
+        const cleanBackdrop = (draft.backdropUrl || draft.posterUrl ? upgradePosterUrl(draft.backdropUrl || cleanPoster, 1280) || cleanPoster : "") || fallbackSvg;
+        const catToSave = isSeriesItem ? String(draft.originalCategory || "").toLowerCase().includes("anime") ? "Anime Series" : "Web Series" : draft.originalCategory || "Bollywood Movie";
         const displayCat = getDisplayCategory(catToSave);
-        const badge = normalizeQualityBadge(
-          /cam|hdtc|predvd/i.test(`${draft.sourceFileName} ${draft.sourceCaption}`) ? "HDTC" : draft.qualityBadge === "4K" ? "HD" : draft.qualityBadge
-        );
+        const badge = normalizeQualityBadge("NONE");
+        if (isSeriesItem) {
+          const seasonNum = Math.max(1, Number(draft.seasonNumber) || 1);
+          const fallbackEpNum = existingRec ? Math.max(
+            1,
+            ...(existingRec.seasons.find((s) => Number(s.seasonNumber) === seasonNum)?.episodes || []).map(
+              (e) => Number(e?.episodeNumber) || 0
+            ),
+            0
+          ) + 1 : 1;
+          const epNum = Math.max(1, Number(draft.episodeNumber) || fallbackEpNum);
+          const epTitle = draft.episodeTitle || `Episode ${epNum}`;
+          const epObj = {
+            episodeNumber: epNum,
+            ...draft.episodeLabel ? { episodeLabel: draft.episodeLabel } : {},
+            title: epTitle,
+            streamUrl: draft.streamUrl.trim(),
+            ...durationFormatted ? { duration: durationFormatted } : {},
+            ...bestDurSec > 0 ? { durationSec: bestDurSec } : {},
+            showInNewEpisodes: true,
+            newEpisodeEnabledAt: nowMs,
+            createdAt: nowMs,
+            addedAt: nowMs
+          };
+          if (existingRec) {
+            const { mergedSeasons, added } = mergeEpisodeIntoSeasons(existingRec.seasons, seasonNum, epObj);
+            if (!added) {
+              existingUrlSet.add(draft.streamUrl.toLowerCase());
+              continue;
+            }
+            const nextStream = existingRec.streamingUrl || epObj.streamUrl;
+            await setDoc(
+              doc2(db, "movies", existingRec.id),
+              {
+                seasons: mergedSeasons,
+                streamingUrl: nextStream,
+                updatedAt: serverTimestamp()
+              },
+              { merge: true }
+            );
+            existingRec.seasons = mergedSeasons;
+            existingRec.streamingUrl = nextStream;
+            existingUrlSet.add(draft.streamUrl.toLowerCase());
+            publishedCount++;
+            console.log(
+              `[ServerAutoSync] Added ${draft.title} S${seasonNum}E${epNum} -> movies/${existingRec.id}`
+            );
+            if (cfg.notifyOnNewPublish && publishedCount <= 3) {
+              await setDoc(
+                doc2(db, "announcements", `tg_rel_${cleanChannelId}_${draft.msgId}`),
+                {
+                  title: draft.title,
+                  releaseYear: Number(draft.releaseYear) || (/* @__PURE__ */ new Date()).getFullYear(),
+                  category: catToSave,
+                  isSeries: true,
+                  language: (draft.language || "Hindi").trim(),
+                  genre: (draft.genre || "Drama").trim(),
+                  qualityBadge: badge !== "NONE" ? badge : "",
+                  runtime: (draft.runtime || "").trim(),
+                  posterUrl: cleanPoster,
+                  backdropUrl: cleanBackdrop,
+                  message: `Season ${seasonNum} Episode ${draft.episodeLabel || epNum} Now Streaming!`,
+                  movieId: existingRec.id,
+                  createdAt: serverTimestamp(),
+                  createdAtMs: nowMs,
+                  expiresAt: new Date(nowMs + 48 * 60 * 60 * 1e3)
+                },
+                { merge: true }
+              ).catch(() => {
+              });
+            }
+            continue;
+          } else {
+            const seriesDocId = `tg_series_${cleanChannelId}_${draft.msgId}`;
+            const initialSeasons = [{ seasonNumber: seasonNum, episodes: [epObj] }];
+            await setDoc(
+              doc2(db, "movies", seriesDocId),
+              {
+                title: draft.title.trim(),
+                originalTitle: (draft.originalTitle || draft.title).trim(),
+                description: draft.description.trim(),
+                posterUrl: cleanPoster,
+                backdropUrl: cleanBackdrop,
+                releaseYear: Number(draft.releaseYear) || (/* @__PURE__ */ new Date()).getFullYear(),
+                originalCategory: catToSave,
+                displayCategory: displayCat,
+                contentType: catToSave.toLowerCase().includes("anime") ? "anime" : null,
+                language: (draft.language || "Hindi").trim(),
+                genre: (draft.genre || "Drama").trim(),
+                director: (draft.director || "").trim(),
+                cast: (draft.cast || "").trim(),
+                runtime: (draft.runtime || "").trim(),
+                rating: Number(draft.rating) || 8,
+                imdbId: (draft.imdbId || "").trim(),
+                trailerUrl: "",
+                streamingUrl: epObj.streamUrl,
+                videoQualities: {},
+                seasons: initialSeasons,
+                featured: true,
+                published: true,
+                qualityBadge: badge,
+                duration: bestDurSec || parseDurationToSeconds(draft.runtime) || 0,
+                telegramMsgId: draft.msgId,
+                telegramChannelId: cleanChannelId,
+                updatedAt: serverTimestamp(),
+                createdAt: serverTimestamp()
+              },
+              { merge: true }
+            );
+            existingUrlSet.add(draft.streamUrl.toLowerCase());
+            existingRecords.push({
+              id: seriesDocId,
+              imdbId: (draft.imdbId || "").trim(),
+              title: draft.title.trim(),
+              originalTitle: (draft.originalTitle || draft.title).trim(),
+              releaseYear: Number(draft.releaseYear) || (/* @__PURE__ */ new Date()).getFullYear(),
+              originalCategory: catToSave,
+              isSeries: true,
+              streamingUrl: epObj.streamUrl,
+              videoQualities: {},
+              seasons: initialSeasons
+            });
+            publishedCount++;
+            console.log(
+              `[ServerAutoSync] Auto-Published Series "${draft.title}" S${seasonNum}E${epNum} (${draft.imdbId || "no-imdb"}) -> movies/${seriesDocId}`
+            );
+            if (cfg.notifyOnNewPublish && publishedCount <= 3) {
+              await setDoc(
+                doc2(db, "announcements", `tg_rel_${cleanChannelId}_${draft.msgId}`),
+                {
+                  title: draft.title,
+                  releaseYear: Number(draft.releaseYear) || (/* @__PURE__ */ new Date()).getFullYear(),
+                  category: catToSave,
+                  isSeries: true,
+                  language: (draft.language || "Hindi").trim(),
+                  genre: (draft.genre || "Drama").trim(),
+                  qualityBadge: badge !== "NONE" ? badge : "",
+                  runtime: (draft.runtime || "").trim(),
+                  posterUrl: cleanPoster,
+                  backdropUrl: cleanBackdrop,
+                  message: "NEW SERIES \u2022 GO STREAM or DOWNLOAD NOW",
+                  movieId: seriesDocId,
+                  createdAt: serverTimestamp(),
+                  createdAtMs: nowMs,
+                  expiresAt: new Date(nowMs + 48 * 60 * 60 * 1e3)
+                },
+                { merge: true }
+              ).catch(() => {
+              });
+            }
+            continue;
+          }
+        }
+        if (existingRec) {
+          const mergedQualities = { ...existingRec.videoQualities };
+          let qualityAdded = false;
+          for (const [qk, qUrl] of Object.entries(draft.videoQualities || {})) {
+            if (qUrl && !mergedQualities[qk]) {
+              mergedQualities[qk] = qUrl;
+              qualityAdded = true;
+            }
+          }
+          if (qualityAdded) {
+            const upgradedStream = mergedQualities["1080p"] || mergedQualities["4K"] || existingRec.streamingUrl || draft.streamUrl.trim();
+            await setDoc(
+              doc2(db, "movies", existingRec.id),
+              {
+                videoQualities: mergedQualities,
+                streamingUrl: upgradedStream,
+                updatedAt: serverTimestamp()
+              },
+              { merge: true }
+            );
+            existingRec.videoQualities = mergedQualities;
+            existingRec.streamingUrl = upgradedStream;
+            existingUrlSet.add(draft.streamUrl.toLowerCase());
+            publishedCount++;
+            console.log(
+              `[ServerAutoSync] Merged new quality for "${existingRec.title}" -> movies/${existingRec.id}`
+            );
+          }
+          continue;
+        }
         const deterministicDocId = `tg_${cleanChannelId}_${draft.msgId}`;
         await setDoc(
           doc2(db, "movies", deterministicDocId),
@@ -6746,17 +7479,24 @@ async function runServerAutoSyncPass(reason) {
           },
           { merge: true }
         );
-        if (draft.imdbId) existingImdbSet.add(draft.imdbId.toLowerCase());
         existingUrlSet.add(draft.streamUrl.toLowerCase());
-        existingTitleList.push(
-          buildExistingTitleDupEntry(draft.title, draft.originalTitle, draft.releaseYear, draft.originalCategory)
-        );
+        existingRecords.push({
+          id: deterministicDocId,
+          imdbId: (draft.imdbId || "").trim(),
+          title: draft.title.trim(),
+          originalTitle: (draft.originalTitle || draft.title).trim(),
+          releaseYear: Number(draft.releaseYear) || (/* @__PURE__ */ new Date()).getFullYear(),
+          originalCategory: catToSave,
+          isSeries: false,
+          streamingUrl: draft.streamUrl.trim(),
+          videoQualities: draft.videoQualities || {},
+          seasons: []
+        });
         publishedCount++;
         console.log(
-          `[ServerAutoSync] Auto-Published "${draft.title}" (${draft.releaseYear}, ${draft.imdbId || "no-imdb"}) -> movies/${deterministicDocId}`
+          `[ServerAutoSync] Auto-Published Movie "${draft.title}" (${draft.releaseYear}, ${draft.imdbId || "no-imdb"}) -> movies/${deterministicDocId}`
         );
         if (cfg.notifyOnNewPublish && publishedCount <= 3) {
-          const nowMs = Date.now();
           await setDoc(
             doc2(db, "announcements", `tg_rel_${cleanChannelId}_${draft.msgId}`),
             {
@@ -6781,7 +7521,9 @@ async function runServerAutoSyncPass(reason) {
           });
         }
       } else {
-        queuedForReview.push(draft);
+        if (!existingRec || isSeriesItem) {
+          queuedForReview.push(draft);
+        }
       }
     }
     if (queuedForReview.length > 0) {
@@ -6796,15 +7538,14 @@ async function runServerAutoSyncPass(reason) {
       await setDoc(
         doc2(db, "app_config", "catalog_sync"),
         {
-          updatedAtMs: Date.now(),
-          updatedAt: serverTimestamp(),
+          updatedAt: Date.now(),
           action: "auto_publish"
         },
         { merge: true }
       ).catch(() => {
       });
     }
-    if (highestMsgId > cfg.lastSyncedMsgId) {
+    if (highestMsgId > cfg.lastSyncedMsgId || reconciledStaleBaseline) {
       await setDoc(
         doc2(db, "app_config", "telegram_auto_sync"),
         {
@@ -6829,8 +7570,8 @@ setTimeout(() => {
   setInterval(() => {
     runServerAutoSyncPass("periodic").catch(() => {
     });
-  }, 25e3);
-}, 6e3);
+  }, 15e3);
+}, 5e3);
 router2.get("/stream", handleStream);
 router2.head("/stream", handleStream);
 var telegramRouter_default = router2;
@@ -6999,10 +7740,10 @@ async function updateServerInstallStats(opts) {
   try {
     const statsUrl = `${FIRESTORE_ADMINS_BASE}/app_stats`;
     const res = await fetch(statsUrl, { cache: "no-store" });
-    let currentCount = 10;
+    let currentCount = 0;
     if (res.ok) {
       const data = await res.json();
-      currentCount = Math.max(10, Number(data?.fields?.installedAppUsers?.integerValue) || 10);
+      currentCount = Math.max(0, Number(data?.fields?.installedAppUsers?.integerValue) || 0);
     }
     if (opts.isNew) {
       currentCount += 1;
@@ -7041,7 +7782,7 @@ async function updateServerInstallStats(opts) {
     return currentCount;
   } catch (e) {
     console.warn("[Install Stats Server Notice]", e);
-    return 10;
+    return 0;
   }
 }
 downloadCastRouter.get("/download/apk", async (_req, res) => {
@@ -7098,7 +7839,7 @@ downloadCastRouter.get("/app/stats", async (_req, res) => {
     const r = await fetch(statsUrl, { cache: "no-store" });
     if (r.ok) {
       const d = await r.json();
-      const installedAppUsers = Math.max(10, Number(d?.fields?.installedAppUsers?.integerValue) || 10);
+      const installedAppUsers = Math.max(0, Number(d?.fields?.installedAppUsers?.integerValue) || 0);
       return res.json({
         installedAppUsers,
         totalApkClicks: Number(d?.fields?.totalApkClicks?.integerValue) || 0,
@@ -7107,7 +7848,7 @@ downloadCastRouter.get("/app/stats", async (_req, res) => {
     }
   } catch {
   }
-  res.json({ installedAppUsers: 10, totalApkClicks: 0 });
+  res.json({ installedAppUsers: 0, totalApkClicks: 0 });
 });
 var cachedDownloadStats = {
   totalGitHubDownloads: 0,
@@ -7670,7 +8411,7 @@ app3.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
     time: (/* @__PURE__ */ new Date()).toISOString(),
-    version: "3.5.249",
+    version: "3.5.267",
     ffmpegAvailable: FFMPEG_AVAILABLE,
     ffprobeAvailable: FFPROBE_AVAILABLE,
     telegramConfigured,
@@ -7694,7 +8435,7 @@ app3.get("/api/ios-profile", (req, res) => {
     const rawProto = String(req.headers["x-forwarded-proto"] || req.protocol || "https").split(",")[0].trim();
     const isLocal = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(rawHost);
     const scheme = isLocal ? rawProto : "https";
-    const appOrigin = rawHost ? `${scheme}://${rawHost}/` : "https://ais-pre-ariekzqzaudxer5atxkvkw-832989141722.asia-southeast1.run.app/";
+    const appOrigin = rawHost ? `${scheme}://${rawHost}/` : "https://ais-pre-jnqt2mxwwu4hovy5xbqigd-560942295760.asia-northeast1.run.app/";
     const escapeXml = (str) => str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
     const iconCandidates = [
       path6.resolve(process.cwd(), "public/apple-touch-icon.png"),
@@ -7820,8 +8561,26 @@ var getStaticDir = () => {
   }
   return __dirname;
 };
+var applyFreshHtmlCacheHeaders = (res, filePath) => {
+  const clean = (filePath || "").toLowerCase();
+  if (!clean || clean.endsWith(".html") || clean.endsWith("/sw.js") || clean.endsWith("/sw-push.js") || clean.endsWith("/version.json") || clean.endsWith("/manifest.webmanifest") || clean.endsWith("/manifest.json")) {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+  } else if (clean.includes(`${path6.sep}assets${path6.sep}`)) {
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+  }
+};
 if (!isProduction) {
   try {
+    app3.use((req, res, next) => {
+      const p = (req.path || "").toLowerCase();
+      const accept = String(req.headers.accept || "").toLowerCase();
+      if (p === "/" || p.endsWith(".html") || p === "/sw.js" || p === "/sw-push.js" || p === "/version.json" || p === "/manifest.webmanifest" || p === "/manifest.json" || !p.startsWith("/api/") && !p.startsWith("/src/") && !p.startsWith("/node_modules/") && accept.includes("text/html")) {
+        applyFreshHtmlCacheHeaders(res);
+      }
+      next();
+    });
     const { createServer } = await import("vite");
     const vite = await createServer({
       server: {
@@ -7912,22 +8671,24 @@ export class ErrorOverlay extends BaseEl {}
   } catch (viteErr) {
     console.warn("[Vite Middleware notice - falling back to static/SPA]", viteErr);
     const staticDir = getStaticDir();
-    app3.use(express3.static(staticDir));
+    app3.use(express3.static(staticDir, { setHeaders: (res, filePath) => applyFreshHtmlCacheHeaders(res, filePath) }));
     if (fs6.existsSync(path6.resolve(process.cwd(), "public"))) {
-      app3.use(express3.static(path6.resolve(process.cwd(), "public")));
+      app3.use(express3.static(path6.resolve(process.cwd(), "public"), { setHeaders: (res, filePath) => applyFreshHtmlCacheHeaders(res, filePath) }));
     }
     app3.get("*", (_req, res) => {
+      applyFreshHtmlCacheHeaders(res);
       res.sendFile(path6.resolve(staticDir, "index.html"));
     });
   }
 } else {
   const staticDir = getStaticDir();
   console.log(`[Production] Serving static files from: ${staticDir}`);
-  app3.use(express3.static(staticDir));
+  app3.use(express3.static(staticDir, { setHeaders: (res, filePath) => applyFreshHtmlCacheHeaders(res, filePath) }));
   if (fs6.existsSync(path6.resolve(process.cwd(), "public"))) {
-    app3.use(express3.static(path6.resolve(process.cwd(), "public")));
+    app3.use(express3.static(path6.resolve(process.cwd(), "public"), { setHeaders: (res, filePath) => applyFreshHtmlCacheHeaders(res, filePath) }));
   }
   app3.get("*", (_req, res) => {
+    applyFreshHtmlCacheHeaders(res);
     res.sendFile(path6.resolve(staticDir, "index.html"));
   });
 }

@@ -4,7 +4,6 @@ import { useAuth } from '../context/AuthContext';
 import { fetchMyList, removeFromMyList, MyListItem } from '../services/userWatchService';
 import { upgradePosterUrl } from '../utils/posterUrl';
 import { getLocalMovies } from '../services/movieStorage';
-import MovieViewsCounter from './MovieViewsCounter';
 
 interface MyListModalProps {
   isOpen: boolean;
@@ -138,7 +137,6 @@ export default function MyListModal({ isOpen, onClose, onSelectMovie, onPlayMovi
                       <h4 className="text-xs font-bold text-white truncate">{item.title}</h4>
                       <div className="flex items-center justify-between gap-2 mt-1">
                         <span className="text-[10px] text-gray-400 uppercase truncate">{item.displayCategory || 'Movie'}</span>
-                        <MovieViewsCounter movie={movie} />
                       </div>
                     </div>
                   </div>

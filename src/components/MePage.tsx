@@ -4,19 +4,14 @@ import { Capacitor } from '@capacitor/core';
 import {
   Bookmark,
   ThumbsUp,
-  History,
-  Bell,
   Settings,
   ChevronRight,
   X,
-  Play,
   Trash2,
   Film,
   LogOut,
   CheckCircle2,
 } from 'lucide-react';
-import { collection, doc, getDoc, getDocs } from 'firebase/firestore';
-import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { loginWithGoogle } from '../services/authService';
 import {
@@ -25,32 +20,17 @@ import {
   addToMyList,
   fetchMyLikes,
   removeFromMyLikes,
-  fetchWatchHistory,
-  removeWatchHistoryItem,
-  clearWatchHistory,
   saveWatchProgress,
   MyListItem,
   MyLikeItem,
-  WatchHistoryItem,
 } from '../services/userWatchService';
-import { getLocalMovies, getTimestampMs, getEpisodeDisplayLabel } from '../services/movieStorage';
+import { getLocalMovies, getEpisodeDisplayLabel } from '../services/movieStorage';
 import { upgradePosterUrl } from '../utils/posterUrl';
 import { parseDurationToSeconds } from '../utils/duration';
 import MovieDetailsModal from './MovieDetailsModal';
 import VideoPlayerModal from './VideoPlayerModal';
 
-type MeSheet = 'none' | 'my_list' | 'my_likes' | 'messages';
-
-interface MessageEntry {
-  id: string;
-  movieId?: string;
-  title: string;
-  body: string;
-  posterUrl?: string;
-  createdAtMs: number;
-}
-
-const MESSAGES_SEEN_AT_KEY = 'mp_messages_last_seen_ms';
+type MeSheet = 'none' | 'my_list' | 'my_likes';
 
 export default function MePage() {
   const navigate = useNavigate();
@@ -59,8 +39,6 @@ export default function MePage() {
 
   const [myList, setMyList] = useState<MyListItem[]>([]);
   const [myLikes, setMyLikes] = useState<MyLikeItem[]>([]);
-  const [messages, setMessages] = useState<MessageEntry[]>([]);
-  const [unreadCount, setUnreadCount] = useState<number>(0);
 
   const [activeSheet, setActiveSheet] = useState<MeSheet>('none');
   const [authBusy, setAuthBusy] = useState(false);
@@ -104,67 +82,8 @@ export default function MePage() {
     setMyLikes(likesRes);
   };
 
-  const loadMessages = async () => {
-    const entriesMap = new Map<string, MessageEntry>();
-    try {
-      const mirrorSnap = await getDoc(doc(db, 'admins', 'latest_release_notification'));
-      if (mirrorSnap.exists()) {
-        const d: any = mirrorSnap.data() || {};
-        try {
-          const parsed = JSON.parse(String(d.itemsJson || '[]'));
-          if (Array.isArray(parsed)) {
-            for (const entry of parsed) {
-              if (!entry) continue;
-              const id = String(entry.id || entry.movieId || entry.createdAtMs || Math.random());
-              entriesMap.set(id, {
-                id,
-                movieId: entry.movieId ? String(entry.movieId) : undefined,
-                title: String(entry.title || 'New Release'),
-                body: String(entry.message || entry.notificationBody || 'Stream or download now'),
-                posterUrl: entry.posterUrl,
-                createdAtMs: getTimestampMs(entry.createdAtMs || entry.createdAt) || Date.now(),
-              });
-            }
-          }
-        } catch {}
-        if (entriesMap.size === 0 && d.title) {
-          const id = String(d.latestId || 'latest_release');
-          entriesMap.set(id, {
-            id,
-            movieId: d.movieId ? String(d.movieId) : undefined,
-            title: String(d.title),
-            body: String(d.message || 'New release available'),
-            posterUrl: d.posterUrl,
-            createdAtMs: Number(d.createdAtMs) || Date.now(),
-          });
-        }
-      }
-    } catch {}
-
-    try {
-      const annSnap = await getDocs(collection(db, 'announcements'));
-      annSnap.docs.forEach((docSnap) => {
-        const data: any = docSnap.data() || {};
-        entriesMap.set(docSnap.id, {
-          id: docSnap.id,
-          movieId: data.movieId ? String(data.movieId) : undefined,
-          title: String(data.title || 'Announcement'),
-          body: String(data.message || data.notificationBody || 'New release available'),
-          posterUrl: data.posterUrl,
-          createdAtMs: getTimestampMs(data.createdAtMs || data.createdAt) || Date.now(),
-        });
-      });
-    } catch {}
-
-    const sorted = Array.from(entriesMap.values()).sort((a, b) => b.createdAtMs - a.createdAtMs);
-    setMessages(sorted);
-    const lastSeen = Number(localStorage.getItem(MESSAGES_SEEN_AT_KEY) || '0');
-    setUnreadCount(sorted.filter((m) => m.createdAtMs > lastSeen).length);
-  };
-
   useEffect(() => {
     refreshUserCollections();
-    loadMessages();
   }, [uid]);
 
   const popHistoryEntrySilently = () => {
@@ -371,16 +290,6 @@ export default function MePage() {
     }
   };
 
-  const handleOpenMessages = () => {
-    setActiveSheet('messages');
-    const latestMs = messages.length > 0 ? messages[0].createdAtMs : Date.now();
-    try {
-      localStorage.setItem(MESSAGES_SEEN_AT_KEY, String(Math.max(latestMs, Date.now())));
-      window.dispatchEvent(new CustomEvent('mp_messages_read'));
-    } catch {}
-    setUnreadCount(0);
-  };
-
   const resolveLiveMovie = (item: any) => {
     const localMovies = getLocalMovies();
     const match = localMovies.find(
@@ -436,7 +345,7 @@ export default function MePage() {
           )}
         </div>
 
-        {/* Menu Group 1: My List, My Likes, Watch History, Messages (Screenshot 3 exact items) */}
+        {/* Menu Group 1: My List, My Likes */}
         <div className="bg-[#1b1e24] rounded-2xl border border-white/[0.06] divide-y divide-white/[0.06] overflow-hidden shadow-lg">
           <button
             type="button"
@@ -467,27 +376,6 @@ export default function MePage() {
               <ChevronRight size={17} />
             </div>
           </button>
-
-
-
-          <button
-            type="button"
-            onClick={handleOpenMessages}
-            className="w-full px-4 py-4 flex items-center justify-between hover:bg-white/[0.03] active:bg-white/[0.05] transition-colors cursor-pointer text-left"
-          >
-            <div className="flex items-center gap-3.5">
-              <Bell size={20} className="text-neutral-200 stroke-[1.9]" />
-              <span className="text-sm sm:text-[15px] font-medium text-white">Messages</span>
-            </div>
-            <div className="flex items-center gap-2 text-neutral-400">
-              {unreadCount > 0 && (
-                <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-red-600 text-white text-[11px] font-bold flex items-center justify-center">
-                  {unreadCount}
-                </span>
-              )}
-              <ChevronRight size={17} />
-            </div>
-          </button>
         </div>
 
         {/* Menu Group 2: Settings ONLY (Community, Posts, My Comments, Study Mode, Feedback removed) */}
@@ -512,11 +400,7 @@ export default function MePage() {
           <header className="px-4 py-3.5 pt-[max(0.85rem,env(safe-area-inset-top))] border-b border-white/[0.08] flex items-center justify-between bg-[#16191f]">
             <div className="flex items-center gap-2.5">
               <h2 className="text-base sm:text-lg font-bold text-white">
-                {activeSheet === 'my_list'
-                  ? 'My List'
-                  : activeSheet === 'my_likes'
-                  ? 'My Likes'
-                  : 'Messages'}
+                {activeSheet === 'my_list' ? 'My List' : 'My Likes'}
               </h2>
             </div>
 
@@ -621,58 +505,6 @@ export default function MePage() {
 
 
 
-            {/* MESSAGES SHEET */}
-            {activeSheet === 'messages' && (
-              messages.length === 0 ? (
-                <div className="py-20 text-center text-neutral-400">
-                  <Bell size={40} className="mx-auto mb-3 opacity-30" />
-                  <p className="text-sm font-medium">No messages right now</p>
-                </div>
-              ) : (
-                <div className="space-y-3 max-w-xl mx-auto">
-                  {messages.map((msg) => (
-                    <div
-                      key={msg.id}
-                      onClick={() => {
-                        if (!msg.movieId) return;
-                        const match = allLocalMovies.find(
-                          (m) => m.id === msg.movieId || m.imdbId === msg.movieId
-                        );
-                        if (match) {
-                          openMovieDetails(match);
-                        } else {
-                          try {
-                            sessionStorage.setItem('mp_pending_open_movie_id', msg.movieId);
-                          } catch {}
-                          navigate('/');
-                        }
-                      }}
-                      className="flex items-center gap-3 bg-[#1a1d24] border border-white/[0.06] rounded-xl p-3 cursor-pointer hover:bg-[#222630]"
-                    >
-                      {msg.posterUrl ? (
-                        <img
-                          src={upgradePosterUrl(msg.posterUrl, 300) || msg.posterUrl}
-                          alt={msg.title}
-                          className="w-12 h-16 rounded-lg object-cover flex-shrink-0 bg-black"
-                        />
-                      ) : (
-                        <div className="w-12 h-16 rounded-lg bg-[#00d664]/15 text-[#00d664] flex items-center justify-center flex-shrink-0">
-                          <Bell size={20} />
-                        </div>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <h4 className="text-sm font-semibold text-white truncate">{msg.title}</h4>
-                        <p className="text-xs text-neutral-300 line-clamp-2 mt-0.5">{msg.body}</p>
-                        <p className="text-[11px] text-neutral-500 mt-1">
-                          {new Date(msg.createdAtMs).toLocaleDateString()}
-                        </p>
-                      </div>
-                      {msg.movieId && <ChevronRight size={16} className="text-neutral-500 flex-shrink-0" />}
-                    </div>
-                  ))}
-                </div>
-              )
-            )}
           </div>
         </div>
       )}

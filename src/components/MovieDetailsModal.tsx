@@ -46,7 +46,6 @@ import {
 } from '../utils/duration';
 import { isEpisodeNewActive, getEpisodeDisplayLabel } from '../services/movieStorage';
 import { recordMovieViewStart } from '../services/movieViewsService';
-import MovieViewsCounter from './MovieViewsCounter';
 
 interface MovieDetailsModalProps {
   movie: any | null;
@@ -1265,9 +1264,6 @@ export default function MovieDetailsModal({
                     <span>{seasonsCountLabel}</span>
                   </>
                 )}
-
-                <span className="text-neutral-600">|</span>
-                <MovieViewsCounter movie={movie} showLabel />
               </div>
             </div>
 
@@ -1577,12 +1573,9 @@ export default function MovieDetailsModal({
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                           />
                         </div>
-                        <div className="mt-1.5 flex items-center justify-between gap-1.5">
-                          <p className="text-xs text-neutral-200 font-medium truncate min-w-0 flex-1">
-                            {item.title}
-                          </p>
-                          <MovieViewsCounter movie={item} />
-                        </div>
+                        <p className="mt-1.5 text-xs text-neutral-200 font-medium truncate">
+                          {item.title}
+                        </p>
                       </button>
                     ))}
                   </div>

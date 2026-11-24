@@ -1760,6 +1760,25 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleRemoveChannel = async (channelId: string, channelTitle?: string) => {
+    try {
+      const res = await authFetch('/api/telegram/remove-channel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channelId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success !== false) {
+        showNotification('success', `Removed channel "${channelTitle || channelId}".`);
+        fetchTelegramStatus();
+      } else {
+        showNotification('error', data.error || 'Failed to remove channel.');
+      }
+    } catch (err: any) {
+      showNotification('error', err?.message || 'Failed to remove channel.');
+    }
+  };
+
   const loadRemoteUpdateConfig = async () => {
     try {
       try {
@@ -1801,23 +1820,44 @@ export default function AdminDashboard() {
   const handleQuickPushCurrentRelease = async () => {
     setSavingUpdateConfig(true);
     try {
-      const parts = CURRENT_VERSION_NAME.split('.');
-      const patch = (parseInt(parts[2] || '0', 10) || 0) + 1;
-      const bumpedVersion = `${parts[0]}.${parts[1]}.${patch}`;
-      const bumpedCode = CURRENT_VERSION_CODE + 1;
+      let targetVersion = CURRENT_VERSION_NAME;
+      let targetCode = CURRENT_VERSION_CODE;
+      try {
+        const res = await fetch(buildApiUrl('/api/download/latest-info'), { cache: 'no-store' });
+        if (res.ok) {
+          const info = await res.json();
+          const ghVer = String(info?.latestVersion || '').replace(/^v/i, '').trim();
+          if (ghVer && /^\d+\.\d+\.\d+$/.test(ghVer) && ghVer !== CURRENT_VERSION_NAME) {
+            const ghParts = ghVer.split('.').map((n: string) => parseInt(n, 10) || 0);
+            const curParts = CURRENT_VERSION_NAME.split('.').map((n: string) => parseInt(n, 10) || 0);
+            const ghScore = (ghParts[0] || 0) * 10000 + (ghParts[1] || 0) * 1000 + (ghParts[2] || 0);
+            const curScore = (curParts[0] || 0) * 10000 + (curParts[1] || 0) * 1000 + (curParts[2] || 0);
+            if (ghScore < curScore) {
+              showNotification(
+                'error',
+                `GitHub Releases par abhi v${ghVer} APK hi live hai (v${CURRENT_VERSION_NAME} abhi push/build nahi hua). Pehle GitHub par push karein taaki APK install fail na ho.`
+              );
+              setSavingUpdateConfig(false);
+              return;
+            }
+            targetVersion = ghVer;
+            targetCode = ghScore;
+          }
+        }
+      } catch {}
 
       const saved = await saveRemoteUpdateConfig({
         ...updateConfigForm,
-        latestVersion: bumpedVersion,
-        minimumRequiredVersion: bumpedVersion,
-        latestVersionCode: bumpedCode,
-        minimumRequiredVersionCode: bumpedCode,
+        latestVersion: targetVersion,
+        minimumRequiredVersion: targetVersion,
+        latestVersionCode: targetCode,
+        minimumRequiredVersionCode: targetCode,
         apkDownloadUrl: updateConfigForm.apkDownloadUrl || DEFAULT_REMOTE_UPDATE_CONFIG.apkDownloadUrl,
-        updateMessage: `Movie Hub v${bumpedVersion} update is ready! Update now for push release notifications with movie posters and bug fixes.`,
+        updateMessage: `Movie Hub v${targetVersion} update is ready! Update now for quality controls, all-format playback, and bug fixes.`,
       });
       setUpdateConfigForm(saved);
       setFirebaseUpdateVersion(saved.minimumRequiredVersion || saved.latestVersion);
-      showNotification('success', `✅ Pushed v${bumpedVersion} update popup to all user phones and browsers!`);
+      showNotification('success', `✅ Pushed v${targetVersion} update popup to all user phones and browsers!`);
     } catch (err: any) {
       showNotification('error', `Failed to update Firebase: ${err?.message || 'Permission denied'}`);
     } finally {
@@ -2201,12 +2241,16 @@ export default function AdminDashboard() {
     setImdbId(movie.imdbId || '');
     setTrailerUrl(movie.trailerUrl || '');
     const vq = (movie as any).videoQualities || {};
-    const masterUrl = movie.streamingUrl || vq['1080p'] || vq['720p'] || vq['480p'] || '';
-    setStreamingUrl(movie.streamingUrl || '');
-    setUrl480p(vq['480p'] || masterUrl);
-    setUrl720p(vq['720p'] || masterUrl);
-    setUrl1080p(vq['1080p'] || masterUrl);
-    setUrl4k(vq['4K'] || masterUrl);
+    const primaryUrl = (movie.streamingUrl || '').trim();
+    const getDistinctTierUrl = (tier: string) => {
+      const u = String(vq[tier] || '').trim();
+      return u && u !== primaryUrl ? u : '';
+    };
+    setStreamingUrl(primaryUrl);
+    setUrl480p(getDistinctTierUrl('480p'));
+    setUrl720p(getDistinctTierUrl('720p'));
+    setUrl1080p(getDistinctTierUrl('1080p'));
+    setUrl4k(getDistinctTierUrl('4K') || getDistinctTierUrl('2160p'));
     setFeatured(Boolean(movie.featured));
     setPublished(movie.published !== false);
     setQualityBadge(normalizeQualityBadge(movie.qualityBadge));
@@ -3192,10 +3236,20 @@ export default function AdminDashboard() {
                     .map((ch: any) => (
                       <span
                         key={ch.id}
-                        className="text-[10px] bg-neutral-950 border border-emerald-800/40 text-emerald-300 px-2 py-0.5 rounded-md truncate max-w-full"
+                        className="inline-flex items-center gap-1.5 text-[10px] bg-neutral-950 border border-emerald-800/40 text-emerald-300 px-2 py-0.5 rounded-md max-w-full"
                         title={ch.title}
                       >
-                        ✓ {ch.title}
+                        <span className="truncate">✓ {ch.title}</span>
+                        {String(ch.id) !== '4498557265' && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveChannel(String(ch.id), ch.title)}
+                            className="text-red-400 hover:text-red-300 font-bold leading-none cursor-pointer"
+                            title="Remove channel"
+                          >
+                            ×
+                          </button>
+                        )}
                       </span>
                     ))}
                 </div>

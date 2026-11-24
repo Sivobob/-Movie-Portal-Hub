@@ -14,6 +14,11 @@
 	},
 	"server": {
 		"androidScheme": "https",
-		"cleartext": true
+		"cleartext": true,
+		"allowNavigation": [
+			"ais-pre-jnqt2mxwwu4hovy5xbqigd-560942295760.asia-northeast1.run.app",
+			"movie-portalhub-1012526016635.asia-southeast1.run.app",
+			"*.run.app"
+		]
 	}
 }

@@ -72,7 +72,7 @@ export interface AutoMatchedMovieDraft {
 }
 
 const RELEASE_CUTOFF_RE =
-  /\b(?:480p|720p|1080p|2160p|360p|4k|uhd|fhd|hdrip|hd[\s._-]*cam|hdcam|hdts|hdtc|predvd|camrip|dvdscr|dvdrip|web[\s._-]*dl|webdl|web[\s._-]*rip|webrip|bluray|bdrip|brrip|x264|x265|h[\s._-]*264|h[\s._-]*265|hevc|avc|10bit|8bit|hi10p|aac|aac2|aac5|ac3|eac3|dd5[\s._-]*1|ddp5[\s._-]*1|dd2[\s._-]*0|dts|atmos|truehd|esub|esubs|msub|msubs|hc[\s._-]*sub|hc[\s._-]*esub|dual[\s._-]*audio|multi[\s._-]*audio|hindi[\s._-]*dubbed|org[\s._-]*hindi|original[\s._-]*hindi|uncut|unrated|extended|remastered|imax|nf|amzn|dsnp|kone|hotstar|zee5|jiocinema|sonyliv|mxplayer|voot|moviesmod|vegamovies|filmyzilla|filmy4wap|hdhub4u|katmoviehd|skymovieshd|mkvcinemas|bolly4u|bollyflix|dotmovies|hdmovie2|cinevoo|movies4u|pagalworld|worldfree4u|khatrimaza|yify|rarbg|psa|flux|ntb|evo|syncopy)\b/i;
+  /\b(?:480p|720p|1080p|2160p|360p|4k|uhd|fhd|hdrip|hd[\s._-]*cam|hdcam|hdts|hdtc|predvd|camrip|dvdscr|dvdrip|web[\s._-]*dl|webdl|web[\s._-]*rip|webrip|bluray|bdrip|brrip|x264|x265|h[\s._-]*264|h[\s._-]*265|hevc|avc|10bit|8bit|hi10p|aac|aac2|aac5|ac3|eac3|dd5[\s._-]*1|ddp5[\s._-]*1|dd2[\s._-]*0|dts|atmos|truehd|esub|esubs|msub|msubs|hc[\s._-]*sub|hc[\s._-]*esub|dual[\s._-]*audio|multi[\s._-]*audio|full[\s._-]+(?:hindi|dubbed|hd|movie)|hindi[\s._-]*dubbed|org[\s._-]*hindi|original[\s._-]*hindi|uncut|unrated|extended|remastered|imax|nf|amzn|dsnp|kone|hotstar|zee5|jiocinema|sonyliv|mxplayer|voot|moviesmod|vegamovies|filmyzilla|filmy4wap|hdhub4u|katmoviehd|skymovieshd|mkvcinemas|bolly4u|bollyflix|dotmovies|hdmovie2|cinevoo|movies4u|pagalworld|worldfree4u|khatrimaza|yify|rarbg|psa|flux|ntb|evo|syncopy|watch[\s._-]+online|free[\s._-]+download|download[\s._-]+now)\b/i;
 
 const SERIES_EP_RE =
   /(?:^|[\s._\-\[(])(?:S\d{1,2}[\s._-]*E\d{1,4}|S\d{1,2}|Season[\s._-]*\d{1,2}(?:[\s._-]*(?:Ep|Episode)[\s._-]*\d{1,4})?|Episode[\s._-]*\d{1,4}|Ep\.?[\s._-]*\d{1,4}|E0*\d{1,3}(?:[\s._-]*[-–—][\s._-]*E?0*\d{1,3})?|\d{1,2}x\d{1,4})(?:$|[\s._\-\])])/i;
@@ -81,19 +81,29 @@ const SERIES_CUTOFF_RE =
   /(?:^|[\s._\-\[(])(?:S0?\d{1,2}[\s._-]*E0?\d{1,4}|S0?\d{1,2}|Season[\s._-]*\d{1,2}|Episode[\s._-]*\d{1,4}|Ep\.?[\s._-]*\d{1,4}|E0*\d{1,3}(?:[\s._-]*[-–—][\s._-]*E?0*\d{1,3})?|\d{1,2}x\d{1,4})\b/i;
 
 const PROMO_LINE_RE =
-  /(?:join\s+@|join\s+our|channel\s*:|powered\s+by|uploaded\s+by|shared\s+by|share\s*&|subscribe|t\.me\/|https?:\/\/|download\s+link|request\s+here|feedback|backup\s+channel|follow\s+us|telegram\.me)/i;
+  /(?:join\s+@|join\s+our|join\s+channel|channel\s*[:\-–—]|powered\s+by|uploaded\s+by|upload\s+by|shared\s+by|share\s*&|subscribe|t\.me\/|https?:\/\/|download\s+link|request\s+here|feedback|backup\s+channel|follow\s+us|telegram\.me|watch\s+online|click\s+here|more\s+movies|visit\s+our|copyright|dmca|disclaimer)/i;
 
 const NON_TITLE_META_LINE_RE =
-  /^(?:imdb(?:\s+rating)?|rating|score|genre|genres|story(?:line)?|plot|synopsis|overview|about|cast|starring|actors?|director|directed\s+by|writer|music|producer|language|languages|audio|subtitle|subtitles|quality|format|resolution|codec|size|file\s*size|duration|runtime|release(?:\s+date)?|released|country|note|info|screens?(?:hots?)?|links?|watch\s+online|download|telegram|channel|bot)\s*[:\-–—]/i;
+  /^(?:imdb(?:\s+rating)?|tmdb|rotten\s*tomatoes|rating|score|genre|genres|story(?:\s*line)?|plot|synopsis|overview|about|summary|tagline|cast|starring|star\s*cast|actors?|actress|director|directed\s+by|writer|written\s+by|music(?:\s+by)?|producer|produced\s+by|language|languages|audio|voice|subtitle|subtitles|subs?|quality|format|resolution|codec|bitrate|size|file\s*size|duration|runtime|release(?:\s*(?:date|year))?|released|year|country|ott|platform|network|studio|banner|note|warning|info|screens?(?:hots?)?|links?|watch(?:\s+online)?|download|telegram|channel|backup|bot|credit|credits|uploaded(?:\s*by)?|posted(?:\s*by)?|source|rip|encoder?|episode\s*(?:title|name)?|episodes?|season|seasons?|status|part)\s*[:\-–—=|]/i;
 
 const EXPLICIT_TITLE_LABEL_RE =
-  /^(?:movie\s*(?:name|title)?|web\s*series|series\s*(?:name|title)?|show\s*(?:name|title)?|film\s*(?:name|title)?|title|name)\s*[:\-–—]\s*(.+)$/i;
+  /^(?:movie\s*(?:name|title)?|web\s*series|anime(?:\s*series)?|series\s*(?:name|title)?|show\s*(?:name|title)?|film\s*(?:name|title)?|title|name)\s*[:\-–—=|]\s*(.+)$/i;
+
+const EXPLICIT_YEAR_LINE_RE =
+  /^(?:release\s*)?(?:year|released|release\s*date)\s*[:\-–—=|]\s*.*?((?:19|20)\d{2})\b/i;
 
 const INLINE_META_CUTOFF_RE =
-  /\s+(?:imdb(?:\s*rating)?|rating|genre|genres|story(?:line)?|plot|synopsis|cast|starring|actors?|director|directed\s+by|language|languages|audio|quality|resolution|duration|runtime|release\s*date|subtitles?|size|download|watch\s+online|join\s+@?)\s*[:\-–—]/i;
+  /\s+(?:imdb(?:\s*rating)?|rating|genre|genres|story(?:\s*line)?|plot|synopsis|summary|cast|starring|star\s*cast|actors?|director|directed\s+by|language|languages|audio|voice|quality|resolution|duration|runtime|release\s*(?:date|year)|year|subtitles?|subs?|size|download|watch\s+online|uploaded\s*by|join\s+@?)\s*[:\-–—=|]/i;
 
 const TRAILING_LANG_SEASON_RE =
   /\b(?:s\d{1,2}[\s._-]*e\d{1,4}|s0?\d{1,2}|e0?\d{1,4}|ep\.?\s*0*\d{1,4}|season\s*\d{1,2}|episode\s*\d{1,4}|hindi|english|tamil|telugu|malayalam|kannada|punjabi|bengali|marathi|japanese|korean|dubbed|subbed|multi|dual)\b/gi;
+
+function stripDecorativeSymbols(input: string): string {
+  return String(input || '')
+    .replace(/[\u{1F000}-\u{1FAFF}\u{2190}-\u{2BFF}\u{FE00}-\u{FE0F}\u{200D}\u{20E3}★☆⭐🎬📺🔥✨👉👇━═─│┃•●◆◇■□▪▫»«›‹➤➜➞➣]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 function stripFileExtension(name: string): string {
   return name.replace(/\.(mkv|mp4|avi|mov|webm|m4v|ts|flv|wmv|mpg|mpeg)$/i, '');
@@ -106,8 +116,8 @@ function cleanSingleTitleLine(rawLine: string): {
 } {
   let text = stripFileExtension(String(rawLine || '').trim());
 
-  // Strip emojis, stars, bullets, and decorative Unicode symbols
-  text = text.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}★☆⭐🎬📺🔥✨👉👇━═─│┃•]+/gu, ' ');
+  // Strip emojis, stars, arrows, bullets, and decorative Unicode symbols
+  text = stripDecorativeSymbols(text);
 
   // Remove URLs, @mentions, and #hashtags
   text = text.replace(/https?:\/\/\S+/gi, ' ');
@@ -139,7 +149,7 @@ function cleanSingleTitleLine(rawLine: string): {
   // Remove bracketed site tags at start like [MoviesMod]
   text = text.replace(/^\[[^\]]{2,40}\]\s*/g, '').trim();
 
-  // Extract valid release year (1940 .. nextYear) and remember its position to trim trailing release tags
+  // Extract valid release year (1940 .. nextYear) and trim trailing release tags after the year
   const maxValidYear = new Date().getFullYear() + 1;
   let detectedYear: number | null = null;
   let yearIndex = -1;
@@ -151,9 +161,12 @@ function cleanSingleTitleLine(rawLine: string): {
     if (yr >= 1940 && yr <= maxValidYear) {
       detectedYear = yr;
       const idx = m.index ?? -1;
+      yearIndex = idx;
       if (idx > 1) {
-        yearIndex = idx;
         text = text.slice(0, idx).trim();
+      } else if (idx >= 0) {
+        // Leading year e.g. "(2024) Pushpa 2"
+        text = `${text.slice(0, idx)} ${text.slice(idx + m[0].length)}`.trim();
       }
       break;
     }
@@ -193,12 +206,12 @@ function cleanSingleTitleLine(rawLine: string): {
     text = wordsAfterStrip;
   }
 
-  // Strip lingering empty brackets / trailing punctuation
+  // Strip lingering empty brackets / trailing punctuation / movie filler words
   text = text
     .replace(/[\[(]\s*[\])]/g, ' ')
     .replace(/\[[^\]]*\]/g, ' ')
     .replace(/\([^)]*(?:dubbed|hindi|english|tamil|telugu|dual|audio|esub|480p|720p|1080p|4k|rip|cam)[^)]*\)/gi, ' ')
-    .replace(/\b(?:full\s+movie|hindi\s+movie|south\s+movie|bollywood|hollywood|web\s+series|complete\s+series|all\s+episodes)\b/gi, ' ')
+    .replace(/\b(?:full\s+movie|hindi\s+movie|south\s+movie|english\s+movie|new\s+movie|bollywood\s+movie|hollywood\s+movie|bollywood|hollywood|web\s+series|complete\s+series|complete\s+season|all\s+episodes|watch\s+online|free\s+download|download\s+now)\b/gi, ' ')
     .replace(/^[\s\-–—:;,./\\]+|[\s\-–—:;,./\\]+$/g, '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -332,7 +345,7 @@ function normalizeTitleKey(title: string): string {
 function looksGenericTelegramName(name: string): boolean {
   const clean = normalizeTitleKey(name);
   if (!clean || clean.length < 2) return true;
-  return /^(?:vid|video|img|document|doc|file|movie|telegram|episode|msg|mp4|mkv)\s*\d*$/i.test(clean);
+  return /^(?:vid|video|img|document|doc|file|movie|telegram|episode|msg|mp4|mkv|year|title|name)\s*\d*$/i.test(clean);
 }
 
 export function parseTelegramMovieMeta(
@@ -343,38 +356,69 @@ export function parseTelegramMovieMeta(
   durationSec = 0,
   sizeBytes = 0
 ): ParsedTelegramMovieMeta {
-  const combined = `${caption || ''}\n${fileName || ''}`;
-
-  // Explicit IMDb ID in caption or filename guarantees 100% accuracy
-  const imdbMatch = combined.match(/\b(tt\d{6,10})\b/i);
-  const explicitImdbId = imdbMatch ? imdbMatch[1].toLowerCase() : null;
-
-  // Detect samples / promos / short clips
-  const lowerCombined = combined.toLowerCase();
-  const isSampleOrClip =
-    /\b(?:sample|trailer|teaser|promo|intro[\s._-]*clip)\b/i.test(fileName || '') ||
-    (durationSec > 0 && durationSec < 300 && sizeBytes > 0 && sizeBytes < 25 * 1024 * 1024);
-
-  const isSeriesEpisode = SERIES_EP_RE.test(combined);
-
-  // Pick ONLY the cleanest Movie/Series title line from caption OR filename, ignoring extra metadata/promo/plot lines
-  const captionLines = String(caption || '')
+  const rawLines = String(caption || '')
     .split(/\r?\n/)
     .map((l) => l.trim())
-    .filter((l) => {
-      if (!l) return false;
-      const plain = l.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}★☆⭐🎬📺🔥✨👉👇━═─│┃•]+/gu, ' ').trim();
-      if (!plain || plain.length < 2) return false;
-      if (/^[\s\-_=*~.,:;!?/\\|]+$/.test(plain)) return false;
-      if (/^(?:#[^\s]+\s*)+$/.test(plain)) return false;
-      if (PROMO_LINE_RE.test(plain) || /^(?:join|http|@)/i.test(plain)) return false;
-      if (NON_TITLE_META_LINE_RE.test(plain)) return false;
-      // Ignore long story/synopsis paragraphs unless explicitly prefixed with Movie/Series Name
-      if (!EXPLICIT_TITLE_LABEL_RE.test(plain) && plain.length > 110 && !/\b(?:19|20)\d{2}\b/.test(plain)) {
-        return false;
+    .filter(Boolean);
+
+  // Extract explicit "Year: 2024" / "Release Year: 2024" / IMDb / Season-Episode lines before discarding noisy body text
+  const maxValidYear = new Date().getFullYear() + 1;
+  let explicitCaptionYear: number | null = null;
+  let explicitImdbId: string | null = null;
+  const seasonEpisodeLines: string[] = [];
+
+  for (const rawLine of rawLines) {
+    const plain = stripDecorativeSymbols(rawLine);
+    if (!plain) continue;
+
+    if (!explicitCaptionYear) {
+      const yMatch = plain.match(EXPLICIT_YEAR_LINE_RE);
+      if (yMatch) {
+        const yr = parseInt(yMatch[1], 10);
+        if (yr >= 1940 && yr <= maxValidYear) explicitCaptionYear = yr;
       }
-      return true;
-    });
+    }
+
+    if (!explicitImdbId && (EXPLICIT_TITLE_LABEL_RE.test(plain) || /^imdb\b/i.test(plain))) {
+      const im = plain.match(/\b(tt\d{6,10})\b/i);
+      if (im) explicitImdbId = im[1].toLowerCase();
+    }
+
+    if (/^(?:season|episode|ep)\s*[:\-–—=]/i.test(plain)) {
+      seasonEpisodeLines.push(plain);
+    }
+  }
+
+  if (!explicitImdbId && fileName) {
+    const im = fileName.match(/\b(tt\d{6,10})\b/i);
+    if (im) explicitImdbId = im[1].toLowerCase();
+  }
+
+  // Detect samples / promos / tiny <60s clips
+  const isSampleOrClip =
+    /\b(?:sample|trailer|teaser|promo|intro[\s._-]*clip)\b/i.test(fileName || '') ||
+    (durationSec > 0 && durationSec < 60 && sizeBytes > 0 && sizeBytes < 5 * 1024 * 1024);
+
+  // Pick ONLY the cleanest Movie/Series title line from caption OR filename, ignoring all extra caption text
+  const captionLines = rawLines.filter((l) => {
+    const plain = stripDecorativeSymbols(l);
+    if (!plain || plain.length < 2) return false;
+    if (/^[\s\-_=*~.,:;!?/\\|]+$/.test(plain)) return false;
+    if (/^(?:#[^\s]+\s*)+$/.test(plain)) return false;
+    if (PROMO_LINE_RE.test(plain) || /^(?:join|http|@|visit|follow|share|download|click)/i.test(plain)) return false;
+    if (NON_TITLE_META_LINE_RE.test(plain)) return false;
+    // Pure standalone year line (handled via adjacentYearLine)
+    if (/^[\[(]?\s*(?:19|20)\d{2}\s*[\])]?$/.test(plain)) return false;
+    // Ignore long descriptive/plot sentences unless explicitly prefixed with Movie/Series Name
+    if (
+      !EXPLICIT_TITLE_LABEL_RE.test(plain) &&
+      (plain.length > 85 || plain.split(/\s+/).length > 12) &&
+      !/^\s*.{2,45}[\[(]\s*(?:19|20)\d{2}\s*[\])]/.test(plain)
+    ) {
+      return false;
+    }
+    return true;
+  });
 
   const candidates: Array<{
     title: string;
@@ -382,22 +426,23 @@ export function parseTelegramMovieMeta(
     hasExplicitLabel: boolean;
     fromCaption: boolean;
     lineIdx: number;
+    rawLine: string;
   }> = [];
 
-  if (captionLines.length > 0) {
-    for (let i = 0; i < Math.min(captionLines.length, 8); i++) {
-      const parsedLine = cleanSingleTitleLine(captionLines[i]);
-      if (parsedLine.title) {
-        candidates.push({
-          title: parsedLine.title,
-          year: parsedLine.year,
-          hasExplicitLabel: parsedLine.hasExplicitLabel,
-          fromCaption: true,
-          lineIdx: i,
-        });
-      }
+  for (let i = 0; i < Math.min(captionLines.length, 6); i++) {
+    const parsedLine = cleanSingleTitleLine(captionLines[i]);
+    if (parsedLine.title && !looksGenericTelegramName(parsedLine.title)) {
+      candidates.push({
+        title: parsedLine.title,
+        year: parsedLine.year,
+        hasExplicitLabel: parsedLine.hasExplicitLabel,
+        fromCaption: true,
+        lineIdx: i,
+        rawLine: captionLines[i],
+      });
     }
   }
+
   const parsedFile = cleanSingleTitleLine(fileName || '');
   if (parsedFile.title) {
     candidates.push({
@@ -406,6 +451,7 @@ export function parseTelegramMovieMeta(
       hasExplicitLabel: parsedFile.hasExplicitLabel,
       fromCaption: false,
       lineIdx: 99,
+      rawLine: fileName || '',
     });
   }
 
@@ -414,23 +460,41 @@ export function parseTelegramMovieMeta(
     const scoreCand = (c: typeof a) => {
       let s = 0;
       if (looksGenericTelegramName(c.title)) s -= 100;
-      if (c.hasExplicitLabel) s += 40;
+      if (c.hasExplicitLabel) s += 45;
       if (c.year) s += 25;
-      if (c.title.length >= 2 && c.title.length <= 65) s += 12;
-      else if (c.title.length > 90) s -= 25;
-      if (c.fromCaption) s += Math.max(2, 10 - c.lineIdx);
+      if (c.title.length >= 2 && c.title.length <= 65) s += 14;
+      else if (c.title.length > 85) s -= 30;
+      if (c.fromCaption) s += Math.max(2, 12 - c.lineIdx * 2);
       return s;
     };
     return scoreCand(b) - scoreCand(a);
   });
 
-  const best = candidates[0] || { title: '', year: null };
-  // If caption had title without year, borrow year from another candidate or filename
-  const fallbackYear = best.year || candidates.find((c) => c.year)?.year || null;
+  const best = candidates[0] || { title: '', year: null, rawLine: '' };
 
-  const quality = detectQualityTag(combined, width, height);
-  const { languageHint, isHindiDubbed } = detectLanguageHint(combined);
-  const epDetails = parseSeriesSeasonEpisode(combined);
+  // Check if line immediately following a caption title is just a standalone year like "2024" or "(2024)"
+  let adjacentYear: number | null = null;
+  if (rawLines.length >= 2) {
+    const secondPlain = stripDecorativeSymbols(rawLines[1]);
+    const adjMatch = secondPlain.match(/^[\[(]?\s*((?:19|20)\d{2})\s*[\])]?$/);
+    if (adjMatch) {
+      const yr = parseInt(adjMatch[1], 10);
+      if (yr >= 1940 && yr <= maxValidYear) adjacentYear = yr;
+    }
+  }
+
+  // Only accept year from the winning title line, explicit Year label, adjacent year line, or filename (NEVER random promo/prose lines)
+  const fallbackYear = best.year || explicitCaptionYear || adjacentYear || parsedFile.year || null;
+
+  // Scan ONLY focused sources (winning title line + explicit Season/Episode lines + filename) so extra caption text never pollutes S/E, quality, or language
+  const focusedMetaText = [best.rawLine, ...seasonEpisodeLines, fileName || '']
+    .filter(Boolean)
+    .join('\n');
+
+  const isSeriesEpisode = SERIES_EP_RE.test(focusedMetaText);
+  const quality = detectQualityTag(focusedMetaText, width, height);
+  const { languageHint, isHindiDubbed } = detectLanguageHint(focusedMetaText);
+  const epDetails = parseSeriesSeasonEpisode(focusedMetaText);
   const finalIsSeries = isSeriesEpisode || epDetails.episodeNumber !== null;
 
   const cleanTitle = best.title || stripFileExtension(fileName || '').replace(/[._-]+/g, ' ').trim();

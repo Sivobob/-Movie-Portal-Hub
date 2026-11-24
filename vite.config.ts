@@ -26,11 +26,44 @@ export default defineConfig(() => {
         ],
         workbox: {
           importScripts: ['/sw-push.js'],
-          globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff2}'],
-          globIgnores: ['**/downloads/**', '**/transcoded/**', '**/*.apk', '**/*.mp4', '**/*.mkv', '**/aistudio/**'],
+          cleanupOutdatedCaches: true,
+          skipWaiting: true,
+          clientsClaim: true,
+          globPatterns: ['**/*.{js,css,ico,png,svg,webp,woff2}'],
+          globIgnores: [
+            '**/index.html',
+            '**/version.json',
+            '**/downloads/**',
+            '**/transcoded/**',
+            '**/*.apk',
+            '**/*.mp4',
+            '**/*.mkv',
+            '**/aistudio/**',
+          ],
           maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
+          navigateFallback: null,
           navigateFallbackDenylist: [/^\/api\//],
           runtimeCaching: [
+            {
+              urlPattern: ({ request }) => request.mode === 'navigate',
+              handler: 'NetworkFirst',
+              options: {
+                cacheName: 'html-navigation-cache',
+                networkTimeoutSeconds: 3,
+                expiration: {
+                  maxEntries: 5,
+                  maxAgeSeconds: 60 * 60,
+                },
+              },
+            },
+            {
+              urlPattern: ({ url }) =>
+                url.pathname === '/version.json' ||
+                url.pathname === '/manifest.webmanifest' ||
+                url.pathname === '/manifest.json' ||
+                url.pathname === '/sw-push.js',
+              handler: 'NetworkOnly',
+            },
             {
               urlPattern: ({ url }) =>
                 url.pathname.startsWith('/api/') &&

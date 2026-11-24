@@ -11,6 +11,8 @@ import android.content.pm.ActivityInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageInstaller;
 import android.content.pm.PackageManager;
+import android.content.pm.Signature;
+import android.content.pm.SigningInfo;
 import android.content.res.Configuration;
 import android.database.Cursor;
 import android.graphics.Color;
@@ -81,6 +83,15 @@ import androidx.mediarouter.media.MediaRouter;
 import androidx.mediarouter.media.MediaRouteSelector;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.BridgeWebChromeClient;
+import com.getcapacitor.BridgeWebViewClient;
+import android.webkit.WebResourceError;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
+import java.io.ByteArrayOutputStream;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import com.google.android.gms.cast.CastMediaControlIntent;
 import com.google.android.gms.cast.MediaInfo;
 import com.google.android.gms.cast.MediaLoadRequestData;
@@ -101,7 +112,9 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -122,6 +135,18 @@ public class MainActivity extends BridgeActivity {
     private OnBackPressedCallback mandatoryUpdateBackCallback;
     private volatile String pendingOpenMovieId = null;
     private final ExecutorService notificationExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService liveSyncExecutor = Executors.newSingleThreadExecutor();
+    private volatile long lastLiveSyncCheckMs = 0L;
+    private volatile String activeLiveOrigin = "";
+    private volatile String activeLiveFingerprint = "";
+    private volatile boolean liveSyncInFlight = false;
+
+    private static final String FIRESTORE_BACKEND_DOC_URL =
+        "https://firestore.googleapis.com/v1/projects/gen-lang-client-0267042672/databases/ai-studio-movieportalhub-664a3e40-85f3-4758-945e-fd031bdc459f/documents/admins/backend";
+    private static final String[] LIVE_WEB_CANDIDATES = new String[] {
+        "https://ais-pre-jnqt2mxwwu4hovy5xbqigd-560942295760.asia-northeast1.run.app",
+        "https://movie-portalhub-1012526016635.asia-southeast1.run.app"
+    };
 
     private static final String ACTION_APK_INSTALL_RESULT = "com.moviebox.stream.app.ACTION_APK_INSTALL_RESULT";
     private static final int REQUEST_CODE_INSTALL_APK = 4205;
@@ -133,6 +158,7 @@ public class MainActivity extends BridgeActivity {
     private volatile boolean isDownloadingApk = false;
     private volatile boolean pendingInstallAfterPermission = false;
     private volatile boolean legacyInstallFallbackTried = false;
+    private volatile boolean preferLegacyInstallerOnRetry = false;
     private volatile long apkDownloadSessionSeq = 0L;
 
     // Google Cast & MediaRouter state
@@ -296,6 +322,7 @@ public class MainActivity extends BridgeActivity {
         mainHandler.postDelayed(this::requestPostNotificationsPermissionIfNeeded, 1200);
         ReleaseNotificationHelper.scheduleBackgroundWorker(this);
         notificationExecutor.execute(() -> ReleaseNotificationHelper.syncAndNotifyLatestReleases(getApplicationContext()));
+        syncLiveWebAppIfAvailable(true);
     }
 
     @Override
@@ -394,6 +421,7 @@ public class MainActivity extends BridgeActivity {
         if (!webViewConfigured || localStreamServer == null) {
             configureWebView();
         }
+        syncLiveWebAppIfAvailable(false);
         notificationExecutor.execute(() -> ReleaseNotificationHelper.syncAndNotifyLatestReleases(getApplicationContext()));
         if (exoPlayer != null && exoActive) {
             try {
@@ -488,6 +516,9 @@ public class MainActivity extends BridgeActivity {
             localStreamServer.stopServer();
             localStreamServer = null;
         }
+        try {
+            liveSyncExecutor.shutdownNow();
+        } catch (Exception ignored) {}
         super.onDestroy();
     }
 
@@ -568,6 +599,40 @@ public class MainActivity extends BridgeActivity {
                     }
                 });
 
+                if (getBridge() != null) {
+                    webView.setWebViewClient(new BridgeWebViewClient(getBridge()) {
+                        private boolean isRemoteLiveUrl(String url) {
+                            if (url == null || url.trim().isEmpty()) return false;
+                            return !url.startsWith("https://localhost")
+                                && !url.startsWith("http://localhost")
+                                && !url.startsWith("http://127.0.0.1")
+                                && !url.startsWith("about:");
+                        }
+
+                        @Override
+                        public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                            if (request != null && request.isForMainFrame() && request.getUrl() != null && isRemoteLiveUrl(request.getUrl().toString())) {
+                                activeLiveOrigin = "";
+                                activeLiveFingerprint = "";
+                                view.loadUrl("https://localhost/");
+                                return;
+                            }
+                            super.onReceivedError(view, request, error);
+                        }
+
+                        @Override
+                        public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse errorResponse) {
+                            if (request != null && request.isForMainFrame() && request.getUrl() != null && errorResponse != null && errorResponse.getStatusCode() >= 400 && isRemoteLiveUrl(request.getUrl().toString())) {
+                                activeLiveOrigin = "";
+                                activeLiveFingerprint = "";
+                                view.loadUrl("https://localhost/");
+                                return;
+                            }
+                            super.onReceivedHttpError(view, request, errorResponse);
+                        }
+                    });
+                }
+
                 if (localStreamServer == null) {
                     localStreamServer = new LocalStreamServer(webView);
                     webView.addJavascriptInterface(localStreamServer.createJsInterface(), "AndroidStreamBridge");
@@ -581,6 +646,177 @@ public class MainActivity extends BridgeActivity {
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    private String getInstalledAppVersionNameSafe() {
+        try {
+            PackageInfo pInfo = getPackageManager().getPackageInfo(getPackageName(), 0);
+            if (pInfo != null && pInfo.versionName != null && !pInfo.versionName.trim().isEmpty()) {
+                return pInfo.versionName.trim();
+            }
+        } catch (Exception ignored) {}
+        return "3.5.267";
+    }
+
+    private int compareVersionStrings(String verA, String verB) {
+        String[] partsA = (verA == null ? "" : verA).replaceAll("^[^0-9]*", "").split("[^0-9]+");
+        String[] partsB = (verB == null ? "" : verB).replaceAll("^[^0-9]*", "").split("[^0-9]+");
+        int max = Math.max(partsA.length, partsB.length);
+        for (int i = 0; i < max; i++) {
+            int a = 0;
+            int b = 0;
+            try {
+                if (i < partsA.length && !partsA[i].isEmpty()) a = Integer.parseInt(partsA[i]);
+            } catch (Exception ignored) {}
+            try {
+                if (i < partsB.length && !partsB[i].isEmpty()) b = Integer.parseInt(partsB[i]);
+            } catch (Exception ignored) {}
+            if (a < b) return -1;
+            if (a > b) return 1;
+        }
+        return 0;
+    }
+
+    private String fetchLiveSyncText(String urlStr, int timeoutMs) {
+        HttpURLConnection conn = null;
+        try {
+            URL url = new URL(urlStr);
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setInstanceFollowRedirects(false);
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(timeoutMs);
+            conn.setReadTimeout(timeoutMs);
+            conn.setRequestProperty("Cache-Control", "no-store, no-cache");
+            conn.setRequestProperty("Pragma", "no-cache");
+            conn.setRequestProperty("User-Agent", "MovieHub-Android-LiveSync/3.5.267");
+            int code = conn.getResponseCode();
+            if (code < 200 || code >= 300) return null;
+            try (InputStream is = conn.getInputStream();
+                 ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+                byte[] buf = new byte[4096];
+                int n;
+                int total = 0;
+                while ((n = is.read(buf)) != -1) {
+                    total += n;
+                    if (total > 512 * 1024) break;
+                    baos.write(buf, 0, n);
+                }
+                return baos.toString("UTF-8");
+            }
+        } catch (Exception ignored) {
+            return null;
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    private String extractHtmlAssetFingerprint(String html, String serverVersion) {
+        if (html == null) return serverVersion != null ? serverVersion : "";
+        StringBuilder sb = new StringBuilder();
+        if (serverVersion != null) sb.append(serverVersion).append("|");
+        try {
+            Matcher m = Pattern.compile("(assets/[A-Za-z0-9._-]+\\.(?:js|css)|/src/main\\.tsx)").matcher(html);
+            while (m.find()) {
+                sb.append(m.group(1)).append(";");
+            }
+        } catch (Exception ignored) {}
+        if (sb.length() == 0) {
+            sb.append(html.hashCode());
+        }
+        return sb.toString();
+    }
+
+    private void syncLiveWebAppIfAvailable(boolean force) {
+        if (liveSyncInFlight || isPlaybackActive || exoActive) return;
+        long now = System.currentTimeMillis();
+        if (!force && lastLiveSyncCheckMs > 0 && (now - lastLiveSyncCheckMs) < 15000L) {
+            return;
+        }
+        lastLiveSyncCheckMs = now;
+        liveSyncInFlight = true;
+
+        liveSyncExecutor.execute(() -> {
+            try {
+                String installedVersion = getInstalledAppVersionNameSafe();
+                Set<String> candidates = new LinkedHashSet<>();
+
+                // 1. Check Firestore admins/backend for dynamic liveAppUrl / webAppUrl
+                try {
+                    String fsRaw = fetchLiveSyncText(FIRESTORE_BACKEND_DOC_URL + "?t=" + System.currentTimeMillis(), 3500);
+                    if (fsRaw != null && fsRaw.contains("fields")) {
+                        JSONObject doc = new JSONObject(fsRaw);
+                        JSONObject fields = doc.optJSONObject("fields");
+                        if (fields != null) {
+                            String[] keys = new String[] { "liveAppUrl", "webAppUrl", "frontendUrl", "url", "backendUrl" };
+                            for (String key : keys) {
+                                JSONObject fieldObj = fields.optJSONObject(key);
+                                if (fieldObj != null && fieldObj.has("stringValue")) {
+                                    String val = fieldObj.optString("stringValue", "").trim().replaceAll("/+$", "");
+                                    if (val.startsWith("https://") && !val.contains("localhost") && !val.contains("127.0.0.1")) {
+                                        candidates.add(val);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {}
+
+                // 2. Fallback to known live deployed origins
+                for (String c : LIVE_WEB_CANDIDATES) {
+                    candidates.add(c);
+                }
+
+                for (String baseUrl : candidates) {
+                    String healthRaw = fetchLiveSyncText(baseUrl + "/api/health?t=" + System.currentTimeMillis(), 3500);
+                    if (healthRaw == null || !healthRaw.trim().startsWith("{")) continue;
+                    JSONObject healthJson;
+                    try {
+                        healthJson = new JSONObject(healthRaw);
+                    } catch (Exception e) {
+                        continue;
+                    }
+                    if (!"ok".equalsIgnoreCase(healthJson.optString("status", ""))) continue;
+
+                    String serverVersion = healthJson.optString("version", "").trim();
+                    // Never switch WebView to an older deployment than the installed APK
+                    if (!serverVersion.isEmpty() && compareVersionStrings(serverVersion, installedVersion) < 0) {
+                        continue;
+                    }
+
+                    String html = fetchLiveSyncText(baseUrl + "/?_sync=" + System.currentTimeMillis(), 4000);
+                    if (html == null || !html.toLowerCase(Locale.US).contains("<div id=\"root\"")) continue;
+                    if (html.contains("accounts.google.com") || html.contains("__cookie_check")) continue;
+
+                    final String fingerprint = extractHtmlAssetFingerprint(html, serverVersion);
+                    final String targetOrigin = baseUrl;
+                    ReleaseNotificationHelper.saveBackendBaseUrl(getApplicationContext(), targetOrigin);
+
+                    runOnUiThread(() -> {
+                        try {
+                            if (isPlaybackActive || exoActive || isFinishing() || isDestroyed()) return;
+                            if (getBridge() == null || getBridge().getWebView() == null) return;
+                            WebView wv = getBridge().getWebView();
+                            String currentUrl = wv.getUrl() != null ? wv.getUrl() : "";
+                            boolean onLocalhost = currentUrl.isEmpty()
+                                || currentUrl.startsWith("https://localhost")
+                                || currentUrl.startsWith("http://localhost");
+                            boolean originChanged = !targetOrigin.equals(activeLiveOrigin);
+                            boolean buildChanged = !fingerprint.equals(activeLiveFingerprint);
+                            if (onLocalhost || originChanged || buildChanged) {
+                                activeLiveOrigin = targetOrigin;
+                                activeLiveFingerprint = fingerprint;
+                                wv.clearCache(false);
+                                wv.loadUrl(targetOrigin + "/");
+                            }
+                        } catch (Exception ignored) {}
+                    });
+                    break;
+                }
+            } catch (Exception ignored) {
+            } finally {
+                liveSyncInFlight = false;
+            }
+        });
     }
 
     private long getTotalRamMb() {
@@ -1727,7 +1963,8 @@ public class MainActivity extends BridgeActivity {
             apkUpdateState = "installing";
             apkUpdateProgress = 100;
             legacyInstallFallbackTried = false;
-            apkUpdateMessage = "Update installation was cancelled. Tap \"Tap to Install Update\" below to install inside the app.";
+            preferLegacyInstallerOnRetry = true;
+            apkUpdateMessage = "Update prompt closed. Tap \"Tap to Install Update\" below (ya \"Download & Install via Chrome\" try karein).";
             return;
         }
 
@@ -1806,6 +2043,82 @@ public class MainActivity extends BridgeActivity {
         }, "MoviePortalPackageInstaller").start();
     }
 
+    private List<String> extractSigningCertDigests(PackageInfo pkgInfo) {
+        List<String> digests = new ArrayList<>();
+        if (pkgInfo == null) return digests;
+        try {
+            Signature[] sigs = null;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && pkgInfo.signingInfo != null) {
+                SigningInfo si = pkgInfo.signingInfo;
+                sigs = si.hasMultipleSigners() ? si.getApkContentsSigners() : si.getSigningCertificateHistory();
+            }
+            if (sigs == null || sigs.length == 0) {
+                sigs = pkgInfo.signatures;
+            }
+            if (sigs != null) {
+                MessageDigest md = MessageDigest.getInstance("SHA-256");
+                for (Signature sig : sigs) {
+                    if (sig == null) continue;
+                    byte[] hash = md.digest(sig.toByteArray());
+                    StringBuilder sb = new StringBuilder();
+                    for (byte b : hash) {
+                        sb.append(String.format(Locale.US, "%02x", b));
+                    }
+                    digests.add(sb.toString());
+                }
+            }
+        } catch (Exception ignored) {}
+        return digests;
+    }
+
+    private String checkApkCompatibilityBeforeInstall(File apkFile) {
+        try {
+            int flags = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                ? PackageManager.GET_SIGNING_CERTIFICATES
+                : PackageManager.GET_SIGNATURES;
+            PackageInfo archiveInfo = getPackageManager().getPackageArchiveInfo(apkFile.getAbsolutePath(), flags);
+            if (archiveInfo == null || archiveInfo.packageName == null) {
+                return "Downloaded APK failed package verification. Tap Retry In-App Update.";
+            }
+            if (!getPackageName().equals(archiveInfo.packageName)) {
+                return "Downloaded APK package mismatch (" + archiveInfo.packageName + ").";
+            }
+
+            PackageInfo installedInfo = getPackageManager().getPackageInfo(getPackageName(), flags);
+            long installedCode = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                ? installedInfo.getLongVersionCode()
+                : installedInfo.versionCode;
+            long archiveCode = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                ? archiveInfo.getLongVersionCode()
+                : archiveInfo.versionCode;
+
+            String installedLabel = installedInfo.versionName != null ? "v" + installedInfo.versionName : ("#" + installedCode);
+            String archiveLabel = archiveInfo.versionName != null ? "v" + archiveInfo.versionName : ("#" + archiveCode);
+
+            if (archiveCode > 0 && installedCode > 0 && archiveCode < installedCode) {
+                return "Server par abhi purana APK (" + archiveLabel + ") hai aur aapke phone me " + installedLabel + " installed hai. Pehle naya release publish karein.";
+            }
+
+            List<String> installedSigs = extractSigningCertDigests(installedInfo);
+            List<String> archiveSigs = extractSigningCertDigests(archiveInfo);
+            if (!installedSigs.isEmpty() && !archiveSigs.isEmpty()) {
+                boolean anyMatch = false;
+                for (String aSig : archiveSigs) {
+                    if (installedSigs.contains(aSig)) {
+                        anyMatch = true;
+                        break;
+                    }
+                }
+                if (!anyMatch) {
+                    return "App signature mismatch (" + installedLabel + " vs " + archiveLabel + "). Purana app ek baar uninstall karke niche \"Download & Install via Chrome\" se naya APK install karein.";
+                }
+            }
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private void launchLegacyFileProviderInstaller(File apkFile) {
         try {
             Uri apkUri = FileProvider.getUriForFile(
@@ -1818,15 +2131,15 @@ public class MainActivity extends BridgeActivity {
             apkUpdateProgress = 100;
             apkUpdateMessage = "Update " + (verLabel.isEmpty() ? "" : verLabel + " ") + "ready! Tap Update / Install on the Android popup.";
 
-            Intent viewIntent = new Intent(Intent.ACTION_VIEW);
-            viewIntent.setDataAndType(apkUri, "application/vnd.android.package-archive");
-            viewIntent.setClipData(android.content.ClipData.newRawUri("", apkUri));
-            viewIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            viewIntent.putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true);
-            viewIntent.putExtra(Intent.EXTRA_RETURN_RESULT, true);
+            // Prefer direct ACTION_VIEW with FLAG_ACTIVITY_NEW_TASK (do NOT pass EXTRA_RETURN_RESULT or rely on singleTask startActivityForResult)
+            Intent newTaskViewIntent = new Intent(Intent.ACTION_VIEW);
+            newTaskViewIntent.setDataAndType(apkUri, "application/vnd.android.package-archive");
+            newTaskViewIntent.setClipData(android.content.ClipData.newRawUri("", apkUri));
+            newTaskViewIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+            newTaskViewIntent.putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true);
 
             try {
-                startActivityForResult(viewIntent, REQUEST_CODE_INSTALL_APK);
+                startActivity(newTaskViewIntent);
                 return;
             } catch (Exception primaryEx) {
                 Intent installPkgIntent = new Intent(Intent.ACTION_INSTALL_PACKAGE);
@@ -1840,29 +2153,18 @@ public class MainActivity extends BridgeActivity {
                     startActivityForResult(installPkgIntent, REQUEST_CODE_INSTALL_APK);
                     return;
                 } catch (Exception secondaryEx) {
-                    Intent newTaskViewIntent = new Intent(Intent.ACTION_VIEW);
-                    newTaskViewIntent.setDataAndType(apkUri, "application/vnd.android.package-archive");
-                    newTaskViewIntent.setClipData(android.content.ClipData.newRawUri("", apkUri));
-                    newTaskViewIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
-                    newTaskViewIntent.putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true);
-
-                    try {
-                        startActivity(newTaskViewIntent);
+                    if (!legacyInstallFallbackTried && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                        legacyInstallFallbackTried = true;
+                        installApkViaPackageInstallerSession(apkFile);
                         return;
-                    } catch (Exception newTaskEx) {
-                        if (!legacyInstallFallbackTried && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                            legacyInstallFallbackTried = true;
-                            installApkViaPackageInstallerSession(apkFile);
-                            return;
-                        }
-                        if (newTaskEx instanceof android.content.ActivityNotFoundException) {
-                            apkUpdateState = "error";
-                            apkUpdateProgress = 100;
-                            apkUpdateMessage = "No Android Package Installer found on this device.";
-                            return;
-                        }
-                        throw newTaskEx;
                     }
+                    if (secondaryEx instanceof android.content.ActivityNotFoundException) {
+                        apkUpdateState = "error";
+                        apkUpdateProgress = 100;
+                        apkUpdateMessage = "No Android Package Installer found on this device. Tap Download & Install via Chrome below.";
+                        return;
+                    }
+                    throw secondaryEx;
                 }
             }
         } catch (SecurityException secEx) {
@@ -1870,13 +2172,13 @@ public class MainActivity extends BridgeActivity {
             apkUpdateProgress = 100;
             apkUpdateMessage = "Android system security blocked in-app installation ("
                 + (secEx.getMessage() != null ? secEx.getMessage() : "SecurityException")
-                + "). Check Unknown Sources permission or tap Retry.";
+                + "). Tap Download & Install via Chrome below.";
         } catch (Exception e) {
             apkUpdateState = "error";
             apkUpdateProgress = 0;
             apkUpdateMessage = "Could not start Android installer ("
                 + (e.getMessage() != null ? e.getMessage() : "Unknown error")
-                + "). Tap Retry In-App Update.";
+                + "). Tap Download & Install via Chrome below.";
         }
     }
 
@@ -1892,6 +2194,14 @@ public class MainActivity extends BridgeActivity {
             apkUpdateState = "error";
             apkUpdateProgress = 0;
             apkUpdateMessage = "Downloaded APK failed package verification. Tap Retry In-App Update.";
+            return;
+        }
+
+        String compatIssue = checkApkCompatibilityBeforeInstall(apkFile);
+        if (compatIssue != null) {
+            apkUpdateState = "error";
+            apkUpdateProgress = 100;
+            apkUpdateMessage = compatIssue;
             return;
         }
 
@@ -1912,19 +2222,15 @@ public class MainActivity extends BridgeActivity {
 
         pendingInstallAfterPermission = false;
         legacyInstallFallbackTried = false;
-        launchLegacyFileProviderInstaller(apkFile);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            installApkViaPackageInstallerSession(apkFile);
+        } else {
+            launchLegacyFileProviderInstaller(apkFile);
+        }
     }
 
     private File resolveApkDownloadDir() {
-        File internalUpdatesDir = new File(getFilesDir(), "apk_updates");
-        if (!internalUpdatesDir.exists()) {
-            internalUpdatesDir.mkdirs();
-        }
         long minRecommendedBytes = 60L * 1024L * 1024L;
-        if (internalUpdatesDir.exists() && internalUpdatesDir.canWrite() && internalUpdatesDir.getUsableSpace() >= minRecommendedBytes) {
-            return internalUpdatesDir;
-        }
-
         File externalDir = null;
         try {
             externalDir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
@@ -1933,9 +2239,15 @@ public class MainActivity extends BridgeActivity {
             if (!externalDir.exists()) {
                 externalDir.mkdirs();
             }
-            if (externalDir.exists() && externalDir.canWrite() && externalDir.getUsableSpace() >= minRecommendedBytes) {
+            if (externalDir.exists() && externalDir.canWrite()
+                && (externalDir.getUsableSpace() == 0 || externalDir.getUsableSpace() >= minRecommendedBytes)) {
                 return externalDir;
             }
+        }
+
+        File internalUpdatesDir = new File(getFilesDir(), "apk_updates");
+        if (!internalUpdatesDir.exists()) {
+            internalUpdatesDir.mkdirs();
         }
         if (internalUpdatesDir.exists() && internalUpdatesDir.canWrite()) {
             return internalUpdatesDir;
@@ -1993,6 +2305,7 @@ public class MainActivity extends BridgeActivity {
         lastApkDownloadUrl = cleanUrl;
         if (isDownloadingApk && "downloading".equals(apkUpdateState)) return;
         isDownloadingApk = true;
+        preferLegacyInstallerOnRetry = false;
         final long sessionSeq = ++apkDownloadSessionSeq;
         apkUpdateState = "downloading";
         apkUpdateProgress = 1;
@@ -2989,11 +3302,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.265");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.267");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.265\",\"versionCode\":35265}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.267\",\"versionCode\":35267}";
             }
         }
 
@@ -3061,7 +3374,23 @@ public class MainActivity extends BridgeActivity {
         public void retryInstallDownloadedApk() {
             runOnUiThread(() -> {
                 if (isValidParsedApkPackage(downloadedApkFile)) {
-                    launchApkPackageInstaller(downloadedApkFile);
+                    if (preferLegacyInstallerOnRetry) {
+                        preferLegacyInstallerOnRetry = false;
+                        String compatIssue = checkApkCompatibilityBeforeInstall(downloadedApkFile);
+                        if (compatIssue != null) {
+                            apkUpdateState = "error";
+                            apkUpdateProgress = 100;
+                            apkUpdateMessage = compatIssue;
+                            return;
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !getPackageManager().canRequestPackageInstalls()) {
+                            launchApkPackageInstaller(downloadedApkFile);
+                            return;
+                        }
+                        launchLegacyFileProviderInstaller(downloadedApkFile);
+                    } else {
+                        launchApkPackageInstaller(downloadedApkFile);
+                    }
                 } else if (lastApkDownloadUrl != null && !lastApkDownloadUrl.isEmpty()) {
                     startApkDownloadManager(lastApkDownloadUrl);
                 } else {
@@ -3074,10 +3403,18 @@ public class MainActivity extends BridgeActivity {
         public void openApkDownloadInBrowser(final String apkUrl) {
             final String targetUrl = (apkUrl != null && !apkUrl.trim().isEmpty())
                 ? apkUrl.trim()
-                : lastApkDownloadUrl;
-            if (targetUrl == null || targetUrl.isEmpty()) return;
+                : (lastApkDownloadUrl != null && !lastApkDownloadUrl.isEmpty()
+                    ? lastApkDownloadUrl
+                    : "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk");
             runOnUiThread(() -> {
-                startApkDownloadManager(targetUrl);
+                try {
+                    Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl));
+                    browserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(browserIntent);
+                } catch (Exception e) {
+                    apkUpdateState = "error";
+                    apkUpdateMessage = "Could not open browser (" + (e.getMessage() != null ? e.getMessage() : "Error") + ").";
+                }
             });
         }
 

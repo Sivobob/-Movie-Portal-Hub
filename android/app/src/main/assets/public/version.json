@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.251",
-  "minimumRequiredVersion": "3.5.200",
-  "latestVersionCode": 3471,
-  "minimumRequiredVersionCode": 3000,
+  "latestVersion": "3.5.267",
+  "minimumRequiredVersion": "3.5.267",
+  "latestVersionCode": 35267,
+  "minimumRequiredVersionCode": 35267,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
-  "isMandatory": false,
-  "updateMessage": "Movie Hub v3.5.251 is live! Includes 24/7 Telegram auto-sync, enhanced duplicate protection, and robust in-app update stability.",
-  "releaseNotes": "v3.5.251: Synced app version code to 3471, resolved update looping, and optimized in-app update delivery."
+  "isMandatory": true,
+  "updateMessage": "Movie Hub v3.5.267 is live! Fixed in-app APK installation + Chrome fallback, distinct 360p/480p/720p HD/1080p quality, auto-360p, resume on quality switch, all-format playback, and clean UI.",
+  "releaseNotes": "v3.5.267: Fixed in-app PackageInstaller & Chrome fallback, updated Telegram channel sync, removed HD/HDTC/views/Featured/Messages clutter, calibrated 360p & sharp 720p HD, white loading indicator, exact timestamp resume on quality switch, and 8MB chunk Android streaming stability."
 }

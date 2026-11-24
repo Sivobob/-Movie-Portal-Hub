@@ -2,7 +2,6 @@ import React, { memo } from 'react';
 import { motion } from 'framer-motion';
 import { upgradePosterUrl } from '../utils/posterUrl';
 import { getVisibleQualityBadge } from '../utils/qualityBadge';
-import MovieViewsCounter from './MovieViewsCounter';
 
 const MovieCard = memo(({ 
   movie, 
@@ -62,10 +61,6 @@ const MovieCard = memo(({
           <h3 className="text-white text-[11px] sm:text-xs font-black truncate drop-shadow">{movie.title}</h3>
           <p className="text-gray-400 text-[9px] sm:text-[10px] font-bold truncate">{movie.releaseYear || 2026} • {movie.genre || movie.displayCategory || 'Movie'}</p>
         </div>
-      </div>
-
-      <div className="mt-1 px-0.5 flex items-center justify-end">
-        <MovieViewsCounter movie={movie} />
       </div>
     </motion.div>
   );

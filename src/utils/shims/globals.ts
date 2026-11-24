@@ -35,3 +35,15 @@ try {
   }
 } catch {}
 
+// When Android APK loads live remote HTTPS URLs inside WebView, preserve Capacitor native platform detection
+try {
+  if (
+    typeof window !== 'undefined' &&
+    ((g as any).AndroidPlayerBridge || (g as any).AndroidStreamBridge) &&
+    !(g as any).androidBridge &&
+    !(g as any).CapacitorCustomPlatform
+  ) {
+    (g as any).CapacitorCustomPlatform = { name: 'android' };
+  }
+} catch {}
+

@@ -1,7 +1,8 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { TelegramClient } from 'telegram';
+import { TelegramClient, Logger } from 'telegram';
+import { LogLevel } from 'telegram/extensions/Logger.js';
 import { StringSession } from 'telegram/sessions/index.js';
 import { initializeChannelCache } from './channelRegistry.ts';
 
@@ -125,6 +126,14 @@ function ensureServerKeepalive(activeClient: TelegramClient) {
   (timer as any).unref?.();
 }
 
+const TELEGRAM_DC_ENDPOINTS: Array<{ id: number; ip: string; port: number }> = [
+  { id: 5, ip: '91.108.56.130', port: 443 },
+  { id: 2, ip: '149.154.167.51', port: 443 },
+  { id: 1, ip: '149.154.175.53', port: 443 },
+  { id: 4, ip: '149.154.167.91', port: 443 },
+  { id: 3, ip: '149.154.175.100', port: 443 },
+];
+
 export async function getTelegramClient(): Promise<TelegramClient> {
   if (client) {
     if (client.connected) {
@@ -151,43 +160,88 @@ export async function getTelegramClient(): Promise<TelegramClient> {
       throw new Error('Telegram credentials incomplete in environment.');
     }
 
-    const stringSession = new StringSession(sessionStr || '');
-    const newClient = new TelegramClient(stringSession, apiId, apiHash, {
-      connectionRetries: 15,
-      autoReconnect: true,
-      useWSS: false,
-      floodSleepThreshold: 60,
-      maxConcurrentDownloads: 20,
-    });
+    let connectedClient: TelegramClient | null = null;
 
     if (sessionStr) {
-      await newClient.connect();
-      console.log('[TelegramClient] Connected using Telegram Account Session String');
-    } else if (botToken) {
-      await newClient.start({ botAuthToken: botToken });
-      console.log('[TelegramClient] Connected using Telegram Bot Auth Token');
-
-      // Save session to tmpdir for future reuse within this container only
-      const savedSession = newClient.session.save() as any;
-      if (savedSession && typeof savedSession === 'string' && savedSession.length > 10) {
-        try {
-          fs.writeFileSync(SESSION_FILE_PATH, savedSession, 'utf-8');
-          console.log('[TelegramClient] New session cached in tmpdir');
-        } catch (e) {
-          console.warn('[TelegramClient] Failed to save session:', e);
+      const savedSessionClient = new TelegramClient(new StringSession(sessionStr), apiId, apiHash, {
+        connectionRetries: 10,
+        requestRetries: 5,
+        retryDelay: 2000,
+        autoReconnect: true,
+        useWSS: false,
+        floodSleepThreshold: 60,
+        maxConcurrentDownloads: 20,
+        baseLogger: new Logger(LogLevel.ERROR),
+      });
+      try {
+        await savedSessionClient.connect();
+        if (savedSessionClient.connected) {
+          connectedClient = savedSessionClient;
+          console.log('[TelegramClient] Connected using cached Telegram Session');
+        } else {
+          try { await savedSessionClient.disconnect(); } catch {}
         }
+      } catch (savedErr: any) {
+        console.warn('[TelegramClient] Cached session connect failed, refreshing bot session:', savedErr?.message || savedErr);
+        try { await savedSessionClient.disconnect(); } catch {}
+        try {
+          if (fs.existsSync(SESSION_FILE_PATH)) fs.unlinkSync(SESSION_FILE_PATH);
+        } catch {}
+        if (!botToken) throw savedErr;
       }
     }
 
-    client = newClient;
-    ensureServerKeepalive(newClient);
+    if (!connectedClient && botToken) {
+      let lastErr: any = null;
+      for (const dc of TELEGRAM_DC_ENDPOINTS) {
+        const dcSession = new StringSession('');
+        dcSession.setDC(dc.id, dc.ip, dc.port);
+        const attemptClient = new TelegramClient(dcSession, apiId, apiHash, {
+          connectionRetries: 6,
+          requestRetries: 3,
+          retryDelay: 1500,
+          autoReconnect: true,
+          useWSS: false,
+          floodSleepThreshold: 60,
+          maxConcurrentDownloads: 20,
+          baseLogger: new Logger(LogLevel.ERROR),
+        });
+        try {
+          await attemptClient.start({ botAuthToken: botToken });
+          connectedClient = attemptClient;
+          console.log(`[TelegramClient] Connected via DC ${dc.id} using Telegram Bot Auth Token`);
+
+          const savedSession = attemptClient.session.save() as any;
+          if (savedSession && typeof savedSession === 'string' && savedSession.length > 10) {
+            try {
+              fs.writeFileSync(SESSION_FILE_PATH, savedSession, 'utf-8');
+            } catch {}
+          }
+          break;
+        } catch (dcErr: any) {
+          lastErr = dcErr;
+          console.warn(`[TelegramClient] DC ${dc.id} bot login fallback (${dcErr?.errorMessage || dcErr?.message || dcErr})`);
+          try { await attemptClient.disconnect(); } catch {}
+        }
+      }
+      if (!connectedClient) {
+        throw lastErr || new Error('Failed to connect Telegram Bot across all DCs.');
+      }
+    }
+
+    if (!connectedClient) {
+      throw new Error('Failed to establish Telegram client connection.');
+    }
+
+    client = connectedClient;
+    ensureServerKeepalive(connectedClient);
 
     // Asynchronously warm up channel entity cache
-    initializeChannelCache(newClient).catch(err => {
+    initializeChannelCache(connectedClient).catch(err => {
       console.warn('[TelegramClient] Channel cache warmup note:', err?.message || err);
     });
 
-    return newClient;
+    return connectedClient;
   })()
     .catch(err => {
       client = null;

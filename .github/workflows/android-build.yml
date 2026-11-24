@@ -59,25 +59,31 @@ jobs:
             echo "No persistent keystore secret configured; using Gradle default debug keystore."
           fi
 
+      - name: Setup Gradle Cache
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Build Android APK (Gradle)
         working-directory: android
         run: |
           chmod +x gradlew
-          echo "Cleaning gradle caches and transforms..."
+          echo "Cleaning gradle transforms and journals..."
           rm -rf ~/.gradle/caches/transforms-*
           rm -rf ~/.gradle/caches/journal-*
           rm -rf ~/.gradle/caches/8.2.1/transforms/
-          if [ -f "app/keystores/release.jks" ] && [ -n "${{ secrets.RELEASE_STORE_PASSWORD }}" ] && [ -n "${{ secrets.RELEASE_KEY_ALIAS }}" ] && [ -n "${{ secrets.RELEASE_KEY_PASSWORD }}" ]; then
-            echo "Building signed release APK..."
-            ./gradlew clean assembleRelease --no-daemon --stacktrace \
-              -PRELEASE_STORE_FILE="keystores/release.jks" \
-              -PRELEASE_STORE_PASSWORD="${{ secrets.RELEASE_STORE_PASSWORD }}" \
-              -PRELEASE_KEY_ALIAS="${{ secrets.RELEASE_KEY_ALIAS }}" \
-              -PRELEASE_KEY_PASSWORD="${{ secrets.RELEASE_KEY_PASSWORD }}"
-          else
-            echo "Building standard APK..."
-            ./gradlew clean assembleDebug --no-daemon --stacktrace
-          fi
+          run_gradle() {
+            if [ -f "app/keystores/release.jks" ] && [ -n "${{ secrets.RELEASE_STORE_PASSWORD }}" ] && [ -n "${{ secrets.RELEASE_KEY_ALIAS }}" ] && [ -n "${{ secrets.RELEASE_KEY_PASSWORD }}" ]; then
+              echo "Building signed release APK..."
+              ./gradlew clean assembleRelease --no-daemon --max-workers=2 --stacktrace \
+                -PRELEASE_STORE_FILE="keystores/release.jks" \
+                -PRELEASE_STORE_PASSWORD="${{ secrets.RELEASE_STORE_PASSWORD }}" \
+                -PRELEASE_KEY_ALIAS="${{ secrets.RELEASE_KEY_ALIAS }}" \
+                -PRELEASE_KEY_PASSWORD="${{ secrets.RELEASE_KEY_PASSWORD }}"
+            else
+              echo "Building standard APK..."
+              ./gradlew clean assembleDebug --no-daemon --max-workers=2 --stacktrace
+            fi
+          }
+          run_gradle || (echo "Retrying Gradle build after 15s (transient Maven/network backoff)..." && sleep 15 && run_gradle)
 
       - name: Verify Signed Release APK
         run: |

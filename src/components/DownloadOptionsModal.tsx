@@ -265,8 +265,8 @@ export default function DownloadOptionsModal({
         (k) => k.toLowerCase() === est.tier.toLowerCase()
       );
       const dedicatedUrl = matchedKey ? String(rawQualitiesMap[matchedKey] || '').trim() : '';
-      const hasDedicated = Boolean(dedicatedUrl);
-      const targetUrl = dedicatedUrl || primaryStreamUrl;
+      const hasDedicated = Boolean(dedicatedUrl && dedicatedUrl !== primaryStreamUrl.trim());
+      const targetUrl = hasDedicated ? dedicatedUrl : primaryStreamUrl;
 
       list.push({
         id: est.tier,

@@ -269,6 +269,7 @@ export default function VideoPlayerModal({
   const userPickedQualityRef = useRef<boolean>(false);
   const exoNetworkRecoveryAttemptsRef = useRef<number>(0);
   const html5NetworkRecoveryAttemptsRef = useRef<number>(0);
+  const lastManualQualityPickAtRef = useRef<number>(0);
 
   // Runtime Android device and decoder capabilities from native bridge
   const deviceCapabilities = useMemo(() => {
@@ -307,10 +308,35 @@ export default function VideoPlayerModal({
   const lockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [videoFit, setVideoFit] = useState<'contain' | 'cover' | 'fill'>('contain');
   const [selectedQuality, setSelectedQuality] = useState<string>('Auto');
+  const selectedQualityRef = useRef<string>('Auto');
+  selectedQualityRef.current = selectedQuality;
   const [showLanguageMenu, setShowLanguageMenu] = useState(false);
   const [showQualityMenu, setShowQualityMenu] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [fitNotice, setFitNotice] = useState<string | null>(null);
+
+  const triggerAutoSlow360pSwitch = (posSec: number) => {
+    const curQ = (selectedQualityRef.current || 'Auto').trim().toUpperCase();
+    if (curQ === '360P' || curQ === 'OFFLINE') return;
+    const curUrl = String(preflightCacheRef.current?.url || activeStreamUrl || '').trim();
+    if (!curUrl || /^(file:|blob:)/i.test(curUrl)) return;
+    if (Capacitor.isNativePlatform() && !hasRemoteTranscodeBackend()) return;
+    if (Date.now() - lastManualQualityPickAtRef.current < 12000) return;
+
+    const safePos = Math.max(0, Number.isFinite(posSec) && posSec > 0 ? posSec : (currentTimeRef.current || 0));
+    console.warn(`[VideoPlayer] Slow network detected at ${safePos.toFixed(1)}s — switching to 360P`);
+    resumeOffsetRef.current = safePos;
+    selectedQualityRef.current = '360P';
+    setSelectedQuality('360P');
+    setFallbackStage('level3_transcode');
+    fallbackStageRef.current = 'level3_transcode';
+    setStreamFallbackMode('transcode');
+    streamFallbackModeRef.current = 'transcode';
+    const offsetFloor = Math.floor(safePos);
+    setStreamStartOffset(offsetFloor);
+    streamStartOffsetRef.current = offsetFloor;
+    setIsLoading(true);
+  };
 
   // Real detected audio and subtitle tracks
   const [realAudioTracks, setRealAudioTracks] = useState<Array<{ id: number | string; label: string; lang?: string }>>([
@@ -792,16 +818,31 @@ export default function VideoPlayerModal({
               durationRef.current = info.durationSec;
               setDuration(info.durationSec);
             }
+            const navConn = (navigator as any)?.connection;
+            const isInitialSlowNet = Boolean(
+              navConn &&
+              (navConn.saveData ||
+                navConn.effectiveType === '2g' ||
+                navConn.effectiveType === 'slow-2g' ||
+                (typeof navConn.downlink === 'number' && navConn.downlink > 0 && navConn.downlink < 0.7))
+            );
+            const startSlow360p = !userPickedQualityRef.current && isInitialSlowNet && remoteTranscodeAvailable;
+
             if (typeof info.height === 'number' && info.height > 0) {
               probedHeight = info.height;
-              if (!userPickedQualityRef.current) {
-                setSelectedQuality(
-                  info.height <= 520 ? '480P' : info.height <= 780 ? '720P' : '1080P'
-                );
+              if (!userPickedQualityRef.current && !startSlow360p) {
+                const autoQ = info.height <= 520 ? '480P' : info.height <= 780 ? '720P' : '1080P';
+                selectedQualityRef.current = autoQ;
+                setSelectedQuality(autoQ);
               }
             }
 
-            if (!exoCapable) {
+            if (startSlow360p) {
+              selectedQualityRef.current = '360P';
+              setSelectedQuality('360P');
+              chosenMode = 'transcode';
+              chosenStage = 'level3_transcode';
+            } else if (!exoCapable) {
               // Chrome / Mobile Web / iOS Safari HTML5 playback evaluation
               if (
                 info.recommendedMode === 'remux' ||
@@ -827,11 +868,17 @@ export default function VideoPlayerModal({
                     : 'level1_hw';
             } else {
               // Native Android Media3 ExoPlayer intelligent codec + audio + resolution evaluation
+              const pixFmtLower = String(info.pixFmt || '').toLowerCase();
               const is10BitStream = Boolean(
                 info.is10Bit ||
-                String(info.pixFmt || '').includes('10le') ||
-                String(info.pixFmt || '').includes('10be') ||
-                String(info.pixFmt || '').includes('12le')
+                pixFmtLower.includes('10le') ||
+                pixFmtLower.includes('10be') ||
+                pixFmtLower.includes('p10') ||
+                pixFmtLower.includes('12le') ||
+                pixFmtLower.includes('12be') ||
+                pixFmtLower.includes('p12') ||
+                pixFmtLower.includes('yuv422') ||
+                pixFmtLower.includes('yuv444')
               );
               const vCodec = String(info.videoCodec || '').toLowerCase();
               const aCodec = String(info.audioCodec || '').toLowerCase();
@@ -860,18 +907,16 @@ export default function VideoPlayerModal({
               if (audioIncompatible && remoteTranscodeAvailable) {
                 chosenMode = 'transcode';
                 chosenStage = 'level3_transcode';
+              } else if (is10BitStream && !deviceSupports10BitHw && remoteTranscodeAvailable) {
+                chosenMode = 'transcode';
+                chosenStage = 'level3_transcode';
               } else if (is10BitStream && !deviceSupports10Bit && remoteTranscodeAvailable) {
                 chosenMode = 'transcode';
                 chosenStage = 'level3_transcode';
               } else if (is10BitStream && !deviceSupports10BitHw && deviceHasSoftwareHevc) {
-                if (remoteTranscodeAvailable && is4KStream) {
-                  chosenMode = 'transcode';
-                  chosenStage = 'level3_transcode';
-                } else {
-                  chosenMode = 'direct';
-                  chosenStage = 'level2_sw';
-                  initialPreferSw = true;
-                }
+                chosenMode = 'direct';
+                chosenStage = 'level2_sw';
+                initialPreferSw = true;
               } else if (isHevcStream && !deviceHasHardwareHevc) {
                 if (remoteTranscodeAvailable && (!deviceHasSoftwareHevc || is4KStream || (info.height && info.height > 1088))) {
                   chosenMode = 'transcode';
@@ -996,10 +1041,15 @@ export default function VideoPlayerModal({
     const qTier = (selectedQuality || 'Auto').trim().toLowerCase();
     const isExplicitTier = qTier === '1080p' || qTier === '720p' || qTier === '480p' || qTier === '360p';
 
-    // 1. Check if admin uploaded a dedicated link for this chosen quality
-    const explicitUrl =
+    // 1. Check if admin uploaded a dedicated link for this chosen quality (must differ from primary stream URL)
+    const rawExplicit =
       isExplicitTier &&
       (videoQualities?.[qTier] || videoQualities?.[selectedQuality] || '');
+    const trimmedExplicit = String(rawExplicit || '').trim();
+    const explicitUrl =
+      trimmedExplicit && trimmedExplicit !== trimmed.trim()
+        ? trimmedExplicit
+        : '';
     const sourceUrl = String(explicitUrl || trimmed).trim();
     const isTelegram = /t\.me|telegram\.me/i.test(sourceUrl);
     const sourceHeight = preflightCacheRef.current.sourceHeight || 0;
@@ -1026,8 +1076,10 @@ export default function VideoPlayerModal({
     // Route server remux/transcode streams through our seekable chunked VOD Apple HLS (.m3u8) pipeline
     // on ALL Web browsers (Desktop Chrome, Android Chrome, iOS Safari) and native APK remote backends
     // so short 4s .ts chunk requests never hit reverse-proxy ~10-15 minute single-HTTP-connection timeouts.
+    const isMp4Direct = !preflightCacheRef.current?.recommendedMode || preflightCacheRef.current.recommendedMode === 'direct';
     const useHlsPipeline =
-      (isServerPipe || (isIosWeb && isTelegram)) &&
+      isServerPipe &&
+      (!isIosWeb || !isMp4Direct || needsScaledTranscode) &&
       (!Capacitor.isNativePlatform() || hasRemoteTranscodeBackend());
 
     if (useHlsPipeline) {
@@ -1308,6 +1360,9 @@ export default function VideoPlayerModal({
     let bufferingStallStartMs = 0;
     let bufferingLastProgressMetric = -1;
     let smoothPlaybackSinceMs = 0;
+    let exoStallIncidentCount = 0;
+    let exoStallWindowStartMs = 0;
+    let exoLastCountedStallStartMs = 0;
 
     const escalateExoPlayback = (reason: string, preservePosSec: number) => {
       if (escalated || cancelled) return;
@@ -1342,7 +1397,7 @@ export default function VideoPlayerModal({
 
       // If playback hit a transient mid-stream stall/EOF/network drop,
       // reconnect at the exact same healthy stage & position rather than ending or downgrading codecs!
-      if (isNetworkOrStall && safePos >= 10 && exoNetworkRecoveryAttemptsRef.current < 6) {
+      if (isNetworkOrStall && safePos >= 10 && exoNetworkRecoveryAttemptsRef.current < 20) {
         exoNetworkRecoveryAttemptsRef.current += 1;
         if (!isHlsExo && /[?&](transcode|remux)=1/i.test(playableUrl)) {
           setStreamStartOffset(safePos);
@@ -1475,15 +1530,43 @@ export default function VideoPlayerModal({
           lastFrameAdvanceMs = Date.now();
         }
 
-        // Infinite buffering stall guard (45s stuck buffering with zero buffered growth)
+        // Infinite buffering stall guard & slow-network 360P downgrade
         if (st.state === 2) {
           const metric = rawBuffered + rawPos;
+          const nowMs = Date.now();
           if (bufferingStallStartMs === 0 || Math.abs(metric - bufferingLastProgressMetric) > 0.15) {
-            bufferingStallStartMs = Date.now();
+            bufferingStallStartMs = nowMs;
             bufferingLastProgressMetric = metric;
-          } else if (Date.now() - bufferingStallStartMs > 45000) {
-            escalateExoPlayback('buffering_timeout', effectiveTime);
-            return;
+          } else {
+            const stallElapsed = nowMs - bufferingStallStartMs;
+            if (
+              st.firstFrameRendered &&
+              hasRemoteTranscodeBackend() &&
+              (selectedQualityRef.current || '').toUpperCase() !== '360P' &&
+              nowMs - lastManualQualityPickAtRef.current >= 12000
+            ) {
+              if (stallElapsed >= 2000 && exoLastCountedStallStartMs !== bufferingStallStartMs) {
+                exoLastCountedStallStartMs = bufferingStallStartMs;
+                if (nowMs - exoStallWindowStartMs > 40000) {
+                  exoStallWindowStartMs = nowMs;
+                  exoStallIncidentCount = 1;
+                } else {
+                  exoStallIncidentCount += 1;
+                }
+              }
+              if (stallElapsed >= 8000 || exoStallIncidentCount >= 2) {
+                escalated = true;
+                clearInterval(pollTimer);
+                bridge.stopExoMedia?.();
+                abortLocalBridgeStreams();
+                triggerAutoSlow360pSwitch(effectiveTime);
+                return;
+              }
+            }
+            if (stallElapsed > 45000) {
+              escalateExoPlayback('buffering_timeout', effectiveTime);
+              return;
+            }
           }
         } else {
           bufferingStallStartMs = 0;
@@ -1499,7 +1582,7 @@ export default function VideoPlayerModal({
             }
             if (smoothPlaybackSinceMs === 0) {
               smoothPlaybackSinceMs = Date.now();
-            } else if (Date.now() - smoothPlaybackSinceMs > 20000) {
+            } else if (Date.now() - smoothPlaybackSinceMs > 12000) {
               exoNetworkRecoveryAttemptsRef.current = 0;
             }
           } else {
@@ -1513,8 +1596,13 @@ export default function VideoPlayerModal({
         setIsLoading(Boolean(st.isBuffering || (st.state === 1 && !st.isPlaying && !st.ended)));
 
         if (!isDraggingSeekRef.current && typeof st.currentTime === 'number') {
-          setCurrentTime(effectiveTime);
-          currentTimeRef.current = effectiveTime;
+          if (exoStartOffset > 3 && !st.firstFrameRendered && effectiveTime < exoStartOffset - 3) {
+            setCurrentTime(exoStartOffset);
+            currentTimeRef.current = exoStartOffset;
+          } else {
+            setCurrentTime(effectiveTime);
+            currentTimeRef.current = effectiveTime;
+          }
         }
         if (typeof st.bufferedPosition === 'number') {
           setBufferedTime(effectiveBuffered);
@@ -1582,7 +1670,7 @@ export default function VideoPlayerModal({
         if (st.ended && !endedHandled) {
           const knownDur = knownDurationRef.current || durationRef.current || 0;
           const isPrematureEnd = knownDur > 90 && effectiveTime > 10 && effectiveTime < knownDur - 25;
-          if (isPrematureEnd && exoNetworkRecoveryAttemptsRef.current < 6) {
+          if (isPrematureEnd && exoNetworkRecoveryAttemptsRef.current < 20) {
             escalateExoPlayback('premature_eof', effectiveTime);
             return;
           }
@@ -1614,8 +1702,8 @@ export default function VideoPlayerModal({
     let hlsInstance: Hls | null = null;
     const isHlsUrl = /\.m3u8/i.test(playableUrl);
     const isAppleDevice = isAppleMobileBrowser();
-    // Use hls.js (ManagedMediaSource on iOS 17.1+ / MSE elsewhere) unless native iOS fallback was triggered
-    const usesHlsJs = isHlsUrl && Hls.isSupported() && !forceNativeIosHls;
+    // Use hls.js on non-Apple devices; Apple devices (iPhone/iPad/Safari) play .m3u8 natively via built-in AVPlayer!
+    const usesHlsJs = isHlsUrl && Hls.isSupported() && !isAppleDevice && !forceNativeIosHls;
     const canSeekDirectTimeline = streamFallbackModeRef.current === 'direct' || isHlsUrl;
 
     // Determine exact initial seek position before starting HTML5/HLS playback
@@ -1658,12 +1746,15 @@ export default function VideoPlayerModal({
         pendingSeekTarget = null;
         return;
       }
-      if (Math.abs(video.currentTime - pendingSeekTarget) <= 1.2) {
+      if (Math.abs(video.currentTime - pendingSeekTarget) <= 2.5) {
         seekConfirmed = true;
         pendingSeekTarget = null;
         return;
       }
-      if (seekAttempts < 4) {
+      if (video.readyState < 1) {
+        return;
+      }
+      if (seekAttempts < 12) {
         seekAttempts += 1;
         try {
           video.currentTime = pendingSeekTarget;
@@ -1821,11 +1912,35 @@ export default function VideoPlayerModal({
         startHtml5Playback();
       });
 
+      let consecutiveSlowFrags = 0;
+      hlsInstance.on(Hls.Events.FRAG_LOADED, (_event, data: any) => {
+        if (cancelled || !hasPlayedAnyFrame) return;
+        const stats = data?.frag?.stats;
+        const loadedBytes = Number(stats?.loaded || stats?.total || 0);
+        const tReq = Number(stats?.loading?.start || 0);
+        const tEnd = Number(stats?.loading?.end || 0);
+        const dlMs = tEnd > tReq ? tEnd - tReq : 0;
+        if (dlMs > 1500 && loadedBytes > 65536) {
+          const kbps = (loadedBytes * 8) / dlMs;
+          if (kbps < 380) {
+            consecutiveSlowFrags += 1;
+            if (consecutiveSlowFrags >= 2) {
+              consecutiveSlowFrags = 0;
+              triggerAutoSlow360pSwitch(currentTimeRef.current || video.currentTime || 0);
+            }
+          } else {
+            consecutiveSlowFrags = 0;
+          }
+        } else if (dlMs > 0 && loadedBytes > 65536) {
+          consecutiveSlowFrags = 0;
+        }
+      });
+
       let hlsRecoverCount = 0;
       let lastMediaRecoverAt = 0;
       hlsInstance.on(Hls.Events.ERROR, (_event, data) => {
         if (!data.fatal || cancelled) return;
-        if (hlsRecoverCount < 6) {
+        if (hlsRecoverCount < 10) {
           hlsRecoverCount += 1;
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
             const resumeAt = Math.max(0, Math.floor(currentTimeRef.current || 0));
@@ -1851,7 +1966,7 @@ export default function VideoPlayerModal({
             return;
           }
         }
-        if (currentTimeRef.current >= 5 && html5NetworkRecoveryAttemptsRef.current < 8) {
+        if (currentTimeRef.current >= 5 && html5NetworkRecoveryAttemptsRef.current < 20) {
           html5NetworkRecoveryAttemptsRef.current += 1;
           setIsLoading(true);
           resumeOffsetRef.current = currentTimeRef.current;
@@ -1881,6 +1996,8 @@ export default function VideoPlayerModal({
       if (video.getAttribute('src') !== playableUrl) {
         video.src = playableUrl;
       }
+      tryApplyPendingSeek();
+      startHtml5Playback();
     }
 
     const onPlay = () => {
@@ -1894,6 +2011,10 @@ export default function VideoPlayerModal({
     };
 
     const onTimeUpdate = () => {
+      if (pendingSeekTarget !== null && pendingSeekTarget > 3 && video.currentTime < pendingSeekTarget - 3) {
+        tryApplyPendingSeek();
+        return;
+      }
       const activeMode = streamFallbackModeRef.current;
       const startOff = !isHlsUrl && activeMode !== 'direct' ? streamStartOffsetRef.current : 0;
       const effectiveTime = startOff + video.currentTime;
@@ -2150,7 +2271,7 @@ export default function VideoPlayerModal({
         knownDur > 90 &&
         activePos > 10 &&
         activePos < knownDur - 25 &&
-        html5NetworkRecoveryAttemptsRef.current < 8;
+        html5NetworkRecoveryAttemptsRef.current < 20;
       if (isPrematureHtml5End) {
         html5NetworkRecoveryAttemptsRef.current += 1;
         setIsLoading(true);
@@ -2203,7 +2324,7 @@ export default function VideoPlayerModal({
           return;
         }
         // Same-mode transient mid-stream reconnect (never permanently drop a movie mid-way on transient glitches)
-        if (currentTimeRef.current >= 5 && html5NetworkRecoveryAttemptsRef.current < 8) {
+        if (currentTimeRef.current >= 5 && html5NetworkRecoveryAttemptsRef.current < 20) {
           html5NetworkRecoveryAttemptsRef.current += 1;
           const activePos = currentTimeRef.current;
           setIsLoading(true);
@@ -2225,7 +2346,7 @@ export default function VideoPlayerModal({
           setUseLocalBridgeFallback(true);
           return;
         }
-      } else if (currentTimeRef.current >= 5 && html5NetworkRecoveryAttemptsRef.current < 6) {
+      } else if (currentTimeRef.current >= 5 && html5NetworkRecoveryAttemptsRef.current < 20) {
         html5NetworkRecoveryAttemptsRef.current += 1;
         setIsLoading(true);
         resumeOffsetRef.current = currentTimeRef.current;
@@ -2367,11 +2488,14 @@ export default function VideoPlayerModal({
       }
     }, streamFallbackMode === 'direct' ? 12000 : 28000);
 
-    // Mid-playback stall watchdog: ensures streams never freeze silently around 10-11 minutes
+    // Mid-playback stall watchdog: ensures streams never freeze silently around 10-15 minutes & drops to 360P on slow net
     let lastWatchPos = video.currentTime || 0;
     let lastAdvanceAtMs = Date.now();
     let smoothRunSinceMs = 0;
     let nudgeTriedForCurrentStall = false;
+    let stallEventsWindowStartMs = 0;
+    let stallEventsCount = 0;
+    let countedCurrentStall = false;
     const html5StallWatchdog = setInterval(() => {
       if (cancelled || autoplayBlockedRef.current) return;
       if (video.paused || video.ended) {
@@ -2385,16 +2509,35 @@ export default function VideoPlayerModal({
         lastWatchPos = posNow;
         lastAdvanceAtMs = Date.now();
         nudgeTriedForCurrentStall = false;
+        countedCurrentStall = false;
         if (smoothRunSinceMs === 0) {
           smoothRunSinceMs = Date.now();
-        } else if (Date.now() - smoothRunSinceMs > 20000) {
+        } else if (Date.now() - smoothRunSinceMs > 12000) {
           html5NetworkRecoveryAttemptsRef.current = 0;
         }
         return;
       }
 
       smoothRunSinceMs = 0;
-      const stallMs = Date.now() - lastAdvanceAtMs;
+      const now = Date.now();
+      const stallMs = now - lastAdvanceAtMs;
+
+      if (hasPlayedAnyFrame && (selectedQualityRef.current || '').toUpperCase() !== '360P' && now - lastManualQualityPickAtRef.current >= 12000) {
+        if (stallMs >= 2500 && !countedCurrentStall) {
+          countedCurrentStall = true;
+          if (now - stallEventsWindowStartMs > 40000) {
+            stallEventsWindowStartMs = now;
+            stallEventsCount = 1;
+          } else {
+            stallEventsCount += 1;
+          }
+        }
+        if (stallMs >= 8000 || stallEventsCount >= 2) {
+          triggerAutoSlow360pSwitch(currentTimeRef.current || posNow);
+          return;
+        }
+      }
+
       if (hasPlayedAnyFrame && stallMs >= 16000 && !nudgeTriedForCurrentStall) {
         nudgeTriedForCurrentStall = true;
         if (hlsInstance) {
@@ -2404,7 +2547,7 @@ export default function VideoPlayerModal({
           } catch {}
         }
         video.play().catch(() => {});
-      } else if (hasPlayedAnyFrame && stallMs >= 26000 && html5NetworkRecoveryAttemptsRef.current < 8) {
+      } else if (hasPlayedAnyFrame && stallMs >= 26000 && html5NetworkRecoveryAttemptsRef.current < 20) {
         html5NetworkRecoveryAttemptsRef.current += 1;
         const activePos = currentTimeRef.current || posNow;
         console.warn(`[VideoPlayer] HTML5/HLS stalled >26s at ${activePos.toFixed(1)}s. Reconnecting (#${html5NetworkRecoveryAttemptsRef.current})...`);
@@ -2453,7 +2596,7 @@ export default function VideoPlayerModal({
       video.removeEventListener('webkitendfullscreen', onWebkitEndFullscreen);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [playableUrl, isYouTube, exoModeActive, episodeResumeKey, streamFallbackMode, manualRetryNonce, html5ReconnectNonce, forceNativeIosHls]);
+  }, [playableUrl, isYouTube, exoModeActive, episodeResumeKey, manualRetryNonce, html5ReconnectNonce, forceNativeIosHls]);
 
   // Keyboard shortcut listener (Space = play/pause, Left/Right = skip, Escape = close)
   useEffect(() => {
@@ -3016,7 +3159,8 @@ export default function VideoPlayerModal({
           {!isYouTube ? (
             <>
               {!canUseNativeExo && (() => {
-                const useHlsJsSrc = Boolean(playableUrl && /\.m3u8/i.test(playableUrl) && Hls.isSupported() && !forceNativeIosHls);
+                const isAppleDevice = isAppleMobileBrowser();
+                const useHlsJsSrc = Boolean(playableUrl && /\.m3u8/i.test(playableUrl) && Hls.isSupported() && !isAppleDevice && !forceNativeIosHls);
                 return (
                 <video
                   key={`${playableUrl}|${manualRetryNonce}|${html5ReconnectNonce}|${forceNativeIosHls ? 'nat' : 'mse'}`}
@@ -3054,9 +3198,13 @@ export default function VideoPlayerModal({
 
               {/* Loading Indicator */}
               {isLoading && !error && !autoplayBlocked && (
-                <div className="absolute inset-0 m-auto w-24 h-24 flex flex-col items-center justify-center gap-2 bg-black/65 backdrop-blur-sm rounded-2xl z-30 pointer-events-none">
-                  <RefreshCw className="animate-spin text-white" size={28} />
-                  <span className="text-[11px] text-white/95 font-semibold tracking-wide">Loading...</span>
+                <div className="absolute inset-0 m-auto px-4 py-3 min-w-[116px] w-fit h-fit flex flex-col items-center justify-center gap-2 bg-black/70 backdrop-blur-sm rounded-2xl z-30 pointer-events-none">
+                  <RefreshCw className="animate-spin text-white" size={26} />
+                  <span className="text-xs text-white/95 font-semibold tracking-wide whitespace-nowrap">
+                    {selectedQuality && selectedQuality !== 'Auto' && selectedQuality !== 'Offline'
+                      ? `${selectedQuality.toLowerCase()} loading...`
+                      : 'Loading...'}
+                  </span>
                 </div>
               )}
 
@@ -3727,16 +3875,32 @@ export default function VideoPlayerModal({
                           type="button"
                           onClick={() => {
                             const qLower = q.toLowerCase();
-                            const curPos = Math.max(0, Math.floor(currentTimeRef.current || 0));
-                            userPickedQualityRef.current = true;
+                            if (q === selectedQuality) {
+                              setShowQualityMenu(false);
+                              resetAutoHideTimer();
+                              return;
+                            }
+                            const curPos = Math.max(0, currentTimeRef.current || 0);
+                            const curFloor = Math.floor(curPos);
+                            lastManualQualityPickAtRef.current = Date.now();
+                            userPickedQualityRef.current = qLower !== 'auto';
+                            exoNetworkRecoveryAttemptsRef.current = 0;
+                            html5NetworkRecoveryAttemptsRef.current = 0;
+                            selectedQualityRef.current = q;
                             setSelectedQuality(q);
                             setShowQualityMenu(false);
                             resetAutoHideTimer();
 
                             const srcH = preflightCacheRef.current?.sourceHeight || 0;
-                            const explicit =
+                            const baseSrcUrl = (preflightCacheRef.current?.url || '').trim();
+                            const rawExplicit =
                               qLower !== 'auto' &&
                               (videoQualities?.[qLower] || videoQualities?.[q] || '');
+                            const trimmedExplicit = String(rawExplicit || '').trim();
+                            const explicit =
+                              trimmedExplicit && trimmedExplicit.replace(/\/+$/, '') !== baseSrcUrl.replace(/\/+$/, '')
+                                ? trimmedExplicit
+                                : '';
                             const scaled =
                               !explicit &&
                               (qLower === '480p' ||
@@ -3745,33 +3909,37 @@ export default function VideoPlayerModal({
 
                             if (scaled) {
                               if (Capacitor.isNativePlatform() && !hasRemoteTranscodeBackend()) {
-                                setFitNotice('Quality scaling needs server connection; playing native quality');
-                                setTimeout(() => setFitNotice(null), 2200);
                                 return;
                               }
                               resumeOffsetRef.current = curPos;
+                              setFallbackStage('level3_transcode');
+                              fallbackStageRef.current = 'level3_transcode';
                               setStreamFallbackMode('transcode');
                               streamFallbackModeRef.current = 'transcode';
-                              setStreamStartOffset(curPos);
-                              streamStartOffsetRef.current = curPos;
+                              setStreamStartOffset(curFloor);
+                              streamStartOffsetRef.current = curFloor;
                               setIsLoading(true);
-                              setFitNotice(`Switching to ${q}...`);
-                              setTimeout(() => setFitNotice(null), 1800);
                             } else {
                               const baseRec = preflightCacheRef.current?.recommendedMode || 'direct';
+                              const nextStage =
+                                baseRec === 'transcode'
+                                  ? 'level3_transcode'
+                                  : baseRec === 'remux'
+                                  ? 'level2_remux'
+                                  : 'level1_hw';
                               resumeOffsetRef.current = curPos;
+                              setFallbackStage(nextStage);
+                              fallbackStageRef.current = nextStage;
                               setStreamFallbackMode(baseRec);
                               streamFallbackModeRef.current = baseRec;
                               if (baseRec !== 'direct') {
-                                setStreamStartOffset(curPos);
-                                streamStartOffsetRef.current = curPos;
+                                setStreamStartOffset(curFloor);
+                                streamStartOffsetRef.current = curFloor;
                               } else {
                                 setStreamStartOffset(0);
                                 streamStartOffsetRef.current = 0;
                               }
                               setIsLoading(true);
-                              setFitNotice(`Quality: ${q}`);
-                              setTimeout(() => setFitNotice(null), 1600);
                             }
                           }}
                           className={`w-full text-left px-3 py-2 text-xs hover:bg-emerald-500 hover:text-black transition-colors flex items-center justify-between cursor-pointer ${

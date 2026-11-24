@@ -117,6 +117,10 @@ function ensureDcKeepaliveLoop() {
 
 async function getDcSenderSafe(client: TelegramClient, dcId: number | undefined): Promise<any> {
   const key = dcId !== undefined ? String(dcId) : 'default';
+  const cachedEntry = activeDcSenders.get(key);
+  if (cachedEntry && cachedEntry.client === client && cachedEntry.sender) {
+    cachedEntry.lastUsedAt = Date.now();
+  }
   const existing = dcSenderPromises.get(key);
   if (existing) return existing;
 
@@ -201,11 +205,16 @@ async function fetchTelegramBlockRaw(
         upperMsg.includes('TIMEOUT') ||
         upperMsg.includes('ECONNRESET') ||
         upperMsg.includes('ETIMEDOUT') ||
+        upperMsg.includes('EPIPE') ||
         upperMsg.includes('CONNECTION') ||
         upperMsg.includes('NOT CONNECTED') ||
-        upperMsg.includes('WEBSOCKET');
+        upperMsg.includes('WEBSOCKET') ||
+        upperMsg.includes('RPC_CALL_FAIL') ||
+        upperMsg.includes('INTERNAL');
       if (isTransientNetErr && attempts < maxAttempts) {
+        const senderKey = dcId !== undefined ? String(dcId) : 'default';
         if (attempts >= 2) {
+          activeDcSenders.delete(senderKey);
           try {
             (sender as any)?.reconnect?.();
           } catch {}
@@ -562,7 +571,12 @@ export async function probeTelegramMedia(
         const is10Bit =
           pixFmt.includes('10le') ||
           pixFmt.includes('10be') ||
+          pixFmt.includes('p10') ||
           pixFmt.includes('12le') ||
+          pixFmt.includes('12be') ||
+          pixFmt.includes('p12') ||
+          pixFmt.includes('yuv422') ||
+          pixFmt.includes('yuv444') ||
           profile.includes('10');
 
         const videoStartTime = parseFloat(videoStream?.start_time || '0');

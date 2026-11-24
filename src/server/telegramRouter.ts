@@ -15,6 +15,7 @@ import {
 import { 
   resolveTelegramMedia, 
   saveChannelEntity, 
+  removeChannelEntity,
   getAllCachedChannels,
   getCachedAccessHash
 } from '../utils/channelRegistry.ts';
@@ -188,7 +189,7 @@ function getFfmpegQualityArgs(quality: VideoQualityTier | '', _isDownload: boole
   const args: string[] = [];
   if (quality === '360p') {
     args.push(
-      '-vf', "scale='min(640,iw)':'min(360,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
+      '-vf', "scale='min(640,iw)':'min(360,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=fast_bilinear,setsar=1,format=yuv420p",
       '-c:v', 'libx264',
       '-preset', 'ultrafast',
       '-threads', '0',
@@ -196,9 +197,9 @@ function getFfmpegQualityArgs(quality: VideoQualityTier | '', _isDownload: boole
       '-profile:v', 'main',
       '-level', '3.1',
       '-vsync', 'vfr',
-      '-b:v', '280k',
-      '-maxrate', '360k',
-      '-bufsize', '720k',
+      '-b:v', '190k',
+      '-maxrate', '250k',
+      '-bufsize', '500k',
       '-g', '48',
       '-keyint_min', '48',
       '-sc_threshold', '0',
@@ -213,7 +214,7 @@ function getFfmpegQualityArgs(quality: VideoQualityTier | '', _isDownload: boole
 
   if (quality === '480p') {
     args.push(
-      '-vf', "scale='min(854,iw)':'min(480,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
+      '-vf', "scale='min(854,iw)':'min(480,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=fast_bilinear,setsar=1,format=yuv420p",
       '-c:v', 'libx264',
       '-preset', 'ultrafast',
       '-threads', '0',
@@ -221,16 +222,16 @@ function getFfmpegQualityArgs(quality: VideoQualityTier | '', _isDownload: boole
       '-profile:v', 'main',
       '-level', '3.1',
       '-vsync', 'vfr',
-      '-b:v', '520k',
-      '-maxrate', '650k',
-      '-bufsize', '1300k',
+      '-b:v', '380k',
+      '-maxrate', '480k',
+      '-bufsize', '960k',
       '-g', '48',
       '-keyint_min', '48',
       '-sc_threshold', '0',
       '-af', 'aresample=async=1:min_hard_comp=0.100000:first_pts=0',
       '-c:a', 'aac',
       '-ac', '2',
-      '-ar', '48000',
+      '-ar', '44100',
       '-b:a', '96k'
     );
     return args;
@@ -238,7 +239,7 @@ function getFfmpegQualityArgs(quality: VideoQualityTier | '', _isDownload: boole
 
   if (quality === '720p') {
     args.push(
-      '-vf', "scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
+      '-vf', "scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos,setsar=1,format=yuv420p",
       '-c:v', 'libx264',
       '-preset', 'ultrafast',
       '-threads', '0',
@@ -246,9 +247,9 @@ function getFfmpegQualityArgs(quality: VideoQualityTier | '', _isDownload: boole
       '-profile:v', 'main',
       '-level', '4.0',
       '-vsync', 'vfr',
-      '-b:v', '1050k',
-      '-maxrate', '1300k',
-      '-bufsize', '2600k',
+      '-crf', '20',
+      '-maxrate', '2800k',
+      '-bufsize', '5600k',
       '-g', '48',
       '-keyint_min', '48',
       '-sc_threshold', '0',
@@ -256,14 +257,14 @@ function getFfmpegQualityArgs(quality: VideoQualityTier | '', _isDownload: boole
       '-c:a', 'aac',
       '-ac', '2',
       '-ar', '48000',
-      '-b:a', '128k'
+      '-b:a', '160k'
     );
     return args;
   }
 
-  // Default 1080p high quality
+  // Default 1080p Full HD high quality
   args.push(
-    '-vf', "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
+    '-vf', "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos,setsar=1,format=yuv420p",
     '-c:v', 'libx264',
     '-preset', 'ultrafast',
     '-threads', '0',
@@ -274,9 +275,9 @@ function getFfmpegQualityArgs(quality: VideoQualityTier | '', _isDownload: boole
     '-color_trc', 'bt709',
     '-colorspace', 'bt709',
     '-vsync', 'vfr',
-    '-crf', '22',
-    '-maxrate', '3400k',
-    '-bufsize', '6800k',
+    '-crf', '18',
+    '-maxrate', '5500k',
+    '-bufsize', '11000k',
     '-g', '48',
     '-keyint_min', '48',
     '-sc_threshold', '0',
@@ -284,7 +285,7 @@ function getFfmpegQualityArgs(quality: VideoQualityTier | '', _isDownload: boole
     '-c:a', 'aac',
     '-ac', '2',
     '-ar', '48000',
-    '-b:a', '160k'
+    '-b:a', '192k'
   );
   return args;
 }
@@ -371,6 +372,16 @@ router.get('/status', async (_req: Request, res: Response) => {
 router.get('/channels', (_req: Request, res: Response) => {
   const channels = getAllCachedChannels();
   res.json({ status: 'ok', channels });
+});
+
+router.post('/remove-channel', (req: Request, res: Response) => {
+  const channelId = String(req.body?.channelId || '').trim();
+  if (!channelId) {
+    return res.status(400).json({ error: 'channelId is required' });
+  }
+  const removed = removeChannelEntity(channelId);
+  const channels = getAllCachedChannels();
+  res.json({ success: true, removed, channels });
 });
 
 /**
@@ -1687,7 +1698,7 @@ interface CachedMediaEntry {
   cachedAt: number;
 }
 const mediaCache = new Map<string, CachedMediaEntry>();
-const MEDIA_CACHE_TTL_MS = 45 * 60 * 1000;
+const MEDIA_CACHE_TTL_MS = 20 * 60 * 1000;
 
 async function resolveAndCacheDocument(
   client: any,
@@ -2181,6 +2192,7 @@ function pipeFfmpegMp4Stream(opts: {
   }
 
   ffArgs.push(
+    '-max_muxing_queue_size', '4096',
     '-avoid_negative_ts', 'make_zero',
     '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
     '-frag_duration', '1000000',
@@ -2462,8 +2474,8 @@ export async function handleStream(req: Request, res: Response) {
     let start = 0;
     let endPos = fileSize - 1;
 
-    // Open-ended browser Range requests: 16MB window (32 x 512KB cached blocks) for smooth playback
-    const MAX_RANGE_CHUNK = 16 * 1024 * 1024;
+    // Open-ended browser Range requests: 8MB window (16 x 512KB cached blocks) so chunks never hit proxy timeouts
+    const MAX_RANGE_CHUNK = 8 * 1024 * 1024;
 
     if (rangeHeader) {
       const match = rangeHeader.match(/bytes=(\d+)-(\d+)?/);
@@ -2646,7 +2658,7 @@ function cleanupHlsJob(sid: string, removeDir = true, markSuperseded = false) {
 setInterval(() => {
   const now = Date.now();
   for (const [sid, job] of hlsJobs.entries()) {
-    if (now - job.lastAccessedAt > 180 * 1000) {
+    if (job.activeReaders === 0 && now - job.lastAccessedAt > 900 * 1000) {
       cleanupHlsJob(sid, true, false);
     }
   }
@@ -2671,10 +2683,10 @@ function getHlsArgsForQuality(quality: VideoQualityTier | '', forceExact4s = tru
 
   if (quality === '360p') {
     return [
-      '-vf', "scale='min(640,iw)':'min(360,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
+      '-vf', "scale='min(640,iw)':'min(360,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=fast_bilinear,setsar=1,format=yuv420p",
       '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '0', '-pix_fmt', 'yuv420p',
       '-profile:v', 'main', '-level', '3.1',
-      '-b:v', '320k', '-maxrate', '420k', '-bufsize', '840k',
+      '-b:v', '190k', '-maxrate', '250k', '-bufsize', '500k',
       ...keyframeArgs,
       '-af', 'aresample=async=1:min_hard_comp=0.100000',
       '-c:a', 'aac', '-ac', '2', '-ar', '44100', '-b:a', '64k',
@@ -2682,34 +2694,34 @@ function getHlsArgsForQuality(quality: VideoQualityTier | '', forceExact4s = tru
   }
   if (quality === '480p') {
     return [
-      '-vf', "scale='min(854,iw)':'min(480,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
+      '-vf', "scale='min(854,iw)':'min(480,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=fast_bilinear,setsar=1,format=yuv420p",
       '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '0', '-pix_fmt', 'yuv420p',
       '-profile:v', 'main', '-level', '3.1',
-      '-b:v', '550k', '-maxrate', '720k', '-bufsize', '1440k',
+      '-b:v', '380k', '-maxrate', '480k', '-bufsize', '960k',
       ...keyframeArgs,
       '-af', 'aresample=async=1:min_hard_comp=0.100000',
-      '-c:a', 'aac', '-ac', '2', '-ar', '48000', '-b:a', '96k',
+      '-c:a', 'aac', '-ac', '2', '-ar', '44100', '-b:a', '96k',
     ];
   }
   if (quality === '720p') {
     return [
-      '-vf', "scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
+      '-vf', "scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos,setsar=1,format=yuv420p",
       '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '0', '-pix_fmt', 'yuv420p',
       '-profile:v', 'main', '-level', '4.0',
-      '-b:v', '1100k', '-maxrate', '1450k', '-bufsize', '2900k',
+      '-crf', '20', '-maxrate', '2800k', '-bufsize', '5600k',
       ...keyframeArgs,
       '-af', 'aresample=async=1:min_hard_comp=0.100000',
-      '-c:a', 'aac', '-ac', '2', '-ar', '48000', '-b:a', '128k',
+      '-c:a', 'aac', '-ac', '2', '-ar', '48000', '-b:a', '160k',
     ];
   }
   return [
-    '-vf', "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,format=yuv420p",
+    '-vf', "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos,setsar=1,format=yuv420p",
     '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '0', '-pix_fmt', 'yuv420p',
     '-profile:v', 'main', '-level', '4.0',
-    '-crf', '22', '-maxrate', '3400k', '-bufsize', '6800k',
+    '-crf', '18', '-maxrate', '5500k', '-bufsize', '11000k',
     ...keyframeArgs,
     '-af', 'aresample=async=1:min_hard_comp=0.100000',
-    '-c:a', 'aac', '-ac', '2', '-ar', '48000', '-b:a', '160k',
+    '-c:a', 'aac', '-ac', '2', '-ar', '48000', '-b:a', '192k',
   ];
 }
 
@@ -3367,7 +3379,7 @@ async function discoverChannelLatestMsgId(
 ): Promise<number> {
   let highest = channelMaxKnownMsgId.get(cleanChannelId) || 0;
 
-  // 1. Check Bot API getUpdates for any recent message_id in this channel (without consuming updates)
+  // 1. Check Bot API getUpdates for any recent message_id in this channel
   try {
     const { botToken } = getTelegramCredentials();
     if (botToken && /^\d+$/.test(cleanChannelId)) {
@@ -3384,12 +3396,25 @@ async function discoverChannelLatestMsgId(
     }
   } catch {}
 
-  // 2. Fast exponential + step probe using single MTProto batch calls
+  // 2. Verify whether cached `highest` actually exists in the channel (protects against cleared/reset channels)
+  let base = highest;
+  if (base > 0) {
+    try {
+      const verifyIds = [base, Math.max(1, base - 1), Math.max(1, base - 5)];
+      const verifyMsgs: any[] = await client.getMessages(peer, { ids: verifyIds });
+      const hasAnyAtBase = (verifyMsgs || []).some((m) => m && m.id);
+      if (!hasAnyAtBase) {
+        base = 0;
+        highest = 0;
+      }
+    } catch {}
+  }
+
+  // 3. Fast exponential + step probe using single MTProto batch calls
   try {
-    const base = highest > 0 ? highest : 0;
     const probeIds = base > 0
       ? [base + 1, base + 5, base + 15, base + 30, base + 60, base + 120, base + 250]
-      : [1, 10, 25, 50, 75, 100, 125, 150, 175, 200, 250, 300, 400, 500, 750, 1000, 1500, 2000];
+      : [1, 2, 3, 5, 7, 10, 15, 25, 50, 75, 100, 125, 150, 200, 300, 500, 750, 1000, 1500, 2000];
 
     const msgs: any[] = await client.getMessages(peer, { ids: probeIds });
     let bestCheckpoint = highest;
@@ -3400,7 +3425,6 @@ async function discoverChannelLatestMsgId(
     }
 
     if (bestCheckpoint > 0) {
-      // Probe upward by small steps until two consecutive empty IDs or a small window of 50
       const tailStart = bestCheckpoint + 1;
       const tailEnd = bestCheckpoint + 60;
       const tailIds: number[] = [];
@@ -3415,7 +3439,7 @@ async function discoverChannelLatestMsgId(
     }
   } catch {}
 
-  if (highest > (channelMaxKnownMsgId.get(cleanChannelId) || 0)) {
+  if (highest > 0) {
     channelMaxKnownMsgId.set(cleanChannelId, highest);
     saveRecentChannelPostsToDisk();
   }
@@ -3469,8 +3493,7 @@ async function resolveChannelPeerFromLinkOrId(
         c.accessHash &&
         c.accessHash !== '0' &&
         ((c.username || '').replace(/^\+/, '') === hash ||
-          (hash === 's2Qki5-sfnVjZTI1' && c.channelId === '4498557265') ||
-          (hash === 'QSL_3k54YfBjMjE1' && c.channelId === '3850537977'))
+          (hash === 's2Qki5-sfnVjZTI1' && c.channelId === '4498557265'))
     );
     if (directCached) {
       cleanChannelId = directCached.channelId;
@@ -3969,7 +3992,7 @@ router.post('/scan-movies-channel', async (req: Request, res: Response) => {
           durationSec: bestDurSec,
           runtime: matched.runtime || durationFormatted,
           sourceFileName: grp.primary.fileName,
-          sourceCaption: grp.primary.caption.slice(0, 240),
+          sourceCaption: `${mergedParsed.cleanTitle}${mergedParsed.year ? ` (${mergedParsed.year})` : ''}`,
           parsedTitle: mergedParsed.cleanTitle,
           parsedYear: mergedParsed.year,
           imdbId: matched.imdbId,
@@ -4326,6 +4349,18 @@ function mergeEpisodeIntoSeasons(
   return { mergedSeasons: cloned, added: true };
 }
 
+function buildFallbackPosterDataUri(title: string, year?: number | string | null): string {
+  const safeTitle = String(title || 'Movie Hub')
+    .replace(/[<>&"']/g, ' ')
+    .trim()
+    .slice(0, 34);
+  const safeYear = String(year || '').replace(/[^0-9]/g, '').slice(0, 4);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 900" width="600" height="900"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#111827"/><stop offset="55%" stop-color="#0f172a"/><stop offset="100%" stop-color="#064e3b"/></linearGradient></defs><rect width="600" height="900" fill="url(#bg)"/><circle cx="300" cy="360" r="88" fill="#10b981" opacity="0.16"/><polygon points="275,320 275,400 345,360" fill="#10b981"/><text x="300" y="545" text-anchor="middle" fill="#f9fafb" font-family="system-ui,-apple-system,sans-serif" font-size="36" font-weight="700">${safeTitle}</text>${safeYear ? `<text x="300" y="605" text-anchor="middle" fill="#34d399" font-family="system-ui,-apple-system,sans-serif" font-size="26" font-weight="600">${safeYear}</text>` : ''}</svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+let lastReconcileCheckAt = 0;
+
 async function runServerAutoSyncPass(reason: string): Promise<void> {
   if (serverAutoSyncRunning) return;
   serverAutoSyncRunning = true;
@@ -4344,23 +4379,65 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
     const { peer, cleanChannelId, channelTitle, publicUsername } = resolved;
 
     let baseline = cfg.lastSyncedMsgId;
+    let reconciledStaleBaseline = false;
+
     if (baseline <= 0) {
       const latest = await discoverChannelLatestMsgId(client, peer, cleanChannelId);
       if (latest <= 0) return;
       baseline = Math.max(0, latest - 25);
     }
 
-    // Fast lightweight probe: check if ANY messages exist after `baseline` before querying Firestore `movies`
+    // Fast lightweight probe: check if ANY messages exist after `baseline`
     const probeIds: number[] = [];
-    for (let id = baseline + 1; id <= baseline + 50; id++) probeIds.push(id);
+    for (let id = baseline + 1; id <= baseline + 20; id++) probeIds.push(id);
     const probedMsgs: any[] = await client.getMessages(peer, { ids: probeIds }).catch(() => []);
-    const validMsgs = (probedMsgs || []).filter((m) => m && m.id);
-    if (validMsgs.length === 0) return;
+    let validMsgs = (probedMsgs || []).filter((m) => m && m.id);
 
-    // Fetch up to another 100 if the first 50 were completely full
-    if (validMsgs.length >= 45) {
+    // Reconcile if baseline is higher than actual channel messages (e.g., stale lastSyncedMsgId 157 when channel has msgs 1..7)
+    // OR on boot/manual trigger when nothing appeared after baseline
+    const shouldReconcile =
+      validMsgs.length === 0 &&
+      (reason === 'boot' || reason === 'manual_trigger' || Date.now() - lastReconcileCheckAt > 45_000);
+
+    if (shouldReconcile) {
+      lastReconcileCheckAt = Date.now();
+      const realLatest = await discoverChannelLatestMsgId(client, peer, cleanChannelId);
+      if (realLatest > 0 && (baseline > realLatest || reason === 'boot' || reason === 'manual_trigger')) {
+        if (baseline > realLatest) {
+          reconciledStaleBaseline = true;
+          baseline = 0;
+        }
+        const scanStart = reconciledStaleBaseline ? 1 : Math.max(1, realLatest - 100);
+        const recMsgs: any[] = [];
+        for (let cur = scanStart; cur <= realLatest; cur += 100) {
+          const endCur = Math.min(realLatest, cur + 99);
+          const batch: number[] = [];
+          for (let id = cur; id <= endCur; id++) batch.push(id);
+          const got: any[] = await client.getMessages(peer, { ids: batch }).catch(() => []);
+          for (const m of got || []) {
+            if (m && m.id) recMsgs.push(m);
+          }
+        }
+        validMsgs = recMsgs;
+      }
+    }
+
+    if (validMsgs.length === 0) {
+      if (reconciledStaleBaseline) {
+        await setDoc(
+          doc(db, 'app_config', 'telegram_auto_sync'),
+          { lastSyncedMsgId: 0, updatedAtMs: Date.now(), updatedAt: serverTimestamp() },
+          { merge: true }
+        ).catch(() => {});
+        if (cachedSyncConfig) cachedSyncConfig.lastSyncedMsgId = 0;
+      }
+      return;
+    }
+
+    // Fetch up to another 130 if the forward batch was nearly full
+    if (!reconciledStaleBaseline && validMsgs.length >= 18) {
       const moreIds: number[] = [];
-      for (let id = baseline + 51; id <= baseline + 150; id++) moreIds.push(id);
+      for (let id = baseline + 21; id <= baseline + 150; id++) moreIds.push(id);
       const moreMsgs: any[] = await client.getMessages(peer, { ids: moreIds }).catch(() => []);
       for (const m of moreMsgs || []) {
         if (m && m.id) validMsgs.push(m);
@@ -4373,7 +4450,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
       ...validMsgs.map((m) => Number(m.id || 0))
     );
 
-    if (highestMsgId > (channelMaxKnownMsgId.get(cleanChannelId) || 0)) {
+    if (highestMsgId > (channelMaxKnownMsgId.get(cleanChannelId) || 0) || reconciledStaleBaseline) {
       channelMaxKnownMsgId.set(cleanChannelId, highestMsgId);
       saveRecentChannelPostsToDisk();
     }
@@ -4565,7 +4642,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
         durationSec: bestDurSec,
         runtime: matched.runtime || durationFormatted,
         sourceFileName: grp.primary.fileName,
-        sourceCaption: grp.primary.caption.slice(0, 240),
+        sourceCaption: `${mergedParsed.cleanTitle}${mergedParsed.year ? ` (${mergedParsed.year})` : ''}`,
         parsedTitle: mergedParsed.cleanTitle,
         parsedYear: mergedParsed.year,
         imdbId: matched.imdbId,
@@ -4600,26 +4677,16 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
         isSeriesItem
       );
 
-      const isConfidentImdbMatch =
-        Boolean(draft.posterUrl) &&
-        (draft.matchConfidence === 'high' ||
-          (draft.matchConfidence === 'medium' && draft.confidenceScore >= 55 && Boolean(draft.imdbId)));
-
-      if (cfg.autoPublishVerified && isConfidentImdbMatch) {
+      if (cfg.autoPublishVerified) {
         const nowMs = Date.now();
-        const cleanPoster = upgradePosterUrl(draft.posterUrl, 1080) || draft.posterUrl;
-        const cleanBackdrop = upgradePosterUrl(draft.backdropUrl || cleanPoster, 1280) || cleanPoster;
+        const fallbackSvg = buildFallbackPosterDataUri(draft.title || mergedParsed.cleanTitle, candYear);
+        const cleanPoster = (draft.posterUrl ? upgradePosterUrl(draft.posterUrl, 1080) || draft.posterUrl : '') || fallbackSvg;
+        const cleanBackdrop = (draft.backdropUrl || draft.posterUrl ? upgradePosterUrl(draft.backdropUrl || cleanPoster, 1280) || cleanPoster : '') || fallbackSvg;
         const catToSave = isSeriesItem
           ? (String(draft.originalCategory || '').toLowerCase().includes('anime') ? 'Anime Series' : 'Web Series')
           : (draft.originalCategory || 'Bollywood Movie');
         const displayCat = getDisplayCategory(catToSave);
-        const badge = normalizeQualityBadge(
-          /cam|hdtc|predvd/i.test(`${draft.sourceFileName} ${draft.sourceCaption}`)
-            ? 'HDTC'
-            : draft.qualityBadge === '4K'
-            ? 'HD'
-            : draft.qualityBadge
-        );
+        const badge = normalizeQualityBadge('NONE');
 
         if (isSeriesItem) {
           const seasonNum = Math.max(1, Number(draft.seasonNumber) || 1);
@@ -4920,7 +4987,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
       ).catch(() => {});
     }
 
-    if (highestMsgId > cfg.lastSyncedMsgId) {
+    if (highestMsgId > cfg.lastSyncedMsgId || reconciledStaleBaseline) {
       await setDoc(
         doc(db, 'app_config', 'telegram_auto_sync'),
         {

@@ -75,8 +75,12 @@ export const isInstalledPhoneApp = (): boolean => {
   if (typeof window === 'undefined') return false;
 
   try {
-    // 1. Capacitor native shell (real APK running on Android device)
-    if (Capacitor.isNativePlatform()) {
+    // 1. Capacitor native shell or Android WebView JS bridge (real APK running on Android device)
+    if (
+      (window as any).AndroidPlayerBridge ||
+      (window as any).AndroidStreamBridge ||
+      Capacitor.isNativePlatform()
+    ) {
       return true;
     }
 

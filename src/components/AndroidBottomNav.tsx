@@ -1,8 +1,5 @@
-import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Home, Download, User } from 'lucide-react';
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../firebase';
 import { useDownloads } from '../hooks/useDownloads';
 
 interface AndroidBottomNavProps {
@@ -10,42 +7,16 @@ interface AndroidBottomNavProps {
   onSelectCategory?: (category: string | null) => void;
 }
 
-const MESSAGES_SEEN_AT_KEY = 'mp_messages_last_seen_ms';
-
 export default function AndroidBottomNav({
   activeCategory: _activeCategory,
   onSelectCategory,
 }: AndroidBottomNavProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
   const { activeDownloads, downloads } = useDownloads();
 
   const runningDownload = activeDownloads.find((d) => d.status === 'downloading') || activeDownloads[0] || null;
   const pathname = location.pathname;
-
-  useEffect(() => {
-    let active = true;
-    const checkUnread = async () => {
-      try {
-        const lastSeen = Number(localStorage.getItem(MESSAGES_SEEN_AT_KEY) || '0');
-        const snap = await getDoc(doc(db, 'admins', 'latest_release_notification'));
-        if (!active || !snap.exists()) return;
-        const data = snap.data();
-        const latestMs = Number(data?.createdAtMs || 0);
-        setHasUnreadMessages(latestMs > lastSeen);
-      } catch {
-        // Ignore silent background unread check errors
-      }
-    };
-    checkUnread();
-    const onRead = () => setHasUnreadMessages(false);
-    window.addEventListener('mp_messages_read', onRead);
-    return () => {
-      active = false;
-      window.removeEventListener('mp_messages_read', onRead);
-    };
-  }, [pathname]);
 
   // Hide bottom bar on Admin, Settings, Search routes
   if (pathname === '/admin' || pathname === '/settings' || pathname === '/search') {
@@ -118,9 +89,6 @@ export default function AndroidBottomNav({
         >
           <div className={`relative w-7 h-7 rounded-lg flex items-center justify-center ${isMe ? 'bg-[#00d664]/15' : ''}`}>
             <User size={20} className={isMe ? 'stroke-[2.5]' : 'stroke-[1.9]'} />
-            {hasUnreadMessages && (
-              <span className="absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-red-500 ring-2 ring-[#121418]" />
-            )}
           </div>
           <span className={`text-[11px] mt-0.5 tracking-tight ${isMe ? 'font-bold text-[#00d664]' : 'font-medium'}`}>
             Me

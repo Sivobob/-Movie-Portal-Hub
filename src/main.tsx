@@ -7,21 +7,24 @@ import App from './App.tsx';
 import './index.css';
 import { AuthProvider } from './context/AuthContext';
 
-if (typeof window !== 'undefined' && !Capacitor.isNativePlatform()) {
+const isNativeShell =
+  typeof window !== 'undefined' &&
+  (Capacitor.isNativePlatform() ||
+    Boolean((window as any).AndroidPlayerBridge) ||
+    Boolean((window as any).AndroidStreamBridge));
+
+if (typeof window !== 'undefined' && isNativeShell) {
   try {
-    // Clean up any stale/uncontrolled service workers that may be serving
-    // blank or outdated cached content in the preview iframe.
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.getRegistrations().then((regs) => {
         for (const reg of regs) {
-          const scriptURL = reg.active?.scriptURL || '';
-          if (scriptURL.includes('dev-sw.js') || scriptURL.includes('/sw.js')) {
-            reg.unregister().catch(() => {});
-          }
+          reg.unregister().catch(() => {});
         }
       }).catch(() => {});
     }
-
+  } catch {}
+} else if (typeof window !== 'undefined' && !isNativeShell) {
+  try {
     let refreshing = false;
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.addEventListener('controllerchange', () => {
@@ -35,6 +38,12 @@ if (typeof window !== 'undefined' && !Capacitor.isNativePlatform()) {
       onRegisteredSW(_swUrl, reg) {
         if (reg) {
           reg.update().catch(() => {});
+          const checkUpdate = () => {
+            if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+            reg.update().catch(() => {});
+          };
+          window.addEventListener('focus', checkUpdate);
+          document.addEventListener('visibilitychange', checkUpdate);
         }
       },
     });

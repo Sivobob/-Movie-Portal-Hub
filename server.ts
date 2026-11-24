@@ -93,7 +93,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     time: new Date().toISOString(),
-    version: '3.5.265',
+    version: '3.5.267',
     ffmpegAvailable: FFMPEG_AVAILABLE,
     ffprobeAvailable: FFPROBE_AVAILABLE,
     telegramConfigured,
@@ -120,7 +120,7 @@ app.get('/api/ios-profile', (req, res) => {
     const rawProto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0].trim();
     const isLocal = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(rawHost);
     const scheme = isLocal ? rawProto : 'https';
-    const appOrigin = rawHost ? `${scheme}://${rawHost}/` : 'https://ais-pre-ariekzqzaudxer5atxkvkw-832989141722.asia-southeast1.run.app/';
+    const appOrigin = rawHost ? `${scheme}://${rawHost}/` : 'https://ais-pre-jnqt2mxwwu4hovy5xbqigd-560942295760.asia-northeast1.run.app/';
 
     const escapeXml = (str: string) =>
       str
@@ -269,8 +269,44 @@ const getStaticDir = () => {
   return __dirname;
 };
 
+const applyFreshHtmlCacheHeaders = (res: express.Response, filePath?: string) => {
+  const clean = (filePath || '').toLowerCase();
+  if (
+    !clean ||
+    clean.endsWith('.html') ||
+    clean.endsWith('/sw.js') ||
+    clean.endsWith('/sw-push.js') ||
+    clean.endsWith('/version.json') ||
+    clean.endsWith('/manifest.webmanifest') ||
+    clean.endsWith('/manifest.json')
+  ) {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  } else if (clean.includes(`${path.sep}assets${path.sep}`)) {
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  }
+};
+
 if (!isProduction) {
   try {
+    app.use((req, res, next) => {
+      const p = (req.path || '').toLowerCase();
+      const accept = String(req.headers.accept || '').toLowerCase();
+      if (
+        p === '/' ||
+        p.endsWith('.html') ||
+        p === '/sw.js' ||
+        p === '/sw-push.js' ||
+        p === '/version.json' ||
+        p === '/manifest.webmanifest' ||
+        p === '/manifest.json' ||
+        (!p.startsWith('/api/') && !p.startsWith('/src/') && !p.startsWith('/node_modules/') && accept.includes('text/html'))
+      ) {
+        applyFreshHtmlCacheHeaders(res);
+      }
+      next();
+    });
     const { createServer } = await import('vite');
     const vite = await createServer({
       server: { 
@@ -363,22 +399,24 @@ export class ErrorOverlay extends BaseEl {}
   } catch (viteErr) {
     console.warn('[Vite Middleware notice - falling back to static/SPA]', viteErr);
     const staticDir = getStaticDir();
-    app.use(express.static(staticDir));
+    app.use(express.static(staticDir, { setHeaders: (res, filePath) => applyFreshHtmlCacheHeaders(res, filePath) }));
     if (fs.existsSync(path.resolve(process.cwd(), 'public'))) {
-      app.use(express.static(path.resolve(process.cwd(), 'public')));
+      app.use(express.static(path.resolve(process.cwd(), 'public'), { setHeaders: (res, filePath) => applyFreshHtmlCacheHeaders(res, filePath) }));
     }
     app.get('*', (_req, res) => {
+      applyFreshHtmlCacheHeaders(res);
       res.sendFile(path.resolve(staticDir, 'index.html'));
     });
   }
 } else {
   const staticDir = getStaticDir();
   console.log(`[Production] Serving static files from: ${staticDir}`);
-  app.use(express.static(staticDir));
+  app.use(express.static(staticDir, { setHeaders: (res, filePath) => applyFreshHtmlCacheHeaders(res, filePath) }));
   if (fs.existsSync(path.resolve(process.cwd(), 'public'))) {
-    app.use(express.static(path.resolve(process.cwd(), 'public')));
+    app.use(express.static(path.resolve(process.cwd(), 'public'), { setHeaders: (res, filePath) => applyFreshHtmlCacheHeaders(res, filePath) }));
   }
   app.get('*', (_req, res) => {
+    applyFreshHtmlCacheHeaders(res);
     res.sendFile(path.resolve(staticDir, 'index.html'));
   });
 }

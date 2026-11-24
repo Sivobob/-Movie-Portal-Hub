@@ -67,7 +67,7 @@ if (!self.define) {
     });
   };
 }
-define(['./workbox-aeb6ecaf'], (function (workbox) { 'use strict';
+define(['./workbox-a3775579'], (function (workbox) { 'use strict';
 
   importScripts("/sw-push.js");
   self.skipWaiting();
@@ -81,9 +81,6 @@ define(['./workbox-aeb6ecaf'], (function (workbox) { 'use strict';
     "url": "sw-push.js",
     "revision": "625d4bdd50c1ee12b4775b53f2c6807d"
   }, {
-    "url": "server.js",
-    "revision": "a61eadedb64c422cec608f537299b528"
-  }, {
     "url": "pwa-maskable-512x512.png",
     "revision": "18a96a3686502a7b088f62ffdcb70bb1"
   }, {
@@ -92,9 +89,6 @@ define(['./workbox-aeb6ecaf'], (function (workbox) { 'use strict';
   }, {
     "url": "pwa-192x192.png",
     "revision": "d8932d488ddf381916241682ce45e480"
-  }, {
-    "url": "index.html",
-    "revision": "acd2a4e6fdfe373dc3fcd7c8c557da91"
   }, {
     "url": "apple-touch-icon.png",
     "revision": "48d4d4a5885a99c61147a6e196c614ee"
@@ -108,76 +102,25 @@ define(['./workbox-aeb6ecaf'], (function (workbox) { 'use strict';
     "url": "assets/workbox-window.prod.es5-BBnX5xw4.js",
     "revision": null
   }, {
-    "url": "assets/web-jKODcTAp.js",
+    "url": "assets/web-DJtAGjlx.js",
     "revision": null
   }, {
-    "url": "assets/web-F04NBJNU.js",
+    "url": "assets/web-BWEGVC1y.js",
     "revision": null
   }, {
-    "url": "assets/web-E_muZC5T.js",
+    "url": "assets/index-DqNYkN4k.css",
     "revision": null
   }, {
-    "url": "assets/web-DzldGoCQ.js",
+    "url": "assets/index-Bt1UYncd.js",
     "revision": null
   }, {
-    "url": "assets/web-CWP3PoK2.js",
+    "url": "assets/esm-DHWGgzOR.js",
     "revision": null
   }, {
-    "url": "assets/web-BYXwb01e.js",
+    "url": "assets/esm-DFa8Dd60.js",
     "revision": null
   }, {
-    "url": "assets/web-7ug2hGi-.js",
-    "revision": null
-  }, {
-    "url": "assets/index-aMN6TuB8.css",
-    "revision": null
-  }, {
-    "url": "assets/index-Moz_hwev.js",
-    "revision": null
-  }, {
-    "url": "assets/index-DvC5fRJH.css",
-    "revision": null
-  }, {
-    "url": "assets/index-DrMnXqkc.js",
-    "revision": null
-  }, {
-    "url": "assets/index-CxRQnOZF.js",
-    "revision": null
-  }, {
-    "url": "assets/index-CScEtBVO.js",
-    "revision": null
-  }, {
-    "url": "assets/esm-k__iDZSD.js",
-    "revision": null
-  }, {
-    "url": "assets/esm-fwWWEhOb.js",
-    "revision": null
-  }, {
-    "url": "assets/esm-DZVY0nqQ.js",
-    "revision": null
-  }, {
-    "url": "assets/esm-CT5ILrxB.js",
-    "revision": null
-  }, {
-    "url": "assets/esm-BmIEe5XS.js",
-    "revision": null
-  }, {
-    "url": "assets/esm-BflA3Lxi.js",
-    "revision": null
-  }, {
-    "url": "assets/esm-BaKwDXpl.js",
-    "revision": null
-  }, {
-    "url": "assets/browserTelegramStream-vVejK0gv.js",
-    "revision": null
-  }, {
-    "url": "assets/browserTelegramStream-FKg-SwT9.js",
-    "revision": null
-  }, {
-    "url": "assets/browserTelegramStream-CSAoNONr.js",
-    "revision": null
-  }, {
-    "url": "assets/browserTelegramStream-3XIaZody.js",
+    "url": "assets/browserTelegramStream-B_TIsXFG.js",
     "revision": null
   }, {
     "url": "assets/icons/master_icon.png",
@@ -211,9 +154,19 @@ define(['./workbox-aeb6ecaf'], (function (workbox) { 'use strict';
     "revision": "04ee92bbb676755f301a365ccb129abf"
   }], {});
   workbox.cleanupOutdatedCaches();
-  workbox.registerRoute(new workbox.NavigationRoute(workbox.createHandlerBoundToURL("index.html"), {
-    denylist: [/^\/api\//]
-  }));
+  workbox.registerRoute(({
+    request
+  }) => request.mode === "navigate", new workbox.NetworkFirst({
+    "cacheName": "html-navigation-cache",
+    "networkTimeoutSeconds": 3,
+    plugins: [new workbox.ExpirationPlugin({
+      maxEntries: 5,
+      maxAgeSeconds: 3600
+    })]
+  }), 'GET');
+  workbox.registerRoute(({
+    url
+  }) => url.pathname === "/version.json" || url.pathname === "/manifest.webmanifest" || url.pathname === "/manifest.json" || url.pathname === "/sw-push.js", new workbox.NetworkOnly(), 'GET');
   workbox.registerRoute(({
     url
   }) => url.pathname.startsWith("/api/") && !url.pathname.startsWith("/api/stream") && !url.pathname.startsWith("/api/telegram/stream") && !url.pathname.startsWith("/api/telegram/hls") && !url.pathname.startsWith("/api/video/"), new workbox.NetworkOnly(), 'GET');

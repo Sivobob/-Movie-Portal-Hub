@@ -134,6 +134,13 @@ function normalizeDupTitle(title: string): string {
     .replace(/[^a-z0-9]+/g, '');
 }
 
+function buildFallbackPosterDataUri(title: string, year?: number): string {
+  const safeTitle = String(title || 'Movie').replace(/[<>&"']/g, '').slice(0, 34);
+  const safeYear = year && Number(year) > 1900 ? String(year) : '';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="500" height="750" viewBox="0 0 500 750"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#141824"/><stop offset="100%" stop-color="#090b10"/></linearGradient></defs><rect width="500" height="750" fill="url(#g)"/><rect x="28" y="28" width="444" height="694" rx="22" fill="none" stroke="#10b981" stroke-opacity="0.35" stroke-width="2"/><text x="250" y="345" text-anchor="middle" fill="#ffffff" font-family="sans-serif" font-size="30" font-weight="bold">${safeTitle}</text><text x="250" y="395" text-anchor="middle" fill="#10b981" font-family="sans-serif" font-size="22" font-weight="bold">${safeYear}</text></svg>`;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
 function collectExistingUrlsAndImdb(movies: MovieData[]): {
   urls: Set<string>;
   imdbIds: Set<string>;
@@ -486,8 +493,11 @@ export default function TelegramAutoMovieSync({
     draft: AutoMovieDraft,
     sendNotification: boolean
   ): Promise<{ published: boolean; skippedDuplicate?: boolean }> => {
-    const cleanPoster = upgradePosterUrl(draft.posterUrl, 1080) || draft.posterUrl.trim();
-    if (!draft.title.trim() || !cleanPoster) {
+    const cleanPoster =
+      upgradePosterUrl(draft.posterUrl, 1080) ||
+      (draft.posterUrl || '').trim() ||
+      buildFallbackPosterDataUri(draft.title, draft.releaseYear);
+    if (!draft.title.trim()) {
       return { published: false };
     }
 
@@ -544,6 +554,7 @@ export default function TelegramAutoMovieSync({
         ...(draft.episodeLabel ? { episodeLabel: draft.episodeLabel } : {}),
         title: epTitle,
         streamUrl: draft.streamUrl.trim(),
+        videoQualities: {},
         ...(draft.runtime ? { duration: draft.runtime } : {}),
         ...(draft.durationSec > 0 ? { durationSec: draft.durationSec } : {}),
         showInNewEpisodes: true,
@@ -629,7 +640,11 @@ export default function TelegramAutoMovieSync({
         imdbId: (draft.imdbId || '').trim(),
         trailerUrl: '',
         streamingUrl: epObj.streamUrl,
-        videoQualities: {},
+        videoQualities: Object.fromEntries(
+          Object.entries(draft.videoQualities || {}).filter(
+            ([, u]) => String(u || '').trim() && String(u || '').trim() !== epObj.streamUrl.trim()
+          )
+        ),
         seasons: initialSeasons,
         featured: true,
         published: true,
@@ -756,7 +771,11 @@ export default function TelegramAutoMovieSync({
       imdbId: (draft.imdbId || '').trim(),
       trailerUrl: '',
       streamingUrl: draft.streamUrl.trim(),
-      videoQualities: draft.videoQualities || {},
+      videoQualities: Object.fromEntries(
+        Object.entries(draft.videoQualities || {}).filter(
+          ([, u]) => String(u || '').trim() && String(u || '').trim() !== draft.streamUrl.trim()
+        )
+      ),
       seasons: [],
       featured: true,
       published: true,
@@ -864,8 +883,10 @@ export default function TelegramAutoMovieSync({
       if (data.channelTitle) setResolvedChannelTitle(String(data.channelTitle));
 
       const incoming: AutoMovieDraft[] = Array.isArray(data.items) ? data.items : [];
-      const scannedFrom = Number(data.scannedFromMsgId) || baselineMsgId + 1;
-      const highestMsgId = Math.max(baselineMsgId, Number(data.highestMsgId) || 0);
+      const serverHighest = Number(data.highestMsgId) || 0;
+      const reconciledStale = Boolean(data.reconciledStaleBaseline) || (serverHighest > 0 && serverHighest < baselineMsgId);
+      const scannedFrom = Number(data.scannedFromMsgId) || (reconciledStale ? 1 : baselineMsgId + 1);
+      const highestMsgId = reconciledStale ? serverHighest : Math.max(baselineMsgId, serverHighest);
 
       let autoPublishedCount = 0;
       const reviewQueue: AutoMovieDraft[] = [];
@@ -875,11 +896,7 @@ export default function TelegramAutoMovieSync({
           configRef.current.notifyOnNewPublish && incoming.length <= 3;
 
         for (const item of incoming) {
-          const isConfidentMatch =
-            Boolean(item.posterUrl) &&
-            (item.matchConfidence === 'high' ||
-              (item.matchConfidence === 'medium' && item.confidenceScore >= 55 && Boolean(item.imdbId)));
-          if (isConfidentMatch) {
+          if (item.title && item.title.trim()) {
             try {
               const res = await publishSingleDraftToFirestore(item, shouldNotify);
               if (res.published) {
@@ -899,7 +916,7 @@ export default function TelegramAutoMovieSync({
         reviewQueue.push(...incoming);
       }
 
-      if (highestMsgId > configRef.current.lastSyncedMsgId) {
+      if (reconciledStale || highestMsgId > configRef.current.lastSyncedMsgId) {
         await saveSyncConfig({
           ...configRef.current,
           channelUrl: activeUrl,
@@ -1048,11 +1065,7 @@ export default function TelegramAutoMovieSync({
 
         const queueAdd: AutoMovieDraft[] = [];
         for (const item of chunkItems) {
-          const isConfidentMatch =
-            Boolean(item.posterUrl) &&
-            (item.matchConfidence === 'high' ||
-              (item.matchConfidence === 'medium' && item.confidenceScore >= 55 && Boolean(item.imdbId)));
-          if (configRef.current.autoPublishVerified && isConfidentMatch) {
+          if (configRef.current.autoPublishVerified && item.title && item.title.trim()) {
             try {
               const res = await publishSingleDraftToFirestore(item, false);
               if (res.published) {
@@ -1176,8 +1189,8 @@ export default function TelegramAutoMovieSync({
   };
 
   const handlePublishSingleDraft = async (draft: AutoMovieDraft) => {
-    if (!draft.posterUrl) {
-      showNotification('error', 'Pehle "Change Poster / IMDb" se sahi poster select karein.');
+    if (!draft.title.trim()) {
+      showNotification('error', 'Movie title missing hai.');
       await openInlineFixer(draft);
       return;
     }

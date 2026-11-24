@@ -89,10 +89,10 @@ async function updateServerInstallStats(opts: {
   try {
     const statsUrl = `${FIRESTORE_ADMINS_BASE}/app_stats`;
     const res = await fetch(statsUrl, { cache: 'no-store' });
-    let currentCount = 10;
+    let currentCount = 0;
     if (res.ok) {
       const data: any = await res.json();
-      currentCount = Math.max(10, Number(data?.fields?.installedAppUsers?.integerValue) || 10);
+      currentCount = Math.max(0, Number(data?.fields?.installedAppUsers?.integerValue) || 0);
     }
 
     if (opts.isNew) {
@@ -134,7 +134,7 @@ async function updateServerInstallStats(opts: {
     return currentCount;
   } catch (e) {
     console.warn('[Install Stats Server Notice]', e);
-    return 10;
+    return 0;
   }
 }
 
@@ -201,7 +201,7 @@ downloadCastRouter.get('/app/stats', async (_req: Request, res: Response) => {
     const r = await fetch(statsUrl, { cache: 'no-store' });
     if (r.ok) {
       const d: any = await r.json();
-      const installedAppUsers = Math.max(10, Number(d?.fields?.installedAppUsers?.integerValue) || 10);
+      const installedAppUsers = Math.max(0, Number(d?.fields?.installedAppUsers?.integerValue) || 0);
       return res.json({
         installedAppUsers,
         totalApkClicks: Number(d?.fields?.totalApkClicks?.integerValue) || 0,
@@ -209,7 +209,7 @@ downloadCastRouter.get('/app/stats', async (_req: Request, res: Response) => {
       });
     }
   } catch {}
-  res.json({ installedAppUsers: 10, totalApkClicks: 0 });
+  res.json({ installedAppUsers: 0, totalApkClicks: 0 });
 });
 
 let cachedDownloadStats = {

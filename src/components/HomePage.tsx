@@ -24,7 +24,6 @@ import { upgradePosterUrl } from '../utils/posterUrl';
 import { getVisibleQualityBadge } from '../utils/qualityBadge';
 import { parseDurationToSeconds } from '../utils/duration';
 import { getAppPreferences, isMatureContent } from '../services/userPreferencesService';
-import MovieViewsCounter from './MovieViewsCounter';
 
 const slideVariants = {
   enter: (direction: number) => ({
@@ -755,9 +754,6 @@ export default function HomePage() {
             {/* Hero Banner Overlay Title & Clean Right Layout */}
             <div className="relative z-10 p-3 sm:p-5 pt-12 flex items-end justify-between">
               <div className="max-w-[70%]">
-                <span className="bg-red-600 text-white font-extrabold text-[9px] px-2 py-0.5 rounded uppercase tracking-wider mb-1 inline-block">
-                  Featured
-                </span>
                 <h1 className="text-2xl sm:text-4xl font-black tracking-tighter uppercase text-white drop-shadow-2xl font-sans line-clamp-1">
                   {currentFeatured.title}
                 </h1>
@@ -810,8 +806,6 @@ export default function HomePage() {
                     <span>{currentFeatured.releaseYear || (currentFeatured as any).year || '2026'}</span>
                     <span>•</span>
                     <span className="text-red-400 truncate">{currentFeatured.genre || 'Action'}</span>
-                    <span>•</span>
-                    <MovieViewsCounter movie={currentFeatured} />
                   </div>
                 </div>
               </div>
@@ -881,9 +875,6 @@ export default function HomePage() {
                           </button>
                         </div>
                       </div>
-                      <div className="px-2 py-1 bg-neutral-950/95 border-t border-white/[0.05] flex items-center justify-end">
-                        <MovieViewsCounter movie={item.movie} />
-                      </div>
                     </div>
                   );
                 })}
@@ -911,9 +902,6 @@ export default function HomePage() {
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                       />
                     </div>
-                    <div className="mt-1 px-0.5 flex items-center justify-end">
-                      <MovieViewsCounter movie={movie} />
-                    </div>
                   </div>
                 ))}
               </div>
@@ -936,9 +924,6 @@ export default function HomePage() {
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                       />
                     </div>
-                    <div className="mt-1 px-0.5 flex items-center justify-end">
-                      <MovieViewsCounter movie={movie} />
-                    </div>
                   </div>
                 ))}
               </div>
@@ -960,9 +945,6 @@ export default function HomePage() {
                         alt={movie.title}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                       />
-                    </div>
-                    <div className="mt-1 px-0.5 flex items-center justify-end">
-                      <MovieViewsCounter movie={movie} />
                     </div>
                   </div>
                 ))}
@@ -993,9 +975,6 @@ export default function HomePage() {
                         #{index + 1}
                       </span>
                     </div>
-                    <div className="mt-1 px-0.5 flex items-center justify-end">
-                      <MovieViewsCounter movie={movie} />
-                    </div>
                   </div>
                 ))}
               </div>
@@ -1013,9 +992,6 @@ export default function HomePage() {
                   <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
                       <img src={upgradePosterUrl(movie.posterUrl, 400) || movie.posterUrl} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                    </div>
-                    <div className="mt-1 px-0.5 flex items-center justify-end">
-                      <MovieViewsCounter movie={movie} />
                     </div>
                   </div>
                 ))}
@@ -1035,9 +1011,6 @@ export default function HomePage() {
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
                       <img src={upgradePosterUrl(movie.posterUrl, 400) || movie.posterUrl} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                     </div>
-                    <div className="mt-1 px-0.5 flex items-center justify-end">
-                      <MovieViewsCounter movie={movie} />
-                    </div>
                   </div>
                 ))}
               </div>
@@ -1056,9 +1029,6 @@ export default function HomePage() {
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
                       <img src={upgradePosterUrl(movie.posterUrl, 400) || movie.posterUrl} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                     </div>
-                    <div className="mt-1 px-0.5 flex items-center justify-end">
-                      <MovieViewsCounter movie={movie} />
-                    </div>
                   </div>
                 ))}
               </div>
@@ -1076,9 +1046,6 @@ export default function HomePage() {
                   <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
                       <img src={upgradePosterUrl(movie.posterUrl, 400) || movie.posterUrl} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                    </div>
-                    <div className="mt-1 px-0.5 flex items-center justify-end">
-                      <MovieViewsCounter movie={movie} />
                     </div>
                   </div>
                 ))}

@@ -1,7 +1,7 @@
 export const CLOUD_RUN_BACKEND_URL = 'https://movie-portalhub-1012526016635.asia-southeast1.run.app';
-export const LIVE_BACKEND_URL = 'https://ais-dev-ariekzqzaudxer5atxkvkw-832989141722.asia-southeast1.run.app';
-export const PRE_BACKEND_URL = 'https://ais-pre-ariekzqzaudxer5atxkvkw-832989141722.asia-southeast1.run.app';
-export const APP_VERSION = 'v3.5.251';
+export const LIVE_BACKEND_URL = 'https://ais-dev-jnqt2mxwwu4hovy5xbqigd-560942295760.asia-northeast1.run.app';
+export const PRE_BACKEND_URL = 'https://ais-pre-jnqt2mxwwu4hovy5xbqigd-560942295760.asia-northeast1.run.app';
+export const APP_VERSION = 'v3.5.267';
 
 const ENV_BACKEND_URL = (
   (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_BASE_URL) ||
@@ -20,8 +20,20 @@ const PROBE_CACHE_TTL_MS = 60 * 1000;
 
 function isNativeAppRuntime(): boolean {
   if (typeof window === 'undefined') return false;
-  const cap = (window as any).Capacitor;
+  const w = window as any;
+  if (w.AndroidPlayerBridge || w.AndroidStreamBridge) return true;
+  const cap = w.Capacitor;
   return Boolean(cap && typeof cap.isNativePlatform === 'function' ? cap.isNativePlatform() : cap?.isNativePlatform);
+}
+
+function isLoadedOnRemoteLiveWebOrigin(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const { protocol, hostname } = window.location;
+    return protocol === 'https:' && !/^(localhost|127\.0\.0\.1)$/i.test(hostname);
+  } catch {
+    return false;
+  }
 }
 
 export function getNativeLocalBridgeUrl(): string {
@@ -113,7 +125,12 @@ export function getApiBaseUrl(): string {
     return '';
   }
 
-  // 3. For Native APK: prefer build-time/probed healthy public backend, else built-in Android local bridge
+  // 3. For Native APK loaded on a live HTTPS server: use same-origin unless another remote transcode server was resolved
+  if (isLoadedOnRemoteLiveWebOrigin()) {
+    return resolvedRemoteTranscodeUrl || resolvedNativeBackendUrl || '';
+  }
+
+  // 4. For Native APK loaded from bundled localhost: prefer healthy public backend, else built-in Android local bridge
   return resolvedRemoteTranscodeUrl || ENV_BACKEND_URL || resolvedNativeBackendUrl || getNativeLocalBridgeUrl() || '';
 }
 
@@ -209,8 +226,12 @@ export async function probeWorkingBackendUrl(force = false): Promise<string | nu
 
     const firestoreBackendUrl = await fetchFirestoreConfiguredBackendUrl();
 
+    const currentOrigin = isLoadedOnRemoteLiveWebOrigin()
+      ? window.location.origin.replace(/\/+$/, '')
+      : '';
+
     const remoteCandidates = Array.from(
-      new Set([custom, ENV_BACKEND_URL, firestoreBackendUrl, PRE_BACKEND_URL, LIVE_BACKEND_URL, CLOUD_RUN_BACKEND_URL].filter(Boolean))
+      new Set([custom, currentOrigin, ENV_BACKEND_URL, firestoreBackendUrl, PRE_BACKEND_URL, LIVE_BACKEND_URL, CLOUD_RUN_BACKEND_URL].filter(Boolean))
     );
 
     let checks: Array<HealthCheckResult & { candidate: string }> = [];

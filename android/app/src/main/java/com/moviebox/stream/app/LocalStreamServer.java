@@ -49,7 +49,7 @@ import java.util.regex.Pattern;
  */
 public class LocalStreamServer {
     private static final String TAG = "LocalStreamServer";
-    private static final long MAX_RANGE_CHUNK = 16L * 1024L * 1024L; // 16 MB per open-ended range
+    private static final long MAX_RANGE_CHUNK = 8L * 1024L * 1024L; // 8 MB per open-ended range
     private static final long META_CACHE_TTL_MS = 45L * 60L * 1000L;
     private static final byte[] END_SENTINEL = new byte[0];
     private static final Pattern RANGE_PATTERN = Pattern.compile("bytes=(\\d+)-(\\d*)");
