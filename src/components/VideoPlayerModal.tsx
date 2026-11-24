@@ -1255,9 +1255,7 @@ export default function VideoPlayerModal({
     const needsScaledTranscode =
       canScaleRemote &&
       !explicitUrl &&
-      (qTier === '480p' ||
-        qTier === '360p' ||
-        (qTier === '720p' && (sourceHeight <= 0 || sourceHeight > 780)));
+      isExplicitTier;
 
     const isIosWeb = !Capacitor.isNativePlatform() && isAppleMobileBrowser();
     const isIncompatibleNonTgIos =
@@ -4233,15 +4231,7 @@ export default function VideoPlayerModal({
                             qualityResumeTargetRef.current = curPos > 0.5 ? curPos : null;
                             resumeOffsetRef.current = curPos;
 
-                            if (scaled) {
-                              setFallbackStage('level3_transcode');
-                              fallbackStageRef.current = 'level3_transcode';
-                              setStreamFallbackMode('transcode');
-                              streamFallbackModeRef.current = 'transcode';
-                              setStreamStartOffset(curFloor);
-                              streamStartOffsetRef.current = curFloor;
-                              setIsLoading(true);
-                            } else {
+                            if (qLower === 'auto') {
                               const baseRec = preflightCacheRef.current?.recommendedMode || 'direct';
                               const nextStage =
                                 baseRec === 'transcode'
@@ -4253,15 +4243,22 @@ export default function VideoPlayerModal({
                               fallbackStageRef.current = nextStage;
                               setStreamFallbackMode(baseRec);
                               streamFallbackModeRef.current = baseRec;
-                              if (baseRec !== 'direct') {
-                                setStreamStartOffset(curFloor);
-                                streamStartOffsetRef.current = curFloor;
-                              } else {
-                                setStreamStartOffset(0);
-                                streamStartOffsetRef.current = 0;
-                              }
-                              setIsLoading(true);
+                              setStreamStartOffset(curFloor);
+                              streamStartOffsetRef.current = curFloor;
+                            } else if (explicit) {
+                              setStreamFallbackMode('direct');
+                              streamFallbackModeRef.current = 'direct';
+                              setStreamStartOffset(curFloor);
+                              streamStartOffsetRef.current = curFloor;
+                            } else {
+                              setFallbackStage('level3_transcode');
+                              fallbackStageRef.current = 'level3_transcode';
+                              setStreamFallbackMode('transcode');
+                              streamFallbackModeRef.current = 'transcode';
+                              setStreamStartOffset(curFloor);
+                              streamStartOffsetRef.current = curFloor;
                             }
+                            setIsLoading(true);
                           }}
                           className={`w-full text-left px-3 py-2 text-xs hover:bg-emerald-500 hover:text-black transition-colors flex items-center justify-between cursor-pointer ${
                             selectedQuality === q ? 'text-emerald-400 font-bold bg-white/5' : 'text-white'

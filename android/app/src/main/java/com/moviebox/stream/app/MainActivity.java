@@ -658,7 +658,7 @@ public class MainActivity extends BridgeActivity {
                 return pInfo.versionName.trim();
             }
         } catch (Exception ignored) {}
-        return "3.5.271";
+        return "3.5.272";
     }
 
     private int compareVersionStrings(String verA, String verB) {
@@ -691,7 +691,7 @@ public class MainActivity extends BridgeActivity {
             conn.setReadTimeout(timeoutMs);
             conn.setRequestProperty("Cache-Control", "no-store, no-cache");
             conn.setRequestProperty("Pragma", "no-cache");
-            conn.setRequestProperty("User-Agent", "MovieHub-Android-LiveSync/3.5.271");
+            conn.setRequestProperty("User-Agent", "MovieHub-Android-LiveSync/3.5.272");
             int code = conn.getResponseCode();
             if (code < 200 || code >= 300) return null;
             try (InputStream is = conn.getInputStream();
@@ -3332,11 +3332,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.271");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.272");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.271\",\"versionCode\":35271}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.272\",\"versionCode\":35272}";
             }
         }
 
