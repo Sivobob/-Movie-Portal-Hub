@@ -658,7 +658,7 @@ public class MainActivity extends BridgeActivity {
                 return pInfo.versionName.trim();
             }
         } catch (Exception ignored) {}
-        return "3.5.272";
+        return "3.5.275";
     }
 
     private int compareVersionStrings(String verA, String verB) {
@@ -691,7 +691,7 @@ public class MainActivity extends BridgeActivity {
             conn.setReadTimeout(timeoutMs);
             conn.setRequestProperty("Cache-Control", "no-store, no-cache");
             conn.setRequestProperty("Pragma", "no-cache");
-            conn.setRequestProperty("User-Agent", "MovieHub-Android-LiveSync/3.5.272");
+            conn.setRequestProperty("User-Agent", "MovieHub-Android-LiveSync/3.5.275");
             int code = conn.getResponseCode();
             if (code < 200 || code >= 300) return null;
             try (InputStream is = conn.getInputStream();
@@ -1989,14 +1989,14 @@ public class MainActivity extends BridgeActivity {
             apkUpdateProgress = 100;
             legacyInstallFallbackTried = false;
             preferLegacyInstallerOnRetry = true;
-            apkUpdateMessage = "Update prompt closed. Tap \"Tap to Install Update\" below (ya \"Download & Install via Chrome\" try karein).";
+            apkUpdateMessage = "Update prompt closed. Tap \"Tap to Install Update\" below to install inside the app.";
             return;
         }
 
         if (status == PackageInstaller.STATUS_FAILURE_CONFLICT) {
             apkUpdateState = "error";
             apkUpdateProgress = 100;
-            apkUpdateMessage = "APK signature conflict with the currently installed version. Please uninstall the old app once, or install via Browser.";
+            apkUpdateMessage = "APK signature conflict with the currently installed version. Please uninstall the old app once, then install the new release APK.";
             return;
         }
 
@@ -2135,7 +2135,7 @@ public class MainActivity extends BridgeActivity {
                     }
                 }
                 if (!anyMatch) {
-                    return "App signature mismatch (" + installedLabel + " vs " + archiveLabel + "). Purana app ek baar uninstall karke niche \"Download & Install via Chrome\" se naya APK install karein.";
+                    return "App signature mismatch (" + installedLabel + " vs " + archiveLabel + "). Purana app ek baar uninstall karke naya release APK install karein.";
                 }
             }
             return null;
@@ -2186,7 +2186,7 @@ public class MainActivity extends BridgeActivity {
                     if (secondaryEx instanceof android.content.ActivityNotFoundException) {
                         apkUpdateState = "error";
                         apkUpdateProgress = 100;
-                        apkUpdateMessage = "No Android Package Installer found on this device. Tap Download & Install via Chrome below.";
+                        apkUpdateMessage = "No Android Package Installer found on this device. Please check system installer settings and tap Retry In-App Update.";
                         return;
                     }
                     throw secondaryEx;
@@ -2197,13 +2197,13 @@ public class MainActivity extends BridgeActivity {
             apkUpdateProgress = 100;
             apkUpdateMessage = "Android system security blocked in-app installation ("
                 + (secEx.getMessage() != null ? secEx.getMessage() : "SecurityException")
-                + "). Tap Download & Install via Chrome below.";
+                + "). Tap Retry In-App Update below.";
         } catch (Exception e) {
             apkUpdateState = "error";
             apkUpdateProgress = 0;
             apkUpdateMessage = "Could not start Android installer ("
                 + (e.getMessage() != null ? e.getMessage() : "Unknown error")
-                + "). Tap Download & Install via Chrome below.";
+                + "). Tap Retry In-App Update below.";
         }
     }
 
@@ -2289,7 +2289,7 @@ public class MainActivity extends BridgeActivity {
             conn.setConnectTimeout(30000);
             conn.setReadTimeout(60000);
             conn.setRequestMethod("GET");
-            conn.setRequestProperty("User-Agent", "MoviePortal-AndroidUpdater/3.5.251");
+            conn.setRequestProperty("User-Agent", "MoviePortal-AndroidUpdater/3.5.275");
             conn.setRequestProperty("Accept", "application/vnd.android.package-archive,application/octet-stream,*/*");
             conn.setRequestProperty("Accept-Encoding", "identity");
             conn.setRequestProperty("Cache-Control", "no-cache");
@@ -3332,11 +3332,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.272");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.275");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.272\",\"versionCode\":35272}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.275\",\"versionCode\":35275}";
             }
         }
 
@@ -3436,16 +3436,7 @@ public class MainActivity extends BridgeActivity {
                 : (lastApkDownloadUrl != null && !lastApkDownloadUrl.isEmpty()
                     ? lastApkDownloadUrl
                     : "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk");
-            runOnUiThread(() -> {
-                try {
-                    Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl));
-                    browserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    startActivity(browserIntent);
-                } catch (Exception e) {
-                    apkUpdateState = "error";
-                    apkUpdateMessage = "Could not open browser (" + (e.getMessage() != null ? e.getMessage() : "Error") + ").";
-                }
-            });
+            runOnUiThread(() -> startApkDownloadManager(targetUrl));
         }
 
         // --- GOOGLE CAST BRIDGE METHODS ---

@@ -663,7 +663,7 @@ export default function DownloadsPage() {
                   <button
                     key={item.id || item.imdbId}
                     type="button"
-                    onClick={() => handleWatchNow(item)}
+                    onClick={() => openMovieDetails(item)}
                     className="text-left group cursor-pointer focus:outline-none"
                   >
                     <div className="relative aspect-[2/3] rounded-lg overflow-hidden bg-[#1a1d24] border border-white/[0.06] shadow-md">

@@ -8,6 +8,7 @@ import {
   subscribeRemoteUpdateConfig,
   getInstalledAppVersion,
   isAppUpdateRequired,
+  pickHigherRemoteUpdateConfig,
   OFFICIAL_APK_DIRECT_URL,
   resolveApkDownloadUrl,
 } from '../services/appUpdateConfig';
@@ -90,17 +91,18 @@ export default function UpdateNotification() {
 
     const unsub = subscribeRemoteUpdateConfig((cfg) => {
       if (!mounted) return;
-      currentRemote = cfg;
-      setRemoteConfig(cfg);
+      const merged = pickHigherRemoteUpdateConfig(currentRemote, cfg) || cfg;
+      currentRemote = merged;
+      setRemoteConfig(merged);
       if (currentInstalled) {
-        evaluateUpdateState(currentInstalled, cfg);
+        evaluateUpdateState(currentInstalled, merged);
       } else {
         getInstalledAppVersion()
           .then((inst) => {
             if (!mounted) return;
             currentInstalled = inst;
             setInstalled(inst);
-            evaluateUpdateState(inst, cfg);
+            evaluateUpdateState(inst, merged);
           })
           .catch(() => {});
       }
@@ -310,23 +312,14 @@ export default function UpdateNotification() {
             </button>
           )}
 
-          {(isInstalling || hasError || needsPermission) && (
+          {(isInstalling || needsPermission) && (
             <button
               type="button"
-              onClick={async () => {
-                try {
-                  const { Browser } = await import('@capacitor/browser');
-                  await Browser.open({ url: downloadUrl });
-                  return;
-                } catch {}
-                try {
-                  (window as any).AndroidPlayerBridge?.openApkDownloadInBrowser?.(downloadUrl);
-                } catch {}
-              }}
+              onClick={handleStartDownload}
               className="w-full bg-neutral-800 hover:bg-neutral-700 text-gray-200 font-bold text-xs py-2.5 px-4 rounded-xl border border-neutral-700 flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition-all"
             >
               <Download size={14} />
-              <span>Download &amp; Install via Chrome</span>
+              <span>Re-download Inside App</span>
             </button>
           )}
 

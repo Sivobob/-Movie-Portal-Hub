@@ -281,7 +281,7 @@ export default function HomePage() {
         } catch {}
         playingMovieRef.current = null;
         setPlayingMovie(null);
-        handleWatchNow(match);
+        handleMovieClick(match);
       }
     };
 
@@ -752,7 +752,7 @@ export default function HomePage() {
               {categoryMovies.map((movie) => {
                 return (
                   <div key={movie.id} className="relative group">
-                    <MovieCard movie={movie} onClick={() => handleWatchNow(movie)} />
+                    <MovieCard movie={movie} onClick={() => handleMovieClick(movie)} />
                   </div>
                 );
               })}
@@ -795,7 +795,7 @@ export default function HomePage() {
                     className="absolute inset-0 will-change-transform cursor-pointer touch-pan-y"
                     onClick={() => {
                       if (!isSwiping && !isSwipingRef.current) {
-                        handleWatchNow(currentFeatured);
+                        handleMovieClick(currentFeatured);
                       }
                     }}
                   >
@@ -841,7 +841,7 @@ export default function HomePage() {
               {/* Reference Screenshot Style Mini Preview Card Below Banner */}
               <div className="px-3 sm:px-6 -mt-3 relative z-20">
                 <div
-                  onClick={() => handleWatchNow(currentFeatured)}
+                  onClick={() => handleMovieClick(currentFeatured)}
                   className="bg-neutral-900/95 hover:bg-neutral-900 border border-neutral-800 hover:border-red-600/50 rounded-2xl p-2.5 sm:p-3 flex items-center justify-between gap-3 shadow-xl cursor-pointer group transition-all"
                 >
                   <div className="flex items-center gap-3 min-w-0">
@@ -893,7 +893,7 @@ export default function HomePage() {
                   return (
                     <div
                       key={item.key}
-                      onClick={() => handleWatchNow(item.movie, item.seasonIndex, item.episodeIndex)}
+                      onClick={() => handleMovieClick(item.movie, item.seasonIndex, item.episodeIndex)}
                       className="flex-shrink-0 w-36 sm:w-44 bg-neutral-900 rounded-xl overflow-hidden border border-neutral-800 hover:border-red-600/60 flex flex-col shadow-lg cursor-pointer group transition-colors"
                     >
                       <div className="relative aspect-[3/4] w-full bg-neutral-950 overflow-hidden">
@@ -954,7 +954,7 @@ export default function HomePage() {
                 {latestMoviesAndSeries.map((movie) => (
                   <div
                     key={movie.id}
-                    onClick={() => handleWatchNow(movie)}
+                    onClick={() => handleMovieClick(movie)}
                     className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer"
                   >
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
@@ -978,7 +978,7 @@ export default function HomePage() {
               </h3>
               <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
                 {suspenseMovies.map((movie) => (
-                  <div key={movie.id} onClick={() => handleWatchNow(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
+                  <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
                       <img
                         src={upgradePosterUrl(movie.posterUrl, 400) || movie.posterUrl}
@@ -1000,7 +1000,7 @@ export default function HomePage() {
               </h3>
               <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
                 {actionMovies.map((movie) => (
-                  <div key={movie.id} onClick={() => handleWatchNow(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
+                  <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
                       <img
                         src={upgradePosterUrl(movie.posterUrl, 400) || movie.posterUrl}
@@ -1024,7 +1024,7 @@ export default function HomePage() {
                 {topSeries.slice(0, 10).map((movie, index) => (
                   <div
                     key={movie.id}
-                    onClick={() => handleWatchNow(movie)}
+                    onClick={() => handleMovieClick(movie)}
                     className="flex-shrink-0 w-28 sm:w-32 cursor-pointer group relative"
                   >
                     <div className="relative aspect-[2/3] w-full bg-neutral-950 rounded-xl overflow-hidden border border-neutral-800/90 shadow-md">
@@ -1051,7 +1051,7 @@ export default function HomePage() {
               </h3>
               <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
                 {comedyMovies.map((movie) => (
-                  <div key={movie.id} onClick={() => handleWatchNow(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
+                  <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
                       <img src={upgradePosterUrl(movie.posterUrl, 400) || movie.posterUrl} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                     </div>
@@ -1069,7 +1069,7 @@ export default function HomePage() {
               </h3>
               <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
                 {romanceMovies.map((movie) => (
-                  <div key={movie.id} onClick={() => handleWatchNow(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
+                  <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
                       <img src={upgradePosterUrl(movie.posterUrl, 400) || movie.posterUrl} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                     </div>
@@ -1087,7 +1087,7 @@ export default function HomePage() {
               </h3>
               <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
                 {thrillerHorrorMovies.map((movie) => (
-                  <div key={movie.id} onClick={() => handleWatchNow(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
+                  <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
                       <img src={upgradePosterUrl(movie.posterUrl, 400) || movie.posterUrl} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                     </div>
@@ -1105,7 +1105,7 @@ export default function HomePage() {
               </h3>
               <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
                 {dramaMovies.map((movie) => (
-                  <div key={movie.id} onClick={() => handleWatchNow(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
+                  <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
                       <img src={upgradePosterUrl(movie.posterUrl, 400) || movie.posterUrl} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                     </div>

@@ -468,7 +468,7 @@ export default function MePage() {
                     return (
                       <div key={item.movieId} className="space-y-1.5 group">
                         <div
-                          onClick={() => handleWatchNow(movieObj)}
+                          onClick={() => openMovieDetails(movieObj)}
                           className="relative aspect-[2/3] rounded-lg overflow-hidden bg-[#1a1d24] border border-white/[0.06] cursor-pointer"
                         >
                           <img src={poster} alt={item.title} className="w-full h-full object-cover" />
@@ -511,7 +511,7 @@ export default function MePage() {
                     return (
                       <div key={item.movieId} className="space-y-1.5">
                         <div
-                          onClick={() => handleWatchNow(movieObj)}
+                          onClick={() => openMovieDetails(movieObj)}
                           className="relative aspect-[2/3] rounded-lg overflow-hidden bg-[#1a1d24] border border-white/[0.06] cursor-pointer"
                         >
                           <img src={poster} alt={item.title} className="w-full h-full object-cover" />

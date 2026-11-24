@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.272",
-  "minimumRequiredVersion": "3.5.272",
-  "latestVersionCode": 35272,
-  "minimumRequiredVersionCode": 35272,
+  "latestVersion": "3.5.275",
+  "minimumRequiredVersion": "3.5.275",
+  "latestVersionCode": 35275,
+  "minimumRequiredVersionCode": 35275,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Hub v3.5.272 is live! Fixed video quality change routing so switching qualities (360p, 720p, 1080p) instantly changes video quality and resumes playback seamlessly.",
-  "releaseNotes": "v3.5.272: Fixed video quality change routing so selecting 360p, 480p, 720p, or 1080p correctly switches the stream quality on the fly and resumes playback at the exact timestamp. Plus all previous fixes: instant series/movie click-to-play, dual touch gestures, and strictly 2026 releases."
+  "updateMessage": "Movie Hub v3.5.275 is live! New clean Movie & Series Details screen with Season & Episode selector, plus 100% in-app update & installation.",
+  "releaseNotes": "v3.5.275: Redesigned Movie & Series Details screen with Season and Episode selector for series, removed extra note and Telegram clutter, and updated APK installer to download and install strictly inside the app."
 }

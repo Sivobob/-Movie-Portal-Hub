@@ -400,7 +400,7 @@ export default function SearchPage() {
             <MovieCard
               key={movie.id}
               movie={movie}
-              onClick={() => handleWatchNow(movie)}
+              onClick={() => openMovieDetails(movie)}
             />
           ))}
         </div>
