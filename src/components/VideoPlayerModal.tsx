@@ -440,6 +440,15 @@ export default function VideoPlayerModal({
     setShowQualityMenu(false);
   };
 
+  const closeOtherMenus = () => {
+    setShowSpeedMenu(false);
+    setShowAudioMenu(false);
+    setShowSubtitlesMenu(false);
+    setShowSettingsMenu(false);
+    setShowLanguageMenu(false);
+    setShowQualityMenu(false);
+  };
+
   const handleToggleFit = (e: React.MouseEvent) => {
     e.stopPropagation();
     resetAutoHideTimer();
@@ -3695,9 +3704,10 @@ export default function VideoPlayerModal({
                     <button
                       type="button"
                       onClick={() => {
-                        setShowSeasonDropdown(!showSeasonDropdown);
+                        const next = !showSeasonDropdown;
+                        closeOtherMenus();
                         setShowEpisodeDropdown(false);
-                        closeAllMenus();
+                        setShowSeasonDropdown(next);
                         resetAutoHideTimer();
                       }}
                       className="bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg px-2.5 py-1 text-xs text-white font-semibold flex items-center gap-1 backdrop-blur-md shadow-sm transition-colors cursor-pointer"
@@ -3736,9 +3746,10 @@ export default function VideoPlayerModal({
                     <button
                       type="button"
                       onClick={() => {
-                        setShowEpisodeDropdown(!showEpisodeDropdown);
+                        const next = !showEpisodeDropdown;
+                        closeOtherMenus();
                         setShowSeasonDropdown(false);
-                        closeAllMenus();
+                        setShowEpisodeDropdown(next);
                         resetAutoHideTimer();
                       }}
                       className="bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg px-2.5 py-1 text-xs text-white font-semibold flex items-center gap-1 backdrop-blur-md shadow-sm transition-colors cursor-pointer max-w-[150px] sm:max-w-[200px]"

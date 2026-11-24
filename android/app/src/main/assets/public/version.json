@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.270",
-  "minimumRequiredVersion": "3.5.270",
-  "latestVersionCode": 35270,
-  "minimumRequiredVersionCode": 35270,
+  "latestVersion": "3.5.271",
+  "minimumRequiredVersion": "3.5.271",
+  "latestVersionCode": 35271,
+  "minimumRequiredVersionCode": 35271,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Hub v3.5.270 is live! Instant movie/series click-to-play, dual touch gestures for volume & brightness, seamless quality switch resume, strictly 2026 releases on Featured & Latest rows, and ~90 MB build.",
-  "releaseNotes": "v3.5.270: Movies and web series start immediately on click. Screen gestures (right side vertical swipe for volume up/down, left side for brightness). Seamless video quality change without resetting to 0. Featured slider and Latest section strictly display 2026 releases only. ~90 MB APK build."
+  "updateMessage": "Movie Hub v3.5.271 is live! Fixed Season and Episode dropdown menus in series player so they open and respond to clicks perfectly, plus dual touch gestures & ~90 MB build.",
+  "releaseNotes": "v3.5.271: Fixed series player Season and Episode dropdown selectors so they open and respond to clicks correctly. Plus all previous fixes: instant playback, quality switch seamless resume, vertical volume/brightness gestures, and strictly 2026 releases."
 }
