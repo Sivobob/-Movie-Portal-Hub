@@ -575,13 +575,9 @@ export default function VideoPlayerModal({
     }, 750);
   };
 
-  const handleViewportPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+  const handleGestureStart = (clientX: number, clientY: number, height: number, id = 1) => {
     if (isLocked || error || isYouTube) return;
-    if (e.button !== 0 && e.pointerType === 'mouse') return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-
-    const side: 'left' | 'right' = e.clientX - rect.left < rect.width / 2 ? 'left' : 'right';
+    const side: 'left' | 'right' = clientX < window.innerWidth / 2 ? 'left' : 'right';
     const bridge = (window as any).AndroidPlayerBridge;
 
     let initVal = side === 'left' ? brightnessRef.current : volumeRef.current;
@@ -612,23 +608,23 @@ export default function VideoPlayerModal({
     swipeStateRef.current = {
       lockedMode: 'pending',
       side,
-      startX: e.clientX,
-      startY: e.clientY,
+      startX: clientX,
+      startY: clientY,
       initialVal: initVal,
-      height: rect.height,
-      pointerId: e.pointerId,
+      height: height || window.innerHeight,
+      pointerId: id,
     };
   };
 
-  const handleViewportPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+  const handleGestureMove = (clientX: number, clientY: number, id = 1) => {
     const st = swipeStateRef.current;
-    if (!st || st.pointerId !== e.pointerId || isLocked || error || isYouTube) return;
+    if (!st || st.pointerId !== id || isLocked || error || isYouTube) return;
 
-    const dx = e.clientX - st.startX;
-    const dy = st.startY - e.clientY; // positive = swipe UP (bottom -> top)
+    const dx = clientX - st.startX;
+    const dy = st.startY - clientY; // positive = swipe UP (bottom -> top)
 
     if (st.lockedMode === 'pending') {
-      if (Math.abs(dy) < 14 || Math.abs(dy) <= Math.abs(dx) * 1.2) {
+      if (Math.abs(dy) < 10 || Math.abs(dy) <= Math.abs(dx) * 1.1) {
         return;
       }
       st.lockedMode = st.side === 'left' ? 'brightness' : 'volume';
@@ -643,7 +639,7 @@ export default function VideoPlayerModal({
       }
     }
 
-    const sensitivityPx = Math.max(150, st.height * 0.55);
+    const sensitivityPx = Math.max(140, st.height * 0.5);
     const rawNext = st.initialVal + dy / sensitivityPx;
     const clamped = Math.max(0, Math.min(1, rawNext));
     const pct = Math.round(clamped * 100);
@@ -682,14 +678,54 @@ export default function VideoPlayerModal({
     }
   };
 
-  const handleViewportPointerEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+  const handleGestureEnd = (id = 1) => {
     const st = swipeStateRef.current;
-    if (!st || st.pointerId !== e.pointerId) return;
+    if (!st || st.pointerId !== id) return;
     const wasSwipe = st.lockedMode !== 'pending';
     swipeStateRef.current = null;
     if (wasSwipe) {
       hideGestureHudSoon();
     }
+  };
+
+  const handleViewportPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    try {
+      (e.currentTarget as any).setPointerCapture?.(e.pointerId);
+    } catch {}
+    handleGestureStart(e.clientX, e.clientY, e.currentTarget.getBoundingClientRect().height, e.pointerId);
+  };
+
+  const handleViewportPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    handleGestureMove(e.clientX, e.clientY, e.pointerId);
+  };
+
+  const handleViewportPointerEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    try {
+      (e.currentTarget as any).releasePointerCapture?.(e.pointerId);
+    } catch {}
+    handleGestureEnd(e.pointerId);
+  };
+
+  const handleViewportTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 1) {
+      const t = e.touches[0];
+      handleGestureStart(t.clientX, t.clientY, e.currentTarget.getBoundingClientRect().height, 9999);
+    }
+  };
+
+  const handleViewportTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 1) {
+      const t = e.touches[0];
+      handleGestureMove(t.clientX, t.clientY, 9999);
+      if (swipeStateRef.current?.lockedMode !== 'pending') {
+        if (e.cancelable) e.preventDefault();
+      }
+    }
+  };
+
+  const handleViewportTouchEnd = () => {
+    handleGestureEnd(9999);
   };
 
   const handleViewportTap = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -1508,8 +1544,7 @@ export default function VideoPlayerModal({
     }
 
     const isHlsExo = /\.m3u8/i.test(playableUrl);
-    const isServerPipedUrl = !isHlsExo && /[?&](transcode|remux)=1/i.test(playableUrl);
-    const exoStartOffset = !isServerPipedUrl ? resumeSec : 0;
+    const exoStartOffset = resumeSec;
     let exoReadySeekRetries = 0;
     let lastExoReadySeekAtMs = 0;
 
@@ -3381,6 +3416,10 @@ export default function VideoPlayerModal({
           onPointerMove={handleViewportPointerMove}
           onPointerUp={handleViewportPointerEnd}
           onPointerCancel={handleViewportPointerEnd}
+          onTouchStart={handleViewportTouchStart}
+          onTouchMove={handleViewportTouchMove}
+          onTouchEnd={handleViewportTouchEnd}
+          onTouchCancel={handleViewportTouchEnd}
         >
           {!isYouTube ? (
             <>
