@@ -29,6 +29,7 @@ import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.TextureView;
 import android.graphics.SurfaceTexture;
+import android.media.AudioManager;
 import android.media.MediaCodecInfo;
 import android.media.MediaCodecList;
 import android.media.MediaFormat;
@@ -226,6 +227,8 @@ public class MainActivity extends BridgeActivity {
     private volatile int exoResizeMode = 0; // 0 = fit, 4 = zoom/cover, 3 = stretch/fill
     private volatile String currentExoMediaUrl = "";
     private volatile int exoAutoReconnectAttempts = 0;
+    private volatile double pendingExoSeekAfterReadySec = 0.0;
+    private volatile int pendingExoSeekAttempts = 0;
     private Runnable pendingExoReconnectRunnable = null;
     private PowerManager.WakeLock playbackWakeLock;
     private WifiManager.WifiLock playbackWifiLock;
@@ -655,7 +658,7 @@ public class MainActivity extends BridgeActivity {
                 return pInfo.versionName.trim();
             }
         } catch (Exception ignored) {}
-        return "3.5.268";
+        return "3.5.269";
     }
 
     private int compareVersionStrings(String verA, String verB) {
@@ -688,7 +691,7 @@ public class MainActivity extends BridgeActivity {
             conn.setReadTimeout(timeoutMs);
             conn.setRequestProperty("Cache-Control", "no-store, no-cache");
             conn.setRequestProperty("Pragma", "no-cache");
-            conn.setRequestProperty("User-Agent", "MovieHub-Android-LiveSync/3.5.268");
+            conn.setRequestProperty("User-Agent", "MovieHub-Android-LiveSync/3.5.269");
             int code = conn.getResponseCode();
             if (code < 200 || code >= 300) return null;
             try (InputStream is = conn.getInputStream();
@@ -1027,6 +1030,10 @@ public class MainActivity extends BridgeActivity {
                 long durMs = exoPlayer.getDuration();
                 long bufMs = Math.max(0L, exoPlayer.getBufferedPosition());
                 isSeekable = exoPlayer.isCurrentMediaItemSeekable();
+                if (pendingExoSeekAfterReadySec > 0.25 && !exoFirstFrameRendered
+                    && posMs < (long) ((pendingExoSeekAfterReadySec - 3.0) * 1000.0)) {
+                    posMs = (long) (pendingExoSeekAfterReadySec * 1000.0);
+                }
 
                 obj.put("state", state);
                 obj.put("isPlaying", exoPlayer.isPlaying());
@@ -1455,6 +1462,17 @@ public class MainActivity extends BridgeActivity {
                 if (playbackState == Player.STATE_READY) {
                     exoAutoReconnectAttempts = 0;
                     exoErrorMessage = "";
+                    if (pendingExoSeekAfterReadySec > 0.25 && exoPlayer != null) {
+                        long targetMs = (long) (pendingExoSeekAfterReadySec * 1000.0);
+                        long curPosMs = Math.max(0L, exoPlayer.getCurrentPosition());
+                        if (curPosMs >= targetMs - 3000L) {
+                            pendingExoSeekAfterReadySec = 0.0;
+                            pendingExoSeekAttempts = 0;
+                        } else if (exoPlayer.isCurrentMediaItemSeekable() && pendingExoSeekAttempts < 4) {
+                            pendingExoSeekAttempts++;
+                            exoPlayer.seekTo(targetMs);
+                        }
+                    }
                 }
                 refreshExoStateSnapshot();
             }
@@ -1603,9 +1621,12 @@ public class MainActivity extends BridgeActivity {
                     );
 
                     MediaItem mediaItem = MediaItem.fromUri(Uri.parse(url));
+                    pendingExoSeekAttempts = 0;
                     if (startSec > 0.25) {
+                        pendingExoSeekAfterReadySec = startSec;
                         exoPlayer.setMediaItem(mediaItem, (long) (startSec * 1000.0));
                     } else {
+                        pendingExoSeekAfterReadySec = 0.0;
                         exoPlayer.setMediaItem(mediaItem);
                     }
                     exoPlayer.setPlaybackSpeed(speed > 0 ? (float) speed : 1.0f);
@@ -1653,6 +1674,8 @@ public class MainActivity extends BridgeActivity {
         exoSessionId++;
         currentExoMediaUrl = "";
         exoAutoReconnectAttempts = 0;
+        pendingExoSeekAfterReadySec = 0.0;
+        pendingExoSeekAttempts = 0;
         pendingStartRunnable = null;
         if (pendingExoReconnectRunnable != null) {
             mainHandler.removeCallbacks(pendingExoReconnectRunnable);
@@ -1708,6 +1731,8 @@ public class MainActivity extends BridgeActivity {
         exoSessionId++;
         currentExoMediaUrl = "";
         exoAutoReconnectAttempts = 0;
+        pendingExoSeekAfterReadySec = 0.0;
+        pendingExoSeekAttempts = 0;
         pendingStartRunnable = null;
         if (pendingExoReconnectRunnable != null) {
             mainHandler.removeCallbacks(pendingExoReconnectRunnable);
@@ -3252,6 +3277,11 @@ public class MainActivity extends BridgeActivity {
                     }
                     isPlaybackFullscreen = false;
                     getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                    try {
+                        WindowManager.LayoutParams lp = getWindow().getAttributes();
+                        lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+                        getWindow().setAttributes(lp);
+                    } catch (Exception ignored) {}
                     setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
                     enableImmersiveStickyMode(false);
                 }
@@ -3302,11 +3332,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.268");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.269");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.268\",\"versionCode\":35268}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.269\",\"versionCode\":35269}";
             }
         }
 
@@ -3738,6 +3768,72 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface
         public String getExoState() {
             return cachedExoStateJson != null ? cachedExoStateJson : "{}";
+        }
+
+        @JavascriptInterface
+        public float getPlayerVolume() {
+            try {
+                AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+                if (am != null) {
+                    int maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+                    int curVol = am.getStreamVolume(AudioManager.STREAM_MUSIC);
+                    if (maxVol > 0) {
+                        return Math.max(0f, Math.min(1f, curVol / (float) maxVol));
+                    }
+                }
+            } catch (Exception ignored) {}
+            return 0.5f;
+        }
+
+        @JavascriptInterface
+        public void setPlayerVolume(final float level) {
+            try {
+                final float clamped = Math.max(0f, Math.min(1f, level));
+                AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+                if (am != null) {
+                    int maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+                    if (maxVol > 0) {
+                        int target = Math.round(clamped * maxVol);
+                        am.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0);
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+
+        @JavascriptInterface
+        public float getPlayerBrightness() {
+            try {
+                WindowManager.LayoutParams lp = getWindow().getAttributes();
+                if (lp != null && lp.screenBrightness >= 0f) {
+                    return Math.max(0.01f, Math.min(1f, lp.screenBrightness));
+                }
+                int sysBrightness = Settings.System.getInt(getContentResolver(), Settings.System.SCREEN_BRIGHTNESS, 128);
+                return Math.max(0.01f, Math.min(1f, sysBrightness / 255.0f));
+            } catch (Exception ignored) {}
+            return 0.5f;
+        }
+
+        @JavascriptInterface
+        public void setPlayerBrightness(final float level) {
+            final float clamped = Math.max(0.01f, Math.min(1f, level));
+            runOnUiThread(() -> {
+                try {
+                    WindowManager.LayoutParams lp = getWindow().getAttributes();
+                    lp.screenBrightness = clamped;
+                    getWindow().setAttributes(lp);
+                } catch (Exception ignored) {}
+            });
+        }
+
+        @JavascriptInterface
+        public void resetPlayerBrightness() {
+            runOnUiThread(() -> {
+                try {
+                    WindowManager.LayoutParams lp = getWindow().getAttributes();
+                    lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+                    getWindow().setAttributes(lp);
+                } catch (Exception ignored) {}
+            });
         }
 
         // --- OFFLINE VIDEO DOWNLOADER BRIDGE METHODS ---

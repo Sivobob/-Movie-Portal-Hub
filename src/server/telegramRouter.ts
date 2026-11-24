@@ -2964,13 +2964,21 @@ async function handleHlsPlaylistRequest(req: Request, res: Response) {
       (resolved.requestedQuality ? `&quality=${encodeURIComponent(resolved.requestedQuality)}` : '') +
       `&audioIdx=${resolved.audioIdx}`;
 
-    // Pre-warm segment 0 immediately so iPhone AVPlayer receives seg 0 faster
+    const requestedStartSec = Math.max(0, Number(req.query.start || 0) || 0);
+    const initialStartSeg = Math.max(0, Math.floor(requestedStartSec / HLS_SEG_DURATION));
+
+    // Pre-warm segment at current playback position so quality switches & resumes start immediately
     const existingJob = hlsJobs.get(sid);
-    if (!existingJob || existingJob.closed) {
+    const existingOutOfRange =
+      Boolean(existingJob) &&
+      initialStartSeg > 0 &&
+      (initialStartSeg < existingJob!.startSeg ||
+        initialStartSeg > Math.max(existingJob!.startSeg, existingJob!.highestSeg) + 18);
+    if (!existingJob || existingJob.closed || existingOutOfRange) {
       startHlsWorker({
         sid,
         urlParam: resolved.urlParam,
-        startSeg: 0,
+        startSeg: initialStartSeg,
         inputUrl: resolved.inputUrl,
         remuxOnly: resolved.remuxOnly,
         canCopyAudio: resolved.canCopyAudio,

@@ -24,6 +24,7 @@ import {
   Unlock,
   ChevronLeft,
   X,
+  Sun,
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar } from '@capacitor/status-bar';
@@ -253,6 +254,7 @@ export default function VideoPlayerModal({
   const knownDurationRef = useRef(initialDuration || 0);
   const currentTimeRef = useRef(0);
   const resumeOffsetRef = useRef(0);
+  const qualityResumeTargetRef = useRef<number | null>(null);
   const isInitialOpenStreamRef = useRef(true);
   const hasExplicitInitialTimeRef = useRef(false);
   const fallbackStageRef = useRef(fallbackStage);
@@ -270,6 +272,22 @@ export default function VideoPlayerModal({
   const exoNetworkRecoveryAttemptsRef = useRef<number>(0);
   const html5NetworkRecoveryAttemptsRef = useRef<number>(0);
   const lastManualQualityPickAtRef = useRef<number>(0);
+  const [brightnessLevel, setBrightnessLevel] = useState<number>(1);
+  const brightnessRef = useRef<number>(1);
+  const [volumeLevel, setVolumeLevel] = useState<number>(1);
+  const volumeRef = useRef<number>(1);
+  const [gestureHud, setGestureHud] = useState<{ type: 'brightness' | 'volume'; percent: number } | null>(null);
+  const gestureHudTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const swipeStateRef = useRef<{
+    lockedMode: 'pending' | 'brightness' | 'volume';
+    side: 'left' | 'right';
+    startX: number;
+    startY: number;
+    initialVal: number;
+    height: number;
+    pointerId: number;
+  } | null>(null);
+  const swipeConsumedClickRef = useRef<boolean>(false);
 
   // Runtime Android device and decoder capabilities from native bridge
   const deviceCapabilities = useMemo(() => {
@@ -323,8 +341,13 @@ export default function VideoPlayerModal({
     if (Capacitor.isNativePlatform() && !hasRemoteTranscodeBackend()) return;
     if (Date.now() - lastManualQualityPickAtRef.current < 12000) return;
 
-    const safePos = Math.max(0, Number.isFinite(posSec) && posSec > 0 ? posSec : (currentTimeRef.current || 0));
+    const safePos = Math.max(
+      0,
+      Number.isFinite(posSec) && posSec > 0 ? posSec : (currentTimeRef.current || 0),
+      qualityResumeTargetRef.current || 0
+    );
     console.warn(`[VideoPlayer] Slow network detected at ${safePos.toFixed(1)}s — switching to 360P`);
+    qualityResumeTargetRef.current = safePos > 0.5 ? safePos : null;
     resumeOffsetRef.current = safePos;
     selectedQualityRef.current = '360P';
     setSelectedQuality('360P');
@@ -545,8 +568,136 @@ export default function VideoPlayerModal({
   // When double tapped/clicked on right: +10s forward (supports rapid +20s, +30s bursts)
   // When double tapped/clicked on left: -10s rewind (supports rapid -20s, -30s bursts)
   // When single tapped: toggle controls visibility (delayed past double-tap window so Tap 1 never spawns overlays before Tap 2)
+  const hideGestureHudSoon = () => {
+    if (gestureHudTimerRef.current) clearTimeout(gestureHudTimerRef.current);
+    gestureHudTimerRef.current = setTimeout(() => {
+      setGestureHud(null);
+    }, 750);
+  };
+
+  const handleViewportPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (isLocked || error || isYouTube) return;
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+
+    const side: 'left' | 'right' = e.clientX - rect.left < rect.width / 2 ? 'left' : 'right';
+    const bridge = (window as any).AndroidPlayerBridge;
+
+    let initVal = side === 'left' ? brightnessRef.current : volumeRef.current;
+    if (Capacitor.isNativePlatform()) {
+      try {
+        if (side === 'left' && typeof bridge?.getPlayerBrightness === 'function') {
+          const b = Number(bridge.getPlayerBrightness());
+          if (Number.isFinite(b) && b >= 0) {
+            initVal = Math.max(0.01, Math.min(1, b));
+            brightnessRef.current = initVal;
+            setBrightnessLevel(initVal);
+          }
+        } else if (side === 'right' && typeof bridge?.getPlayerVolume === 'function') {
+          const v = Number(bridge.getPlayerVolume());
+          if (Number.isFinite(v) && v >= 0) {
+            initVal = Math.max(0, Math.min(1, v));
+            volumeRef.current = initVal;
+            setVolumeLevel(initVal);
+          }
+        }
+      } catch {}
+    } else if (side === 'right' && videoRef.current) {
+      initVal = videoRef.current.muted ? 0 : Math.max(0, Math.min(1, videoRef.current.volume ?? 1));
+      volumeRef.current = initVal;
+    }
+
+    swipeConsumedClickRef.current = false;
+    swipeStateRef.current = {
+      lockedMode: 'pending',
+      side,
+      startX: e.clientX,
+      startY: e.clientY,
+      initialVal: initVal,
+      height: rect.height,
+      pointerId: e.pointerId,
+    };
+  };
+
+  const handleViewportPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const st = swipeStateRef.current;
+    if (!st || st.pointerId !== e.pointerId || isLocked || error || isYouTube) return;
+
+    const dx = e.clientX - st.startX;
+    const dy = st.startY - e.clientY; // positive = swipe UP (bottom -> top)
+
+    if (st.lockedMode === 'pending') {
+      if (Math.abs(dy) < 14 || Math.abs(dy) <= Math.abs(dx) * 1.2) {
+        return;
+      }
+      st.lockedMode = st.side === 'left' ? 'brightness' : 'volume';
+      swipeConsumedClickRef.current = true;
+      if (viewportSingleTapTimerRef.current) {
+        clearTimeout(viewportSingleTapTimerRef.current);
+        viewportSingleTapTimerRef.current = null;
+      }
+      if (gestureHudTimerRef.current) {
+        clearTimeout(gestureHudTimerRef.current);
+        gestureHudTimerRef.current = null;
+      }
+    }
+
+    const sensitivityPx = Math.max(150, st.height * 0.55);
+    const rawNext = st.initialVal + dy / sensitivityPx;
+    const clamped = Math.max(0, Math.min(1, rawNext));
+    const pct = Math.round(clamped * 100);
+    const bridge = (window as any).AndroidPlayerBridge;
+
+    if (st.lockedMode === 'brightness') {
+      const safeB = Math.max(0.01, clamped);
+      brightnessRef.current = safeB;
+      setBrightnessLevel(safeB);
+      if (Capacitor.isNativePlatform()) {
+        try {
+          bridge?.setPlayerBrightness?.(safeB);
+        } catch {}
+      }
+      setGestureHud({ type: 'brightness', percent: pct });
+    } else if (st.lockedMode === 'volume') {
+      volumeRef.current = clamped;
+      setVolumeLevel(clamped);
+      if (Capacitor.isNativePlatform()) {
+        try {
+          bridge?.setPlayerVolume?.(clamped);
+        } catch {}
+      } else if (videoRef.current) {
+        try {
+          videoRef.current.volume = clamped;
+          if (clamped <= 0.01) {
+            videoRef.current.muted = true;
+          } else if (videoRef.current.muted) {
+            videoRef.current.muted = false;
+            wasMutedByAutoplayRef.current = false;
+            setIsAutoplayMuted(false);
+          }
+        } catch {}
+      }
+      setGestureHud({ type: 'volume', percent: pct });
+    }
+  };
+
+  const handleViewportPointerEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    const st = swipeStateRef.current;
+    if (!st || st.pointerId !== e.pointerId) return;
+    const wasSwipe = st.lockedMode !== 'pending';
+    swipeStateRef.current = null;
+    if (wasSwipe) {
+      hideGestureHudSoon();
+    }
+  };
+
   const handleViewportTap = (e: React.MouseEvent<HTMLDivElement>) => {
     e.stopPropagation();
+    if (swipeConsumedClickRef.current) {
+      swipeConsumedClickRef.current = false;
+      return;
+    }
     ensureUnmutedOnInteraction();
     if (isLocked) {
       setShowLockPrompt((prev) => !prev);
@@ -1053,9 +1204,11 @@ export default function VideoPlayerModal({
     const sourceUrl = String(explicitUrl || trimmed).trim();
     const isTelegram = /t\.me|telegram\.me/i.test(sourceUrl);
     const sourceHeight = preflightCacheRef.current.sourceHeight || 0;
+    const canScaleRemote = !Capacitor.isNativePlatform() || hasRemoteTranscodeBackend();
 
     // 2. If using the single uploaded stream link and user requested scaled resolution (720P/480P/360P)
     const needsScaledTranscode =
+      canScaleRemote &&
       !explicitUrl &&
       (qTier === '480p' ||
         qTier === '360p' ||
@@ -1084,12 +1237,14 @@ export default function VideoPlayerModal({
 
     if (useHlsPipeline) {
       const durHint = Math.round(preflightCacheRef.current.durationSec || durationRef.current || knownDurationRef.current || 0);
+      const startHint = Math.floor(Math.max(0, qualityResumeTargetRef.current || resumeOffsetRef.current || 0));
       let hlsQs = `?url=${encodeURIComponent(sourceUrl)}&mode=${effectiveMode}`;
       if (isExplicitTier && (userPickedQualityRef.current || needsScaledTranscode)) {
         hlsQs += `&quality=${qTier}`;
       }
       if (selectedAudioIdx > 0) hlsQs += `&audioIdx=${selectedAudioIdx}`;
       if (durHint > 0) hlsQs += `&dur=${durHint}`;
+      if (startHint >= 4) hlsQs += `&start=${startHint}`;
       if (Capacitor.isNativePlatform()) {
         const remoteBase = getRemoteTranscodeBackendUrl() || getApiBaseUrl();
         setPlayableUrl(
@@ -1143,6 +1298,13 @@ export default function VideoPlayerModal({
     if (!isOpen) {
       isInitialOpenStreamRef.current = true;
       hasExplicitInitialTimeRef.current = false;
+      qualityResumeTargetRef.current = null;
+      setGestureHud(null);
+      if (Capacitor.isNativePlatform()) {
+        try {
+          (window as any).AndroidPlayerBridge?.resetPlayerBrightness?.();
+        } catch {}
+      }
       return;
     }
 
@@ -1153,8 +1315,26 @@ export default function VideoPlayerModal({
 
     if (Capacitor.isNativePlatform()) {
       try {
-        (window as any).AndroidPlayerBridge?.setPlaybackActive?.(true);
+        const b = (window as any).AndroidPlayerBridge;
+        b?.setPlaybackActive?.(true);
+        if (typeof b?.getPlayerBrightness === 'function') {
+          const curB = Number(b.getPlayerBrightness());
+          if (Number.isFinite(curB) && curB > 0) {
+            brightnessRef.current = curB;
+            setBrightnessLevel(curB);
+          }
+        }
+        if (typeof b?.getPlayerVolume === 'function') {
+          const curV = Number(b.getPlayerVolume());
+          if (Number.isFinite(curV) && curV >= 0) {
+            volumeRef.current = curV;
+            setVolumeLevel(curV);
+          }
+        }
       } catch {}
+    } else {
+      brightnessRef.current = 1;
+      setBrightnessLevel(1);
     }
 
     if (manageHistory) {
@@ -1314,7 +1494,7 @@ export default function VideoPlayerModal({
     if (!bridge || (typeof bridge.playExoMediaWithOptions !== 'function' && typeof bridge.playExoMedia !== 'function')) return;
 
     let cancelled = false;
-    let resumeSec = resumeOffsetRef.current || 0;
+    let resumeSec = Math.max(resumeOffsetRef.current || 0, qualityResumeTargetRef.current || 0);
     resumeOffsetRef.current = 0;
 
     if (resumeSec <= 0.25 && !hasExplicitInitialTimeRef.current && streamFallbackModeRef.current === 'direct' && episodeResumeKey) {
@@ -1330,6 +1510,8 @@ export default function VideoPlayerModal({
     const isHlsExo = /\.m3u8/i.test(playableUrl);
     const isServerPipedUrl = !isHlsExo && /[?&](transcode|remux)=1/i.test(playableUrl);
     const exoStartOffset = !isServerPipedUrl ? resumeSec : 0;
+    let exoReadySeekRetries = 0;
+    let lastExoReadySeekAtMs = 0;
 
     setError(null);
     setErrorDetail(null);
@@ -1595,13 +1777,45 @@ export default function VideoPlayerModal({
         setIsPlaying(Boolean(st.isPlaying));
         setIsLoading(Boolean(st.isBuffering || (st.state === 1 && !st.isPlaying && !st.ended)));
 
-        if (!isDraggingSeekRef.current && typeof st.currentTime === 'number') {
-          if (exoStartOffset > 3 && !st.firstFrameRendered && effectiveTime < exoStartOffset - 3) {
-            setCurrentTime(exoStartOffset);
-            currentTimeRef.current = exoStartOffset;
-          } else {
-            setCurrentTime(effectiveTime);
-            currentTimeRef.current = effectiveTime;
+        const pendingTarget = qualityResumeTargetRef.current;
+        const holdingResumeTarget =
+          pendingTarget !== null &&
+          pendingTarget > 3 &&
+          effectiveTime < pendingTarget - 4;
+
+        if (holdingResumeTarget) {
+          if (
+            st.state === 3 &&
+            st.seekable &&
+            exoReadySeekRetries < 4 &&
+            Date.now() - lastExoReadySeekAtMs > 1400
+          ) {
+            exoReadySeekRetries += 1;
+            lastExoReadySeekAtMs = Date.now();
+            try {
+              bridge.exoSeek?.(pendingTarget);
+            } catch {}
+          }
+          if (!isDraggingSeekRef.current) {
+            setCurrentTime(pendingTarget);
+            currentTimeRef.current = pendingTarget;
+          }
+        } else {
+          if (
+            pendingTarget !== null &&
+            (effectiveTime >= pendingTarget - 4 || pendingTarget <= 3) &&
+            (st.firstFrameRendered || renderedCount > 0)
+          ) {
+            qualityResumeTargetRef.current = null;
+          }
+          if (!isDraggingSeekRef.current && typeof st.currentTime === 'number') {
+            if (exoStartOffset > 3 && !st.firstFrameRendered && effectiveTime < exoStartOffset - 3) {
+              setCurrentTime(exoStartOffset);
+              currentTimeRef.current = exoStartOffset;
+            } else {
+              setCurrentTime(effectiveTime);
+              currentTimeRef.current = effectiveTime;
+            }
           }
         }
         if (typeof st.bufferedPosition === 'number') {
@@ -1623,7 +1837,7 @@ export default function VideoPlayerModal({
           }
         }
 
-        if (effectiveTime > 1) {
+        if (effectiveTime > 1 && !holdingResumeTarget) {
           onProgress?.(effectiveTime, durationRef.current);
           if (effectiveTime > 2 && episodeResumeKey) {
             try {
@@ -1707,9 +1921,10 @@ export default function VideoPlayerModal({
     const canSeekDirectTimeline = streamFallbackModeRef.current === 'direct' || isHlsUrl;
 
     // Determine exact initial seek position before starting HTML5/HLS playback
+    const initialResumeCandidate = Math.max(resumeOffsetRef.current || 0, qualityResumeTargetRef.current || 0);
     let pendingSeekTarget: number | null =
-      resumeOffsetRef.current > 0.25 && canSeekDirectTimeline
-        ? resumeOffsetRef.current
+      initialResumeCandidate > 0.25 && canSeekDirectTimeline
+        ? initialResumeCandidate
         : null;
     resumeOffsetRef.current = 0;
 
@@ -1744,17 +1959,19 @@ export default function VideoPlayerModal({
       if (knownDur > 0 && pendingSeekTarget >= knownDur - 2) {
         seekConfirmed = true;
         pendingSeekTarget = null;
+        qualityResumeTargetRef.current = null;
         return;
       }
-      if (Math.abs(video.currentTime - pendingSeekTarget) <= 2.5) {
+      if (Math.abs(video.currentTime - pendingSeekTarget) <= 2.8) {
         seekConfirmed = true;
         pendingSeekTarget = null;
+        qualityResumeTargetRef.current = null;
         return;
       }
       if (video.readyState < 1) {
         return;
       }
-      if (seekAttempts < 12) {
+      if (seekAttempts < 25) {
         seekAttempts += 1;
         try {
           video.currentTime = pendingSeekTarget;
@@ -1764,6 +1981,7 @@ export default function VideoPlayerModal({
       } else {
         seekConfirmed = true;
         pendingSeekTarget = null;
+        qualityResumeTargetRef.current = null;
       }
     };
 
@@ -2250,9 +2468,10 @@ export default function VideoPlayerModal({
     };
 
     const onSeeked = () => {
-      if (pendingSeekTarget !== null && Math.abs(video.currentTime - pendingSeekTarget) <= 1.5) {
+      if (pendingSeekTarget !== null && Math.abs(video.currentTime - pendingSeekTarget) <= 2.8) {
         seekConfirmed = true;
         pendingSeekTarget = null;
+        qualityResumeTargetRef.current = null;
       }
       if (selectedSubtitleRef.current !== 'Off') {
         const startOff = !isHlsUrl && streamFallbackModeRef.current !== 'direct' ? streamStartOffsetRef.current : 0;
@@ -2670,6 +2889,7 @@ export default function VideoPlayerModal({
     const maxDur = durationRef.current || knownDurationRef.current || 0;
     const clamped = maxDur > 0 ? Math.max(0, Math.min(maxDur, targetTime)) : Math.max(0, targetTime);
 
+    qualityResumeTargetRef.current = null;
     setSeekPreviewTime(null);
     seekPreviewTimeRef.current = null;
     isDraggingSeekRef.current = false;
@@ -3090,6 +3310,7 @@ export default function VideoPlayerModal({
     setShowSeasonDropdown(false);
     isInitialOpenStreamRef.current = false;
     hasExplicitInitialTimeRef.current = false;
+    qualityResumeTargetRef.current = null;
     setActiveSeasonIdx(sIdx);
 
     const targetSeason = seasonsList[sIdx];
@@ -3113,6 +3334,7 @@ export default function VideoPlayerModal({
     setShowEpisodeDropdown(false);
     isInitialOpenStreamRef.current = false;
     hasExplicitInitialTimeRef.current = false;
+    qualityResumeTargetRef.current = null;
     setActiveEpisodeIdx(eIdx);
 
     const ep = episodesList[eIdx];
@@ -3153,8 +3375,12 @@ export default function VideoPlayerModal({
 
         {/* Video Screen Viewport */}
         <div
-          className={`relative w-full h-full ${exoModeActive ? 'bg-transparent' : 'bg-black'} flex items-center justify-center overflow-hidden cursor-pointer touch-manipulation select-none`}
+          className={`relative w-full h-full ${exoModeActive ? 'bg-transparent' : 'bg-black'} flex items-center justify-center overflow-hidden cursor-pointer touch-none select-none`}
           onClick={handleViewportTap}
+          onPointerDown={handleViewportPointerDown}
+          onPointerMove={handleViewportPointerMove}
+          onPointerUp={handleViewportPointerEnd}
+          onPointerCancel={handleViewportPointerEnd}
         >
           {!isYouTube ? (
             <>
@@ -3177,6 +3403,40 @@ export default function VideoPlayerModal({
                 />
                 );
               })()}
+
+              {/* Web / Non-native Brightness Dimming Overlay */}
+              {!canUseNativeExo && brightnessLevel < 0.99 && (
+                <div
+                  className="absolute inset-0 bg-black pointer-events-none z-20 transition-opacity duration-75"
+                  style={{ opacity: Math.min(0.82, Math.max(0, (1 - brightnessLevel) * 0.82)) }}
+                />
+              )}
+
+              {/* Gesture HUD Overlay: Left Brightness / Right Volume */}
+              {gestureHud && (
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-black/80 border border-white/15 backdrop-blur-md rounded-2xl px-4 py-3 min-w-[156px] flex flex-col items-center gap-2 pointer-events-none shadow-2xl">
+                  <div className="flex items-center gap-2 text-white">
+                    {gestureHud.type === 'brightness' ? (
+                      <Sun size={20} className="text-amber-300" />
+                    ) : gestureHud.percent === 0 ? (
+                      <VolumeX size={20} className="text-red-400" />
+                    ) : (
+                      <Volume2 size={20} className="text-emerald-400" />
+                    )}
+                    <span className="text-xs font-bold tracking-wide">
+                      {gestureHud.type === 'brightness' ? 'Brightness' : 'Volume'} {gestureHud.percent}%
+                    </span>
+                  </div>
+                  <div className="w-full h-1.5 bg-white/20 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-75 ${
+                        gestureHud.type === 'brightness' ? 'bg-amber-300' : 'bg-emerald-400'
+                      }`}
+                      style={{ width: `${gestureHud.percent}%` }}
+                    />
+                  </div>
+                </div>
+              )}
 
               {/* Double-Tap / Double-Click Seek Ripple Feedback (+10s / -10s) */}
               {seekFeedback && (
@@ -3880,16 +4140,16 @@ export default function VideoPlayerModal({
                               resetAutoHideTimer();
                               return;
                             }
-                            const curPos = Math.max(0, currentTimeRef.current || 0);
+                            const curPos = Math.max(
+                              0,
+                              currentTimeRef.current || 0,
+                              qualityResumeTargetRef.current || 0
+                            );
                             const curFloor = Math.floor(curPos);
                             lastManualQualityPickAtRef.current = Date.now();
                             userPickedQualityRef.current = qLower !== 'auto';
                             exoNetworkRecoveryAttemptsRef.current = 0;
                             html5NetworkRecoveryAttemptsRef.current = 0;
-                            selectedQualityRef.current = q;
-                            setSelectedQuality(q);
-                            setShowQualityMenu(false);
-                            resetAutoHideTimer();
 
                             const srcH = preflightCacheRef.current?.sourceHeight || 0;
                             const baseSrcUrl = (preflightCacheRef.current?.url || '').trim();
@@ -3901,17 +4161,29 @@ export default function VideoPlayerModal({
                               trimmedExplicit && trimmedExplicit.replace(/\/+$/, '') !== baseSrcUrl.replace(/\/+$/, '')
                                 ? trimmedExplicit
                                 : '';
+                            const canScaleRemote = !Capacitor.isNativePlatform() || hasRemoteTranscodeBackend();
                             const scaled =
                               !explicit &&
                               (qLower === '480p' ||
                                 qLower === '360p' ||
                                 (qLower === '720p' && (srcH <= 0 || srcH > 780)));
 
+                            if (scaled && !canScaleRemote) {
+                              probeWorkingBackendUrl(true).catch(() => null);
+                              setShowQualityMenu(false);
+                              resetAutoHideTimer();
+                              return;
+                            }
+
+                            selectedQualityRef.current = q;
+                            setSelectedQuality(q);
+                            setShowQualityMenu(false);
+                            resetAutoHideTimer();
+
+                            qualityResumeTargetRef.current = curPos > 0.5 ? curPos : null;
+                            resumeOffsetRef.current = curPos;
+
                             if (scaled) {
-                              if (Capacitor.isNativePlatform() && !hasRemoteTranscodeBackend()) {
-                                return;
-                              }
-                              resumeOffsetRef.current = curPos;
                               setFallbackStage('level3_transcode');
                               fallbackStageRef.current = 'level3_transcode';
                               setStreamFallbackMode('transcode');
@@ -3927,7 +4199,6 @@ export default function VideoPlayerModal({
                                   : baseRec === 'remux'
                                   ? 'level2_remux'
                                   : 'level1_hw';
-                              resumeOffsetRef.current = curPos;
                               setFallbackStage(nextStage);
                               fallbackStageRef.current = nextStage;
                               setStreamFallbackMode(baseRec);

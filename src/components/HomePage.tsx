@@ -87,9 +87,30 @@ export default function HomePage() {
   const [myListIds, setMyListIds] = useState<Set<string>>(new Set());
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
 
+  // Helper: Strictly verify 2026 release year for Featured and Latest sections
+  const is2026Release = (m: any): boolean => {
+    if (!m) return false;
+    const ry = m.releaseYear ?? m.year ?? m.releaseDate;
+    if (typeof ry === 'number') {
+      return ry === 2026;
+    }
+    if (typeof ry === 'string') {
+      const trimmed = ry.trim();
+      if (trimmed === '2026') return true;
+      if (/\b2026\b/.test(trimmed)) return true;
+      if (parseInt(trimmed, 10) === 2026) return true;
+    }
+    if (m.title && /\b2026\b/.test(String(m.title))) return true;
+    return false;
+  };
+
   const featuredMovies = useMemo(() => {
+    // Strictly ONLY movies and web series released in 2026
+    const only2026 = movies.filter((m: any) => is2026Release(m));
+    if (only2026.length === 0) return [];
+
     const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
-    const validFeatured = movies.filter((m: any) => {
+    const validFeatured = only2026.filter((m: any) => {
       if (!m.featured) return false;
       const featTime = getTimestampMs(m.featuredAt) || getTimestampMs(m.createdAt) || getTimestampMs(m.updatedAt) || 0;
       if (featTime > 0) {
@@ -100,14 +121,14 @@ export default function HomePage() {
 
     if (validFeatured.length > 0) return validFeatured;
 
-    // Fallback if no movies featured within last 24h: show recent movies from last 48h
-    const recentFallback = movies.filter((m: any) => {
+    // Fallback if no 2026 movies featured within last 24h: show recent 2026 movies from last 48h
+    const recentFallback = only2026.filter((m: any) => {
       const t = getTimestampMs(m.createdAt) || getTimestampMs(m.updatedAt) || 0;
       return t > 0 && (nowMs - t) < (48 * 3600 * 1000);
     });
 
     if (recentFallback.length > 0) return recentFallback.slice(0, 5);
-    return movies.slice(0, 5);
+    return only2026.slice(0, 5);
   }, [movies, nowMs]);
 
   const categoryRef = useRef(category);
@@ -621,7 +642,8 @@ export default function HomePage() {
   }, [movies, nowMs]);
 
   const latestMoviesAndSeries = useMemo(() => {
-    return movies.slice(0, 20);
+    // Strictly ONLY movies and web series released in 2026
+    return movies.filter((m: any) => is2026Release(m)).slice(0, 20);
   }, [movies]);
 
   // Dynamic Genre filtering helpers
@@ -737,7 +759,7 @@ export default function HomePage() {
             </div>
           )}
         </div>
-      ) : !currentFeatured ? (
+      ) : movies.length === 0 ? (
         <div className="relative flex-1 min-h-0 flex flex-col items-center justify-center p-6 text-center">
           <Film size={44} className="text-neutral-700 mb-3" />
           <h2 className="text-2xl font-black text-red-500 uppercase tracking-wider mb-2">NO CONTENT FOUND</h2>
@@ -745,110 +767,116 @@ export default function HomePage() {
         </div>
       ) : (
         <div className="flex flex-col w-full">
-          {/* Cinematic Hero Banner with Folder Tabs Overlaid on Top Gradient Edge (Matching Reference Screenshot) */}
-          <div
-            className="relative w-full h-[32dvh] sm:h-[40dvh] flex flex-col justify-end overflow-hidden select-none touch-pan-y"
-            onTouchStart={handleTouchStart}
-            onTouchMove={handleTouchMove}
-            onTouchEnd={handleTouchEnd}
-            onMouseDown={handleTouchStart}
-            onMouseMove={handleTouchMove}
-            onMouseUp={handleTouchEnd}
-          >
-            {renderFolderTabRow(true)}
-            <AnimatePresence initial={false} custom={slideDirection}>
-              <motion.div
-                key={currentFeatured.id || activeSlideIndex}
-                custom={slideDirection}
-                variants={slideVariants}
-                initial="enter"
-                animate="center"
-                exit="exit"
-                transition={{
-                  x: { type: 'tween', ease: [0.22, 1, 0.36, 1], duration: 0.35 },
-                  opacity: { duration: 0.25 },
-                }}
-                className="absolute inset-0 will-change-transform cursor-pointer touch-pan-y"
-                onClick={() => {
-                  if (!isSwiping && !isSwipingRef.current) {
-                    handleWatchNow(currentFeatured);
-                  }
-                }}
+          {currentFeatured ? (
+            <>
+              {/* Cinematic Hero Banner with Folder Tabs Overlaid on Top Gradient Edge (Matching Reference Screenshot) */}
+              <div
+                className="relative w-full h-[32dvh] sm:h-[40dvh] flex flex-col justify-end overflow-hidden select-none touch-pan-y"
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                onMouseDown={handleTouchStart}
+                onMouseMove={handleTouchMove}
+                onMouseUp={handleTouchEnd}
               >
-                <img
-                  src={upgradePosterUrl(currentFeatured.backdropUrl || currentFeatured.posterUrl, 1600) || currentFeatured.backdropUrl || currentFeatured.posterUrl}
-                  alt={currentFeatured.title}
-                  draggable={false}
-                  className="absolute inset-0 w-full h-full object-cover object-center brightness-105 contrast-105"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black via-black/35 to-transparent" />
-              </motion.div>
-            </AnimatePresence>
+                {renderFolderTabRow(true)}
+                <AnimatePresence initial={false} custom={slideDirection}>
+                  <motion.div
+                    key={currentFeatured.id || activeSlideIndex}
+                    custom={slideDirection}
+                    variants={slideVariants}
+                    initial="enter"
+                    animate="center"
+                    exit="exit"
+                    transition={{
+                      x: { type: 'tween', ease: [0.22, 1, 0.36, 1], duration: 0.35 },
+                      opacity: { duration: 0.25 },
+                    }}
+                    className="absolute inset-0 will-change-transform cursor-pointer touch-pan-y"
+                    onClick={() => {
+                      if (!isSwiping && !isSwipingRef.current) {
+                        handleWatchNow(currentFeatured);
+                      }
+                    }}
+                  >
+                    <img
+                      src={upgradePosterUrl(currentFeatured.backdropUrl || currentFeatured.posterUrl, 1600) || currentFeatured.backdropUrl || currentFeatured.posterUrl}
+                      alt={currentFeatured.title}
+                      draggable={false}
+                      className="absolute inset-0 w-full h-full object-cover object-center brightness-105 contrast-105"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black via-black/35 to-transparent" />
+                  </motion.div>
+                </AnimatePresence>
 
-            {/* Hero Banner Overlay Title & Clean Right Layout */}
-            <div className="relative z-10 p-3 sm:p-5 pt-12 flex items-end justify-between">
-              <div className="max-w-[70%]">
-                <h1 className="text-2xl sm:text-4xl font-black tracking-tighter uppercase text-white drop-shadow-2xl font-sans line-clamp-1">
-                  {currentFeatured.title}
-                </h1>
+                {/* Hero Banner Overlay Title & Clean Right Layout */}
+                <div className="relative z-10 p-3 sm:p-5 pt-12 flex items-end justify-between">
+                  <div className="max-w-[70%]">
+                    <h1 className="text-2xl sm:text-4xl font-black tracking-tighter uppercase text-white drop-shadow-2xl font-sans line-clamp-1">
+                      {currentFeatured.title}
+                    </h1>
+                  </div>
+
+                  {/* Slider Dots */}
+                  {featuredMovies.length > 1 && (
+                    <div className="flex items-center gap-1.5 pb-2">
+                      {featuredMovies.slice(0, 5).map((_, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => {
+                            setSlideDirection(idx > activeSlideIndex ? 1 : -1);
+                            setActiveSlideIndex(idx);
+                          }}
+                          className={`h-1.5 rounded-full transition-all cursor-pointer ${
+                            idx === activeSlideIndex ? 'w-5 bg-red-600' : 'w-1.5 bg-white/40'
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {/* Slider Dots */}
-              {featuredMovies.length > 1 && (
-                <div className="flex items-center gap-1.5 pb-2">
-                  {featuredMovies.slice(0, 5).map((_, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => {
-                        setSlideDirection(idx > activeSlideIndex ? 1 : -1);
-                        setActiveSlideIndex(idx);
-                      }}
-                      className={`h-1.5 rounded-full transition-all cursor-pointer ${
-                        idx === activeSlideIndex ? 'w-5 bg-red-600' : 'w-1.5 bg-white/40'
-                      }`}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
+              {/* Reference Screenshot Style Mini Preview Card Below Banner */}
+              <div className="px-3 sm:px-6 -mt-3 relative z-20">
+                <div
+                  onClick={() => handleWatchNow(currentFeatured)}
+                  className="bg-neutral-900/95 hover:bg-neutral-900 border border-neutral-800 hover:border-red-600/50 rounded-2xl p-2.5 sm:p-3 flex items-center justify-between gap-3 shadow-xl cursor-pointer group transition-all"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-12 h-14 sm:w-14 sm:h-16 rounded-xl overflow-hidden bg-neutral-950 flex-shrink-0 border border-white/10 shadow">
+                      <img
+                        src={upgradePosterUrl(currentFeatured.posterUrl || currentFeatured.backdropUrl, 300) || currentFeatured.posterUrl}
+                        alt={currentFeatured.title}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                      />
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="text-xs sm:text-sm font-black text-white uppercase tracking-tight truncate group-hover:text-red-500 transition-colors">
+                        {currentFeatured.title}
+                      </h4>
+                      <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-400 mt-0.5">
+                        <span className="bg-neutral-800 text-gray-300 px-1.5 py-0.2 rounded text-[10px]">
+                          {currentFeatured.displayCategory || currentFeatured.originalCategory || 'Movie'}
+                        </span>
+                        <span>•</span>
+                        <span>{currentFeatured.releaseYear || (currentFeatured as any).year || '2026'}</span>
+                        <span>•</span>
+                        <span className="text-red-400 truncate">{currentFeatured.genre || 'Action'}</span>
+                      </div>
+                    </div>
+                  </div>
 
-          {/* Reference Screenshot Style Mini Preview Card Below Banner */}
-          <div className="px-3 sm:px-6 -mt-3 relative z-20">
-            <div
-              onClick={() => handleWatchNow(currentFeatured)}
-              className="bg-neutral-900/95 hover:bg-neutral-900 border border-neutral-800 hover:border-red-600/50 rounded-2xl p-2.5 sm:p-3 flex items-center justify-between gap-3 shadow-xl cursor-pointer group transition-all"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-12 h-14 sm:w-14 sm:h-16 rounded-xl overflow-hidden bg-neutral-950 flex-shrink-0 border border-white/10 shadow">
-                  <img
-                    src={upgradePosterUrl(currentFeatured.posterUrl || currentFeatured.backdropUrl, 300) || currentFeatured.posterUrl}
-                    alt={currentFeatured.title}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                  />
-                </div>
-                <div className="min-w-0">
-                  <h4 className="text-xs sm:text-sm font-black text-white uppercase tracking-tight truncate group-hover:text-red-500 transition-colors">
-                    {currentFeatured.title}
-                  </h4>
-                  <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-400 mt-0.5">
-                    <span className="bg-neutral-800 text-gray-300 px-1.5 py-0.2 rounded text-[10px]">
-                      {currentFeatured.displayCategory || currentFeatured.originalCategory || 'Movie'}
-                    </span>
-                    <span>•</span>
-                    <span>{currentFeatured.releaseYear || (currentFeatured as any).year || '2026'}</span>
-                    <span>•</span>
-                    <span className="text-red-400 truncate">{currentFeatured.genre || 'Action'}</span>
+                  <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/20 group-hover:scale-105 transition-all">
+                    <Play size={18} fill="black" className="ml-0.5" />
                   </div>
                 </div>
               </div>
-
-              <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-emerald-500 hover:bg-emerald-400 text-black flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/20 group-hover:scale-105 transition-all">
-                <Play size={18} fill="black" className="ml-0.5" />
-              </div>
-            </div>
-          </div>
+            </>
+          ) : (
+            renderFolderTabRow(false)
+          )}
 
           {/* NEW EPISODES (Auto-expires from Home after 24h) */}
           {newEpisodes24h.length > 0 && (
