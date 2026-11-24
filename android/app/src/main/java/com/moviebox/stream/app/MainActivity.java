@@ -60,6 +60,7 @@ import androidx.core.view.WindowInsetsControllerCompat;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import androidx.media3.common.C;
+import androidx.media3.common.Effect;
 import androidx.media3.common.Format;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.PlaybackException;
@@ -79,6 +80,8 @@ import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.analytics.AnalyticsListener;
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
+import androidx.media3.effect.FrameCache;
+import androidx.media3.effect.Presentation;
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy;
 import androidx.mediarouter.media.MediaRouter;
 import androidx.mediarouter.media.MediaRouteSelector;
@@ -116,6 +119,7 @@ import java.net.URL;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -209,6 +213,8 @@ public class MainActivity extends BridgeActivity {
     private volatile boolean surfaceHolderAvailable = false;
     private volatile String currentSurfaceMode = "texture";
     private volatile boolean currentPreferSoftware = false;
+    private volatile int currentTargetQualityHeight = 0;
+    private volatile boolean exoQualityEffectsActive = false;
     private ExoPlayer exoPlayer;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private long exoSessionId = 0L;
@@ -658,7 +664,7 @@ public class MainActivity extends BridgeActivity {
                 return pInfo.versionName.trim();
             }
         } catch (Exception ignored) {}
-        return "3.5.275";
+        return "3.5.276";
     }
 
     private int compareVersionStrings(String verA, String verB) {
@@ -691,7 +697,7 @@ public class MainActivity extends BridgeActivity {
             conn.setReadTimeout(timeoutMs);
             conn.setRequestProperty("Cache-Control", "no-store, no-cache");
             conn.setRequestProperty("Pragma", "no-cache");
-            conn.setRequestProperty("User-Agent", "MovieHub-Android-LiveSync/3.5.275");
+            conn.setRequestProperty("User-Agent", "MovieHub-Android-LiveSync/3.5.276");
             int code = conn.getResponseCode();
             if (code < 200 || code >= 300) return null;
             try (InputStream is = conn.getInputStream();
@@ -1100,6 +1106,7 @@ public class MainActivity extends BridgeActivity {
             obj.put("errorCode", errorCode);
             obj.put("decoderName", decoderName);
             obj.put("surfaceVisible", exoContainer != null && exoContainer.getVisibility() == View.VISIBLE);
+            obj.put("videoQualityHeight", currentTargetQualityHeight);
             obj.put("audioTracks", new JSONArray(exoAudioTracksJson != null ? exoAudioTracksJson : "[]"));
             obj.put("subtitleTracks", new JSONArray(exoSubtitleTracksJson != null ? exoSubtitleTracksJson : "[]"));
             obj.put("cueText", exoActiveCueText != null ? exoActiveCueText : "");
@@ -1266,14 +1273,68 @@ public class MainActivity extends BridgeActivity {
         return false;
     }
 
-    private void ensureExoPlayer(final boolean preferSoftware) {
-        if (exoPlayer != null && currentPreferSoftware != preferSoftware) {
+    private int parseQualityHeight(final String qualityStr) {
+        if (qualityStr == null) return 0;
+        String q = qualityStr.trim().toLowerCase(Locale.US);
+        if (q.contains("360")) return 360;
+        if (q.contains("480")) return 480;
+        if (q.contains("720")) return 720;
+        return 0;
+    }
+
+    private void applyExoQualityConfig(final ExoPlayer player, final int targetHeight) {
+        if (player == null) return;
+        currentTargetQualityHeight = targetHeight;
+        try {
+            TrackSelectionParameters.Builder tpBuilder = player.getTrackSelectionParameters().buildUpon();
+            if (targetHeight == 360) {
+                tpBuilder.setMaxVideoSize(640, 360).setMaxVideoBitrate(750_000);
+            } else if (targetHeight == 480) {
+                tpBuilder.setMaxVideoSize(854, 480).setMaxVideoBitrate(1_400_000);
+            } else if (targetHeight == 720) {
+                tpBuilder.setMaxVideoSize(1280, 720).setMaxVideoBitrate(2_800_000);
+            } else {
+                tpBuilder.clearVideoSizeConstraints().setMaxVideoBitrate(Integer.MAX_VALUE);
+            }
+            player.setTrackSelectionParameters(tpBuilder.build());
+        } catch (Exception ignored) {}
+
+        try {
+            if (targetHeight > 0 && targetHeight <= 720) {
+                List<Effect> effects = Arrays.<Effect>asList(
+                    Presentation.createForHeight(targetHeight),
+                    new FrameCache(1)
+                );
+                player.setVideoEffects(effects);
+                exoQualityEffectsActive = true;
+            } else {
+                player.setVideoEffects(Collections.emptyList());
+                exoQualityEffectsActive = false;
+            }
+        } catch (Throwable t) {
+            exoQualityEffectsActive = false;
             try {
+                player.setVideoEffects(Collections.emptyList());
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    private void ensureExoPlayer(final boolean preferSoftware, final int targetHeight) {
+        boolean wantsEffects = targetHeight > 0 && targetHeight <= 720;
+        boolean needsRecreate = exoPlayer != null && (
+            currentPreferSoftware != preferSoftware
+            || exoQualityEffectsActive != wantsEffects
+            || (wantsEffects && currentTargetQualityHeight != targetHeight)
+        );
+        if (needsRecreate) {
+            try {
+                exoPlayer.stop();
                 exoPlayer.setVideoTextureView(null);
                 exoPlayer.setVideoSurfaceView(null);
                 exoPlayer.release();
             } catch (Exception ignored) {}
             exoPlayer = null;
+            exoQualityEffectsActive = false;
         }
         currentPreferSoftware = preferSoftware;
         if (exoPlayer != null) return;
@@ -1284,14 +1345,14 @@ public class MainActivity extends BridgeActivity {
             .setReadTimeoutMs(60000)
             .setAllowCrossProtocolRedirects(true)
             .setKeepPostFor302Redirects(true)
-            .setUserAgent("MoviePortal/3.5.251 AndroidExoPlayer");
+            .setUserAgent("MoviePortal/3.5.276 AndroidExoPlayer");
 
         DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                lowRam ? 20000 : 45000,
+                lowRam ? 16000 : 35000,
                 lowRam ? 90000 : 180000,
-                1500,
-                lowRam ? 3500 : 5000
+                350,
+                lowRam ? 1500 : 2000
             )
             .build();
 
@@ -1488,6 +1549,29 @@ public class MainActivity extends BridgeActivity {
 
             @Override
             public void onPlayerError(PlaybackException error) {
+                if (exoActive && exoPlayer != null && exoQualityEffectsActive) {
+                    String errMsg = error.getMessage() != null ? error.getMessage().toLowerCase(Locale.US) : "";
+                    boolean isEffectErr =
+                        error.errorCode == PlaybackException.ERROR_CODE_VIDEO_FRAME_PROCESSING_FAILED
+                        || error.errorCode == PlaybackException.ERROR_CODE_VIDEO_FRAME_PROCESSOR_INIT_FAILED
+                        || errMsg.contains("frame")
+                        || errMsg.contains("effect")
+                        || errMsg.contains("gl");
+                    if (isEffectErr && currentExoMediaUrl != null && !currentExoMediaUrl.isEmpty()) {
+                        final double resumeSec = Math.max(0.0, exoPlayer.getCurrentPosition() / 1000.0);
+                        final float curSpeed = exoPlayer.getPlaybackParameters().speed;
+                        final String targetUrl = currentExoMediaUrl;
+                        currentTargetQualityHeight = 0;
+                        exoQualityEffectsActive = false;
+                        exoErrorMessage = "";
+                        mainHandler.post(() -> {
+                            if (exoActive) {
+                                startExoPlaybackNative(targetUrl, resumeSec, curSpeed, currentPreferSoftware, currentSurfaceMode, 0);
+                            }
+                        });
+                        return;
+                    }
+                }
                 if (exoActive && exoPlayer != null && currentExoMediaUrl != null && !currentExoMediaUrl.isEmpty()
                     && exoAutoReconnectAttempts < 8
                     && (isTransientIoPlaybackException(error) || exoPlayer.getCurrentPosition() > 15000L)) {
@@ -1541,10 +1625,14 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void startExoPlaybackNative(final String url, final double startSec, final double speed) {
-        startExoPlaybackNative(url, startSec, speed, false, "texture");
+        startExoPlaybackNative(url, startSec, speed, false, "texture", currentTargetQualityHeight);
     }
 
     private void startExoPlaybackNative(final String url, final double startSec, final double speed, final boolean preferSoftware, final String surfaceMode) {
+        startExoPlaybackNative(url, startSec, speed, preferSoftware, surfaceMode, currentTargetQualityHeight);
+    }
+
+    private void startExoPlaybackNative(final String url, final double startSec, final double speed, final boolean preferSoftware, final String surfaceMode, final int targetHeight) {
         try {
             if (pendingHideContainerRunnable != null) {
                 mainHandler.removeCallbacks(pendingHideContainerRunnable);
@@ -1553,6 +1641,7 @@ public class MainActivity extends BridgeActivity {
             final long sessionId = ++this.exoSessionId;
             final String targetSurface = "surface".equalsIgnoreCase(surfaceMode) ? "surface" : "texture";
             currentSurfaceMode = targetSurface;
+            currentTargetQualityHeight = targetHeight;
 
             if (getBridge() != null && getBridge().getWebView() != null) {
                 WebView webView = getBridge().getWebView();
@@ -1588,7 +1677,7 @@ public class MainActivity extends BridgeActivity {
             exoSubtitleTracksJson = "[]";
             exoActiveCueText = "";
 
-            ensureExoPlayer(preferSoftware);
+            ensureExoPlayer(preferSoftware, targetHeight);
             if (exoPlayer != null) {
                 try {
                     exoPlayer.setTrackSelectionParameters(
@@ -1619,6 +1708,8 @@ public class MainActivity extends BridgeActivity {
                             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
                             .build()
                     );
+
+                    applyExoQualityConfig(exoPlayer, targetHeight);
 
                     MediaItem mediaItem = MediaItem.fromUri(Uri.parse(url));
                     pendingExoSeekAttempts = 0;
@@ -1661,7 +1752,7 @@ public class MainActivity extends BridgeActivity {
                         pendingStartRunnable = null;
                         r.run();
                     }
-                }, 1200);
+                }, 450);
             }
         } catch (Throwable t) {
             exoErrorMessage = t.getMessage() != null ? t.getMessage() : "Native player init failed";
@@ -1673,6 +1764,8 @@ public class MainActivity extends BridgeActivity {
         exoActive = false;
         exoSessionId++;
         currentExoMediaUrl = "";
+        currentTargetQualityHeight = 0;
+        exoQualityEffectsActive = false;
         exoAutoReconnectAttempts = 0;
         pendingExoSeekAfterReadySec = 0.0;
         pendingExoSeekAttempts = 0;
@@ -1730,6 +1823,8 @@ public class MainActivity extends BridgeActivity {
         exoActive = false;
         exoSessionId++;
         currentExoMediaUrl = "";
+        currentTargetQualityHeight = 0;
+        exoQualityEffectsActive = false;
         exoAutoReconnectAttempts = 0;
         pendingExoSeekAfterReadySec = 0.0;
         pendingExoSeekAttempts = 0;
@@ -2289,7 +2384,7 @@ public class MainActivity extends BridgeActivity {
             conn.setConnectTimeout(30000);
             conn.setReadTimeout(60000);
             conn.setRequestMethod("GET");
-            conn.setRequestProperty("User-Agent", "MoviePortal-AndroidUpdater/3.5.275");
+            conn.setRequestProperty("User-Agent", "MoviePortal-AndroidUpdater/3.5.276");
             conn.setRequestProperty("Accept", "application/vnd.android.package-archive,application/octet-stream,*/*");
             conn.setRequestProperty("Accept-Encoding", "identity");
             conn.setRequestProperty("Cache-Control", "no-cache");
@@ -3332,11 +3427,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.275");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.276");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.275\",\"versionCode\":35275}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.276\",\"versionCode\":35276}";
             }
         }
 
@@ -3682,13 +3777,35 @@ public class MainActivity extends BridgeActivity {
         @JavascriptInterface
         public void playExoMedia(final String url, final double startSec, final double speed) {
             if (url == null || url.trim().isEmpty()) return;
-            runOnUiThread(() -> startExoPlaybackNative(url.trim(), startSec, speed, false, "texture"));
+            runOnUiThread(() -> startExoPlaybackNative(url.trim(), startSec, speed, false, "texture", 0));
         }
 
         @JavascriptInterface
         public void playExoMediaWithOptions(final String url, final double startSec, final double speed, final boolean preferSoftware, final String surfaceMode) {
             if (url == null || url.trim().isEmpty()) return;
-            runOnUiThread(() -> startExoPlaybackNative(url.trim(), startSec, speed, preferSoftware, surfaceMode));
+            runOnUiThread(() -> startExoPlaybackNative(url.trim(), startSec, speed, preferSoftware, surfaceMode, currentTargetQualityHeight));
+        }
+
+        @JavascriptInterface
+        public void playExoMediaWithQuality(final String url, final double startSec, final double speed, final boolean preferSoftware, final String surfaceMode, final String quality) {
+            if (url == null || url.trim().isEmpty()) return;
+            final int targetH = parseQualityHeight(quality);
+            runOnUiThread(() -> startExoPlaybackNative(url.trim(), startSec, speed, preferSoftware, surfaceMode, targetH));
+        }
+
+        @JavascriptInterface
+        public void exoSetVideoQuality(final String quality) {
+            final int targetH = parseQualityHeight(quality);
+            runOnUiThread(() -> {
+                if (exoActive && currentExoMediaUrl != null && !currentExoMediaUrl.isEmpty() && exoPlayer != null) {
+                    if (currentTargetQualityHeight == targetH) return;
+                    double curPosSec = Math.max(0.0, exoPlayer.getCurrentPosition() / 1000.0);
+                    float curSpeed = exoPlayer.getPlaybackParameters().speed;
+                    startExoPlaybackNative(currentExoMediaUrl, curPosSec, curSpeed, currentPreferSoftware, currentSurfaceMode, targetH);
+                } else {
+                    currentTargetQualityHeight = targetH;
+                }
+            });
         }
 
         @JavascriptInterface

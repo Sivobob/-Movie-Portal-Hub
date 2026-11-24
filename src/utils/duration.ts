@@ -1,4 +1,9 @@
-import { buildApiUrl, isUsingLocalNativeBridge } from './apiConfig';
+import {
+  buildApiUrl,
+  ensureAndroidStreamBridge,
+  isUsingLocalNativeBridge,
+  warmBackendConnection,
+} from './apiConfig';
 import { Capacitor } from '@capacitor/core';
 
 /**
@@ -110,9 +115,94 @@ export function formatHumanDuration(
   return `${secs}s`;
 }
 
-// Shared cache & dedupe map for probing real Telegram stream durations on Details page
+// Shared cache & dedupe maps for instant player startup + accurate Details durations
 const probedDurationCache = new Map<string, number>();
 const inflightDurationProbes = new Map<string, Promise<number>>();
+const streamInfoPreflightCache = new Map<string, { data: any; cachedAt: number }>();
+const inflightStreamInfoPreflight = new Map<string, Promise<any | null>>();
+const STREAM_INFO_CACHE_TTL_MS = 10 * 60 * 1000;
+
+export function getCachedStreamInfo(streamUrl?: string | null): any | null {
+  const trimmed = (streamUrl || '').trim();
+  if (!trimmed) return null;
+  const hit = streamInfoPreflightCache.get(trimmed);
+  if (hit && Date.now() - hit.cachedAt < STREAM_INFO_CACHE_TTL_MS) {
+    return hit.data;
+  }
+  return null;
+}
+
+export async function fetchStreamInfoPreflight(
+  streamUrl?: string | null,
+  timeoutMs = 14000
+): Promise<any | null> {
+  const trimmed = (streamUrl || '').trim();
+  if (!trimmed || /^(file:|blob:)/i.test(trimmed)) return null;
+
+  const cached = getCachedStreamInfo(trimmed);
+  if (cached) return cached;
+
+  const inflight = inflightStreamInfoPreflight.get(trimmed);
+  if (inflight) return inflight;
+
+  const p = (async () => {
+    try {
+      if (Capacitor.isNativePlatform()) {
+        await ensureAndroidStreamBridge().catch(() => '');
+      }
+      const infoUrl = buildApiUrl(`/api/telegram/stream-info?url=${encodeURIComponent(trimmed)}`);
+      if (!infoUrl || (Capacitor.isNativePlatform() && isUsingLocalNativeBridge() && !infoUrl.startsWith('http'))) {
+        return null;
+      }
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const res = await fetch(infoUrl, { cache: 'no-store', signal: controller.signal }).finally(() =>
+        clearTimeout(timer)
+      );
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data && data.status === 'ok') {
+        if (streamInfoPreflightCache.size >= 40) {
+          const oldest = streamInfoPreflightCache.keys().next().value;
+          if (oldest) streamInfoPreflightCache.delete(oldest);
+        }
+        streamInfoPreflightCache.set(trimmed, { data, cachedAt: Date.now() });
+        const dur = Number(data?.durationSec || 0);
+        if (Number.isFinite(dur) && dur > 0) {
+          probedDurationCache.set(trimmed, Math.round(dur));
+        }
+        return data;
+      }
+      return null;
+    } catch {
+      return null;
+    } finally {
+      inflightStreamInfoPreflight.delete(trimmed);
+    }
+  })();
+
+  inflightStreamInfoPreflight.set(trimmed, p);
+  return p;
+}
+
+export function prewarmTelegramStream(streamUrl?: string | null): void {
+  const trimmed = (streamUrl || '').trim();
+  if (!trimmed || !/t\.me|telegram\.me/i.test(trimmed)) return;
+  if (Capacitor.isNativePlatform()) {
+    warmBackendConnection();
+    ensureAndroidStreamBridge()
+      .then(() => {
+        const bridge = (window as any).__tgStreamBridge;
+        if (typeof bridge?.prewarm === 'function') {
+          return bridge.prewarm(trimmed);
+        }
+        return fetchStreamInfoPreflight(trimmed, 10000);
+      })
+      .catch(() => {});
+    return;
+  }
+  fetchStreamInfoPreflight(trimmed, 10000).catch(() => null);
+}
 
 export async function probeTelegramDurationSec(streamUrl?: string | null): Promise<number> {
   const trimmed = (streamUrl || '').trim();
@@ -123,6 +213,13 @@ export async function probeTelegramDurationSec(streamUrl?: string | null): Promi
   const cached = probedDurationCache.get(trimmed);
   if (typeof cached === 'number' && cached > 0) {
     return cached;
+  }
+
+  const cachedInfo = getCachedStreamInfo(trimmed);
+  if (cachedInfo?.durationSec && Number(cachedInfo.durationSec) > 0) {
+    const rounded = Math.round(Number(cachedInfo.durationSec));
+    probedDurationCache.set(trimmed, rounded);
+    return rounded;
   }
 
   // Check native/browser Telegram cache synchronously first
@@ -142,17 +239,7 @@ export async function probeTelegramDurationSec(streamUrl?: string | null): Promi
 
   const promise = (async () => {
     try {
-      const infoUrl = buildApiUrl(`/api/telegram/stream-info?url=${encodeURIComponent(trimmed)}`);
-      if (!infoUrl || (Capacitor.isNativePlatform() && isUsingLocalNativeBridge() && !infoUrl.startsWith('http'))) {
-        return 0;
-      }
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 8000);
-      const res = await fetch(infoUrl, { cache: 'no-store', signal: controller.signal }).finally(() =>
-        clearTimeout(timer)
-      );
-      if (!res.ok) return 0;
-      const data = await res.json();
+      const data = await fetchStreamInfoPreflight(trimmed, 8000);
       const dur = Number(data?.durationSec || 0);
       if (Number.isFinite(dur) && dur > 0) {
         const rounded = Math.round(dur);

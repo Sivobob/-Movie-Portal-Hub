@@ -1,9 +1,10 @@
 export interface LocalHeaderProbeResult {
-  container: 'mp4' | 'matroska' | 'webm' | 'avi' | 'unknown';
+  container: 'mp4' | 'matroska' | 'webm' | 'avi' | 'mpegts' | 'unknown';
   videoCodec: string;
   audioCodec: string;
   is10Bit: boolean;
   durationSec: number;
+  durationExact?: boolean;
   width: number;
   height: number;
   hasUnsupportedAudio: boolean;
@@ -44,7 +45,7 @@ function containsBytes(buf: Uint8Array, needle: string): number {
   return -1;
 }
 
-function parseMp4Header(buf: Uint8Array): Partial<LocalHeaderProbeResult> {
+export function parseMp4Header(buf: Uint8Array): Partial<LocalHeaderProbeResult> {
   const out: Partial<LocalHeaderProbeResult> = {
     container: 'mp4',
   };
@@ -61,15 +62,10 @@ function parseMp4Header(buf: Uint8Array): Partial<LocalHeaderProbeResult> {
 
   if (hasHvc1 >= 0 || hasHev1 >= 0) {
     out.videoCodec = 'hevc';
-    // Inspect hvcC box if present to read exact general_profile_idc & bitDepthLumaMinus8
     const hvccIdx = containsBytes(buf, 'hvcC');
     if (hvccIdx >= 0 && hvccIdx + 24 < buf.length) {
-      // hvcC payload starts at hvccIdx + 4:
-      // byte 0: configurationVersion (1)
-      // byte 1: general_profile_space(2) | general_tier_flag(1) | general_profile_idc(5)
       const pStart = hvccIdx + 4;
       const profileIdc = buf[pStart + 1] & 0x1f;
-      // byte 17: bitDepthLumaMinus8 in lower 3 bits
       const bitDepthLumaMinus8 = buf[pStart + 17] & 0x07;
       if (profileIdc === 2 || profileIdc === 4 || bitDepthLumaMinus8 >= 2) {
         out.is10Bit = true;
@@ -121,7 +117,7 @@ function parseMp4Header(buf: Uint8Array): Partial<LocalHeaderProbeResult> {
     out.audioCodec = 'mp3';
   }
 
-  // Try parsing mvhd box duration
+  // Try parsing mvhd box duration (search valid mvhd box with reasonable version & timescale)
   const mvhdIdx = containsBytes(buf, 'mvhd');
   if (mvhdIdx >= 4 && mvhdIdx + 28 < buf.length) {
     const version = buf[mvhdIdx + 4];
@@ -129,13 +125,21 @@ function parseMp4Header(buf: Uint8Array): Partial<LocalHeaderProbeResult> {
       const timescale = readUint32BE(buf, mvhdIdx + 16);
       const durUnits = readUint32BE(buf, mvhdIdx + 20);
       if (timescale > 0 && durUnits > 0) {
-        out.durationSec = Math.round(durUnits / timescale);
+        const sec = Math.round(durUnits / timescale);
+        if (sec > 0 && sec < 86400) {
+          out.durationSec = sec;
+          out.durationExact = true;
+        }
       }
     } else if (version === 1 && mvhdIdx + 36 <= buf.length) {
       const timescale = readUint32BE(buf, mvhdIdx + 24);
       const durUnits = readUint64BE(buf, mvhdIdx + 28);
       if (timescale > 0 && durUnits > 0) {
-        out.durationSec = Math.round(durUnits / timescale);
+        const sec = Math.round(durUnits / timescale);
+        if (sec > 0 && sec < 86400) {
+          out.durationSec = sec;
+          out.durationExact = true;
+        }
       }
     }
   }
@@ -155,22 +159,42 @@ function readFloat64BE(buf: Uint8Array, off: number): number {
   return view.getFloat64(0, false);
 }
 
-function readEbmlVintSize(buf: Uint8Array, off: number): { size: number; len: number } {
-  if (off >= buf.length) return { size: 0, len: 0 };
+function readEbmlElementId(buf: Uint8Array, off: number): { id: number; len: number } {
+  if (off >= buf.length) return { id: 0, len: 0 };
   const first = buf[off];
-  if (first === 0) return { size: 0, len: 0 };
+  if (first === 0) return { id: 0, len: 0 };
+  let mask = 0x80;
+  let len = 1;
+  while (len <= 4 && (first & mask) === 0) {
+    mask >>= 1;
+    len++;
+  }
+  if (len > 4 || off + len > buf.length) return { id: 0, len: 0 };
+  let id = 0;
+  for (let i = 0; i < len; i++) {
+    id = id * 256 + buf[off + i];
+  }
+  return { id, len };
+}
+
+function readEbmlVintSize(buf: Uint8Array, off: number): { size: number; len: number; unknownSize: boolean } {
+  if (off >= buf.length) return { size: 0, len: 0, unknownSize: false };
+  const first = buf[off];
+  if (first === 0) return { size: 0, len: 0, unknownSize: false };
   let mask = 0x80;
   let len = 1;
   while (len <= 8 && (first & mask) === 0) {
     mask >>= 1;
     len++;
   }
-  if (len > 8 || off + len > buf.length) return { size: 0, len: 0 };
+  if (len > 8 || off + len > buf.length) return { size: 0, len: 0, unknownSize: false };
   let size = first & ~mask;
+  let allOnes = size === (mask - 1);
   for (let i = 1; i < len; i++) {
+    if (buf[off + i] !== 0xff) allOnes = false;
     size = size * 256 + buf[off + i];
   }
-  return { size, len };
+  return { size, len, unknownSize: allOnes };
 }
 
 function parseEbmlHeader(buf: Uint8Array): Partial<LocalHeaderProbeResult> {
@@ -217,7 +241,7 @@ function parseEbmlHeader(buf: Uint8Array): Partial<LocalHeaderProbeResult> {
     out.audioCodec = 'flac';
   }
 
-  // Locate Matroska Segment Info element (ID: 0x15 0x49 0xA9 0x66) to extract TimecodeScale & Duration
+  // Locate Matroska Segment Info element (ID: 0x15 0x49 0xA9 0x66) and walk child elements strictly by EBML boundaries
   for (let i = 0; i <= buf.length - 12; i++) {
     if (
       buf[i] === 0x15 &&
@@ -225,44 +249,53 @@ function parseEbmlHeader(buf: Uint8Array): Partial<LocalHeaderProbeResult> {
       buf[i + 2] === 0xa9 &&
       buf[i + 3] === 0x66
     ) {
-      const { size: infoSize, len: sizeLen } = readEbmlVintSize(buf, i + 4);
+      const { size: infoSize, len: sizeLen, unknownSize } = readEbmlVintSize(buf, i + 4);
+      if (sizeLen === 0 || (!unknownSize && (infoSize <= 0 || infoSize > 65536))) {
+        continue;
+      }
       const infoStart = i + 4 + sizeLen;
-      const infoEnd = Math.min(buf.length, infoSize > 0 && infoSize < 65536 ? infoStart + infoSize : infoStart + 4096);
+      const infoEnd = Math.min(buf.length, unknownSize ? infoStart + 4096 : infoStart + infoSize);
 
       let timecodeScaleNs = 1000000;
       let durationTicks = 0;
+      let pos = infoStart;
+      let steps = 0;
 
-      for (let j = infoStart; j <= infoEnd - 6; j++) {
-        // TimecodeScale (0x2A 0xD7 0xB1)
-        if (buf[j] === 0x2a && buf[j + 1] === 0xd7 && buf[j + 2] === 0xb1) {
-          const { size: dLen, len: vLen } = readEbmlVintSize(buf, j + 3);
-          const valStart = j + 3 + vLen;
-          if (dLen >= 1 && dLen <= 8 && valStart + dLen <= infoEnd) {
-            let scale = 0;
-            for (let b = 0; b < dLen; b++) {
-              scale = scale * 256 + buf[valStart + b];
-            }
-            if (scale > 0) timecodeScaleNs = scale;
+      while (pos < infoEnd - 2 && steps < 256) {
+        steps++;
+        const { id, len: idLen } = readEbmlElementId(buf, pos);
+        if (idLen === 0) break;
+        const { size: elemSize, len: elemSizeLen, unknownSize: elemUnknown } = readEbmlVintSize(buf, pos + idLen);
+        if (elemSizeLen === 0 || elemUnknown) break;
+        const valStart = pos + idLen + elemSizeLen;
+        const nextPos = valStart + elemSize;
+        if (nextPos > infoEnd) break;
+
+        if (id === 0x2ad7b1 && elemSize >= 1 && elemSize <= 8) {
+          // TimecodeScale
+          let scale = 0;
+          for (let b = 0; b < elemSize; b++) {
+            scale = scale * 256 + buf[valStart + b];
           }
-        }
-        // Duration (0x44 0x89)
-        if (buf[j] === 0x44 && buf[j + 1] === 0x89) {
-          const { size: dLen, len: vLen } = readEbmlVintSize(buf, j + 2);
-          const valStart = j + 2 + vLen;
-          if (dLen === 4 && valStart + 4 <= infoEnd) {
+          if (scale > 0) timecodeScaleNs = scale;
+        } else if (id === 0x4489) {
+          // Duration
+          if (elemSize === 4) {
             const val = readFloat32BE(buf, valStart);
             if (Number.isFinite(val) && val > 0) durationTicks = val;
-          } else if (dLen === 8 && valStart + 8 <= infoEnd) {
+          } else if (elemSize === 8) {
             const val = readFloat64BE(buf, valStart);
             if (Number.isFinite(val) && val > 0) durationTicks = val;
           }
         }
+        pos = nextPos;
       }
 
       if (durationTicks > 0) {
         const sec = Math.round((durationTicks * timecodeScaleNs) / 1_000_000_000);
         if (sec > 0 && sec < 86400) {
           out.durationSec = sec;
+          out.durationExact = true;
           break;
         }
       }
@@ -270,6 +303,99 @@ function parseEbmlHeader(buf: Uint8Array): Partial<LocalHeaderProbeResult> {
   }
 
   return out;
+}
+
+function findMpegTsSyncStart(buf: Uint8Array, scanLimit = 752): number {
+  if (!buf || buf.length < 188 * 3) return -1;
+  const maxStart = Math.min(scanLimit, buf.length - 188 * 2 - 1);
+  for (let i = 0; i <= maxStart; i++) {
+    if (buf[i] === 0x47 && buf[i + 188] === 0x47 && buf[i + 376] === 0x47) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+export function isMpegTsBytes(buf: Uint8Array): boolean {
+  return findMpegTsSyncStart(buf) >= 0;
+}
+
+function readPcrFromTsPacket(buf: Uint8Array, pktOff: number): number | null {
+  if (pktOff < 0 || pktOff + 188 > buf.length || buf[pktOff] !== 0x47) return null;
+  const afc = (buf[pktOff + 3] >> 4) & 0x03;
+  if (afc !== 2 && afc !== 3) return null;
+  const afLen = buf[pktOff + 4];
+  if (afLen < 7 || pktOff + 12 > buf.length) return null;
+  const flags = buf[pktOff + 5];
+  if ((flags & 0x10) === 0) return null; // PCR_flag
+
+  const base33 =
+    buf[pktOff + 6] * 33554432 +
+    buf[pktOff + 7] * 131072 +
+    buf[pktOff + 8] * 512 +
+    buf[pktOff + 9] * 2 +
+    ((buf[pktOff + 10] >> 7) & 1);
+  return base33 / 90000;
+}
+
+export function extractMpegTsPcrSec(buf: Uint8Array, fromEnd: boolean): number | null {
+  if (!buf || buf.length < 188 * 3) return null;
+
+  if (!fromEnd) {
+    const start = findMpegTsSyncStart(buf, 1024);
+    if (start < 0) return null;
+    for (let off = start; off + 188 <= buf.length; off += 188) {
+      const pcr = readPcrFromTsPacket(buf, off);
+      if (pcr !== null) return pcr;
+    }
+    return null;
+  }
+
+  // Scan backwards for packet sync alignment near the end of tail buffer
+  const minScan = Math.max(0, buf.length - 188 * 4 - 64);
+  let tailAlignEnd = -1;
+  for (let i = buf.length - 188; i >= minScan; i--) {
+    if (
+      i >= 376 &&
+      buf[i] === 0x47 &&
+      buf[i - 188] === 0x47 &&
+      buf[i - 376] === 0x47
+    ) {
+      tailAlignEnd = i;
+      break;
+    }
+  }
+  if (tailAlignEnd < 0) {
+    // Fallback align from buffer start
+    const headAlign = findMpegTsSyncStart(buf, 752);
+    if (headAlign < 0) return null;
+    const totalPkts = Math.floor((buf.length - headAlign) / 188);
+    tailAlignEnd = headAlign + Math.max(0, totalPkts - 1) * 188;
+  }
+
+  for (let off = tailAlignEnd; off >= 0; off -= 188) {
+    if (buf[off] !== 0x47) continue;
+    const pcr = readPcrFromTsPacket(buf, off);
+    if (pcr !== null) return pcr;
+  }
+  return null;
+}
+
+export function computeMpegTsDurationSec(headBuf: Uint8Array, tailBuf: Uint8Array): number {
+  const firstPcr = extractMpegTsPcrSec(headBuf, false);
+  const lastPcr = extractMpegTsPcrSec(tailBuf, true);
+  if (firstPcr === null || lastPcr === null) return 0;
+
+  let diff = lastPcr - firstPcr;
+  if (diff < 0) {
+    // Handle 33-bit PCR wrap-around (~26.5 hours)
+    diff += 8589934592 / 90000;
+  }
+  const rounded = Math.round(diff);
+  if (rounded >= 2 && rounded < 43200) {
+    return rounded;
+  }
+  return 0;
 }
 
 export function inspectMediaHeaderBytes(
@@ -299,6 +425,8 @@ export function inspectMediaHeaderBytes(
 
     if (isEbml) {
       parsed = parseEbmlHeader(headerBytes);
+    } else if (isMpegTsBytes(headerBytes)) {
+      parsed = { container: 'mpegts', videoCodec: 'h264', audioCodec: 'aac' };
     } else if (ftyp === 'ftyp' || containsBytes(headerBytes, 'moov') >= 0 || containsBytes(headerBytes, 'trak') >= 0) {
       parsed = parseMp4Header(headerBytes);
     } else if (isRiff) {
@@ -308,13 +436,15 @@ export function inspectMediaHeaderBytes(
 
   const container: LocalHeaderProbeResult['container'] =
     parsed.container ||
-    (lowerName.endsWith('.webm') || lowerMime.includes('webm')
-      ? 'webm'
-      : lowerName.endsWith('.mkv') || lowerMime.includes('matroska') || lowerMime.includes('mkv')
-        ? 'matroska'
-        : lowerName.endsWith('.avi') || lowerMime.includes('avi')
-          ? 'avi'
-          : 'mp4');
+    (lowerName.endsWith('.ts') || lowerName.endsWith('.m2ts') || lowerMime.includes('mp2t')
+      ? 'mpegts'
+      : lowerName.endsWith('.webm') || lowerMime.includes('webm')
+        ? 'webm'
+        : lowerName.endsWith('.mkv') || lowerMime.includes('matroska') || lowerMime.includes('mkv')
+          ? 'matroska'
+          : lowerName.endsWith('.avi') || lowerMime.includes('avi')
+            ? 'avi'
+            : 'mp4');
 
   const videoCodec =
     parsed.videoCodec ||
@@ -322,6 +452,7 @@ export function inspectMediaHeaderBytes(
 
   const audioCodec = parsed.audioCodec || (container === 'webm' ? 'opus' : 'aac');
   const is10Bit = Boolean(parsed.is10Bit || riskyName10Bit);
+  const durationExact = Boolean(parsed.durationExact && parsed.durationSec && parsed.durationSec > 0);
   const durationSec = parsed.durationSec && parsed.durationSec > 0 ? parsed.durationSec : fallbackDurationSec;
 
   return {
@@ -330,6 +461,7 @@ export function inspectMediaHeaderBytes(
     audioCodec,
     is10Bit,
     durationSec,
+    durationExact,
     width: fallbackWidth,
     height: fallbackHeight,
     hasUnsupportedAudio: Boolean(

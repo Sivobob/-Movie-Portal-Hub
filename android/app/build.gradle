@@ -7,8 +7,8 @@ android {
         applicationId "com.moviebox.stream.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 35275
-        versionName "3.5.275"
+        versionCode 35276
+        versionName "3.5.276"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              noCompress 'dat'
@@ -75,6 +75,8 @@ dependencies {
     implementation 'androidx.mediarouter:mediarouter:1.7.0'
     implementation 'androidx.media3:media3-exoplayer:1.4.1'
     implementation 'androidx.media3:media3-exoplayer-hls:1.4.1'
+    implementation 'androidx.media3:media3-common:1.4.1'
+    implementation 'androidx.media3:media3-effect:1.4.1'
     implementation 'androidx.work:work-runtime:2.9.1'
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"

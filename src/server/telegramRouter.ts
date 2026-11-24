@@ -21,6 +21,7 @@ import {
 } from '../utils/channelRegistry.ts';
 import {
   checkTelegramDocHasAudioFast,
+  probeExactTelegramDurationSec,
   probeTelegramMedia,
   ProbeMediaResult,
   streamTelegramRange,
@@ -1780,20 +1781,31 @@ async function resolveAndCacheDocument(
 async function ensureMediaProbed(
   entry: CachedMediaEntry,
   telegramUrl: string,
-  probeOptions?: { timeoutMs?: number; probesize?: number; analyzeduration?: number }
+  probeOptions?: { timeoutMs?: number; probesize?: number; analyzeduration?: number },
+  client?: any
 ): Promise<ProbeMediaResult> {
   if (entry.probe) return entry.probe;
   if (entry.probePromise) return entry.probePromise;
 
   const localPort = process.env.INTERNAL_APP_PORT || process.env.APP_PORT || '3000';
   entry.probePromise = probeTelegramMedia(localPort, telegramUrl, entry.docInfo, probeOptions)
-    .then((result) => {
+    .then(async (result) => {
+      if (
+        client &&
+        (String(result.container || '').toLowerCase().includes('mpegts') || !result.containerDurationExact)
+      ) {
+        const exactCheck = await probeExactTelegramDurationSec(client, entry.docInfo, result.container).catch(() => null);
+        if (exactCheck && exactCheck.exact && exactCheck.durationSec > 0) {
+          result.durationSec = exactCheck.durationSec;
+          result.containerDurationExact = true;
+        }
+      }
       entry.probe = result;
-      if (result.durationSec > 0) {
+      if (result.durationSec > 0 && (result.containerDurationExact || entry.docInfo.durationSec <= 0)) {
         entry.docInfo.durationSec = result.durationSec;
       }
       console.log(
-        `[Probe] ${entry.docInfo.fileName || entry.docInfo.document.id}: mode=${result.recommendedMode}, video=${result.videoCodec}(${result.pixFmt}), audio=${result.audioCodec}, duration=${result.durationSec}s, tracks=${result.audioTracks.length}`
+        `[Probe] ${entry.docInfo.fileName || entry.docInfo.document.id}: mode=${result.recommendedMode}, container=${result.container}, video=${result.videoCodec}(${result.pixFmt}), audio=${result.audioCodec}, duration=${result.durationSec}s (exact=${Boolean(result.containerDurationExact)}), tracks=${result.audioTracks.length}`
       );
       return result;
     })
@@ -1865,8 +1877,14 @@ router.get('/stream-info', async (req: Request, res: Response) => {
       return res.status(status || 404).json({ error: error || 'Media not found' });
     }
 
-    const probe = await ensureMediaProbed(entry, urlParam);
+    const probe = await ensureMediaProbed(entry, urlParam, undefined, client);
     const resolvedDuration = probe.durationSec || entry.docInfo.durationSec || 0;
+    const containerDurationExact = Boolean(
+      probe.containerDurationExact ||
+        (probe.probedByFfprobe &&
+          resolvedDuration > 0 &&
+          !String(probe.container || '').toLowerCase().includes('mpegts'))
+    );
     const qualityEstimates = buildQualitySizeEstimates({
       fileSizeBytes: entry.docInfo.fileSize,
       durationSec: resolvedDuration,
@@ -1879,6 +1897,7 @@ router.get('/stream-info', async (req: Request, res: Response) => {
       fileName: entry.docInfo.fileName,
       fileSize: entry.docInfo.fileSize,
       durationSec: resolvedDuration,
+      containerDurationExact,
       recommendedMode: probe.recommendedMode,
       container: probe.container,
       videoCodec: probe.videoCodec,
@@ -2377,7 +2396,7 @@ export async function handleStream(req: Request, res: Response) {
 
     // Raw internal stream for ffprobe / ffmpeg: bypass probe & remux completely
     if (!isRawParam) {
-      const probe = await ensureMediaProbed(entry, urlParam);
+      const probe = await ensureMediaProbed(entry, urlParam, undefined, client);
       const durationSec = probe.durationSec || docInfo.durationSec || 0;
 
       let effectiveMode: 'direct' | 'remux' | 'transcode' = probe.recommendedMode;
@@ -2907,7 +2926,7 @@ async function resolveHlsSourceParams(req: Request) {
     if (!entry) {
       throw new Error(error || 'Media not found');
     }
-    const probe = await ensureMediaProbed(entry, urlParam);
+    const probe = await ensureMediaProbed(entry, urlParam, undefined, client);
     durationSec = probe.durationSec || entry.docInfo.durationSec || durationSec;
     const localPort = process.env.INTERNAL_APP_PORT || process.env.APP_PORT || '3000';
     inputUrl = `http://127.0.0.1:${localPort}/api/stream?url=${encodeURIComponent(urlParam)}&raw=1`;
@@ -4308,7 +4327,7 @@ function mergeEpisodeIntoSeasons(
     duration?: string;
     durationSec?: number;
     showInNewEpisodes: boolean;
-    newEpisodeEnabledAt: number;
+    newEpisodeEnabledAt?: number;
     createdAt: number;
     addedAt: number;
   }
@@ -4716,8 +4735,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
             streamUrl: draft.streamUrl.trim(),
             ...(durationFormatted ? { duration: durationFormatted } : {}),
             ...(bestDurSec > 0 ? { durationSec: bestDurSec } : {}),
-            showInNewEpisodes: true,
-            newEpisodeEnabledAt: nowMs,
+            showInNewEpisodes: false,
             createdAt: nowMs,
             addedAt: nowMs,
           };

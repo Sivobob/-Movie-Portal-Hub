@@ -4,7 +4,12 @@ import { LogLevel } from 'telegram/extensions/Logger.js';
 import { StringSession } from 'telegram/sessions/index.js';
 import bigInt from 'big-integer';
 import { parseTelegramUrl } from './telegramParser';
-import { inspectMediaHeaderBytes, LocalHeaderProbeResult } from './mediaHeaderParser';
+import {
+  inspectMediaHeaderBytes,
+  computeMpegTsDurationSec,
+  parseMp4Header,
+  LocalHeaderProbeResult,
+} from './mediaHeaderParser';
 
 const TG_API_ID = 31425129;
 const TG_API_HASH = 'd1069176c0bd22479ffed449cb9b3d2a';
@@ -773,6 +778,77 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
       };
     },
 
+    async prewarm(telegramUrl: string) {
+      try {
+        const meta = await resolveTelegramDocument(telegramUrl);
+        if (!meta.headerProbe) {
+          const client = await getBrowserTelegramClient();
+          const clientRef = { current: client };
+          const block0 = await fetchOneBlockWithRetry(clientRef, meta.document, 0);
+          let probe = inspectMediaHeaderBytes(
+            block0,
+            meta.fileName,
+            meta.rawMime,
+            meta.durationSec,
+            meta.width,
+            meta.height
+          );
+          if (probe.container === 'mpegts' && meta.fileSize > BLOCK) {
+            const lastIdx = Math.floor((meta.fileSize - 1) / BLOCK);
+            const lastBlock = await fetchOneBlockWithRetry(clientRef, meta.document, lastIdx);
+            let tailBuf = lastBlock;
+            if (lastBlock.length < 65536 && lastIdx > 0) {
+              const prevBlock = await fetchOneBlockWithRetry(clientRef, meta.document, lastIdx - 1);
+              tailBuf = new Uint8Array(prevBlock.length + lastBlock.length);
+              tailBuf.set(prevBlock, 0);
+              tailBuf.set(lastBlock, prevBlock.length);
+            }
+            const tsDur = computeMpegTsDurationSec(block0, tailBuf);
+            if (tsDur > 0) {
+              probe = { ...probe, durationSec: tsDur, durationExact: true };
+            }
+          } else if (probe.container === 'mp4' && !probe.durationExact && meta.fileSize > BLOCK) {
+            const lastIdx = Math.floor((meta.fileSize - 1) / BLOCK);
+            const lastBlock = await fetchOneBlockWithRetry(clientRef, meta.document, lastIdx);
+            let tailBuf = lastBlock;
+            if (lastIdx > 0) {
+              const prevBlock = await fetchOneBlockWithRetry(clientRef, meta.document, lastIdx - 1);
+              tailBuf = new Uint8Array(prevBlock.length + lastBlock.length);
+              tailBuf.set(prevBlock, 0);
+              tailBuf.set(lastBlock, prevBlock.length);
+            }
+            const tailMp4 = parseMp4Header(tailBuf);
+            if (tailMp4.durationSec && tailMp4.durationSec > 0) {
+              probe = {
+                ...probe,
+                videoCodec: tailMp4.videoCodec || probe.videoCodec,
+                audioCodec: tailMp4.audioCodec || probe.audioCodec,
+                is10Bit: Boolean(probe.is10Bit || tailMp4.is10Bit),
+                hasUnsupportedAudio: Boolean(probe.hasUnsupportedAudio || tailMp4.hasUnsupportedAudio),
+                durationSec: tailMp4.durationSec,
+                durationExact: Boolean(tailMp4.durationExact),
+              };
+            }
+          }
+          meta.headerProbe = probe;
+          if (probe.durationSec > 0 && (probe.durationExact || meta.durationSec <= 0)) {
+            meta.durationSec = probe.durationSec;
+          }
+        }
+        return {
+          ok: true,
+          fileSize: meta.fileSize,
+          durationSec: meta.headerProbe?.durationSec || meta.durationSec || 0,
+          containerDurationExact: Boolean(
+            meta.headerProbe?.durationExact ||
+            (meta.durationSec > 0 && meta.headerProbe?.container !== 'mpegts')
+          ),
+        };
+      } catch {
+        return { ok: false };
+      }
+    },
+
     async resolveMeta(reqId: string, telegramUrl: string) {
       try {
         const meta = await resolveTelegramDocument(telegramUrl);
@@ -801,7 +877,7 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
             const client = await getBrowserTelegramClient();
             const clientRef = { current: client };
             const block0 = await fetchOneBlockWithRetry(clientRef, meta.document, 0);
-            meta.headerProbe = inspectMediaHeaderBytes(
+            let probe = inspectMediaHeaderBytes(
               block0,
               meta.fileName,
               meta.rawMime,
@@ -809,8 +885,54 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
               meta.width,
               meta.height
             );
-            if (meta.headerProbe.durationSec > 0 && meta.durationSec <= 0) {
-              meta.durationSec = meta.headerProbe.durationSec;
+            if (probe.container === 'mpegts' && meta.fileSize > BLOCK) {
+              const lastIdx = Math.floor((meta.fileSize - 1) / BLOCK);
+              const lastBlock = await fetchOneBlockWithRetry(clientRef, meta.document, lastIdx).catch(() => new Uint8Array(0));
+              let tailBuf = lastBlock;
+              if (lastBlock.length > 0 && lastBlock.length < 65536 && lastIdx > 0) {
+                const prevBlock = await fetchOneBlockWithRetry(clientRef, meta.document, lastIdx - 1).catch(() => new Uint8Array(0));
+                if (prevBlock.length > 0) {
+                  tailBuf = new Uint8Array(prevBlock.length + lastBlock.length);
+                  tailBuf.set(prevBlock, 0);
+                  tailBuf.set(lastBlock, prevBlock.length);
+                }
+              }
+              if (tailBuf.length > 0) {
+                const tsDur = computeMpegTsDurationSec(block0, tailBuf);
+                if (tsDur > 0) {
+                  probe = { ...probe, durationSec: tsDur, durationExact: true };
+                }
+              }
+            } else if (probe.container === 'mp4' && !probe.durationExact && meta.fileSize > BLOCK) {
+              const lastIdx = Math.floor((meta.fileSize - 1) / BLOCK);
+              const lastBlock = await fetchOneBlockWithRetry(clientRef, meta.document, lastIdx).catch(() => new Uint8Array(0));
+              let tailBuf = lastBlock;
+              if (lastBlock.length > 0 && lastIdx > 0) {
+                const prevBlock = await fetchOneBlockWithRetry(clientRef, meta.document, lastIdx - 1).catch(() => new Uint8Array(0));
+                if (prevBlock.length > 0) {
+                  tailBuf = new Uint8Array(prevBlock.length + lastBlock.length);
+                  tailBuf.set(prevBlock, 0);
+                  tailBuf.set(lastBlock, prevBlock.length);
+                }
+              }
+              if (tailBuf.length > 0) {
+                const tailMp4 = parseMp4Header(tailBuf);
+                if (tailMp4.durationSec && tailMp4.durationSec > 0) {
+                  probe = {
+                    ...probe,
+                    videoCodec: tailMp4.videoCodec || probe.videoCodec,
+                    audioCodec: tailMp4.audioCodec || probe.audioCodec,
+                    is10Bit: Boolean(probe.is10Bit || tailMp4.is10Bit),
+                    hasUnsupportedAudio: Boolean(probe.hasUnsupportedAudio || tailMp4.hasUnsupportedAudio),
+                    durationSec: tailMp4.durationSec,
+                    durationExact: Boolean(tailMp4.durationExact),
+                  };
+                }
+              }
+            }
+            meta.headerProbe = probe;
+            if (probe.durationSec > 0 && (probe.durationExact || meta.durationSec <= 0)) {
+              meta.durationSec = probe.durationSec;
             }
           } catch {
             meta.headerProbe = inspectMediaHeaderBytes(
@@ -824,13 +946,18 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
           }
         }
         const p = meta.headerProbe;
+        const resolvedDuration = p.durationSec || meta.durationSec || 0;
+        const containerDurationExact = Boolean(
+          p.durationExact || (meta.durationSec > 0 && p.container !== 'mpegts')
+        );
         await sendMeta(reqId, {
           ok: true,
           status: 'ok',
           isTelegram: true,
           fileName: meta.fileName,
           fileSize: meta.fileSize,
-          durationSec: p.durationSec || meta.durationSec || 0,
+          durationSec: resolvedDuration,
+          containerDurationExact,
           container: p.container,
           videoCodec: p.videoCodec,
           is10Bit: p.is10Bit,

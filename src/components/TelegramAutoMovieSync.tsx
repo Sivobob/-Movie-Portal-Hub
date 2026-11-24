@@ -253,7 +253,7 @@ function mergeEpisodeIntoClientSeasons(
     duration?: string;
     durationSec?: number;
     showInNewEpisodes: boolean;
-    newEpisodeEnabledAt: number;
+    newEpisodeEnabledAt?: number;
     createdAt: number;
     addedAt: number;
   }
@@ -557,8 +557,7 @@ export default function TelegramAutoMovieSync({
         videoQualities: {},
         ...(draft.runtime ? { duration: draft.runtime } : {}),
         ...(draft.durationSec > 0 ? { durationSec: draft.durationSec } : {}),
-        showInNewEpisodes: true,
-        newEpisodeEnabledAt: nowMs,
+        showInNewEpisodes: false,
         createdAt: nowMs,
         addedAt: nowMs,
       };

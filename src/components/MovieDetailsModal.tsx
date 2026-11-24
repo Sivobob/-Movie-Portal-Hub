@@ -24,6 +24,7 @@ import { getAppPreferences } from '../services/userPreferencesService';
 import {
   formatHumanDuration,
   parseDurationToSeconds,
+  prewarmTelegramStream,
   probeTelegramDurationSec,
 } from '../utils/duration';
 import { isEpisodeNewActive, getEpisodeDisplayLabel } from '../services/movieStorage';
@@ -230,6 +231,21 @@ export default function MovieDetailsModal({
       cancelled = true;
     };
   }, [isOpen, movie?.id, hasRealSeasons, activeSeasonIndex]);
+
+  // Pre-warm stream bridge & metadata for the currently selected movie or episode so Watch Now starts instantly
+  useEffect(() => {
+    if (!isOpen || !movie) return;
+    const sIdx = seasonsList.length > 0 ? Math.min(activeSeasonIndex, seasonsList.length - 1) : 0;
+    const curS = seasonsList[sIdx] || seasonsList[0];
+    const eps: any[] = Array.isArray(curS?.episodes) ? curS.episodes : [];
+    const epObj = hasRealSeasons ? (eps[selectedEpisodeIdx] || eps[0]) : null;
+    const candidate = hasRealSeasons
+      ? String(epObj?.streamUrl || epObj?.videoQualities?.['720p'] || epObj?.videoQualities?.['1080p'] || '').trim()
+      : String(movie.streamingUrl || movie.videoQualities?.['720p'] || movie.videoQualities?.['1080p'] || '').trim();
+    if (candidate && /t\.me|telegram\.me/i.test(candidate)) {
+      prewarmTelegramStream(candidate);
+    }
+  }, [isOpen, movie?.id, hasRealSeasons, activeSeasonIndex, selectedEpisodeIdx]);
 
   if (!isOpen || !movie) return null;
 

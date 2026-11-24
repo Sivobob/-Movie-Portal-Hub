@@ -40,7 +40,12 @@ import {
   isUsingLocalNativeBridge,
   probeWorkingBackendUrl,
 } from '../utils/apiConfig';
-import { formatClockTime, parseDurationToSeconds } from '../utils/duration';
+import {
+  fetchStreamInfoPreflight,
+  formatClockTime,
+  getCachedStreamInfo,
+  parseDurationToSeconds,
+} from '../utils/duration';
 import { isEpisodeNewActive, getEpisodeDisplayLabel } from '../services/movieStorage';
 import { normalizePlayerTrackList } from '../utils/videoQuality';
 import { useAuth } from '../context/AuthContext';
@@ -242,6 +247,8 @@ export default function VideoPlayerModal({
   const [exoReconnectNonce, setExoReconnectNonce] = useState(0);
   const [html5ReconnectNonce, setHtml5ReconnectNonce] = useState(0);
   const [hasDecodedFrame, setHasDecodedFrame] = useState(false);
+  const hasDecodedFrameRef = useRef<boolean>(false);
+  hasDecodedFrameRef.current = hasDecodedFrame;
   const [autoplayBlocked, setAutoplayBlocked] = useState(false);
   const [isAutoplayMuted, setIsAutoplayMuted] = useState(() => !Capacitor.isNativePlatform() && isAppleMobileBrowser());
   const [seekPreviewTime, setSeekPreviewTime] = useState<number | null>(null);
@@ -252,6 +259,7 @@ export default function VideoPlayerModal({
   const autoplayBlockedRef = useRef(false);
   const durationRef = useRef(initialDuration || 0);
   const knownDurationRef = useRef(initialDuration || 0);
+  const verifiedContainerDurationRef = useRef(0);
   const currentTimeRef = useRef(0);
   const resumeOffsetRef = useRef(0);
   const qualityResumeTargetRef = useRef<number | null>(null);
@@ -881,6 +889,7 @@ export default function VideoPlayerModal({
     currentTimeRef.current = 0;
     setBufferedTime(0);
     const resetDur = resolveKnownEpisodeOrMovieDuration();
+    verifiedContainerDurationRef.current = 0;
     setDuration(resetDur);
     durationRef.current = resetDur;
     knownDurationRef.current = resetDur;
@@ -1000,176 +1009,239 @@ export default function VideoPlayerModal({
         Boolean(bridgeRef.isExoSupported());
       const remoteTranscodeAvailable = !Capacitor.isNativePlatform() || hasRemoteTranscodeBackend();
 
-      try {
-        const infoUrl = buildApiUrl(`/api/telegram/stream-info?url=${encodeURIComponent(trimmed)}`);
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), isUsingLocalNativeBridge() ? 14000 : 20000);
-        const res = await fetch(infoUrl, { cache: 'no-store', signal: controller.signal }).finally(() => clearTimeout(timer));
-        if (res.ok) {
-          const info = await res.json();
-          if (!cancelled && info && info.status === 'ok') {
-            if (info.durationSec > 0) {
-              probedDuration = info.durationSec;
-              knownDurationRef.current = info.durationSec;
-              durationRef.current = info.durationSec;
-              setDuration(info.durationSec);
-            }
-            const navConn = (navigator as any)?.connection;
-            const isInitialSlowNet = Boolean(
-              navConn &&
-              (navConn.saveData ||
-                navConn.effectiveType === '2g' ||
-                navConn.effectiveType === 'slow-2g' ||
-                (typeof navConn.downlink === 'number' && navConn.downlink > 0 && navConn.downlink < 0.7))
-            );
-            const startSlow360p = !userPickedQualityRef.current && isInitialSlowNet && remoteTranscodeAvailable;
+      const evaluateNativeCodecStage = (info: any) => {
+        const pixFmtLower = String(info?.pixFmt || '').toLowerCase();
+        const is10BitStream = Boolean(
+          info?.is10Bit ||
+          pixFmtLower.includes('10le') ||
+          pixFmtLower.includes('10be') ||
+          pixFmtLower.includes('p10') ||
+          pixFmtLower.includes('12le') ||
+          pixFmtLower.includes('12be') ||
+          pixFmtLower.includes('p12') ||
+          pixFmtLower.includes('yuv422') ||
+          pixFmtLower.includes('yuv444')
+        );
+        const vCodec = String(info?.videoCodec || '').toLowerCase();
+        const aCodec = String(info?.audioCodec || '').toLowerCase();
+        const isHevcStream = vCodec === 'hevc' || vCodec === 'h265';
+        const isVp9Stream = vCodec === 'vp9';
+        const isAv1Stream = vCodec === 'av1' || vCodec === 'av01';
+        const is4KStream = (info?.width && info.width > 2100) || (info?.height && info.height > 1200);
 
-            if (typeof info.height === 'number' && info.height > 0) {
-              probedHeight = info.height;
-              if (!userPickedQualityRef.current && !startSlow360p) {
-                const autoQ = info.height <= 520 ? '480P' : info.height <= 780 ? '720P' : '1080P';
-                selectedQualityRef.current = autoQ;
-                setSelectedQuality(autoQ);
-              }
-            }
+        const caps = deviceCapabilities || {};
+        const deviceSupports10Bit = Boolean(caps.supportsHevc10Bit);
+        const deviceSupports10BitHw = Boolean(caps.supportsHevc10BitHw);
+        const deviceHasHardwareHevc = Boolean(caps.hasHardwareHevc);
+        const deviceHasSoftwareHevc = Boolean(caps.hasSoftwareHevc || caps.supportsHevc);
+        const deviceSupportsVp9 = caps.supportsVp9 !== false;
+        const deviceSupportsAv1 = Boolean(caps.supportsAv1);
 
-            if (startSlow360p) {
-              selectedQualityRef.current = '360P';
-              setSelectedQuality('360P');
+        const ac3Unsupported = aCodec === 'ac3' && caps.supportsAc3 === false;
+        const eac3Unsupported = (aCodec === 'eac3' || aCodec === 'ec-3') && caps.supportsEac3 === false;
+        const dtsUnsupported = aCodec.includes('dts') && caps.supportsDts === false;
+        const genericUnsupportedAudio = Boolean(info?.hasUnsupportedAudio) && caps.supportsAc3 === false && caps.supportsEac3 === false && caps.supportsDts === false;
+        const audioIncompatible = ac3Unsupported || eac3Unsupported || dtsUnsupported || genericUnsupportedAudio;
+
+        const exceedsMaxHevc = isHevcStream && is4KStream && caps.maxHevcWidth && info?.width > caps.maxHevcWidth;
+        const exceedsMaxAvc = (vCodec === 'h264' || vCodec === 'avc') && is4KStream && caps.maxAvcWidth && info?.width > caps.maxAvcWidth;
+
+        let mode: 'direct' | 'remux' | 'transcode' = 'direct';
+        let stage: 'level1_hw' | 'level2_sw' | 'level2_surface' | 'level2_remux' | 'level3_transcode' = 'level1_hw';
+        let preferSw = false;
+
+        if (audioIncompatible && remoteTranscodeAvailable) {
+          mode = 'transcode';
+          stage = 'level3_transcode';
+        } else if (is10BitStream && !deviceSupports10BitHw && remoteTranscodeAvailable) {
+          mode = 'transcode';
+          stage = 'level3_transcode';
+        } else if (is10BitStream && !deviceSupports10Bit && remoteTranscodeAvailable) {
+          mode = 'transcode';
+          stage = 'level3_transcode';
+        } else if (is10BitStream && !deviceSupports10BitHw && deviceHasSoftwareHevc) {
+          mode = 'direct';
+          stage = 'level2_sw';
+          preferSw = true;
+        } else if (isHevcStream && !deviceHasHardwareHevc) {
+          if (remoteTranscodeAvailable && (!deviceHasSoftwareHevc || is4KStream || (info?.height && info.height > 1088))) {
+            mode = 'transcode';
+            stage = 'level3_transcode';
+          } else if (deviceHasSoftwareHevc) {
+            mode = 'direct';
+            stage = 'level2_sw';
+            preferSw = true;
+          }
+        } else if ((exceedsMaxHevc || exceedsMaxAvc || (isVp9Stream && !deviceSupportsVp9) || (isAv1Stream && !deviceSupportsAv1)) && remoteTranscodeAvailable) {
+          mode = 'transcode';
+          stage = 'level3_transcode';
+        }
+        return { mode, stage, preferSw };
+      };
+
+      const applyPreflightInfo = (info: any, isBackgroundUpdate: boolean) => {
+        if (!info || info.status !== 'ok') return;
+        const parsedDur = Number(info.durationSec || 0);
+        if (parsedDur > 0) {
+          probedDuration = parsedDur;
+          const isExactContainerDur = Boolean(
+            info.containerDurationExact ||
+            info.probedByFfprobe ||
+            !String(info.container || '').toLowerCase().includes('mpegts')
+          );
+          if (isExactContainerDur) {
+            verifiedContainerDurationRef.current = parsedDur;
+          }
+          knownDurationRef.current = parsedDur;
+          durationRef.current = parsedDur;
+          setDuration(parsedDur);
+          if (preflightCacheRef.current) {
+            preflightCacheRef.current.durationSec = parsedDur;
+          }
+        }
+
+        const navConn = (navigator as any)?.connection;
+        const isInitialSlowNet = Boolean(
+          navConn &&
+          (navConn.saveData ||
+            navConn.effectiveType === '2g' ||
+            navConn.effectiveType === 'slow-2g' ||
+            (typeof navConn.downlink === 'number' && navConn.downlink > 0 && navConn.downlink < 0.7))
+        );
+        const startSlow360p = !isBackgroundUpdate && !userPickedQualityRef.current && isInitialSlowNet && remoteTranscodeAvailable;
+
+        if (typeof info.height === 'number' && info.height > 0) {
+          probedHeight = info.height;
+          if (preflightCacheRef.current) {
+            preflightCacheRef.current.sourceHeight = info.height;
+          }
+          if (!userPickedQualityRef.current && !startSlow360p) {
+            const autoQ = info.height <= 520 ? '480P' : info.height <= 780 ? '720P' : '1080P';
+            selectedQualityRef.current = autoQ;
+            setSelectedQuality(autoQ);
+          }
+        }
+
+        const cleanProbedSubs = Array.isArray(info.subtitleTracks) && info.subtitleTracks.length > 0
+          ? normalizePlayerTrackList(info.subtitleTracks, 'subtitle')
+          : [];
+        if (cleanProbedSubs.length > 0) {
+          serverProbedSubTracksRef.current = cleanProbedSubs;
+          setRealSubtitleTracks(cleanProbedSubs);
+        } else if (!exoCapable && !isBackgroundUpdate) {
+          setRealSubtitleTracks([]);
+        }
+
+        if (isBackgroundUpdate) {
+          if (
+            exoCapable &&
+            !hasDecodedFrameRef.current &&
+            fallbackStageRef.current === 'level1_hw' &&
+            streamFallbackModeRef.current === 'direct'
+          ) {
+            const evalRes = evaluateNativeCodecStage(info);
+            if (evalRes.preferSw && evalRes.stage === 'level2_sw') {
+              setFallbackStage('level2_sw');
+              fallbackStageRef.current = 'level2_sw';
+              setPreferSoftwareDecoder(true);
+              preferSoftwareRef.current = true;
+            }
+          }
+          return;
+        }
+
+        if (startSlow360p) {
+          selectedQualityRef.current = '360P';
+          setSelectedQuality('360P');
+          chosenMode = 'transcode';
+          chosenStage = 'level3_transcode';
+        } else if (!exoCapable) {
+          if (
+            info.recommendedMode === 'remux' ||
+            info.recommendedMode === 'transcode' ||
+            info.recommendedMode === 'direct'
+          ) {
+            chosenMode = info.recommendedMode;
+          }
+          if (isAppleMobileBrowser()) {
+            const vCodec = String(info.videoCodec || '').toLowerCase();
+            const cont = String(info.container || '').toLowerCase();
+            if (cont.includes('webm') || vCodec === 'vp8' || vCodec === 'vp9') {
               chosenMode = 'transcode';
-              chosenStage = 'level3_transcode';
-            } else if (!exoCapable) {
-              // Chrome / Mobile Web / iOS Safari HTML5 playback evaluation
-              if (
-                info.recommendedMode === 'remux' ||
-                info.recommendedMode === 'transcode' ||
-                info.recommendedMode === 'direct'
-              ) {
-                chosenMode = info.recommendedMode;
-              }
-              if (isAppleMobileBrowser()) {
-                const vCodec = String(info.videoCodec || '').toLowerCase();
-                const cont = String(info.container || '').toLowerCase();
-                if (cont.includes('webm') || vCodec === 'vp8' || vCodec === 'vp9') {
-                  chosenMode = 'transcode';
-                } else if (chosenMode === 'direct') {
-                  chosenMode = 'remux';
-                }
-              }
-              chosenStage =
-                chosenMode === 'transcode'
-                  ? 'level3_transcode'
-                  : chosenMode === 'remux'
-                    ? 'level2_remux'
-                    : 'level1_hw';
-            } else {
-              // Native Android Media3 ExoPlayer intelligent codec + audio + resolution evaluation
-              const pixFmtLower = String(info.pixFmt || '').toLowerCase();
-              const is10BitStream = Boolean(
-                info.is10Bit ||
-                pixFmtLower.includes('10le') ||
-                pixFmtLower.includes('10be') ||
-                pixFmtLower.includes('p10') ||
-                pixFmtLower.includes('12le') ||
-                pixFmtLower.includes('12be') ||
-                pixFmtLower.includes('p12') ||
-                pixFmtLower.includes('yuv422') ||
-                pixFmtLower.includes('yuv444')
-              );
-              const vCodec = String(info.videoCodec || '').toLowerCase();
-              const aCodec = String(info.audioCodec || '').toLowerCase();
-              const isHevcStream = vCodec === 'hevc' || vCodec === 'h265';
-              const isVp9Stream = vCodec === 'vp9';
-              const isAv1Stream = vCodec === 'av1' || vCodec === 'av01';
-              const is4KStream = (info.width && info.width > 2100) || (info.height && info.height > 1200);
-
-              const caps = deviceCapabilities || {};
-              const deviceSupports10Bit = Boolean(caps.supportsHevc10Bit);
-              const deviceSupports10BitHw = Boolean(caps.supportsHevc10BitHw);
-              const deviceHasHardwareHevc = Boolean(caps.hasHardwareHevc);
-              const deviceHasSoftwareHevc = Boolean(caps.hasSoftwareHevc || caps.supportsHevc);
-              const deviceSupportsVp9 = caps.supportsVp9 !== false;
-              const deviceSupportsAv1 = Boolean(caps.supportsAv1);
-
-              const ac3Unsupported = aCodec === 'ac3' && caps.supportsAc3 === false;
-              const eac3Unsupported = (aCodec === 'eac3' || aCodec === 'ec-3') && caps.supportsEac3 === false;
-              const dtsUnsupported = aCodec.includes('dts') && caps.supportsDts === false;
-              const genericUnsupportedAudio = Boolean(info.hasUnsupportedAudio) && caps.supportsAc3 === false && caps.supportsEac3 === false && caps.supportsDts === false;
-              const audioIncompatible = ac3Unsupported || eac3Unsupported || dtsUnsupported || genericUnsupportedAudio;
-
-              const exceedsMaxHevc = isHevcStream && is4KStream && caps.maxHevcWidth && info.width > caps.maxHevcWidth;
-              const exceedsMaxAvc = (vCodec === 'h264' || vCodec === 'avc') && is4KStream && caps.maxAvcWidth && info.width > caps.maxAvcWidth;
-
-              if (audioIncompatible && remoteTranscodeAvailable) {
-                chosenMode = 'transcode';
-                chosenStage = 'level3_transcode';
-              } else if (is10BitStream && !deviceSupports10BitHw && remoteTranscodeAvailable) {
-                chosenMode = 'transcode';
-                chosenStage = 'level3_transcode';
-              } else if (is10BitStream && !deviceSupports10Bit && remoteTranscodeAvailable) {
-                chosenMode = 'transcode';
-                chosenStage = 'level3_transcode';
-              } else if (is10BitStream && !deviceSupports10BitHw && deviceHasSoftwareHevc) {
-                chosenMode = 'direct';
-                chosenStage = 'level2_sw';
-                initialPreferSw = true;
-              } else if (isHevcStream && !deviceHasHardwareHevc) {
-                if (remoteTranscodeAvailable && (!deviceHasSoftwareHevc || is4KStream || (info.height && info.height > 1088))) {
-                  chosenMode = 'transcode';
-                  chosenStage = 'level3_transcode';
-                } else if (deviceHasSoftwareHevc) {
-                  chosenMode = 'direct';
-                  chosenStage = 'level2_sw';
-                  initialPreferSw = true;
-                }
-              } else if ((exceedsMaxHevc || exceedsMaxAvc || (isVp9Stream && !deviceSupportsVp9) || (isAv1Stream && !deviceSupportsAv1)) && remoteTranscodeAvailable) {
-                chosenMode = 'transcode';
-                chosenStage = 'level3_transcode';
-              } else {
-                chosenMode = 'direct';
-                chosenStage = 'level1_hw';
-              }
+            } else if (chosenMode === 'direct') {
+              chosenMode = 'remux';
             }
+          }
+          chosenStage =
+            chosenMode === 'transcode'
+              ? 'level3_transcode'
+              : chosenMode === 'remux'
+                ? 'level2_remux'
+                : 'level1_hw';
+        } else {
+          const evalRes = evaluateNativeCodecStage(info);
+          chosenMode = evalRes.mode;
+          chosenStage = evalRes.stage;
+          initialPreferSw = evalRes.preferSw;
+        }
 
-            const cleanProbedSubs = Array.isArray(info.subtitleTracks) && info.subtitleTracks.length > 0
-              ? normalizePlayerTrackList(info.subtitleTracks, 'subtitle')
-              : [];
-            serverProbedSubTracksRef.current = cleanProbedSubs;
-
-            if (!exoCapable) {
-              if (Array.isArray(info.audioTracks) && info.audioTracks.length > 0) {
-                const cleanAudio = normalizePlayerTrackList(info.audioTracks, 'audio');
-                setRealAudioTracks(cleanAudio);
-                const preferredLang = verifiedLanguageRef.current.toLowerCase();
-                const matchIdx = cleanAudio.findIndex(
-                  (t) =>
-                    String(t.lang || '').toLowerCase().includes(preferredLang) ||
-                    String(t.label || '').toLowerCase().includes(preferredLang)
-                );
-                const chosenTrack = matchIdx >= 0 ? cleanAudio[matchIdx] : cleanAudio[0];
-                if (chosenTrack) {
-                  setSelectedAudio(chosenTrack.label);
-                  if (typeof chosenTrack.id === 'number') {
-                    setSelectedAudioIdx(chosenTrack.id);
-                    if (chosenTrack.id > 0 && chosenMode === 'direct' && remoteTranscodeAvailable) {
-                      chosenMode = 'remux';
-                      chosenStage = 'level2_remux';
-                    }
-                  }
-                }
+        if (!exoCapable && Array.isArray(info.audioTracks) && info.audioTracks.length > 0) {
+          const cleanAudio = normalizePlayerTrackList(info.audioTracks, 'audio');
+          setRealAudioTracks(cleanAudio);
+          const preferredLang = verifiedLanguageRef.current.toLowerCase();
+          const matchIdx = cleanAudio.findIndex(
+            (t) =>
+              String(t.lang || '').toLowerCase().includes(preferredLang) ||
+              String(t.label || '').toLowerCase().includes(preferredLang)
+          );
+          const chosenTrack = matchIdx >= 0 ? cleanAudio[matchIdx] : cleanAudio[0];
+          if (chosenTrack) {
+            setSelectedAudio(chosenTrack.label);
+            if (typeof chosenTrack.id === 'number') {
+              setSelectedAudioIdx(chosenTrack.id);
+              if (chosenTrack.id > 0 && chosenMode === 'direct' && remoteTranscodeAvailable) {
+                chosenMode = 'remux';
+                chosenStage = 'level2_remux';
               }
-
-              setRealSubtitleTracks(cleanProbedSubs);
-            } else if (cleanProbedSubs.length > 0) {
-              setRealSubtitleTracks(cleanProbedSubs);
             }
           }
         }
-      } catch (err) {
-        console.warn('[VideoPlayer] stream-info preflight notice:', err);
-        if (!exoCapable && isAppleMobileBrowser() && isTelegram && chosenMode === 'direct') {
-          chosenMode = 'remux';
-          chosenStage = 'level2_remux';
+      };
+
+      const cachedInfo = getCachedStreamInfo(trimmed);
+      const instantNativeDirectStart = Boolean(
+        !cachedInfo &&
+        exoCapable &&
+        (!remoteTranscodeAvailable || useLocalBridgeFallback)
+      );
+
+      if (cachedInfo) {
+        applyPreflightInfo(cachedInfo, false);
+      } else if (instantNativeDirectStart) {
+        // Start native ExoPlayer immediately without waiting for network stream-info inspection;
+        // refine exact container/PCR duration & subtitle metadata in the background.
+        fetchStreamInfoPreflight(trimmed, 14000)
+          .then((bgInfo) => {
+            if (!cancelled && bgInfo && bgInfo.status === 'ok') {
+              applyPreflightInfo(bgInfo, true);
+            }
+          })
+          .catch(() => null);
+      } else {
+        try {
+          const info = await fetchStreamInfoPreflight(
+            trimmed,
+            isUsingLocalNativeBridge() ? 14000 : 20000
+          );
+          if (!cancelled && info) {
+            applyPreflightInfo(info, false);
+          }
+        } catch (err) {
+          console.warn('[VideoPlayer] stream-info preflight notice:', err);
+          if (!exoCapable && isAppleMobileBrowser() && isTelegram && chosenMode === 'direct') {
+            chosenMode = 'remux';
+            chosenStage = 'level2_remux';
+          }
         }
       }
 
@@ -1560,7 +1632,17 @@ export default function VideoPlayerModal({
     setIsLoading(true);
     setHasDecodedFrame(false);
 
-    if (typeof bridge.playExoMediaWithOptions === 'function') {
+    const initialQualityStr = (selectedQualityRef.current || 'Auto').trim().toLowerCase();
+    if (typeof bridge.playExoMediaWithQuality === 'function') {
+      bridge.playExoMediaWithQuality(
+        playableUrl,
+        exoStartOffset,
+        playbackSpeed || 1.0,
+        Boolean(preferSoftwareRef.current),
+        surfaceModeRef.current,
+        initialQualityStr
+      );
+    } else if (typeof bridge.playExoMediaWithOptions === 'function') {
       bridge.playExoMediaWithOptions(
         playableUrl,
         exoStartOffset,
@@ -1866,7 +1948,10 @@ export default function VideoPlayerModal({
         if (typeof st.duration === 'number' && st.duration > 1 && isFinite(st.duration)) {
           const isDirectOrHls = streamFallbackModeRef.current === 'direct' || isHlsExo;
           const candidateDur = !isDirectOrHls && baseOffset > 0 ? baseOffset + st.duration : st.duration;
-          if (isDirectOrHls) {
+          const verifiedDur = verifiedContainerDurationRef.current;
+          const divergesFromVerified =
+            verifiedDur > 30 && !isHlsExo && Math.abs(candidateDur - verifiedDur) / verifiedDur > 0.08;
+          if (isDirectOrHls && !divergesFromVerified) {
             if (Math.abs(candidateDur - durationRef.current) >= 0.5) {
               setDuration(candidateDur);
               durationRef.current = candidateDur;
@@ -2292,7 +2377,10 @@ export default function VideoPlayerModal({
       }
 
       if (video.duration && isFinite(video.duration) && video.duration > 1) {
-        if (activeMode === 'direct') {
+        const verifiedDur = verifiedContainerDurationRef.current;
+        const divergesFromVerified =
+          verifiedDur > 30 && !isHlsUrl && Math.abs(video.duration - verifiedDur) / verifiedDur > 0.08;
+        if (activeMode === 'direct' && !divergesFromVerified) {
           if (Math.abs(video.duration - durationRef.current) >= 0.5) {
             setDuration(video.duration);
             durationRef.current = video.duration;
@@ -2373,8 +2461,11 @@ export default function VideoPlayerModal({
     const syncDurationFallback = () => {
       const vidDuration = video.duration;
       const activeMode = streamFallbackModeRef.current;
+      const verifiedDur = verifiedContainerDurationRef.current;
+      const divergesFromVerified =
+        verifiedDur > 30 && !isHlsUrl && vidDuration && isFinite(vidDuration) && Math.abs(vidDuration - verifiedDur) / verifiedDur > 0.08;
       // In remux/transcode fragmented MP4 mode, browser reports growing fragment duration or Infinity — never overwrite real known duration
-      if (activeMode === 'direct') {
+      if (activeMode === 'direct' && !divergesFromVerified) {
         if (vidDuration && isFinite(vidDuration) && vidDuration > 1) {
           setDuration(vidDuration);
           durationRef.current = vidDuration;
@@ -2418,10 +2509,13 @@ export default function VideoPlayerModal({
     };
 
     const onDurationChange = () => {
-      if (streamFallbackModeRef.current !== 'direct' && knownDurationRef.current > 0) {
+      const verifiedDur = verifiedContainerDurationRef.current;
+      const divergesFromVerified =
+        verifiedDur > 30 && !isHlsUrl && video.duration && isFinite(video.duration) && Math.abs(video.duration - verifiedDur) / verifiedDur > 0.08;
+      if ((streamFallbackModeRef.current !== 'direct' || divergesFromVerified) && knownDurationRef.current > 0) {
         return;
       }
-      if (video.duration && isFinite(video.duration) && video.duration > 1) {
+      if (video.duration && isFinite(video.duration) && video.duration > 1 && !divergesFromVerified) {
         setDuration(video.duration);
         durationRef.current = video.duration;
         knownDurationRef.current = video.duration;
@@ -4210,13 +4304,11 @@ export default function VideoPlayerModal({
                                 ? trimmedExplicit
                                 : '';
                             const canScaleRemote = !Capacitor.isNativePlatform() || hasRemoteTranscodeBackend();
-                            const scaled =
-                              !explicit &&
-                              (qLower === '480p' ||
-                                qLower === '360p' ||
-                                (qLower === '720p' && (srcH <= 0 || srcH > 780)));
+                            const exoBridge = (window as any).AndroidPlayerBridge;
+                            const hasNativeQualitySwitch =
+                              canUseNativeExo && typeof exoBridge?.exoSetVideoQuality === 'function';
 
-                            if (scaled && !canScaleRemote) {
+                            if (!explicit && !canScaleRemote && !hasNativeQualitySwitch) {
                               probeWorkingBackendUrl(true).catch(() => null);
                               setShowQualityMenu(false);
                               resetAutoHideTimer();
@@ -4227,6 +4319,15 @@ export default function VideoPlayerModal({
                             setSelectedQuality(q);
                             setShowQualityMenu(false);
                             resetAutoHideTimer();
+
+                            if (canUseNativeExo && !explicit && !canScaleRemote && hasNativeQualitySwitch) {
+                              setIsLoading(true);
+                              qualityResumeTargetRef.current = curPos > 0.5 ? curPos : null;
+                              try {
+                                exoBridge.exoSetVideoQuality(qLower);
+                              } catch {}
+                              return;
+                            }
 
                             qualityResumeTargetRef.current = curPos > 0.5 ? curPos : null;
                             resumeOffsetRef.current = curPos;
