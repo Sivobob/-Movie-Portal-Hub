@@ -93,7 +93,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     time: new Date().toISOString(),
-    version: '3.5.276',
+    version: '3.5.277',
     ffmpegAvailable: FFMPEG_AVAILABLE,
     ffprobeAvailable: FFPROBE_AVAILABLE,
     telegramConfigured,
@@ -120,7 +120,7 @@ app.get('/api/ios-profile', (req, res) => {
     const rawProto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0].trim();
     const isLocal = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(rawHost);
     const scheme = isLocal ? rawProto : 'https';
-    const appOrigin = rawHost ? `${scheme}://${rawHost}/` : 'https://ais-pre-jnqt2mxwwu4hovy5xbqigd-560942295760.asia-northeast1.run.app/';
+    const appOrigin = rawHost ? `${scheme}://${rawHost}/` : 'https://ais-pre-yaniwuwl6wc7ivl5tz2bbo-755452514312.asia-northeast1.run.app/';
 
     const escapeXml = (str: string) =>
       str

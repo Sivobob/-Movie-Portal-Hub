@@ -27,6 +27,7 @@ import {
 import { getLocalMovies, getEpisodeDisplayLabel } from '../services/movieStorage';
 import { upgradePosterUrl } from '../utils/posterUrl';
 import { parseDurationToSeconds } from '../utils/duration';
+import { resolveEpisodePlaybackDurationSec } from '../utils/playerHelpers';
 import MovieDetailsModal from './MovieDetailsModal';
 import VideoPlayerModal from './VideoPlayerModal';
 
@@ -247,10 +248,7 @@ export default function MePage() {
 
       if (ep && epStream) {
         setActiveSeasonIndex(sIdx);
-        const epDurationSec =
-          (typeof ep.durationSec === 'number' && ep.durationSec > 0 ? ep.durationSec : 0) ||
-          parseDurationToSeconds(ep.duration) ||
-          movieDurationSec;
+        const epDurationSec = resolveEpisodePlaybackDurationSec(ep);
         if (epDurationSec > 0 || resumeTime > 0) {
           saveWatchProgress(uid, movie, resumeTime, epDurationSec).catch(() => {});
         }

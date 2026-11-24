@@ -4,12 +4,6 @@ import { Api, TelegramClient } from 'telegram';
 import bigInt from 'big-integer';
 import { cleanMediaTrackLabel } from '../utils/videoQuality.ts';
 import { isTelegramAuthKeyError, resetTelegramClient } from '../utils/telegramClient.ts';
-import {
-  computeMpegTsDurationSec,
-  inspectMediaHeaderBytes,
-  isMpegTsBytes,
-  parseMp4Header,
-} from '../utils/mediaHeaderParser.ts';
 
 export const BLOCK_SIZE = 512 * 1024; // 512 KB (exact Telegram upload.GetFile unit)
 const MAX_CACHED_BLOCKS = 96; // ~48 MB RAM LRU cache across active streams
@@ -58,7 +52,6 @@ export interface ProbeMediaResult {
   recommendedMode: 'direct' | 'remux' | 'transcode';
   needsAudioTranscode: boolean;
   probedByFfprobe: boolean;
-  containerDurationExact?: boolean;
   videoStartTime?: number;
   videoStreamIndex?: number;
 }
@@ -492,8 +485,8 @@ export async function probeTelegramMedia(
 ): Promise<ProbeMediaResult> {
   const localRawUrl = `http://127.0.0.1:${localPort}/api/stream?url=${encodeURIComponent(telegramUrl)}&raw=1`;
   const timeoutMs = Math.max(3000, options?.timeoutMs ?? 14000);
-  const probesize = String(options?.probesize ?? 3000000);
-  const analyzeduration = String(options?.analyzeduration ?? 2500000);
+  const probesize = String(options?.probesize ?? 900000);
+  const analyzeduration = String(options?.analyzeduration ?? 900000);
 
   return new Promise<ProbeMediaResult>((resolve) => {
     const args = [
@@ -549,10 +542,16 @@ export async function probeTelegramMedia(
         const format = parsed.format || {};
 
         const formatDuration = parseFloat(format.duration || '0');
+        const streamDurations = streams
+          .map((s) => parseFloat(s?.duration || '0'))
+          .filter((d) => Number.isFinite(d) && d > 0);
+        const maxStreamDuration = streamDurations.length > 0 ? Math.max(...streamDurations) : 0;
         const durationSec =
           Number.isFinite(formatDuration) && formatDuration > 0
             ? Math.round(formatDuration)
-            : docInfo.durationSec || 0;
+            : maxStreamDuration > 0
+              ? Math.round(maxStreamDuration)
+              : docInfo.durationSec || 0;
 
         // Ignore attached cover art images (mjpeg/png with attached_pic = 1) or image codecs (png, mjpeg, webp, bmp, mjpg, gif)
         const videoStreamObj = streams.find(
@@ -675,18 +674,8 @@ export async function probeTelegramMedia(
           recommendedMode = 'direct';
         }
 
-        const streamDur = parseFloat(videoStreamObj?.duration || '0');
-        const resolvedBaseDur =
-          Number.isFinite(streamDur) && streamDur > 0 && container.includes('mpegts')
-            ? Math.round(streamDur)
-            : durationSec;
-        const containerDurationExact = Boolean(
-          !container.includes('mpegts') &&
-          ((Number.isFinite(streamDur) && streamDur > 0) || (Number.isFinite(formatDuration) && formatDuration > 0))
-        );
-
         resolve({
-          durationSec: resolvedBaseDur,
+          durationSec,
           container,
           videoCodec,
           videoProfile: profile,
@@ -701,7 +690,6 @@ export async function probeTelegramMedia(
           recommendedMode,
           needsAudioTranscode,
           probedByFfprobe: true,
-          containerDurationExact,
           videoStartTime: Number.isFinite(videoStartTime) ? videoStartTime : 0,
           videoStreamIndex,
         });
@@ -858,49 +846,4 @@ export async function checkTelegramDocHasAudioFast(
   } catch {
     return null;
   }
-}
-
-export async function probeExactTelegramDurationSec(
-  client: TelegramClient,
-  docInfo: TelegramDocInfo,
-  containerHint?: string
-): Promise<{ durationSec: number; exact: boolean }> {
-  try {
-    const block0 = await fetchBlock(client, docInfo.document, 0);
-    if (!block0 || block0.length < 16) return { durationSec: docInfo.durationSec || 0, exact: false };
-
-    const isTs = isMpegTsBytes(block0) || String(containerHint || '').toLowerCase().includes('mpegts');
-    if (isTs && docInfo.fileSize > BLOCK_SIZE) {
-      const lastIdx = Math.floor((docInfo.fileSize - 1) / BLOCK_SIZE);
-      const lastBlock = await fetchBlock(client, docInfo.document, lastIdx);
-      let tailBuf = lastBlock;
-      if (lastBlock.length < 65536 && lastIdx > 0) {
-        const prevBlock = await fetchBlock(client, docInfo.document, lastIdx - 1);
-        tailBuf = Buffer.concat([prevBlock, lastBlock]);
-      }
-      const tsDur = computeMpegTsDurationSec(block0, tailBuf);
-      if (tsDur > 2) {
-        return { durationSec: tsDur, exact: true };
-      }
-    }
-
-    const headerProbe = inspectMediaHeaderBytes(block0, docInfo.fileName, docInfo.rawMime, 0, 0, 0);
-    if (headerProbe.durationExact && headerProbe.durationSec > 0) {
-      return { durationSec: headerProbe.durationSec, exact: true };
-    }
-    if (headerProbe.container === 'mp4' && docInfo.fileSize > BLOCK_SIZE) {
-      const lastIdx = Math.floor((docInfo.fileSize - 1) / BLOCK_SIZE);
-      const lastBlock = await fetchBlock(client, docInfo.document, lastIdx);
-      let tailBuf = lastBlock;
-      if (lastIdx > 0) {
-        const prevBlock = await fetchBlock(client, docInfo.document, lastIdx - 1);
-        tailBuf = Buffer.concat([prevBlock, lastBlock]);
-      }
-      const mp4Tail = parseMp4Header(tailBuf);
-      if (mp4Tail.durationExact && mp4Tail.durationSec && mp4Tail.durationSec > 0) {
-        return { durationSec: mp4Tail.durationSec, exact: true };
-      }
-    }
-  } catch {}
-  return { durationSec: docInfo.durationSec || 0, exact: false };
 }

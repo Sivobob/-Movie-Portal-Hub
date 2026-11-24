@@ -22,11 +22,12 @@ import { upgradePosterUrl } from '../utils/posterUrl';
 import { addToMyList, removeFromMyList } from '../services/userWatchService';
 import { getAppPreferences } from '../services/userPreferencesService';
 import {
+  fetchStreamInfo,
   formatHumanDuration,
   parseDurationToSeconds,
-  prewarmTelegramStream,
   probeTelegramDurationSec,
 } from '../utils/duration';
+import { resolveEpisodePlaybackDurationSec } from '../utils/playerHelpers';
 import { isEpisodeNewActive, getEpisodeDisplayLabel } from '../services/movieStorage';
 
 interface MovieDetailsModalProps {
@@ -179,29 +180,25 @@ export default function MovieDetailsModal({
     return [...matched, ...extras].slice(0, 9);
   }, [movie, allMovies]);
 
-  // Probe real Telegram duration when metadata duration is missing
+  // Prefetch real stream-info & accurate ffprobe duration for instant Watch Now and accurate episode times
   useEffect(() => {
     if (!isOpen || !movie) return;
     let cancelled = false;
 
     if (!hasRealSeasons) {
-      const existingSec =
-        (typeof movie.duration === 'number' && movie.duration > 0 ? movie.duration : 0) ||
-        parseDurationToSeconds(movie.runtime);
-      if (existingSec <= 0) {
-        const candidateUrl =
-          movie.streamingUrl ||
-          movie.videoQualities?.['1080p'] ||
-          movie.videoQualities?.['720p'] ||
-          movie.videoQualities?.['480p'] ||
-          '';
-        if (candidateUrl) {
-          probeTelegramDurationSec(candidateUrl).then((sec) => {
-            if (!cancelled && sec > 0) {
-              setProbedMovieDurationSec(sec);
-            }
-          });
-        }
+      const candidateUrl =
+        movie.streamingUrl ||
+        movie.videoQualities?.['1080p'] ||
+        movie.videoQualities?.['720p'] ||
+        movie.videoQualities?.['480p'] ||
+        '';
+      if (candidateUrl) {
+        fetchStreamInfo(candidateUrl, { timeoutMs: 8000 }).then((info) => {
+          const sec = Number(info?.durationSec || 0);
+          if (!cancelled && Number.isFinite(sec) && sec > 0) {
+            setProbedMovieDurationSec(Math.round(sec));
+          }
+        });
       }
       return () => {
         cancelled = true;
@@ -211,17 +208,26 @@ export default function MovieDetailsModal({
     const activeSeasonObj = seasonsList[activeSeasonIndex] || seasonsList[0];
     const eps: any[] = activeSeasonObj?.episodes || [];
     const probeEpisodes = async () => {
-      for (const ep of eps.slice(0, 16)) {
+      // Warm selected episode first for instant Watch Now
+      const ordered = [
+        ...(eps[selectedEpisodeIdx] ? [eps[selectedEpisodeIdx]] : []),
+        ...eps.slice(0, 16).filter((_, idx) => idx !== selectedEpisodeIdx),
+      ];
+      for (const ep of ordered) {
         if (cancelled) break;
-        const epSec =
-          (typeof ep?.durationSec === 'number' && ep.durationSec > 0 ? ep.durationSec : 0) ||
-          parseDurationToSeconds(ep?.duration);
-        if (epSec > 0 || !ep?.streamUrl) continue;
-        const url = String(ep.streamUrl).trim();
-        if (!/t\.me|telegram\.me/i.test(url)) continue;
-        const sec = await probeTelegramDurationSec(url);
-        if (!cancelled && sec > 0) {
-          setProbedEpisodeDurations((prev) => (prev[url] === sec ? prev : { ...prev, [url]: sec }));
+        const url = String(ep?.streamUrl || '').trim();
+        if (!url || !/t\.me|telegram\.me/i.test(url)) continue;
+        const isSelectedEp = ep === eps[selectedEpisodeIdx];
+        const hasStoredDur =
+          (typeof ep?.durationSec === 'number' && ep.durationSec > 0) ||
+          parseDurationToSeconds(ep?.duration) > 0;
+        if (hasStoredDur && !isSelectedEp) continue;
+
+        const info = await fetchStreamInfo(url, { timeoutMs: 8000 });
+        const sec = Number(info?.durationSec || 0);
+        if (!cancelled && Number.isFinite(sec) && sec > 0) {
+          const rounded = Math.round(sec);
+          setProbedEpisodeDurations((prev) => (prev[url] === rounded ? prev : { ...prev, [url]: rounded }));
         }
       }
     };
@@ -230,21 +236,6 @@ export default function MovieDetailsModal({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, movie?.id, hasRealSeasons, activeSeasonIndex]);
-
-  // Pre-warm stream bridge & metadata for the currently selected movie or episode so Watch Now starts instantly
-  useEffect(() => {
-    if (!isOpen || !movie) return;
-    const sIdx = seasonsList.length > 0 ? Math.min(activeSeasonIndex, seasonsList.length - 1) : 0;
-    const curS = seasonsList[sIdx] || seasonsList[0];
-    const eps: any[] = Array.isArray(curS?.episodes) ? curS.episodes : [];
-    const epObj = hasRealSeasons ? (eps[selectedEpisodeIdx] || eps[0]) : null;
-    const candidate = hasRealSeasons
-      ? String(epObj?.streamUrl || epObj?.videoQualities?.['720p'] || epObj?.videoQualities?.['1080p'] || '').trim()
-      : String(movie.streamingUrl || movie.videoQualities?.['720p'] || movie.videoQualities?.['1080p'] || '').trim();
-    if (candidate && /t\.me|telegram\.me/i.test(candidate)) {
-      prewarmTelegramStream(candidate);
-    }
   }, [isOpen, movie?.id, hasRealSeasons, activeSeasonIndex, selectedEpisodeIdx]);
 
   if (!isOpen || !movie) return null;
@@ -274,11 +265,9 @@ export default function MovieDetailsModal({
     const season = seasonsList[sIdx];
     const ep = season?.episodes?.[eIdx];
     const epUrl = String(ep?.streamUrl || '').trim();
-    const epSec =
-      (typeof ep?.durationSec === 'number' && ep.durationSec > 0 ? ep.durationSec : 0) ||
-      parseDurationToSeconds(ep?.duration) ||
-      (epUrl ? probedEpisodeDurations[epUrl] || 0 : 0);
-    if (epSec > 0 && ep && !ep.durationSec) {
+    const probedSec = epUrl ? probedEpisodeDurations[epUrl] || 0 : 0;
+    const epSec = probedSec > 0 ? probedSec : resolveEpisodePlaybackDurationSec(ep, probedSec);
+    if (epSec > 0 && ep && (!ep.durationSec || (probedSec > 0 && Math.abs(probedSec - ep.durationSec) >= 15))) {
       const updatedSeasons = seasonsList.map((s: any, si: number) =>
         si !== sIdx
           ? s
@@ -792,13 +781,13 @@ export default function MovieDetailsModal({
                       const epNumLabel = getEpisodeDisplayLabel(ep, eIdx, true);
                       const isSelected = primaryEpIdx === eIdx;
                       const epUrl = String(ep?.streamUrl || '').trim();
+                      const probedEpSec = epUrl ? probedEpisodeDurations[epUrl] || 0 : 0;
                       const epDurationSec =
-                        (typeof ep?.durationSec === 'number' && ep.durationSec > 0
-                          ? ep.durationSec
-                          : 0) ||
-                        parseDurationToSeconds(ep?.duration) ||
-                        (epUrl ? probedEpisodeDurations[epUrl] || 0 : 0);
-                      const epHumanDuration = formatHumanDuration(ep?.duration, epDurationSec);
+                        probedEpSec > 0 ? probedEpSec : resolveEpisodePlaybackDurationSec(ep, probedEpSec);
+                      const epHumanDuration =
+                        epDurationSec > 0
+                          ? formatHumanDuration(null, epDurationSec)
+                          : formatHumanDuration(ep?.duration, 0);
                       const isNew = isEpisodeNewActive(ep);
 
                       return (

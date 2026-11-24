@@ -28,7 +28,8 @@ import {
 import { db } from '../firebase';
 import { MovieData, saveMovieLocally, touchCatalogSyncMarker } from '../services/movieStorage';
 import { getDisplayCategory } from '../utils/categoryMapping';
-import { parseDurationToSeconds } from '../utils/duration';
+import { formatHumanDuration, parseDurationToSeconds } from '../utils/duration';
+import { normalizeEpisodeForSave } from '../utils/playerHelpers';
 import { upgradePosterUrl } from '../utils/posterUrl';
 import { normalizeQualityBadge } from '../utils/qualityBadge';
 import { parseTelegramUrl } from '../utils/telegramParser';
@@ -254,8 +255,8 @@ function mergeEpisodeIntoClientSeasons(
     durationSec?: number;
     showInNewEpisodes: boolean;
     newEpisodeEnabledAt?: number;
-    createdAt: number;
-    addedAt: number;
+    createdAt?: number;
+    addedAt?: number;
   }
 ): { mergedSeasons: any[]; added: boolean } {
   const cloned = Array.isArray(existingSeasons)
@@ -549,18 +550,21 @@ export default function TelegramAutoMovieSync({
         : 1;
       const epNum = Math.max(1, Number(draft.episodeNumber) || fallbackEpNum);
       const epTitle = draft.episodeTitle || `Episode ${epNum}`;
-      const epObj = {
-        episodeNumber: epNum,
-        ...(draft.episodeLabel ? { episodeLabel: draft.episodeLabel } : {}),
-        title: epTitle,
-        streamUrl: draft.streamUrl.trim(),
-        videoQualities: {},
-        ...(draft.runtime ? { duration: draft.runtime } : {}),
-        ...(draft.durationSec > 0 ? { durationSec: draft.durationSec } : {}),
-        showInNewEpisodes: false,
-        createdAt: nowMs,
-        addedAt: nowMs,
-      };
+      const epDurationFormatted = draft.durationSec > 0 ? formatHumanDuration(null, draft.durationSec) || '' : '';
+      const epObj = normalizeEpisodeForSave(
+        {
+          episodeNumber: epNum,
+          episodeLabel: draft.episodeLabel,
+          title: epTitle,
+          streamUrl: draft.streamUrl.trim(),
+          videoQualities: {},
+          duration: epDurationFormatted || undefined,
+          durationSec: draft.durationSec > 0 ? draft.durationSec : undefined,
+          showInNewEpisodes: false,
+        },
+        epNum,
+        nowMs
+      );
 
       if (existingMatch && existingMatch.id) {
         const { mergedSeasons, added } = mergeEpisodeIntoClientSeasons(

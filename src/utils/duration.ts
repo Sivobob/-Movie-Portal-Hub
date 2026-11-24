@@ -1,9 +1,4 @@
-import {
-  buildApiUrl,
-  ensureAndroidStreamBridge,
-  isUsingLocalNativeBridge,
-  warmBackendConnection,
-} from './apiConfig';
+import { buildApiUrl, isUsingLocalNativeBridge } from './apiConfig';
 import { Capacitor } from '@capacitor/core';
 
 /**
@@ -115,41 +110,62 @@ export function formatHumanDuration(
   return `${secs}s`;
 }
 
-// Shared cache & dedupe maps for instant player startup + accurate Details durations
-const probedDurationCache = new Map<string, number>();
-const inflightDurationProbes = new Map<string, Promise<number>>();
-const streamInfoPreflightCache = new Map<string, { data: any; cachedAt: number }>();
-const inflightStreamInfoPreflight = new Map<string, Promise<any | null>>();
-const STREAM_INFO_CACHE_TTL_MS = 10 * 60 * 1000;
-
-export function getCachedStreamInfo(streamUrl?: string | null): any | null {
-  const trimmed = (streamUrl || '').trim();
-  if (!trimmed) return null;
-  const hit = streamInfoPreflightCache.get(trimmed);
-  if (hit && Date.now() - hit.cachedAt < STREAM_INFO_CACHE_TTL_MS) {
-    return hit.data;
-  }
-  return null;
+// Shared cache & dedupe map for probing real Telegram stream info (duration, codecs, tracks) on Details page & Watch Now
+export interface CachedStreamInfo {
+  status?: string;
+  isTelegram?: boolean;
+  recommendedMode?: 'direct' | 'remux' | 'transcode';
+  fileSize?: number;
+  durationSec?: number;
+  width?: number;
+  height?: number;
+  videoCodec?: string;
+  pixFmt?: string;
+  is10Bit?: boolean;
+  audioCodec?: string;
+  container?: string;
+  hasUnsupportedAudio?: boolean;
+  probedByFfprobe?: boolean;
+  audioTracks?: any[];
+  subtitleTracks?: any[];
+  qualityEstimates?: any;
+  [key: string]: any;
 }
 
-export async function fetchStreamInfoPreflight(
+const STREAM_INFO_CACHE_TTL_MS = 10 * 60 * 1000;
+const streamInfoCache = new Map<string, { data: CachedStreamInfo; cachedAt: number }>();
+const inflightStreamInfoProbes = new Map<string, Promise<CachedStreamInfo | null>>();
+
+export function getCachedStreamInfo(streamUrl?: string | null): CachedStreamInfo | null {
+  const trimmed = (streamUrl || '').trim();
+  if (!trimmed) return null;
+  const hit = streamInfoCache.get(trimmed);
+  if (!hit) return null;
+  if (Date.now() - hit.cachedAt > STREAM_INFO_CACHE_TTL_MS) {
+    streamInfoCache.delete(trimmed);
+    return null;
+  }
+  return hit.data;
+}
+
+export async function fetchStreamInfo(
   streamUrl?: string | null,
-  timeoutMs = 14000
-): Promise<any | null> {
+  options?: { force?: boolean; timeoutMs?: number }
+): Promise<CachedStreamInfo | null> {
   const trimmed = (streamUrl || '').trim();
   if (!trimmed || /^(file:|blob:)/i.test(trimmed)) return null;
 
-  const cached = getCachedStreamInfo(trimmed);
-  if (cached) return cached;
+  if (!options?.force) {
+    const cached = getCachedStreamInfo(trimmed);
+    if (cached) return cached;
+  }
 
-  const inflight = inflightStreamInfoPreflight.get(trimmed);
-  if (inflight) return inflight;
+  const existing = inflightStreamInfoProbes.get(trimmed);
+  if (existing && !options?.force) return existing;
 
-  const p = (async () => {
+  const timeoutMs = Math.max(2500, options?.timeoutMs ?? 8000);
+  const promise = (async (): Promise<CachedStreamInfo | null> => {
     try {
-      if (Capacitor.isNativePlatform()) {
-        await ensureAndroidStreamBridge().catch(() => '');
-      }
       const infoUrl = buildApiUrl(`/api/telegram/stream-info?url=${encodeURIComponent(trimmed)}`);
       if (!infoUrl || (Capacitor.isNativePlatform() && isUsingLocalNativeBridge() && !infoUrl.startsWith('http'))) {
         return null;
@@ -162,14 +178,8 @@ export async function fetchStreamInfoPreflight(
       if (!res.ok) return null;
       const data = await res.json();
       if (data && data.status === 'ok') {
-        if (streamInfoPreflightCache.size >= 40) {
-          const oldest = streamInfoPreflightCache.keys().next().value;
-          if (oldest) streamInfoPreflightCache.delete(oldest);
-        }
-        streamInfoPreflightCache.set(trimmed, { data, cachedAt: Date.now() });
-        const dur = Number(data?.durationSec || 0);
-        if (Number.isFinite(dur) && dur > 0) {
-          probedDurationCache.set(trimmed, Math.round(dur));
+        if (data.probedByFfprobe !== false || Number(data.durationSec || 0) > 0) {
+          streamInfoCache.set(trimmed, { data, cachedAt: Date.now() });
         }
         return data;
       }
@@ -177,31 +187,12 @@ export async function fetchStreamInfoPreflight(
     } catch {
       return null;
     } finally {
-      inflightStreamInfoPreflight.delete(trimmed);
+      inflightStreamInfoProbes.delete(trimmed);
     }
   })();
 
-  inflightStreamInfoPreflight.set(trimmed, p);
-  return p;
-}
-
-export function prewarmTelegramStream(streamUrl?: string | null): void {
-  const trimmed = (streamUrl || '').trim();
-  if (!trimmed || !/t\.me|telegram\.me/i.test(trimmed)) return;
-  if (Capacitor.isNativePlatform()) {
-    warmBackendConnection();
-    ensureAndroidStreamBridge()
-      .then(() => {
-        const bridge = (window as any).__tgStreamBridge;
-        if (typeof bridge?.prewarm === 'function') {
-          return bridge.prewarm(trimmed);
-        }
-        return fetchStreamInfoPreflight(trimmed, 10000);
-      })
-      .catch(() => {});
-    return;
-  }
-  fetchStreamInfoPreflight(trimmed, 10000).catch(() => null);
+  inflightStreamInfoProbes.set(trimmed, promise);
+  return promise;
 }
 
 export async function probeTelegramDurationSec(streamUrl?: string | null): Promise<number> {
@@ -210,50 +201,23 @@ export async function probeTelegramDurationSec(streamUrl?: string | null): Promi
     return 0;
   }
 
-  const cached = probedDurationCache.get(trimmed);
-  if (typeof cached === 'number' && cached > 0) {
-    return cached;
-  }
-
-  const cachedInfo = getCachedStreamInfo(trimmed);
-  if (cachedInfo?.durationSec && Number(cachedInfo.durationSec) > 0) {
-    const rounded = Math.round(Number(cachedInfo.durationSec));
-    probedDurationCache.set(trimmed, rounded);
-    return rounded;
+  const cached = getCachedStreamInfo(trimmed);
+  if (cached && typeof cached.durationSec === 'number' && cached.durationSec > 0) {
+    return Math.round(cached.durationSec);
   }
 
   // Check native/browser Telegram cache synchronously first
   try {
     const bridgeMeta = (window as any).__tgStreamBridge?.getCachedMeta?.(trimmed);
     if (bridgeMeta?.durationSec && bridgeMeta.durationSec > 0) {
-      const sec = Math.round(bridgeMeta.durationSec);
-      probedDurationCache.set(trimmed, sec);
-      return sec;
+      return Math.round(bridgeMeta.durationSec);
     }
   } catch {}
 
-  const existing = inflightDurationProbes.get(trimmed);
-  if (existing) {
-    return existing;
+  const data = await fetchStreamInfo(trimmed, { timeoutMs: 8000 });
+  const dur = Number(data?.durationSec || 0);
+  if (Number.isFinite(dur) && dur > 0) {
+    return Math.round(dur);
   }
-
-  const promise = (async () => {
-    try {
-      const data = await fetchStreamInfoPreflight(trimmed, 8000);
-      const dur = Number(data?.durationSec || 0);
-      if (Number.isFinite(dur) && dur > 0) {
-        const rounded = Math.round(dur);
-        probedDurationCache.set(trimmed, rounded);
-        return rounded;
-      }
-      return 0;
-    } catch {
-      return 0;
-    } finally {
-      inflightDurationProbes.delete(trimmed);
-    }
-  })();
-
-  inflightDurationProbes.set(trimmed, promise);
-  return promise;
+  return 0;
 }

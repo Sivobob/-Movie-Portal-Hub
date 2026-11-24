@@ -2505,8 +2505,8 @@ function fallbackProbeFromMetadata(docInfo) {
 async function probeTelegramMedia(localPort, telegramUrl, docInfo, options) {
   const localRawUrl = `http://127.0.0.1:${localPort}/api/stream?url=${encodeURIComponent(telegramUrl)}&raw=1`;
   const timeoutMs = Math.max(3e3, options?.timeoutMs ?? 14e3);
-  const probesize = String(options?.probesize ?? 3e6);
-  const analyzeduration = String(options?.analyzeduration ?? 25e5);
+  const probesize = String(options?.probesize ?? 9e5);
+  const analyzeduration = String(options?.analyzeduration ?? 9e5);
   return new Promise((resolve) => {
     const args2 = [
       "-v",
@@ -2558,7 +2558,9 @@ async function probeTelegramMedia(localPort, telegramUrl, docInfo, options) {
         const streams = Array.isArray(parsed.streams) ? parsed.streams : [];
         const format = parsed.format || {};
         const formatDuration2 = parseFloat(format.duration || "0");
-        const durationSec = Number.isFinite(formatDuration2) && formatDuration2 > 0 ? Math.round(formatDuration2) : docInfo.durationSec || 0;
+        const streamDurations = streams.map((s) => parseFloat(s?.duration || "0")).filter((d) => Number.isFinite(d) && d > 0);
+        const maxStreamDuration = streamDurations.length > 0 ? Math.max(...streamDurations) : 0;
+        const durationSec = Number.isFinite(formatDuration2) && formatDuration2 > 0 ? Math.round(formatDuration2) : maxStreamDuration > 0 ? Math.round(maxStreamDuration) : docInfo.durationSec || 0;
         const videoStreamObj = streams.find(
           (s) => s.codec_type === "video" && (!s.disposition || s.disposition.attached_pic !== 1) && !["png", "mjpeg", "webp", "bmp", "mjpg", "gif", "image"].includes(String(s.codec_name || "").toLowerCase())
         ) || streams.find((s) => s.codec_type === "video");
@@ -3369,6 +3371,7 @@ function parseDurationToSeconds(input) {
   }
   return 0;
 }
+var STREAM_INFO_CACHE_TTL_MS = 10 * 60 * 1e3;
 
 // src/utils/qualityBadge.ts
 function normalizeQualityBadge(_value) {
@@ -3525,11 +3528,11 @@ function getFfmpegQualityArgs(quality, _isDownload) {
       "-vsync",
       "vfr",
       "-b:v",
-      "190k",
+      "220k",
       "-maxrate",
-      "250k",
+      "320k",
       "-bufsize",
-      "500k",
+      "640k",
       "-g",
       "48",
       "-keyint_min",
@@ -3568,11 +3571,11 @@ function getFfmpegQualityArgs(quality, _isDownload) {
       "-vsync",
       "vfr",
       "-b:v",
-      "380k",
+      "500k",
       "-maxrate",
-      "480k",
+      "700k",
       "-bufsize",
-      "960k",
+      "1400k",
       "-g",
       "48",
       "-keyint_min",
@@ -3611,11 +3614,11 @@ function getFfmpegQualityArgs(quality, _isDownload) {
       "-vsync",
       "vfr",
       "-crf",
-      "20",
+      "21",
       "-maxrate",
-      "2800k",
+      "1800k",
       "-bufsize",
-      "5600k",
+      "3600k",
       "-g",
       "48",
       "-keyint_min",
@@ -3631,7 +3634,7 @@ function getFfmpegQualityArgs(quality, _isDownload) {
       "-ar",
       "48000",
       "-b:a",
-      "160k"
+      "128k"
     );
     return args2;
   }
@@ -4792,16 +4795,26 @@ async function resolveAndCacheDocument(client2, parsed) {
   return { entry };
 }
 async function ensureMediaProbed(entry, telegramUrl, probeOptions) {
-  if (entry.probe) return entry.probe;
+  if (entry.probe) {
+    if (entry.probe.probedByFfprobe) return entry.probe;
+    if (entry.probeFallbackAt && Date.now() - entry.probeFallbackAt < 15e3) {
+      return entry.probe;
+    }
+  }
   if (entry.probePromise) return entry.probePromise;
   const localPort = process.env.INTERNAL_APP_PORT || process.env.APP_PORT || "3000";
   entry.probePromise = probeTelegramMedia(localPort, telegramUrl, entry.docInfo, probeOptions).then((result) => {
     entry.probe = result;
-    if (result.durationSec > 0) {
-      entry.docInfo.durationSec = result.durationSec;
+    if (result.probedByFfprobe) {
+      entry.probeFallbackAt = void 0;
+      if (result.durationSec > 0) {
+        entry.docInfo.durationSec = result.durationSec;
+      }
+    } else {
+      entry.probeFallbackAt = Date.now();
     }
     console.log(
-      `[Probe] ${entry.docInfo.fileName || entry.docInfo.document.id}: mode=${result.recommendedMode}, video=${result.videoCodec}(${result.pixFmt}), audio=${result.audioCodec}, duration=${result.durationSec}s, tracks=${result.audioTracks.length}`
+      `[Probe] ${entry.docInfo.fileName || entry.docInfo.document.id}: mode=${result.recommendedMode}, video=${result.videoCodec}(${result.pixFmt}), audio=${result.audioCodec}, duration=${result.durationSec}s (ffprobe=${result.probedByFfprobe}), tracks=${result.audioTracks.length}`
     );
     return result;
   }).finally(() => {
@@ -5461,8 +5474,8 @@ async function handleStream(req, res) {
     if (!res.headersSent) res.status(500).json({ error: err.message });
   }
 }
-var HLS_SEG_DURATION = 4;
-var HLS_TARGET_DURATION = 5;
+var HLS_SEG_DURATION = 2;
+var HLS_TARGET_DURATION = 3;
 var HLS_TMP_ROOT = path3.resolve("/tmp", "movie_portal_hls");
 var MAX_CONCURRENT_HLS_JOBS = Math.max(2, MAX_CONCURRENT_FFMPEG - 1);
 var hlsJobs = /* @__PURE__ */ new Map();
@@ -5562,7 +5575,7 @@ function segmentReadyOnDisk(filePath) {
   }
 }
 function getHlsArgsForQuality(quality, forceExact4s = true) {
-  const keyframeArgs = forceExact4s ? ["-g", "240", "-force_key_frames", `expr:gte(t,n_forced*${HLS_SEG_DURATION})`, "-sc_threshold", "0"] : ["-g", "48", "-keyint_min", "48", "-sc_threshold", "0"];
+  const keyframeArgs = forceExact4s ? ["-g", "48", "-force_key_frames", `expr:gte(t,n_forced*${HLS_SEG_DURATION})`, "-sc_threshold", "0"] : ["-g", "48", "-keyint_min", "48", "-sc_threshold", "0"];
   if (quality === "360p") {
     return [
       "-vf",
@@ -5580,11 +5593,11 @@ function getHlsArgsForQuality(quality, forceExact4s = true) {
       "-level",
       "3.1",
       "-b:v",
-      "190k",
+      "220k",
       "-maxrate",
-      "250k",
+      "320k",
       "-bufsize",
-      "500k",
+      "640k",
       ...keyframeArgs,
       "-af",
       "aresample=async=1:min_hard_comp=0.100000",
@@ -5615,11 +5628,11 @@ function getHlsArgsForQuality(quality, forceExact4s = true) {
       "-level",
       "3.1",
       "-b:v",
-      "380k",
+      "500k",
       "-maxrate",
-      "480k",
+      "700k",
       "-bufsize",
-      "960k",
+      "1400k",
       ...keyframeArgs,
       "-af",
       "aresample=async=1:min_hard_comp=0.100000",
@@ -5650,11 +5663,11 @@ function getHlsArgsForQuality(quality, forceExact4s = true) {
       "-level",
       "4.0",
       "-crf",
-      "20",
+      "21",
       "-maxrate",
-      "2800k",
+      "1800k",
       "-bufsize",
-      "5600k",
+      "3600k",
       ...keyframeArgs,
       "-af",
       "aresample=async=1:min_hard_comp=0.100000",
@@ -5665,7 +5678,7 @@ function getHlsArgsForQuality(quality, forceExact4s = true) {
       "-ar",
       "48000",
       "-b:a",
-      "160k"
+      "128k"
     ];
   }
   return [
@@ -5725,9 +5738,9 @@ function startHlsWorker(opts) {
   const startSec = opts.startSeg * HLS_SEG_DURATION;
   const ffArgs = [
     "-probesize",
-    "1800000",
+    "900000",
     "-analyzeduration",
-    "1800000",
+    "900000",
     "-fflags",
     "+discardcorrupt",
     "-reconnect",
@@ -5781,7 +5794,7 @@ function startHlsWorker(opts) {
       "-bufsize",
       "7200k",
       "-g",
-      "240",
+      "48",
       "-force_key_frames",
       `expr:gte(t,n_forced*${HLS_SEG_DURATION})`,
       "-sc_threshold",
@@ -7222,7 +7235,7 @@ async function runServerAutoSyncPass(reason) {
         videoQualities: grp.videoQualities,
         qualityBadge,
         durationSec: bestDurSec,
-        runtime: matched.runtime || durationFormatted,
+        runtime: isSeriesItem ? durationFormatted : durationFormatted || matched.runtime,
         sourceFileName: grp.primary.fileName,
         sourceCaption: `${mergedParsed.cleanTitle}${mergedParsed.year ? ` (${mergedParsed.year})` : ""}`,
         parsedTitle: mergedParsed.cleanTitle,
@@ -7283,10 +7296,7 @@ async function runServerAutoSyncPass(reason) {
             streamUrl: draft.streamUrl.trim(),
             ...durationFormatted ? { duration: durationFormatted } : {},
             ...bestDurSec > 0 ? { durationSec: bestDurSec } : {},
-            showInNewEpisodes: true,
-            newEpisodeEnabledAt: nowMs,
-            createdAt: nowMs,
-            addedAt: nowMs
+            showInNewEpisodes: false
           };
           if (existingRec) {
             const { mergedSeasons, added } = mergeEpisodeIntoSeasons(existingRec.seasons, seasonNum, epObj);
@@ -8414,7 +8424,7 @@ app3.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
     time: (/* @__PURE__ */ new Date()).toISOString(),
-    version: "3.5.272",
+    version: "3.5.277",
     ffmpegAvailable: FFMPEG_AVAILABLE,
     ffprobeAvailable: FFPROBE_AVAILABLE,
     telegramConfigured,
@@ -8438,7 +8448,7 @@ app3.get("/api/ios-profile", (req, res) => {
     const rawProto = String(req.headers["x-forwarded-proto"] || req.protocol || "https").split(",")[0].trim();
     const isLocal = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(rawHost);
     const scheme = isLocal ? rawProto : "https";
-    const appOrigin = rawHost ? `${scheme}://${rawHost}/` : "https://ais-pre-jnqt2mxwwu4hovy5xbqigd-560942295760.asia-northeast1.run.app/";
+    const appOrigin = rawHost ? `${scheme}://${rawHost}/` : "https://ais-pre-yaniwuwl6wc7ivl5tz2bbo-755452514312.asia-northeast1.run.app/";
     const escapeXml = (str) => str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
     const iconCandidates = [
       path6.resolve(process.cwd(), "public/apple-touch-icon.png"),

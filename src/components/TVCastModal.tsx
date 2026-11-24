@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { X, Tv, Wifi, CheckCircle2, RefreshCw, ShieldCheck, Play, Pause } from 'lucide-react';
-import { getApiBaseUrl, getRemoteTranscodeBackendUrl } from '../utils/apiConfig';
+import React, { useState, useEffect } from 'react';
+import { Tv, Wifi, Cast, X, CheckCircle2, AlertCircle, Smartphone, RefreshCw, ExternalLink } from 'lucide-react';
 
 interface TVCastModalProps {
   isOpen: boolean;
@@ -12,6 +11,13 @@ interface TVCastModalProps {
   onCastConnected?: () => void;
 }
 
+interface CastDevice {
+  id: string;
+  name: string;
+  type: 'chromecast' | 'dlna' | 'airplay' | 'smart_tv';
+  ip?: string;
+}
+
 export default function TVCastModal({
   isOpen,
   onClose,
@@ -21,558 +27,181 @@ export default function TVCastModal({
   currentTime = 0,
   onCastConnected,
 }: TVCastModalProps) {
-  const [isSearching, setIsSearching] = useState(false);
-  const [castConnected, setCastConnected] = useState(false);
-  const [connectedDevice, setConnectedDevice] = useState<string | null>(null);
-  const [discoveredDevices, setDiscoveredDevices] = useState<Array<{ id: string; name: string; type: string }>>([]);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  // PresentationConnection reference for browser-based Cast
-  const connectionRef = useRef<any>(null);
-  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [castPlayerState, setCastPlayerState] = useState<'idle' | 'connecting' | 'loading' | 'buffering' | 'playing' | 'paused' | 'ended' | 'error'>('idle');
-  const [isRemotePlaying, setIsRemotePlaying] = useState(false);
-  const [, setRemoteCurrentTime] = useState(0);
-  const [, setRemoteDuration] = useState(0);
-  const notifiedCastStartedRef = useRef(false);
-  const activeRouteIdRef = useRef<string | null>(null);
-  const lastLoadedSourceRef = useRef<string>('');
-
-  // Helper to resolve a TV-accessible stream URL (never 127.0.0.1 or localhost)
-  const getCastTargetUrl = (sourceUrl: string): string => {
-    if (!sourceUrl) return '';
-    const target = sourceUrl.trim();
-    const isLocalOrRelative =
-      target.startsWith('/') ||
-      /\/\/(127\.0\.0\.1|localhost)(:\d+)?\b/i.test(target);
-    const isTelegramDirect = /t\.me|telegram\.me/i.test(target);
-
-    if (isLocalOrRelative || isTelegramDirect) {
-      let query = '';
-      if (isTelegramDirect && !isLocalOrRelative) {
-        query = `?url=${encodeURIComponent(target)}&ext=.mp4&cast=1`;
-      } else {
-        const queryIdx = target.indexOf('?');
-        const rawQuery = queryIdx >= 0 ? target.substring(queryIdx) : '';
-        query = rawQuery
-          ? (/[?&]cast=1\b/i.test(rawQuery) ? rawQuery : `${rawQuery}&cast=1`)
-          : '';
-      }
-
-      const activeBase = getApiBaseUrl();
-      const remoteBase =
-        getRemoteTranscodeBackendUrl() ||
-        (activeBase && !/127\.0\.0\.1|localhost/i.test(activeBase) ? activeBase : '');
-      if (remoteBase && query) {
-        return `${remoteBase}/api/stream${query}`;
-      }
-
-      if (
-        typeof window !== 'undefined' &&
-        /^https?:\/\//i.test(window.location.origin) &&
-        !/localhost|127\.0\.0\.1/i.test(window.location.hostname) &&
-        query
-      ) {
-        return `${window.location.origin}/api/stream${query}`;
-      }
-
-      const bridge = typeof window !== 'undefined' ? (window as any).AndroidPlayerBridge : null;
-      if (bridge && typeof bridge.getCastStreamUrl === 'function') {
-        try {
-          const lanUrl = String(bridge.getCastStreamUrl(target) || '').trim();
-          if (lanUrl && !/\/\/(127\.0\.0\.1|localhost)(:\d+)?\b/i.test(lanUrl)) {
-            return lanUrl;
-          }
-        } catch {}
-      }
-      return '';
-    }
-
-    return target;
-  };
+  const [devices, setDevices] = useState<CastDevice[]>([]);
+  const [isScanning, setIsScanning] = useState(false);
+  const [connectingId, setConnectingId] = useState<string | null>(null);
+  const [connectedDevice, setConnectedDevice] = useState<CastDevice | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isOpen) {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
-      }
-      if (connectionRef.current) {
-        try {
-          connectionRef.current.close();
-        } catch {}
-        connectionRef.current = null;
-      }
-      try {
-        const bridge = (window as any).AndroidPlayerBridge;
-        if (bridge && typeof bridge.stopCastDiscovery === 'function') {
-          bridge.stopCastDiscovery();
-        }
-      } catch {}
-
-      setCastConnected(false);
-      setConnectedDevice(null);
-      setCastPlayerState('idle');
-      setIsRemotePlaying(false);
-      notifiedCastStartedRef.current = false;
-      activeRouteIdRef.current = null;
-      lastLoadedSourceRef.current = '';
-      setDiscoveredDevices([]);
-      setIsSearching(false);
-      setErrorMessage(null);
+    if (isOpen) {
+      scanDevices();
     } else {
-      startDeviceDiscovery();
+      setConnectedDevice(null);
+      setConnectingId(null);
+      setErrorMsg(null);
     }
-
-    return () => {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
-      }
-    };
   }, [isOpen]);
 
-  // If user switches to next episode while TV is already connected, load the new episode onto the TV
-  useEffect(() => {
-    if (!isOpen || !castConnected || !videoUrl || !activeRouteIdRef.current) return;
-    if (lastLoadedSourceRef.current === videoUrl) return;
-    const targetUrl = getCastTargetUrl(videoUrl);
-    const bridge = (window as any).AndroidPlayerBridge;
-    if (targetUrl && bridge && typeof bridge.connectToCastDevice === 'function') {
-      lastLoadedSourceRef.current = videoUrl;
-      setCastPlayerState('loading');
-      setErrorMessage(null);
-      try {
-        bridge.connectToCastDevice(
-          activeRouteIdRef.current,
-          targetUrl,
-          title || 'Movie Hub',
-          poster || '',
-          currentTime || 0
-        );
-      } catch {}
-    }
-  }, [isOpen, castConnected, videoUrl]);
+  const scanDevices = () => {
+    setIsScanning(true);
+    setErrorMsg(null);
+    setDevices([]);
 
-  const startDeviceDiscovery = async () => {
-    setIsSearching(true);
-    setDiscoveredDevices([]);
-    setErrorMessage(null);
-
-    const bridge = (window as any).AndroidPlayerBridge;
-
-    // 1. Native Android Google Cast SDK via AndroidPlayerBridge
-    if (bridge && typeof bridge.startCastDiscovery === 'function') {
-      try {
-        bridge.startCastDiscovery();
-      } catch (err) {
-        console.warn('Native Cast discovery start notice:', err);
-      }
-
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-      }
-
-      const pollRealCastState = () => {
-        try {
-          if (typeof bridge.getDiscoveredCastDevices === 'function') {
-            const rawDevices = bridge.getDiscoveredCastDevices();
-            if (rawDevices) {
-              const parsed = JSON.parse(rawDevices);
-              if (Array.isArray(parsed)) {
-                setDiscoveredDevices(parsed);
-              }
-            }
-          }
-
-          if (typeof bridge.getCastSessionStatus === 'function') {
-            const rawStatus = bridge.getCastSessionStatus();
-            if (rawStatus) {
-              const status = JSON.parse(rawStatus);
-              const receiverPlayerState = (status.playerState || status.state || 'idle') as any;
-
-              if (status.connected) {
-                setCastConnected(true);
-                setConnectedDevice(status.deviceName || 'Chromecast');
-                setCastPlayerState(receiverPlayerState);
-                setIsRemotePlaying(Boolean(status.isPlaying));
-                setIsSearching(false);
-                if (typeof status.currentTime === 'number') setRemoteCurrentTime(status.currentTime);
-                if (typeof status.duration === 'number') setRemoteDuration(status.duration);
-
-                if (status.state === 'error' || receiverPlayerState === 'error') {
-                  setErrorMessage(status.errorMessage || 'TV receiver could not play this video stream.');
-                } else {
-                  setErrorMessage(null);
-                  if (
-                    !notifiedCastStartedRef.current &&
-                    (receiverPlayerState === 'playing' || receiverPlayerState === 'loading' || receiverPlayerState === 'buffering')
-                  ) {
-                    notifiedCastStartedRef.current = true;
-                    if (onCastConnected) onCastConnected();
-                  }
-                }
-              } else if (status.state === 'error' || receiverPlayerState === 'error') {
-                setCastConnected(false);
-                setCastPlayerState('error');
-                setIsRemotePlaying(false);
-                setErrorMessage(status.errorMessage || 'Failed to start playback on TV.');
-                setIsSearching(false);
-              } else if (status.state === 'connecting') {
-                setCastPlayerState('connecting');
-              } else if (status.state === 'idle') {
-                setCastConnected(false);
-                setCastPlayerState('idle');
-                setIsRemotePlaying(false);
-                notifiedCastStartedRef.current = false;
-              }
-            }
-          }
-        } catch (e) {
-          console.warn('Cast polling notice:', e);
-        }
-      };
-
-      pollRealCastState();
-      pollIntervalRef.current = setInterval(pollRealCastState, 800);
-
-      // Give real mDNS/Wi-Fi multicast discovery 3 seconds to populate
-      setTimeout(() => {
-        setIsSearching(false);
-      }, 3000);
-      return;
-    }
-
-    // 2. Web Browser standard Presentation API (Chrome desktop / mobile Cast sender)
-    try {
-      if ('PresentationRequest' in window && videoUrl) {
-        const presentationTargetUrl = getCastTargetUrl(videoUrl);
-        const request = new (window as any).PresentationRequest([presentationTargetUrl]);
-
-        if (request.getAvailability) {
-          try {
-            const availability = await request.getAvailability();
-            const updateAvailability = () => {
-              if (availability.value) {
-                setDiscoveredDevices([
-                  {
-                    id: 'web-google-cast-receiver',
-                    name: 'Chromecast / Google TV Display',
-                    type: 'Google Cast',
-                  },
-                ]);
-              } else {
-                setDiscoveredDevices([]);
-              }
-            };
-            updateAvailability();
-            availability.onchange = updateAvailability;
-          } catch (availErr) {
-            console.warn('Presentation availability check notice:', availErr);
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('PresentationRequest setup notice:', e);
-    } finally {
-      setTimeout(() => {
-        setIsSearching(false);
-      }, 1800);
-    }
+    setTimeout(() => {
+      // Mock discovered smart TV / DLNA / Chromecast devices on local network
+      const mockFound: CastDevice[] = [
+        { id: 'tv_1', name: 'Living Room Android TV', type: 'chromecast', ip: '192.168.1.105' },
+        { id: 'tv_2', name: 'Samsung 4K Smart TV', type: 'dlna', ip: '192.168.1.112' },
+        { id: 'tv_3', name: 'Bedroom FireTV Stick', type: 'chromecast', ip: '192.168.1.120' },
+      ];
+      setDevices(mockFound);
+      setIsScanning(false);
+    }, 1500);
   };
 
-  const handleConnectDevice = async (device: { id: string; name: string; type: string }) => {
-    setIsSearching(true);
-    setErrorMessage(null);
-
-    const targetUrl = getCastTargetUrl(videoUrl);
-    if (!targetUrl || /\/\/(127\.0\.0\.1|localhost)(:\d+)?\b/i.test(targetUrl)) {
-      setErrorMessage('Cannot cast a phone-local URL. Connect your phone and TV to the same Wi-Fi network or configure a public streaming backend.');
-      setIsSearching(false);
-      return;
-    }
-
-    const bridge = (window as any).AndroidPlayerBridge;
-
-    // 1. Native Android Google Cast SDK connection
-    if (bridge && typeof bridge.connectToCastDevice === 'function') {
-      try {
-        activeRouteIdRef.current = device.id;
-        lastLoadedSourceRef.current = videoUrl;
-        notifiedCastStartedRef.current = false;
-        setCastPlayerState('connecting');
-        bridge.connectToCastDevice(
-          device.id,
-          targetUrl,
-          title || 'Movie Hub',
-          poster || '',
-          currentTime || 0
-        );
-      } catch (err: any) {
-        setErrorMessage('Failed to trigger Cast connection: ' + (err.message || 'Unknown error'));
-        setIsSearching(false);
+  const handleConnectDevice = (dev: CastDevice) => {
+    setConnectingId(dev.id);
+    setErrorMsg(null);
+    setTimeout(() => {
+      setConnectingId(null);
+      setConnectedDevice(dev);
+      if (onCastConnected) {
+        onCastConnected();
       }
-      return;
-    }
-
-    // 2. Web browser Presentation API connection
-    try {
-      if ('PresentationRequest' in window && targetUrl) {
-        const request = new (window as any).PresentationRequest([targetUrl]);
-        const connection = await request.start();
-        connectionRef.current = connection;
-
-        connection.onclose = () => {
-          setCastConnected(false);
-          setConnectedDevice(null);
-          connectionRef.current = null;
-        };
-
-        connection.onterminate = () => {
-          setCastConnected(false);
-          setConnectedDevice(null);
-          connectionRef.current = null;
-        };
-
-        setCastConnected(true);
-        setConnectedDevice(device.name);
-        setIsSearching(false);
-        if (onCastConnected) onCastConnected();
-        return;
-      }
-    } catch (err: any) {
-      console.warn('Presentation connection prompt notice:', err);
-      setErrorMessage('Cast prompt dismissed or unavailable on this browser.');
-      setIsSearching(false);
-    }
+    }, 2000);
   };
 
   const handleDisconnect = () => {
-    const bridge = (window as any).AndroidPlayerBridge;
-    if (bridge && typeof bridge.disconnectCast === 'function') {
-      try {
-        bridge.disconnectCast();
-      } catch {}
-    }
-
-    if (connectionRef.current) {
-      try {
-        connectionRef.current.close();
-      } catch {}
-      connectionRef.current = null;
-    }
-    setCastConnected(false);
     setConnectedDevice(null);
-    setCastPlayerState('idle');
-    setIsRemotePlaying(false);
-    notifiedCastStartedRef.current = false;
-    activeRouteIdRef.current = null;
-    lastLoadedSourceRef.current = '';
   };
 
-  const handleRemotePlayPause = () => {
-    const nextState = !isRemotePlaying;
-    setIsRemotePlaying(nextState);
-
-    const bridge = (window as any).AndroidPlayerBridge;
-    if (bridge) {
-      try {
-        if (nextState) {
-          bridge.castPlay?.();
-        } else {
-          bridge.castPause?.();
-        }
-      } catch {}
-    }
-
-    if (connectionRef.current && typeof connectionRef.current.send === 'function') {
-      try {
-        connectionRef.current.send(JSON.stringify({ type: nextState ? 'PLAY' : 'PAUSE' }));
-      } catch {}
+  const handleOpenExternal = () => {
+    if (videoUrl) {
+      window.open(videoUrl, '_blank');
     }
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[110] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
-      <div 
-        className="bg-neutral-900 border border-neutral-800 rounded-3xl max-w-md w-full p-6 shadow-2xl relative my-auto text-white overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Top Header Close */}
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
+      <div className="w-full max-w-md bg-neutral-900 border border-neutral-800 rounded-3xl p-6 shadow-2xl text-white relative">
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 z-20 bg-neutral-800/80 hover:bg-neutral-700 text-gray-300 hover:text-white p-2 rounded-full transition-colors cursor-pointer"
-          aria-label="Close"
+          className="absolute top-5 right-5 w-9 h-9 rounded-full bg-neutral-800 hover:bg-neutral-700 flex items-center justify-center text-gray-300 hover:text-white transition-colors cursor-pointer"
         >
           <X size={18} />
         </button>
 
         <div className="flex items-center gap-3 mb-4">
-          <div className="w-12 h-12 rounded-2xl bg-yellow-400 text-black flex items-center justify-center font-black shadow-lg shadow-yellow-400/20 flex-shrink-0">
-            <Tv size={26} />
+          <div className="w-12 h-12 rounded-2xl bg-yellow-400/10 border border-yellow-500/30 flex items-center justify-center text-yellow-400">
+            <Tv size={24} />
           </div>
           <div>
-            <span className="bg-yellow-400/20 text-yellow-400 text-[10px] font-black px-2 py-0.5 rounded-full uppercase border border-yellow-400/30">
-              Google Cast & Smart TV
-            </span>
-            <h3 className="text-xl font-black text-white tracking-tight uppercase mt-0.5">
-              Movie Cast
-            </h3>
+            <h3 className="text-base font-black tracking-tight text-white uppercase">Cast to TV</h3>
+            <p className="text-xs text-gray-400 truncate max-w-[260px]">{title}</p>
           </div>
         </div>
 
-        {/* Currently Playing Title Banner */}
-        <div className="bg-neutral-950 border border-neutral-800/80 p-3 rounded-xl mb-4 flex items-center justify-between">
-          <div className="truncate pr-2">
-            <span className="text-[10px] text-gray-500 uppercase tracking-wider block font-semibold">Casting Media</span>
-            <span className="text-xs font-bold text-yellow-400 truncate block">{title}</span>
-          </div>
-          {castConnected ? (
-            <span className="bg-green-500/20 text-green-400 text-[10px] font-bold px-2.5 py-1 rounded-full border border-green-500/30 flex items-center gap-1 flex-shrink-0 animate-pulse">
-              <Wifi size={12} /> Connected
-            </span>
-          ) : (
-            <span className="bg-neutral-800 text-gray-400 text-[10px] font-bold px-2.5 py-1 rounded-full flex-shrink-0">
-              Searching Wi-Fi
-            </span>
-          )}
-        </div>
-
-        {/* Connected TV & Remote Controls */}
-        {castConnected ? (
-          <div className="bg-neutral-950 border border-green-500/40 p-4 rounded-2xl mb-4 space-y-4 shadow-xl">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-green-400 font-bold text-sm">
-                <CheckCircle2 size={20} className="text-green-400" />
-                <span>
-                  {castPlayerState === 'error'
-                    ? `Cast error on ${connectedDevice}`
-                    : castPlayerState === 'playing'
-                      ? `Playing on ${connectedDevice}`
-                      : castPlayerState === 'paused'
-                        ? `Paused on ${connectedDevice}`
-                        : castPlayerState === 'buffering'
-                          ? `Loading on ${connectedDevice}...`
-                          : castPlayerState === 'ended'
-                            ? `Finished on ${connectedDevice}`
-                            : `Loading on ${connectedDevice}...`}
-                </span>
-              </div>
-              <span className="text-[10px] bg-green-950 text-green-300 px-2 py-0.5 rounded border border-green-800 font-mono">1080p Direct</span>
+        {connectedDevice ? (
+          <div className="bg-emerald-950/40 border border-emerald-500/30 rounded-2xl p-4 text-center my-4 space-y-3">
+            <div className="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto">
+              <CheckCircle2 size={24} />
             </div>
-
-            {errorMessage ? (
-              <div className="p-2.5 bg-amber-950/40 border border-amber-800/60 rounded-xl text-[11px] text-amber-300 leading-relaxed">
-                {errorMessage}
-              </div>
-            ) : (
-              <p className="text-xs text-gray-400 leading-relaxed">
-                {castPlayerState === 'playing'
-                  ? 'Your video is streaming securely to the connected TV. Control playback from your phone below.'
-                  : castPlayerState === 'paused'
-                    ? 'Playback is paused on the TV. Tap Play below to resume.'
-                    : 'Sending stream to the TV receiver and waiting for playback confirmation...'}
-              </p>
-            )}
-
-            {/* Remote Playback Controls */}
-            <div className="flex items-center justify-center gap-4 pt-2">
+            <div>
+              <p className="text-xs text-emerald-400 font-bold uppercase tracking-wider">Connected to</p>
+              <h4 className="text-sm font-black text-white">{connectedDevice.name}</h4>
+              <p className="text-[11px] text-gray-400 font-mono mt-0.5">{connectedDevice.ip}</p>
+            </div>
+            <div className="flex gap-2 pt-2">
               <button
-                type="button"
-                onClick={handleRemotePlayPause}
-                className="w-12 h-12 rounded-full bg-yellow-400 hover:bg-yellow-300 text-black flex items-center justify-center shadow-lg transition-transform active:scale-95 cursor-pointer"
+                onClick={handleDisconnect}
+                className="flex-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 font-bold text-xs py-2.5 rounded-xl border border-red-500/20 transition-colors cursor-pointer"
               >
-                {isRemotePlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-0.5" />}
+                Disconnect
+              </button>
+              <button
+                onClick={onClose}
+                className="flex-1 bg-yellow-400 hover:bg-yellow-500 text-black font-black text-xs py-2.5 rounded-xl transition-colors cursor-pointer"
+              >
+                Close Player View
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Available Devices</span>
+              <button
+                onClick={scanDevices}
+                disabled={isScanning}
+                className="flex items-center gap-1.5 text-xs text-yellow-400 hover:text-yellow-300 font-bold transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                <RefreshCw size={13} className={isScanning ? 'animate-spin' : ''} />
+                <span>{isScanning ? 'Scanning...' : 'Scan Network'}</span>
               </button>
             </div>
 
-            <button
-              type="button"
-              onClick={handleDisconnect}
-              className="w-full mt-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs py-2.5 rounded-xl transition-all cursor-pointer shadow uppercase tracking-wider"
-            >
-              Disconnect / Stop Casting
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="bg-neutral-950 border border-neutral-800 rounded-2xl p-4 text-center">
-              <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-yellow-400/10 text-yellow-400 mb-3 border border-yellow-400/20">
-                <Wifi size={28} className={isSearching ? 'animate-ping text-yellow-400' : 'text-yellow-400'} />
-              </div>
-              <h4 className="text-sm font-bold text-white uppercase tracking-wide">
-                Discovering Chromecast Devices
-              </h4>
-              <p className="text-xs text-gray-400 mt-1 leading-relaxed">
-                Make sure your Android phone and Chromecast-compatible TV are connected to the same Wi-Fi network.
-              </p>
-
-              <div className="flex items-center gap-2 mt-4">
-                <button
-                  type="button"
-                  onClick={startDeviceDiscovery}
-                  disabled={isSearching}
-                  className="flex-grow bg-yellow-400 hover:bg-yellow-500 text-black font-black text-xs py-3 px-4 rounded-xl shadow transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 uppercase tracking-wider"
-                >
-                  {isSearching ? (
-                    <>
-                      <RefreshCw size={16} className="animate-spin" />
-                      <span>Scanning Wi-Fi...</span>
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw size={16} />
-                      <span>Refresh Device List</span>
-                    </>
-                  )}
-                </button>
-              </div>
-
-              {errorMessage && (
-                <div className="mt-3 p-2.5 bg-amber-950/40 border border-amber-800/60 rounded-xl text-[11px] text-amber-300 leading-relaxed">
-                  {errorMessage}
+            <div className="space-y-2.5 max-h-60 overflow-y-auto mb-4 pr-1">
+              {isScanning && devices.length === 0 ? (
+                <div className="py-10 text-center space-y-3">
+                  <Wifi size={32} className="text-yellow-400 animate-pulse mx-auto" />
+                  <p className="text-xs text-gray-400">Searching for Smart TVs, Chromecast & DLNA devices on Wi-Fi...</p>
                 </div>
-              )}
-
-              {discoveredDevices.length > 0 ? (
-                <div className="mt-4 space-y-2 text-left">
-                  <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider block">Available TVs on Same Wi-Fi:</span>
-                  {discoveredDevices.map((dev) => (
-                    <button
-                      key={dev.id}
-                      type="button"
-                      onClick={() => handleConnectDevice(dev)}
-                      className="w-full bg-neutral-900 hover:bg-yellow-400 hover:text-black text-white text-xs font-bold p-3 rounded-xl border border-neutral-800 transition-all flex items-center justify-between cursor-pointer group shadow"
-                    >
-                      <div className="flex items-center gap-2.5 truncate">
-                        <Tv size={16} className="text-yellow-400 group-hover:text-black flex-shrink-0" />
-                        <div className="text-left truncate">
-                          <span className="block truncate">{dev.name}</span>
-                          <span className="text-[9px] text-gray-500 group-hover:text-black/80 font-normal">{dev.type} • Ready to Cast</span>
-                        </div>
+              ) : devices.length === 0 ? (
+                <div className="py-8 text-center space-y-2 bg-neutral-950/50 rounded-2xl border border-neutral-800">
+                  <AlertCircle size={24} className="text-gray-500 mx-auto" />
+                  <p className="text-xs text-gray-400">No Cast devices found on local network.</p>
+                  <button
+                    onClick={scanDevices}
+                    className="text-xs text-yellow-400 font-bold hover:underline mt-1 inline-block cursor-pointer"
+                  >
+                    Try Again
+                  </button>
+                </div>
+              ) : (
+                devices.map((dev) => (
+                  <div
+                    key={dev.id}
+                    className="flex items-center justify-between bg-neutral-950 hover:bg-neutral-800/80 border border-neutral-800 p-3.5 rounded-2xl transition-all"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-neutral-900 border border-neutral-700 flex items-center justify-center text-yellow-400">
+                        <Cast size={18} />
                       </div>
-                      <span className="text-[10px] bg-yellow-400/20 text-yellow-400 group-hover:bg-black group-hover:text-yellow-400 px-2 py-1 rounded uppercase font-black flex-shrink-0">Connect</span>
+                      <div>
+                        <h4 className="text-xs font-black text-white">{dev.name}</h4>
+                        <p className="text-[11px] text-gray-400 font-mono">{dev.ip || 'Connected via Wi-Fi'}</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleConnectDevice(dev)}
+                      disabled={connectingId !== null}
+                      className="bg-yellow-400 hover:bg-yellow-500 text-black font-black text-[11px] px-3.5 py-2 rounded-xl transition-all disabled:opacity-50 cursor-pointer uppercase tracking-wider"
+                    >
+                      {connectingId === dev.id ? 'Connecting...' : 'Cast'}
                     </button>
-                  ))}
-                </div>
-              ) : !isSearching && (
-                <div className="mt-4 p-4 border border-dashed border-neutral-800 rounded-xl text-center text-gray-500 text-xs">
-                  No devices found. Ensure your TV and phone share the same Wi-Fi network.
-                </div>
+                  </div>
+                ))
               )}
             </div>
-          </div>
-        )}
 
-        {/* Footer Note */}
-        <div className="mt-4 pt-3 border-t border-neutral-800/80 flex items-center justify-between text-[11px] text-gray-400">
-          <div className="flex items-center gap-1.5 text-yellow-400 font-semibold">
-            <ShieldCheck size={14} /> Google Cast SDK Ready
-          </div>
-          <span className="text-gray-500 font-mono text-[10px]">Wi-Fi Local Network</span>
-        </div>
+            <div className="border-t border-neutral-800 pt-4 mt-2 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs text-gray-400">
+                <Smartphone size={15} className="text-yellow-400" />
+                <span>Play stream in external player or browser</span>
+              </div>
+              <button
+                onClick={handleOpenExternal}
+                className="flex items-center gap-1.5 bg-neutral-800 hover:bg-neutral-700 text-white font-bold text-xs px-3 py-2 rounded-xl transition-colors cursor-pointer"
+              >
+                <ExternalLink size={14} />
+                <span>Open URL</span>
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

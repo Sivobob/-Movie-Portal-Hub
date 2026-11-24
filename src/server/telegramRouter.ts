@@ -21,7 +21,6 @@ import {
 } from '../utils/channelRegistry.ts';
 import {
   checkTelegramDocHasAudioFast,
-  probeExactTelegramDurationSec,
   probeTelegramMedia,
   ProbeMediaResult,
   streamTelegramRange,
@@ -198,9 +197,9 @@ function getFfmpegQualityArgs(quality: VideoQualityTier | '', _isDownload: boole
       '-profile:v', 'main',
       '-level', '3.1',
       '-vsync', 'vfr',
-      '-b:v', '190k',
-      '-maxrate', '250k',
-      '-bufsize', '500k',
+      '-b:v', '220k',
+      '-maxrate', '320k',
+      '-bufsize', '640k',
       '-g', '48',
       '-keyint_min', '48',
       '-sc_threshold', '0',
@@ -223,9 +222,9 @@ function getFfmpegQualityArgs(quality: VideoQualityTier | '', _isDownload: boole
       '-profile:v', 'main',
       '-level', '3.1',
       '-vsync', 'vfr',
-      '-b:v', '380k',
-      '-maxrate', '480k',
-      '-bufsize', '960k',
+      '-b:v', '500k',
+      '-maxrate', '700k',
+      '-bufsize', '1400k',
       '-g', '48',
       '-keyint_min', '48',
       '-sc_threshold', '0',
@@ -248,9 +247,9 @@ function getFfmpegQualityArgs(quality: VideoQualityTier | '', _isDownload: boole
       '-profile:v', 'main',
       '-level', '4.0',
       '-vsync', 'vfr',
-      '-crf', '20',
-      '-maxrate', '2800k',
-      '-bufsize', '5600k',
+      '-crf', '21',
+      '-maxrate', '1800k',
+      '-bufsize', '3600k',
       '-g', '48',
       '-keyint_min', '48',
       '-sc_threshold', '0',
@@ -258,7 +257,7 @@ function getFfmpegQualityArgs(quality: VideoQualityTier | '', _isDownload: boole
       '-c:a', 'aac',
       '-ac', '2',
       '-ar', '48000',
-      '-b:a', '160k'
+      '-b:a', '128k'
     );
     return args;
   }
@@ -1695,6 +1694,7 @@ interface CachedMediaEntry {
   mimeType: string;
   hasAudio?: boolean;
   probe?: ProbeMediaResult;
+  probeFallbackAt?: number;
   probePromise?: Promise<ProbeMediaResult>;
   cachedAt: number;
 }
@@ -1781,31 +1781,30 @@ async function resolveAndCacheDocument(
 async function ensureMediaProbed(
   entry: CachedMediaEntry,
   telegramUrl: string,
-  probeOptions?: { timeoutMs?: number; probesize?: number; analyzeduration?: number },
-  client?: any
+  probeOptions?: { timeoutMs?: number; probesize?: number; analyzeduration?: number }
 ): Promise<ProbeMediaResult> {
-  if (entry.probe) return entry.probe;
+  if (entry.probe) {
+    if (entry.probe.probedByFfprobe) return entry.probe;
+    if (entry.probeFallbackAt && Date.now() - entry.probeFallbackAt < 15_000) {
+      return entry.probe;
+    }
+  }
   if (entry.probePromise) return entry.probePromise;
 
   const localPort = process.env.INTERNAL_APP_PORT || process.env.APP_PORT || '3000';
   entry.probePromise = probeTelegramMedia(localPort, telegramUrl, entry.docInfo, probeOptions)
-    .then(async (result) => {
-      if (
-        client &&
-        (String(result.container || '').toLowerCase().includes('mpegts') || !result.containerDurationExact)
-      ) {
-        const exactCheck = await probeExactTelegramDurationSec(client, entry.docInfo, result.container).catch(() => null);
-        if (exactCheck && exactCheck.exact && exactCheck.durationSec > 0) {
-          result.durationSec = exactCheck.durationSec;
-          result.containerDurationExact = true;
-        }
-      }
+    .then((result) => {
       entry.probe = result;
-      if (result.durationSec > 0 && (result.containerDurationExact || entry.docInfo.durationSec <= 0)) {
-        entry.docInfo.durationSec = result.durationSec;
+      if (result.probedByFfprobe) {
+        entry.probeFallbackAt = undefined;
+        if (result.durationSec > 0) {
+          entry.docInfo.durationSec = result.durationSec;
+        }
+      } else {
+        entry.probeFallbackAt = Date.now();
       }
       console.log(
-        `[Probe] ${entry.docInfo.fileName || entry.docInfo.document.id}: mode=${result.recommendedMode}, container=${result.container}, video=${result.videoCodec}(${result.pixFmt}), audio=${result.audioCodec}, duration=${result.durationSec}s (exact=${Boolean(result.containerDurationExact)}), tracks=${result.audioTracks.length}`
+        `[Probe] ${entry.docInfo.fileName || entry.docInfo.document.id}: mode=${result.recommendedMode}, video=${result.videoCodec}(${result.pixFmt}), audio=${result.audioCodec}, duration=${result.durationSec}s (ffprobe=${result.probedByFfprobe}), tracks=${result.audioTracks.length}`
       );
       return result;
     })
@@ -1877,14 +1876,8 @@ router.get('/stream-info', async (req: Request, res: Response) => {
       return res.status(status || 404).json({ error: error || 'Media not found' });
     }
 
-    const probe = await ensureMediaProbed(entry, urlParam, undefined, client);
+    const probe = await ensureMediaProbed(entry, urlParam);
     const resolvedDuration = probe.durationSec || entry.docInfo.durationSec || 0;
-    const containerDurationExact = Boolean(
-      probe.containerDurationExact ||
-        (probe.probedByFfprobe &&
-          resolvedDuration > 0 &&
-          !String(probe.container || '').toLowerCase().includes('mpegts'))
-    );
     const qualityEstimates = buildQualitySizeEstimates({
       fileSizeBytes: entry.docInfo.fileSize,
       durationSec: resolvedDuration,
@@ -1897,7 +1890,6 @@ router.get('/stream-info', async (req: Request, res: Response) => {
       fileName: entry.docInfo.fileName,
       fileSize: entry.docInfo.fileSize,
       durationSec: resolvedDuration,
-      containerDurationExact,
       recommendedMode: probe.recommendedMode,
       container: probe.container,
       videoCodec: probe.videoCodec,
@@ -2396,7 +2388,7 @@ export async function handleStream(req: Request, res: Response) {
 
     // Raw internal stream for ffprobe / ffmpeg: bypass probe & remux completely
     if (!isRawParam) {
-      const probe = await ensureMediaProbed(entry, urlParam, undefined, client);
+      const probe = await ensureMediaProbed(entry, urlParam);
       const durationSec = probe.durationSec || docInfo.durationSec || 0;
 
       let effectiveMode: 'direct' | 'remux' | 'transcode' = probe.recommendedMode;
@@ -2575,8 +2567,8 @@ export async function handleStream(req: Request, res: Response) {
 // ============================================================================
 // NATIVE APPLE HLS STREAMING PIPELINE (/api/telegram/hls/*) FOR iOS & ANDROID
 // ============================================================================
-const HLS_SEG_DURATION = 4;
-const HLS_TARGET_DURATION = 5;
+const HLS_SEG_DURATION = 2;
+const HLS_TARGET_DURATION = 3;
 const HLS_TMP_ROOT = path.resolve('/tmp', 'movie_portal_hls');
 const MAX_CONCURRENT_HLS_JOBS = Math.max(2, MAX_CONCURRENT_FFMPEG - 1);
 
@@ -2697,7 +2689,7 @@ function segmentReadyOnDisk(filePath: string): boolean {
 
 function getHlsArgsForQuality(quality: VideoQualityTier | '', forceExact4s = true): string[] {
   const keyframeArgs = forceExact4s
-    ? ['-g', '240', '-force_key_frames', `expr:gte(t,n_forced*${HLS_SEG_DURATION})`, '-sc_threshold', '0']
+    ? ['-g', '48', '-force_key_frames', `expr:gte(t,n_forced*${HLS_SEG_DURATION})`, '-sc_threshold', '0']
     : ['-g', '48', '-keyint_min', '48', '-sc_threshold', '0'];
 
   if (quality === '360p') {
@@ -2705,7 +2697,7 @@ function getHlsArgsForQuality(quality: VideoQualityTier | '', forceExact4s = tru
       '-vf', "scale='min(640,iw)':'min(360,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=fast_bilinear,setsar=1,format=yuv420p",
       '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '0', '-pix_fmt', 'yuv420p',
       '-profile:v', 'main', '-level', '3.1',
-      '-b:v', '190k', '-maxrate', '250k', '-bufsize', '500k',
+      '-b:v', '220k', '-maxrate', '320k', '-bufsize', '640k',
       ...keyframeArgs,
       '-af', 'aresample=async=1:min_hard_comp=0.100000',
       '-c:a', 'aac', '-ac', '2', '-ar', '44100', '-b:a', '64k',
@@ -2716,7 +2708,7 @@ function getHlsArgsForQuality(quality: VideoQualityTier | '', forceExact4s = tru
       '-vf', "scale='min(854,iw)':'min(480,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=fast_bilinear,setsar=1,format=yuv420p",
       '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '0', '-pix_fmt', 'yuv420p',
       '-profile:v', 'main', '-level', '3.1',
-      '-b:v', '380k', '-maxrate', '480k', '-bufsize', '960k',
+      '-b:v', '500k', '-maxrate', '700k', '-bufsize', '1400k',
       ...keyframeArgs,
       '-af', 'aresample=async=1:min_hard_comp=0.100000',
       '-c:a', 'aac', '-ac', '2', '-ar', '44100', '-b:a', '96k',
@@ -2727,10 +2719,10 @@ function getHlsArgsForQuality(quality: VideoQualityTier | '', forceExact4s = tru
       '-vf', "scale='min(1280,iw)':'min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos,setsar=1,format=yuv420p",
       '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '0', '-pix_fmt', 'yuv420p',
       '-profile:v', 'main', '-level', '4.0',
-      '-crf', '20', '-maxrate', '2800k', '-bufsize', '5600k',
+      '-crf', '21', '-maxrate', '1800k', '-bufsize', '3600k',
       ...keyframeArgs,
       '-af', 'aresample=async=1:min_hard_comp=0.100000',
-      '-c:a', 'aac', '-ac', '2', '-ar', '48000', '-b:a', '160k',
+      '-c:a', 'aac', '-ac', '2', '-ar', '48000', '-b:a', '128k',
     ];
   }
   return [
@@ -2780,8 +2772,8 @@ function startHlsWorker(opts: {
 
   const startSec = opts.startSeg * HLS_SEG_DURATION;
   const ffArgs: string[] = [
-    '-probesize', '1800000',
-    '-analyzeduration', '1800000',
+    '-probesize', '900000',
+    '-analyzeduration', '900000',
     '-fflags', '+discardcorrupt',
     '-reconnect', '1',
     '-reconnect_streamed', '1',
@@ -2809,7 +2801,7 @@ function startHlsWorker(opts: {
       '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '0', '-pix_fmt', 'yuv420p',
       '-profile:v', 'main', '-level', '4.0',
       '-crf', '21', '-maxrate', '3600k', '-bufsize', '7200k',
-      '-g', '240', '-force_key_frames', `expr:gte(t,n_forced*${HLS_SEG_DURATION})`, '-sc_threshold', '0'
+      '-g', '48', '-force_key_frames', `expr:gte(t,n_forced*${HLS_SEG_DURATION})`, '-sc_threshold', '0'
     );
     if (opts.canCopyAudio) {
       ffArgs.push('-c:a', 'copy');
@@ -2926,7 +2918,7 @@ async function resolveHlsSourceParams(req: Request) {
     if (!entry) {
       throw new Error(error || 'Media not found');
     }
-    const probe = await ensureMediaProbed(entry, urlParam, undefined, client);
+    const probe = await ensureMediaProbed(entry, urlParam);
     durationSec = probe.durationSec || entry.docInfo.durationSec || durationSec;
     const localPort = process.env.INTERNAL_APP_PORT || process.env.APP_PORT || '3000';
     inputUrl = `http://127.0.0.1:${localPort}/api/stream?url=${encodeURIComponent(urlParam)}&raw=1`;
@@ -4328,8 +4320,8 @@ function mergeEpisodeIntoSeasons(
     durationSec?: number;
     showInNewEpisodes: boolean;
     newEpisodeEnabledAt?: number;
-    createdAt: number;
-    addedAt: number;
+    createdAt?: number;
+    addedAt?: number;
   }
 ): { mergedSeasons: Array<{ seasonNumber: number; episodes: any[] }>; added: boolean } {
   const cloned = Array.isArray(existingSeasons)
@@ -4667,7 +4659,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
         videoQualities: grp.videoQualities,
         qualityBadge,
         durationSec: bestDurSec,
-        runtime: matched.runtime || durationFormatted,
+        runtime: isSeriesItem ? durationFormatted : (durationFormatted || matched.runtime),
         sourceFileName: grp.primary.fileName,
         sourceCaption: `${mergedParsed.cleanTitle}${mergedParsed.year ? ` (${mergedParsed.year})` : ''}`,
         parsedTitle: mergedParsed.cleanTitle,
@@ -4736,8 +4728,6 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
             ...(durationFormatted ? { duration: durationFormatted } : {}),
             ...(bestDurSec > 0 ? { durationSec: bestDurSec } : {}),
             showInNewEpisodes: false,
-            createdAt: nowMs,
-            addedAt: nowMs,
           };
 
           if (existingRec) {

@@ -1,7 +1,7 @@
 export const CLOUD_RUN_BACKEND_URL = 'https://movie-portalhub-1012526016635.asia-southeast1.run.app';
-export const LIVE_BACKEND_URL = 'https://ais-dev-jnqt2mxwwu4hovy5xbqigd-560942295760.asia-northeast1.run.app';
-export const PRE_BACKEND_URL = 'https://ais-pre-jnqt2mxwwu4hovy5xbqigd-560942295760.asia-northeast1.run.app';
-export const APP_VERSION = 'v3.5.276';
+export const LIVE_BACKEND_URL = 'https://ais-dev-yaniwuwl6wc7ivl5tz2bbo-755452514312.asia-northeast1.run.app';
+export const PRE_BACKEND_URL = 'https://ais-pre-yaniwuwl6wc7ivl5tz2bbo-755452514312.asia-northeast1.run.app';
+export const APP_VERSION = 'v3.5.277';
 
 const ENV_BACKEND_URL = (
   (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_BASE_URL) ||
@@ -14,12 +14,9 @@ const ENV_BACKEND_URL = (
 let resolvedNativeBackendUrl: string | null = null;
 let resolvedRemoteTranscodeUrl: string | null = null;
 let lastProbeTimestamp = 0;
-let lastRemoteAttemptTimestamp = 0;
 let inflightProbePromise: Promise<string | null> | null = null;
-let inflightRemoteDiscoveryPromise: Promise<string | null> | null = null;
 let bridgeReadyPromise: Promise<void> | null = null;
 const PROBE_CACHE_TTL_MS = 60 * 1000;
-const REMOTE_RETRY_TTL_MS = 5 * 60 * 1000;
 
 function isNativeAppRuntime(): boolean {
   if (typeof window === 'undefined') return false;
@@ -143,7 +140,7 @@ interface HealthCheckResult {
   telegramConfigured: boolean;
 }
 
-async function checkBackendHealth(baseUrl: string, timeoutMs = 1200): Promise<HealthCheckResult> {
+async function checkBackendHealth(baseUrl: string, timeoutMs = 3800): Promise<HealthCheckResult> {
   const target = baseUrl.replace(/\/+$/, '');
   if (!target) return { ok: false, transcodeSupported: false, telegramConfigured: false };
   const healthUrl = `${target}/api/health`;
@@ -187,7 +184,7 @@ async function fetchFirestoreConfiguredBackendUrl(): Promise<string> {
       import('firebase/firestore'),
       import('../firebase'),
     ]);
-    const controllerTimeout = new Promise<string>((resolve) => setTimeout(() => resolve(''), 700));
+    const controllerTimeout = new Promise<string>((resolve) => setTimeout(() => resolve(''), 1400));
     const readDoc = Promise.any([
       getDoc(doc(db, 'admins', 'backend')),
       getDoc(doc(db, 'app_config', 'backend')),
@@ -203,69 +200,6 @@ async function fetchFirestoreConfiguredBackendUrl(): Promise<string> {
   } catch {
     return '';
   }
-}
-
-function discoverRemoteBackendAsync(force = false): Promise<string | null> {
-  if (
-    !force &&
-    lastRemoteAttemptTimestamp > 0 &&
-    Date.now() - lastRemoteAttemptTimestamp < REMOTE_RETRY_TTL_MS &&
-    !resolvedRemoteTranscodeUrl
-  ) {
-    return Promise.resolve(null);
-  }
-  if (inflightRemoteDiscoveryPromise) return inflightRemoteDiscoveryPromise;
-
-  lastRemoteAttemptTimestamp = Date.now();
-  inflightRemoteDiscoveryPromise = (async () => {
-    let custom = '';
-    try {
-      custom = (localStorage.getItem('movie_portal_backend_url') || '').trim().replace(/\/+$/, '');
-    } catch {}
-
-    const firestoreBackendUrl = await fetchFirestoreConfiguredBackendUrl();
-    const currentOrigin = isLoadedOnRemoteLiveWebOrigin()
-      ? window.location.origin.replace(/\/+$/, '')
-      : '';
-
-    const remoteCandidates = Array.from(
-      new Set([custom, currentOrigin, ENV_BACKEND_URL, firestoreBackendUrl, PRE_BACKEND_URL, LIVE_BACKEND_URL, CLOUD_RUN_BACKEND_URL].filter(Boolean))
-    );
-
-    if (remoteCandidates.length === 0) {
-      resolvedRemoteTranscodeUrl = null;
-      return null;
-    }
-
-    const checks = await Promise.all(
-      remoteCandidates.map(async (candidate) => ({
-        candidate,
-        ...(await checkBackendHealth(candidate, 1200)),
-      }))
-    );
-
-    const fullHealthy = checks.find((c) => c.ok && c.transcodeSupported && c.telegramConfigured);
-    if (fullHealthy) {
-      resolvedNativeBackendUrl = fullHealthy.candidate;
-      resolvedRemoteTranscodeUrl = fullHealthy.candidate;
-      lastProbeTimestamp = Date.now();
-      return fullHealthy.candidate;
-    }
-
-    resolvedRemoteTranscodeUrl = null;
-    const fallbackRemote = checks.find((c) => c.ok && c.telegramConfigured);
-    return fallbackRemote ? fallbackRemote.candidate : null;
-  })().finally(() => {
-    inflightRemoteDiscoveryPromise = null;
-  });
-
-  return inflightRemoteDiscoveryPromise;
-}
-
-export function warmBackendConnection(): void {
-  if (typeof window === 'undefined' || !isNativeAppRuntime()) return;
-  ensureAndroidStreamBridge().catch(() => '');
-  discoverRemoteBackendAsync(false).catch(() => null);
 }
 
 export async function probeWorkingBackendUrl(force = false): Promise<string | null> {
@@ -285,27 +219,83 @@ export async function probeWorkingBackendUrl(force = false): Promise<string | nu
   }
 
   inflightProbePromise = (async () => {
-    // On Native APK: attach the built-in localhost streaming bridge immediately (0ms)
-    // whenever no verified remote transcode backend is cached yet, and probe remote silently in background.
+    let custom = '';
+    try {
+      custom = (localStorage.getItem('movie_portal_backend_url') || '').trim().replace(/\/+$/, '');
+    } catch {}
+
+    const currentOrigin = isLoadedOnRemoteLiveWebOrigin()
+      ? window.location.origin.replace(/\/+$/, '')
+      : '';
+
+    const staticCandidates = Array.from(
+      new Set([custom, currentOrigin, ENV_BACKEND_URL, PRE_BACKEND_URL, LIVE_BACKEND_URL, CLOUD_RUN_BACKEND_URL].filter(Boolean))
+    );
+
+    const checkResults = new Map<string, HealthCheckResult & { candidate: string }>();
+    const probeCandidate = async (candidate: string) => {
+      const res = await checkBackendHealth(candidate, 1800);
+      const entry = { candidate, ...res };
+      checkResults.set(candidate, entry);
+      return entry;
+    };
+
+    // Race static health checks in parallel WITH Firestore backend URL lookup so dead URLs never stall playback
+    const firestorePromise = fetchFirestoreConfiguredBackendUrl().then(async (fsUrl) => {
+      if (fsUrl && !checkResults.has(fsUrl)) {
+        return probeCandidate(fsUrl);
+      }
+      return null;
+    });
+
+    const staticPromises = staticCandidates.map((c) => probeCandidate(c));
+
+    // Return immediately as soon as the first fullHealthy (FFmpeg + Telegram) remote backend responds
+    const firstHealthy = await Promise.any(
+      [...staticPromises, firestorePromise].map((p) =>
+        p.then((res) => {
+          if (res && res.ok && res.transcodeSupported && res.telegramConfigured) {
+            return res;
+          }
+          throw new Error('not_full_healthy');
+        })
+      )
+    ).catch(() => null);
+
+    if (firstHealthy) {
+      resolvedNativeBackendUrl = firstHealthy.candidate;
+      resolvedRemoteTranscodeUrl = firstHealthy.candidate;
+      lastProbeTimestamp = Date.now();
+      await bridgeInitPromise;
+      return firstHealthy.candidate;
+    }
+
+    await Promise.allSettled([...staticPromises, firestorePromise]);
+    const checks = Array.from(checkResults.values());
+    const fullHealthy = checks.find((c) => c.ok && c.transcodeSupported && c.telegramConfigured);
+    if (fullHealthy) {
+      resolvedNativeBackendUrl = fullHealthy.candidate;
+      resolvedRemoteTranscodeUrl = fullHealthy.candidate;
+      lastProbeTimestamp = Date.now();
+      await bridgeInitPromise;
+      return fullHealthy.candidate;
+    }
+
+    resolvedRemoteTranscodeUrl = null;
+
+    // On native Android APK: prefer built-in in-app localhost streaming bridge over a remote server that lacks FFmpeg/transcoding
     const localBridgeUrl = await bridgeInitPromise;
-    if (localBridgeUrl && !resolvedRemoteTranscodeUrl) {
-      resolvedNativeBackendUrl = localBridgeUrl;
-      lastProbeTimestamp = Date.now();
-      discoverRemoteBackendAsync(force).catch(() => null);
-      return localBridgeUrl;
-    }
-
-    const remote = await discoverRemoteBackendAsync(force);
-    if (remote) {
-      resolvedNativeBackendUrl = remote;
-      lastProbeTimestamp = Date.now();
-      return remote;
-    }
-
     if (localBridgeUrl) {
       resolvedNativeBackendUrl = localBridgeUrl;
       lastProbeTimestamp = Date.now();
       return localBridgeUrl;
+    }
+
+    const fallbackRemote = checks.find((c) => c.ok && c.telegramConfigured);
+    if (fallbackRemote) {
+      resolvedNativeBackendUrl = fallbackRemote.candidate;
+      lastProbeTimestamp = Date.now();
+      return fallbackRemote.candidate;
     }
 
     return null;
@@ -323,10 +313,4 @@ export function buildApiUrl(path: string): string {
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   const base = getApiBaseUrl();
   return base ? `${base}${cleanPath}` : cleanPath;
-}
-
-if (typeof window !== 'undefined' && isNativeAppRuntime()) {
-  setTimeout(() => {
-    warmBackendConnection();
-  }, 50);
 }

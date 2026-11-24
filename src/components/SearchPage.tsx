@@ -6,6 +6,7 @@ import VideoPlayerModal from './VideoPlayerModal';
 import MovieDetailsModal from './MovieDetailsModal';
 import MovieCard from './MovieCard';
 import { parseDurationToSeconds } from '../utils/duration';
+import { resolveEpisodePlaybackDurationSec } from '../utils/playerHelpers';
 import { saveWatchProgress } from '../services/userWatchService';
 import { useAuth } from '../context/AuthContext';
 import { useMovies } from '../context/MoviesContext';
@@ -211,10 +212,7 @@ export default function SearchPage() {
 
       if (ep && epStream) {
         setActiveSeasonIndex(sIdx);
-        const epDurationSec =
-          (typeof ep.durationSec === 'number' && ep.durationSec > 0 ? ep.durationSec : 0) ||
-          parseDurationToSeconds(ep.duration) ||
-          movieDurationSec;
+        const epDurationSec = resolveEpisodePlaybackDurationSec(ep);
         if (epDurationSec > 0 || resumeTime > 0) {
           saveWatchProgress(uid, movie, resumeTime, epDurationSec).catch(() => {});
         }
