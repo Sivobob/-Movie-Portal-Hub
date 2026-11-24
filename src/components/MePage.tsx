@@ -212,15 +212,38 @@ export default function MePage() {
     };
 
     if (movie.seasons && movie.seasons.length > 0) {
-      const sIdx = Math.max(0, Math.min(seasonIndex, movie.seasons.length - 1));
-      const season = movie.seasons[sIdx];
-      const episodes = season?.episodes || [];
-      const eIdx = Math.max(0, Math.min(episodeIndex, episodes.length - 1));
-      const ep = episodes[eIdx];
+      let sIdx = Math.max(0, Math.min(seasonIndex, movie.seasons.length - 1));
+      let season = movie.seasons[sIdx];
+      let episodes = season?.episodes || [];
+      let eIdx = Math.max(0, Math.min(episodeIndex, Math.max(0, episodes.length - 1)));
+      let ep = episodes[eIdx];
 
-      const epStream = String(
-        ep?.streamUrl || ep?.videoQualities?.['720p'] || ep?.videoQualities?.['1080p'] || ''
-      ).trim();
+      const getEpStream = (episode: any) =>
+        String(
+          episode?.streamUrl ||
+            episode?.videoQualities?.['720p'] ||
+            episode?.videoQualities?.['1080p'] ||
+            episode?.videoQualities?.['480p'] ||
+            episode?.videoQualities?.['360p'] ||
+            ''
+        ).trim();
+
+      let epStream = getEpStream(ep);
+
+      if (!epStream) {
+        for (let si = 0; si < movie.seasons.length; si++) {
+          const eps = movie.seasons[si]?.episodes || [];
+          const ei = eps.findIndex((candidate: any) => Boolean(getEpStream(candidate)));
+          if (ei >= 0) {
+            sIdx = si;
+            season = movie.seasons[si];
+            eIdx = ei;
+            ep = eps[ei];
+            epStream = getEpStream(ep);
+            break;
+          }
+        }
+      }
 
       if (ep && epStream) {
         setActiveSeasonIndex(sIdx);
@@ -237,6 +260,7 @@ export default function MePage() {
         const nextPlaying = {
           title: `${movie.title} - S${sLabel}E${eLabel}: ${ep.title}`,
           streamingUrl: epStream,
+          videoQualities: ep.videoQualities,
           displayCategory: movie.displayCategory,
           posterUrl: movie.posterUrl,
           movie,
@@ -252,14 +276,23 @@ export default function MePage() {
       }
     }
 
-    if (movie.streamingUrl) {
+    const movieStream = String(
+      movie.streamingUrl ||
+        movie.videoQualities?.['720p'] ||
+        movie.videoQualities?.['1080p'] ||
+        movie.videoQualities?.['480p'] ||
+        movie.videoQualities?.['360p'] ||
+        ''
+    ).trim();
+
+    if (movieStream) {
       if (movieDurationSec > 0 || resumeTime > 0) {
         saveWatchProgress(uid, movie, resumeTime, movieDurationSec).catch(() => {});
       }
       pushPlayerHistory();
       const nextPlaying = {
         ...movie,
-        streamingUrl: movie.streamingUrl.trim(),
+        streamingUrl: movieStream,
         language: audioLanguage || movie.language,
         currentTime: resumeTime,
         initialDuration: movieDurationSec,
@@ -435,7 +468,7 @@ export default function MePage() {
                     return (
                       <div key={item.movieId} className="space-y-1.5 group">
                         <div
-                          onClick={() => openMovieDetails(movieObj)}
+                          onClick={() => handleWatchNow(movieObj)}
                           className="relative aspect-[2/3] rounded-lg overflow-hidden bg-[#1a1d24] border border-white/[0.06] cursor-pointer"
                         >
                           <img src={poster} alt={item.title} className="w-full h-full object-cover" />
@@ -478,7 +511,7 @@ export default function MePage() {
                     return (
                       <div key={item.movieId} className="space-y-1.5">
                         <div
-                          onClick={() => openMovieDetails(movieObj)}
+                          onClick={() => handleWatchNow(movieObj)}
                           className="relative aspect-[2/3] rounded-lg overflow-hidden bg-[#1a1d24] border border-white/[0.06] cursor-pointer"
                         >
                           <img src={poster} alt={item.title} className="w-full h-full object-cover" />

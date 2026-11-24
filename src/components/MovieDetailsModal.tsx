@@ -746,7 +746,7 @@ export default function MovieDetailsModal({
       if (remuxStallTimer) clearTimeout(remuxStallTimer);
       if (globalStallTimer) clearTimeout(globalStallTimer);
 
-      if (isIosBrowser && currentInlineStage === 'direct') {
+      if ((isIosBrowser || isTelegramSource) && currentInlineStage === 'direct') {
         directStallTimer = setTimeout(() => {
           if (cancelled || hasPlayedAnyFrame || autoplayHardBlocked) return;
           if (videoEl.readyState < 3 || videoEl.currentTime < 0.1) {
@@ -754,7 +754,7 @@ export default function MovieDetailsModal({
           }
         }, 6500);
       }
-      if (isIosBrowser && currentInlineStage === 'remux_hls') {
+      if ((isIosBrowser || isTelegramSource) && currentInlineStage === 'remux_hls') {
         remuxStallTimer = setTimeout(() => {
           if (cancelled || hasPlayedAnyFrame || autoplayHardBlocked) return;
           if (videoEl.readyState < 3 || videoEl.currentTime < 0.1) {

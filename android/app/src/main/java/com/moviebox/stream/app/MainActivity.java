@@ -655,7 +655,7 @@ public class MainActivity extends BridgeActivity {
                 return pInfo.versionName.trim();
             }
         } catch (Exception ignored) {}
-        return "3.5.267";
+        return "3.5.268";
     }
 
     private int compareVersionStrings(String verA, String verB) {
@@ -688,7 +688,7 @@ public class MainActivity extends BridgeActivity {
             conn.setReadTimeout(timeoutMs);
             conn.setRequestProperty("Cache-Control", "no-store, no-cache");
             conn.setRequestProperty("Pragma", "no-cache");
-            conn.setRequestProperty("User-Agent", "MovieHub-Android-LiveSync/3.5.267");
+            conn.setRequestProperty("User-Agent", "MovieHub-Android-LiveSync/3.5.268");
             int code = conn.getResponseCode();
             if (code < 200 || code >= 300) return null;
             try (InputStream is = conn.getInputStream();
@@ -2230,7 +2230,7 @@ public class MainActivity extends BridgeActivity {
     }
 
     private File resolveApkDownloadDir() {
-        long minRecommendedBytes = 60L * 1024L * 1024L;
+        long minRecommendedBytes = 120L * 1024L * 1024L;
         File externalDir = null;
         try {
             externalDir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
@@ -2320,10 +2320,10 @@ public class MainActivity extends BridgeActivity {
                     apkUpdateMessage = "Storage directory unavailable. Please check device storage and tap Retry.";
                     return;
                 }
-                if (targetDir.getUsableSpace() > 0 && targetDir.getUsableSpace() < 60L * 1024L * 1024L) {
+                if (targetDir.getUsableSpace() > 0 && targetDir.getUsableSpace() < 120L * 1024L * 1024L) {
                     apkUpdateState = "error";
                     apkUpdateProgress = 0;
-                    apkUpdateMessage = "Not enough free storage space (~60 MB required). Free up space and tap Retry.";
+                    apkUpdateMessage = "Not enough free storage space (~120 MB required). Free up space and tap Retry.";
                     return;
                 }
 
@@ -3302,11 +3302,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.267");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.268");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.267\",\"versionCode\":35267}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.268\",\"versionCode\":35268}";
             }
         }
 

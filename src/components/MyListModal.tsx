@@ -8,11 +8,11 @@ import { getLocalMovies } from '../services/movieStorage';
 interface MyListModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelectMovie: (movie: any) => void;
+  onSelectMovie?: (movie: any) => void;
   onPlayMovie: (movie: any) => void;
 }
 
-export default function MyListModal({ isOpen, onClose, onSelectMovie, onPlayMovie }: MyListModalProps) {
+export default function MyListModal({ isOpen, onClose, onPlayMovie }: MyListModalProps) {
   const { user } = useAuth();
   const [listItems, setListItems] = useState<MyListItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -98,7 +98,7 @@ export default function MyListModal({ isOpen, onClose, onSelectMovie, onPlayMovi
                   <div
                     key={item.movieId}
                     onClick={() => {
-                      onSelectMovie(movie);
+                      onPlayMovie(movie);
                       onClose();
                     }}
                     className="group relative bg-neutral-950 rounded-xl overflow-hidden border border-neutral-800 hover:border-red-600/60 transition-all cursor-pointer flex flex-col shadow-lg"
