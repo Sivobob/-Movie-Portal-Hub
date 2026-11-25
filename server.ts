@@ -99,7 +99,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     time: new Date().toISOString(),
-    version: '3.5.284',
+    version: '3.5.285',
     ffmpegAvailable: FFMPEG_AVAILABLE,
     ffprobeAvailable: FFPROBE_AVAILABLE,
     telegramConfigured,

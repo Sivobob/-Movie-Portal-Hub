@@ -375,15 +375,88 @@ export default function HomePage() {
     return () => clearInterval(interval);
   }, [category, featuredMovies.length, isUserInteracting, activeSlideIndex]);
 
+  const folderTabs: { label: string; value: string | null }[] = useMemo(
+    () => [
+      { label: 'All', value: null },
+      { label: 'Bollywood', value: 'Bollywood' },
+      { label: 'Hollywood', value: 'Hollywood' },
+      { label: 'Series', value: 'Series' },
+    ],
+    []
+  );
+
+  const navigateCategoryBySwipe = (direction: 'left' | 'right') => {
+    const currentIdx = folderTabs.findIndex((t) => t.value === category);
+    const activeIdx = currentIdx >= 0 ? currentIdx : 0;
+    if (direction === 'left') {
+      const nextIdx = (activeIdx + 1) % folderTabs.length;
+      setCategory(folderTabs[nextIdx].value, true);
+    } else {
+      const prevIdx = (activeIdx - 1 + folderTabs.length) % folderTabs.length;
+      setCategory(folderTabs[prevIdx].value, true);
+    }
+  };
+
+  const pageTouchStartRef = useRef<{ x: number; y: number; time: number; insideHScroll: boolean } | null>(null);
+
+  const handlePageTouchStart = (e: React.TouchEvent) => {
+    if (selectedMovie || playingMovie) return;
+    const touch = e.touches[0];
+    if (!touch) return;
+    const target = e.target as HTMLElement | null;
+    const insideHScroll = Boolean(target?.closest?.('.overflow-x-auto, [data-no-swipe]'));
+    pageTouchStartRef.current = {
+      x: touch.clientX,
+      y: touch.clientY,
+      time: Date.now(),
+      insideHScroll,
+    };
+  };
+
+  const handlePageTouchEnd = (e: React.TouchEvent) => {
+    if (!pageTouchStartRef.current) return;
+    const start = pageTouchStartRef.current;
+    pageTouchStartRef.current = null;
+    if (selectedMovie || playingMovie) return;
+
+    const touch = e.changedTouches[0];
+    if (!touch) return;
+    const diffX = touch.clientX - start.x;
+    const diffY = touch.clientY - start.y;
+    const absX = Math.abs(diffX);
+    const absY = Math.abs(diffY);
+    const elapsed = Date.now() - start.time;
+
+    if (absX >= 45 && absX > absY * 1.35 && elapsed < 650) {
+      if (start.insideHScroll && absX < 90) return;
+      if (diffX < 0) {
+        navigateCategoryBySwipe('left');
+      } else {
+        navigateCategoryBySwipe('right');
+      }
+    }
+  };
+
   const handleManualSwipe = (direction: 'left' | 'right') => {
-    if (featuredMovies.length <= 1) return;
+    if (featuredMovies.length <= 1) {
+      navigateCategoryBySwipe(direction);
+      return;
+    }
     handleInteractionStart();
     if (direction === 'left') {
-      setSlideDirection(1);
-      setActiveSlideIndex((prev) => (prev + 1) % featuredMovies.length);
+      if (activeSlideIndex === featuredMovies.length - 1) {
+        navigateCategoryBySwipe('left');
+      } else {
+        setSlideDirection(1);
+        setActiveSlideIndex((prev) => (prev + 1) % featuredMovies.length);
+      }
     } else {
-      setSlideDirection(-1);
-      setActiveSlideIndex((prev) => (prev - 1 + featuredMovies.length) % featuredMovies.length);
+      if (activeSlideIndex === 0) {
+        navigateCategoryBySwipe('right');
+      } else {
+        setSlideDirection(-1);
+        setActiveSlideIndex((prev) => (prev - 1 + featuredMovies.length) % featuredMovies.length);
+      }
     }
     handleInteractionEnd();
   };
@@ -677,13 +750,6 @@ export default function HomePage() {
     );
   });
 
-  const folderTabs: { label: string; value: string | null }[] = [
-    { label: 'All', value: null },
-    { label: 'Bollywood', value: 'Bollywood' },
-    { label: 'Hollywood', value: 'Hollywood' },
-    { label: 'Series', value: 'Series' },
-  ];
-
   const renderFolderTabRow = (overHero: boolean) => (
     <div
       className={
@@ -700,13 +766,16 @@ export default function HomePage() {
               key={tab.label}
               type="button"
               onClick={() => setCategory(tab.value)}
-              className={`min-h-[40px] flex items-center cursor-pointer whitespace-nowrap flex-shrink-0 transition-all tracking-tight drop-shadow-[0_1px_6px_rgba(0,0,0,0.85)] ${
+              className={`min-h-[40px] relative pb-1 flex items-center cursor-pointer whitespace-nowrap flex-shrink-0 transition-all tracking-tight drop-shadow-[0_1px_6px_rgba(0,0,0,0.85)] ${
                 isActive
                   ? 'text-white font-bold text-[17px] sm:text-[18px]'
                   : 'text-[#b4b9c2] hover:text-white font-normal text-[16px] sm:text-[17px]'
               }`}
             >
-              {tab.label}
+              <span>{tab.label}</span>
+              {isActive && (
+                <span className="absolute bottom-0 left-0 right-0 h-[2.5px] bg-red-600 rounded-full" />
+              )}
             </button>
           );
         })}
@@ -715,7 +784,11 @@ export default function HomePage() {
   );
 
   return (
-    <div className="relative flex-1 w-full max-w-full bg-black text-white flex flex-col select-none touch-pan-y pt-0 pb-[calc(5.75rem+env(safe-area-inset-bottom))]">
+    <div
+      className="relative flex-1 w-full max-w-full bg-black text-white flex flex-col select-none touch-pan-y pt-0 pb-[calc(5.75rem+env(safe-area-inset-bottom))]"
+      onTouchStart={handlePageTouchStart}
+      onTouchEnd={handlePageTouchEnd}
+    >
 
       {toastMessage && (
         <div className="fixed top-[max(4.25rem,env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-[120] bg-neutral-900/95 border border-red-600/50 text-white text-xs font-bold px-4 py-2.5 rounded-full shadow-2xl backdrop-blur-md max-w-[90vw] truncate">

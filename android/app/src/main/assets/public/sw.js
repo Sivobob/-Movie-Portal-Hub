@@ -102,19 +102,19 @@ define(['./workbox-a3775579'], (function (workbox) { 'use strict';
     "url": "assets/workbox-window.prod.es5-BBnX5xw4.js",
     "revision": null
   }, {
-    "url": "assets/web-pcUDNP3t.js",
+    "url": "assets/web-pdQXrAGW.js",
     "revision": null
   }, {
-    "url": "assets/index-D9o1Ifqi.css",
+    "url": "assets/index-DHVBQCck.css",
     "revision": null
   }, {
-    "url": "assets/index-D4KeqAfW.js",
+    "url": "assets/index-B7oXowxI.js",
     "revision": null
   }, {
-    "url": "assets/esm-BX6oo3LO.js",
+    "url": "assets/esm-BNOm8u1N.js",
     "revision": null
   }, {
-    "url": "assets/browserTelegramStream-BZU-DVxE.js",
+    "url": "assets/browserTelegramStream-w3peAzyS.js",
     "revision": null
   }, {
     "url": "assets/icons/master_icon.png",

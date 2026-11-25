@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.284",
-  "minimumRequiredVersion": "3.5.284",
-  "latestVersionCode": 35284,
-  "minimumRequiredVersionCode": 35284,
+  "latestVersion": "3.5.285",
+  "minimumRequiredVersion": "3.5.285",
+  "latestVersionCode": 35285,
+  "minimumRequiredVersionCode": 35285,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Hub v3.5.284: Enhanced audio verification and stricter no-audio screening for catalog movies and series.",
-  "releaseNotes": "v3.5.284: Strengthened audio checking pipeline and strict silent stream rejection during catalog sync."
+  "updateMessage": "Movie Hub v3.5.285: Horizontal swipe gesture navigation between All, Bollywood, Hollywood, and Series sections.",
+  "releaseNotes": "v3.5.285: Added smooth horizontal swipe screen navigation across All, Bollywood, Hollywood, and Series sections with instant real-time live sync."
 }
