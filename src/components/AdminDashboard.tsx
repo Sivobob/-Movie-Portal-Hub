@@ -1298,11 +1298,15 @@ export default function AdminDashboard() {
         }));
         try {
           if (isFirestoreWriteAllowed()) {
-            await guardedFirestoreWrite(() =>
-              updateDoc(doc(db, 'movies', editingMovie.id), {
+            const safeDocPayload = Object.fromEntries(
+              Object.entries({
+                ...editingMovie,
                 seasons: updatedMovieSeasons,
                 updatedAt: serverTimestamp(),
-              })
+              }).filter(([, v]) => v !== undefined)
+            );
+            await guardedFirestoreWrite(() =>
+              setDoc(doc(db, 'movies', editingMovie.id), safeDocPayload, { merge: true })
             );
           }
           const updatedMovie: MovieData = {
@@ -2679,7 +2683,14 @@ export default function AdminDashboard() {
       if (editingMovie) {
         const wRes = isFirestoreWriteAllowed()
           ? await guardedFirestoreWrite(() =>
-              updateDoc(doc(db, 'movies', editingMovie.id), moviePayload)
+              setDoc(
+                doc(db, 'movies', editingMovie.id),
+                {
+                  ...moviePayload,
+                  createdAt: editingMovie.createdAt ?? serverTimestamp(),
+                },
+                { merge: true }
+              )
             )
           : { ok: false, quotaExhausted: true, error: undefined };
 

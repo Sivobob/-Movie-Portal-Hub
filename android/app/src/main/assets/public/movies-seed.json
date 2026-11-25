@@ -1455,10 +1455,7 @@
             "streamUrl": "https://t.me/c/4451036277/3161",
             "duration": "04:00:35",
             "durationSec": 14435,
-            "showInNewEpisodes": true,
-            "newEpisodeEnabledAt": 1795592544319,
-            "createdAt": 1795592544319,
-            "addedAt": 1795592544319
+            "showInNewEpisodes": false
           }
         ]
       }
@@ -1505,10 +1502,7 @@
             "streamUrl": "https://t.me/c/4451036277/3154",
             "duration": "08:06:16",
             "durationSec": 29176,
-            "showInNewEpisodes": true,
-            "newEpisodeEnabledAt": 1795592541899,
-            "createdAt": 1795592541899,
-            "addedAt": 1795592541899
+            "showInNewEpisodes": false
           },
           {
             "episodeNumber": 8,
@@ -1517,10 +1511,7 @@
             "streamUrl": "https://t.me/c/4451036277/3155",
             "duration": "08:11:16",
             "durationSec": 29476,
-            "showInNewEpisodes": true,
-            "newEpisodeEnabledAt": 1795592543886,
-            "createdAt": 1795592543886,
-            "addedAt": 1795592543886
+            "showInNewEpisodes": false
           }
         ]
       }
@@ -17189,11 +17180,9 @@
             "duration": "23:06",
             "showInNewEpisodes": false,
             "episodeNumber": 18,
-            "addedAt": 1794896506607,
             "durationSec": 1386,
             "title": "Episode 18",
-            "streamUrl": "https://t.me/Naruto_Shippuden_HindiiDubb/177",
-            "createdAt": 1794896506607
+            "streamUrl": "https://t.me/Naruto_Shippuden_HindiiDubb/177"
           }
         ],
         "seasonNumber": 18

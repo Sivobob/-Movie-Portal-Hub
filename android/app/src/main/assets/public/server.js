@@ -8351,10 +8351,7 @@ async function runServerAutoSyncPass(reason) {
             streamUrl: draft.streamUrl.trim(),
             ...durationFormatted ? { duration: durationFormatted } : {},
             ...bestDurSec > 0 ? { durationSec: bestDurSec } : {},
-            showInNewEpisodes: true,
-            newEpisodeEnabledAt: nowMs,
-            createdAt: nowMs,
-            addedAt: nowMs
+            showInNewEpisodes: false
           };
           const seriesImdbId = (existingRec?.imdbId || draft.imdbId || "").trim();
           const expectedCounts = seriesImdbId ? await fetchExpectedSeasonEpisodeCounts(seriesImdbId) : null;
@@ -10447,7 +10444,7 @@ app3.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
     time: (/* @__PURE__ */ new Date()).toISOString(),
-    version: "3.5.282",
+    version: "3.5.283",
     ffmpegAvailable: FFMPEG_AVAILABLE,
     ffprobeAvailable: FFPROBE_AVAILABLE,
     telegramConfigured,

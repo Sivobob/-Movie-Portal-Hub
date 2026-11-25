@@ -5379,10 +5379,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
             streamUrl: draft.streamUrl.trim(),
             ...(durationFormatted ? { duration: durationFormatted } : {}),
             ...(bestDurSec > 0 ? { durationSec: bestDurSec } : {}),
-            showInNewEpisodes: true,
-            newEpisodeEnabledAt: nowMs,
-            createdAt: nowMs,
-            addedAt: nowMs,
+            showInNewEpisodes: false,
           };
 
           const seriesImdbId = (existingRec?.imdbId || draft.imdbId || '').trim();

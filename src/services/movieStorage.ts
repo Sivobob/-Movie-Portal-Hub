@@ -210,7 +210,7 @@ export function sortMoviesList<T extends Partial<MovieData>>(list: T[]): T[] {
 
 const IDB_NAME = 'mp_catalog_cache_v1';
 const IDB_STORE = 'catalog';
-const IDB_KEY = 'movies_v2';
+const IDB_KEY = 'movies_v3';
 
 function openCatalogDb(): Promise<IDBDatabase | null> {
   if (typeof window === 'undefined' || !('indexedDB' in window)) return Promise.resolve(null);
@@ -442,7 +442,7 @@ export async function deleteMovieFromFirestore(id: string): Promise<void> {
   }
 }
 
-const STORAGE_KEY = 'movie_portal_movies_v3';
+const STORAGE_KEY = 'movie_portal_movies_v4';
 
 export const DEFAULT_INITIAL_MOVIES: MovieData[] = [];
 
