@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.283",
-  "minimumRequiredVersion": "3.5.283",
-  "latestVersionCode": 35283,
-  "minimumRequiredVersionCode": 35283,
+  "latestVersion": "3.5.284",
+  "minimumRequiredVersion": "3.5.284",
+  "latestVersionCode": 35284,
+  "minimumRequiredVersionCode": 35284,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Hub v3.5.283: Episodes will no longer be auto-added to New Episodes — only episodes you manually turn ON in Admin will appear in New Episodes.",
-  "releaseNotes": "v3.5.283: Disabled automatic showInNewEpisodes during Telegram auto-sync, cleared pre-flagged episodes, and fixed manual New Episode toggle persistence via setDoc merge."
+  "updateMessage": "Movie Hub v3.5.284: Enhanced audio verification and stricter no-audio screening for catalog movies and series.",
+  "releaseNotes": "v3.5.284: Strengthened audio checking pipeline and strict silent stream rejection during catalog sync."
 }

@@ -776,11 +776,30 @@ export async function checkTelegramDocHasAudioFast(
       firstBlock[2] === 0xdf &&
       firstBlock[3] === 0xa3
     ) {
-      const tracksIdx = findSequence(firstBlock, [0x16, 0x54, 0xae, 0x6b]);
+      let scanBuf = firstBlock;
+      let tracksIdx = findSequence(scanBuf, [0x16, 0x54, 0xae, 0x6b]);
+      if (tracksIdx < 0 && docInfo.fileSize > BLOCK_SIZE) {
+        try {
+          const secondBlock = await fetchBlock(client, docInfo.document, 1);
+          if (secondBlock && secondBlock.length > 0) {
+            scanBuf = Buffer.concat([firstBlock, secondBlock]);
+            tracksIdx = findSequence(scanBuf, [0x16, 0x54, 0xae, 0x6b]);
+          }
+        } catch {}
+      }
       if (tracksIdx >= 0) {
-        const clusterIdx = findSequence(firstBlock, [0x1f, 0x43, 0xb6, 0x75], tracksIdx + 4);
-        const searchEnd = clusterIdx > tracksIdx ? clusterIdx : firstBlock.length;
-        const tracksSlice = firstBlock.subarray(tracksIdx, searchEnd);
+        let clusterIdx = findSequence(scanBuf, [0x1f, 0x43, 0xb6, 0x75], tracksIdx + 4);
+        if (clusterIdx < 0 && scanBuf === firstBlock && docInfo.fileSize > BLOCK_SIZE) {
+          try {
+            const secondBlock = await fetchBlock(client, docInfo.document, 1);
+            if (secondBlock && secondBlock.length > 0) {
+              scanBuf = Buffer.concat([firstBlock, secondBlock]);
+              clusterIdx = findSequence(scanBuf, [0x1f, 0x43, 0xb6, 0x75], tracksIdx + 4);
+            }
+          } catch {}
+        }
+        const searchEnd = clusterIdx > tracksIdx ? clusterIdx : scanBuf.length;
+        const tracksSlice = scanBuf.subarray(tracksIdx, searchEnd);
 
         const hasAudioCodec = bufferContainsAnyAscii(tracksSlice, [
           'A_AAC',
@@ -804,7 +823,7 @@ export async function checkTelegramDocHasAudioFast(
         }
 
         // If we reached Cluster or end of small file, Tracks is complete with 0 audio tracks
-        if (clusterIdx > tracksIdx || docInfo.fileSize <= BLOCK_SIZE) {
+        if (clusterIdx > tracksIdx || docInfo.fileSize <= scanBuf.length) {
           return false;
         }
       }

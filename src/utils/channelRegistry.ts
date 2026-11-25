@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { Api, TelegramClient } from 'telegram';
 import bigInt from 'big-integer';
-import { ParsedTelegramLink } from './telegramParser.ts';
+import type { ParsedTelegramLink } from './telegramParser.ts';
 import { isTelegramAuthKeyError, resetTelegramClient } from './telegramClient.ts';
 
 export interface CachedChannelInfo {

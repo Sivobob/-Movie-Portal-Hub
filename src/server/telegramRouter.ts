@@ -4669,6 +4669,268 @@ router.post('/trigger-auto-sync', async (_req: Request, res: Response) => {
   }
 });
 
+let cachedAudioAuditContext: {
+  fetchedAt: number;
+  allMovies: any[];
+  refs: Array<{
+    movieId: string;
+    title: string;
+    releaseYear: any;
+    category: string;
+    label: string;
+    url: string;
+    channelId: string;
+    msgId: number;
+  }>;
+  uniqueRefs: Array<{
+    movieId: string;
+    title: string;
+    releaseYear: any;
+    category: string;
+    label: string;
+    url: string;
+    channelId: string;
+    msgId: number;
+  }>;
+  msgMap: Map<string, any>;
+} | null = null;
+
+router.get('/audit-catalog-audio', async (req: Request, res: Response) => {
+  try {
+    const deepProbeAll = String(req.query.deep || '') === '1';
+    const refreshCache = String(req.query.refresh || '') === '1';
+    const offset = Math.max(0, Number(req.query.offset) || 0);
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 60));
+    const client = await getTelegramClient();
+
+    if (!cachedAudioAuditContext || refreshCache || Date.now() - cachedAudioAuditContext.fetchedAt > 15 * 60_000) {
+      const byId = new Map<string, any>();
+
+      try {
+        if (fs.existsSync('public/movies-seed.json')) {
+          const seedArr = JSON.parse(fs.readFileSync('public/movies-seed.json', 'utf8'));
+          if (Array.isArray(seedArr)) {
+            for (const m of seedArr) {
+              if (m && m.id) byId.set(m.id, m);
+            }
+          }
+        }
+      } catch {}
+
+      try {
+        const fsSnap = await Promise.race([
+          getDocsFromServer(collection(db, 'movies')),
+          new Promise<null>((r) => setTimeout(() => r(null), 10000)),
+        ]);
+        if (fsSnap) {
+          fsSnap.docs.forEach((d) => {
+            const data = d.data() as any;
+            const prev = byId.get(d.id) || {};
+            byId.set(d.id, { ...prev, ...data, id: d.id });
+          });
+        }
+      } catch {}
+
+      const allMovies = Array.from(byId.values());
+      const refs: NonNullable<typeof cachedAudioAuditContext>['refs'] = [];
+
+      const addRef = (m: any, label: string, rawUrl: any) => {
+        const url = String(rawUrl || '').trim();
+        if (!url) return;
+        const p = parseTelegramUrl(url);
+        if (!p.isValid || p.isInviteLink || !p.messageId) return;
+        const chId = String(p.rawChannelId || p.chatId || '').replace(/^-100/, '');
+        const msgId = Number(p.messageId);
+        if (!chId || !Number.isFinite(msgId) || msgId <= 0) return;
+        refs.push({
+          movieId: m.id,
+          title: String(m.title || ''),
+          releaseYear: m.releaseYear,
+          category: String(m.category || m.originalCategory || ''),
+          label,
+          url,
+          channelId: chId,
+          msgId,
+        });
+      };
+
+      for (const m of allMovies) {
+        addRef(m, 'primary', m.streamingUrl);
+        if (m.videoQualities && typeof m.videoQualities === 'object') {
+          for (const [q, u] of Object.entries(m.videoQualities)) {
+            if (typeof u === 'string') addRef(m, `quality:${q}`, u);
+          }
+        }
+        if (Array.isArray(m.seasons)) {
+          for (const s of m.seasons) {
+            for (const ep of s.episodes || []) {
+              addRef(m, `S${s.seasonNumber}E${ep.episodeNumber}`, ep.streamUrl);
+              if (ep.videoQualities && typeof ep.videoQualities === 'object') {
+                for (const [q, u] of Object.entries(ep.videoQualities)) {
+                  if (typeof u === 'string') {
+                    addRef(m, `S${s.seasonNumber}E${ep.episodeNumber}:${q}`, u);
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      const uniqueRefByUrl = new Map<string, (typeof refs)[number]>();
+      for (const r of refs) {
+        if (!uniqueRefByUrl.has(r.url)) uniqueRefByUrl.set(r.url, r);
+      }
+      const uniqueRefs = Array.from(uniqueRefByUrl.values()).sort((a, b) => b.msgId - a.msgId);
+
+      cachedAudioAuditContext = {
+        fetchedAt: Date.now(),
+        allMovies,
+        refs,
+        uniqueRefs,
+        msgMap: new Map<string, any>(),
+      };
+    }
+
+    const { allMovies, refs, uniqueRefs, msgMap } = cachedAudioAuditContext;
+    const sliceRefs = uniqueRefs.slice(offset, offset + limit);
+
+    // Fetch Telegram messages ONLY for uncached refs in the current page
+    const missingByChannel = new Map<string, Set<number>>();
+    for (const r of sliceRefs) {
+      if (!msgMap.has(`${r.channelId}:${r.msgId}`)) {
+        if (!missingByChannel.has(r.channelId)) missingByChannel.set(r.channelId, new Set());
+        missingByChannel.get(r.channelId)!.add(r.msgId);
+      }
+    }
+
+    for (const [chId, idSet] of missingByChannel.entries()) {
+      const accessHash = getCachedAccessHash(chId);
+      let peer: any = null;
+      if (accessHash && /^\d+$/.test(chId)) {
+        peer = new Api.InputPeerChannel({
+          channelId: BigInt(chId) as any,
+          accessHash: BigInt(accessHash) as any,
+        });
+      } else {
+        try {
+          peer = await Promise.race([
+            client.getEntity(/^\d+$/.test(chId) ? `-100${chId}` : chId),
+            new Promise<null>((r) => setTimeout(() => r(null), 8000)),
+          ]);
+        } catch {}
+      }
+      if (!peer) continue;
+      const ids = Array.from(idSet).sort((a, b) => b - a);
+      for (let i = 0; i < ids.length; i += 100) {
+        const chunk = ids.slice(i, i + 100);
+        try {
+          const msgs = await Promise.race([
+            client.getMessages(peer, { ids: chunk }),
+            new Promise<null>((r) => setTimeout(() => r(null), 12000)),
+          ]);
+          for (const msg of msgs || []) {
+            if (msg && (msg as any).id) {
+              msgMap.set(`${chId}:${(msg as any).id}`, msg);
+            }
+          }
+        } catch (err) {
+          console.warn(`[AudioAudit] getMessages chunk failed for ${chId}:`, err);
+        }
+      }
+    }
+
+    const urlStatus = new Map<string, any>();
+
+    await mapWithConcurrency(sliceRefs, 4, async (r) => {
+      const msg = msgMap.get(`${r.channelId}:${r.msgId}`);
+      if (!msg) {
+        urlStatus.set(r.url, { url: r.url, issue: 'missing_message', fastAudio: false, probedAudio: false, audioTracksCount: 0, audioCodec: '' });
+        return;
+      }
+      const classified = classifyTelegramDocMedia(msg);
+      if (classified.kind !== 'video') {
+        urlStatus.set(r.url, { url: r.url, fileName: classified.fileName || '', mime: classified.mime || '', issue: `not_video:${classified.kind}`, fastAudio: false, probedAudio: false, audioTracksCount: 0, audioCodec: '' });
+        return;
+      }
+      if (classified.hasExplicitNoSound) {
+        urlStatus.set(r.url, { url: r.url, fileName: classified.fileName, mime: classified.mime, issue: 'tg_nosound_flag', fastAudio: false, probedAudio: false, audioTracksCount: 0, audioCodec: '' });
+        return;
+      }
+      if (/\bno[\s._-]*(sound|audio)\b|\bsilent\b|\bmute\b/i.test(`${classified.fileName} ${classified.caption}`)) {
+        urlStatus.set(r.url, { url: r.url, fileName: classified.fileName, mime: classified.mime, issue: 'filename_no_sound', fastAudio: false, probedAudio: false, audioTracksCount: 0, audioCodec: '' });
+        return;
+      }
+
+      const entry = primeMediaCacheFromTelegramDoc(
+        r.url,
+        classified.doc,
+        classified.fileName,
+        classified.durationSec,
+        classified.mime
+      );
+      let fastAudio: boolean | null = null;
+      if (entry) {
+        fastAudio = await Promise.race([
+          checkTelegramDocHasAudioFast(client, entry.docInfo).catch(() => null),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 6000)),
+        ]);
+      }
+
+      let probedAudio: boolean | null = null;
+      let audioTracksCount = 0;
+      let audioCodec = '';
+      if (entry && (fastAudio !== true || deepProbeAll)) {
+        const probe = await ensureMediaProbed(entry, r.url, {
+          timeoutMs: 12000,
+          probesize: 1_500_000,
+          analyzeduration: 1_500_000,
+        }).catch(() => null);
+        if (probe?.probedByFfprobe) {
+          audioTracksCount = probe.audioTracks.length;
+          audioCodec = probe.audioCodec || '';
+          probedAudio = audioTracksCount > 0 || Boolean(audioCodec && audioCodec !== 'none');
+        }
+      }
+
+      let issue = '';
+      if (probedAudio === false) issue = 'ffprobe_zero_audio';
+      else if (fastAudio === false && probedAudio !== true) issue = 'header_zero_audio';
+      else if (fastAudio !== true && probedAudio !== true) issue = 'unverified_audio';
+
+      urlStatus.set(r.url, {
+        url: r.url,
+        fileName: classified.fileName,
+        mime: classified.mime,
+        fastAudio,
+        probedAudio,
+        audioTracksCount,
+        audioCodec,
+        issue,
+      });
+    });
+
+    const badRefs = refs
+      .filter((r) => urlStatus.has(r.url) && Boolean(urlStatus.get(r.url).issue))
+      .map((r) => ({ ...r, ...urlStatus.get(r.url) }));
+
+    return res.json({
+      success: true,
+      totalMovies: allMovies.length,
+      totalRefs: refs.length,
+      uniqueUrls: uniqueRefs.length,
+      offset,
+      checked: sliceRefs.length,
+      nextOffset: offset + sliceRefs.length < uniqueRefs.length ? offset + sliceRefs.length : null,
+      badCount: badRefs.length,
+      badRefs,
+    });
+  } catch (err: any) {
+    console.error('[AudioAudit] Error:', err);
+    return res.status(500).json({ error: err?.message || 'Audit failed' });
+  }
+});
+
 let serverAutoSyncTimer: NodeJS.Timeout | null = null;
 let serverAutoSyncRunning = false;
 let pendingResyncReason: string | null = null;

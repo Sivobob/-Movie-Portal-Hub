@@ -2947,11 +2947,32 @@ async function checkTelegramDocHasAudioFast(client2, docInfo) {
     const firstBlock = await fetchBlock(client2, docInfo.document, 0);
     if (!firstBlock || firstBlock.length < 16) return null;
     if (firstBlock[0] === 26 && firstBlock[1] === 69 && firstBlock[2] === 223 && firstBlock[3] === 163) {
-      const tracksIdx = findSequence(firstBlock, [22, 84, 174, 107]);
+      let scanBuf = firstBlock;
+      let tracksIdx = findSequence(scanBuf, [22, 84, 174, 107]);
+      if (tracksIdx < 0 && docInfo.fileSize > BLOCK_SIZE) {
+        try {
+          const secondBlock = await fetchBlock(client2, docInfo.document, 1);
+          if (secondBlock && secondBlock.length > 0) {
+            scanBuf = Buffer.concat([firstBlock, secondBlock]);
+            tracksIdx = findSequence(scanBuf, [22, 84, 174, 107]);
+          }
+        } catch {
+        }
+      }
       if (tracksIdx >= 0) {
-        const clusterIdx = findSequence(firstBlock, [31, 67, 182, 117], tracksIdx + 4);
-        const searchEnd = clusterIdx > tracksIdx ? clusterIdx : firstBlock.length;
-        const tracksSlice = firstBlock.subarray(tracksIdx, searchEnd);
+        let clusterIdx = findSequence(scanBuf, [31, 67, 182, 117], tracksIdx + 4);
+        if (clusterIdx < 0 && scanBuf === firstBlock && docInfo.fileSize > BLOCK_SIZE) {
+          try {
+            const secondBlock = await fetchBlock(client2, docInfo.document, 1);
+            if (secondBlock && secondBlock.length > 0) {
+              scanBuf = Buffer.concat([firstBlock, secondBlock]);
+              clusterIdx = findSequence(scanBuf, [31, 67, 182, 117], tracksIdx + 4);
+            }
+          } catch {
+          }
+        }
+        const searchEnd = clusterIdx > tracksIdx ? clusterIdx : scanBuf.length;
+        const tracksSlice = scanBuf.subarray(tracksIdx, searchEnd);
         const hasAudioCodec = bufferContainsAnyAscii(tracksSlice, [
           "A_AAC",
           "A_AC3",
@@ -2970,7 +2991,7 @@ async function checkTelegramDocHasAudioFast(client2, docInfo) {
         if (findSequence(tracksSlice, [131, 129, 2]) >= 0) {
           return true;
         }
-        if (clusterIdx > tracksIdx || docInfo.fileSize <= BLOCK_SIZE) {
+        if (clusterIdx > tracksIdx || docInfo.fileSize <= scanBuf.length) {
           return false;
         }
       }
@@ -3660,9 +3681,6 @@ function hasConfirmedAudioTrack(input) {
       return { confirmed: true, definitelyNoAudio: false };
     }
     return { confirmed: false, definitelyNoAudio: true };
-  }
-  if (input.hasVideoAttr) {
-    return { confirmed: true, definitelyNoAudio: false };
   }
   return { confirmed: false, definitelyNoAudio: false };
 }
@@ -7810,6 +7828,223 @@ router2.post("/trigger-auto-sync", async (_req, res) => {
     return res.status(500).json({ error: err?.message || "Auto-sync trigger failed." });
   }
 });
+var cachedAudioAuditContext = null;
+router2.get("/audit-catalog-audio", async (req, res) => {
+  try {
+    const deepProbeAll = String(req.query.deep || "") === "1";
+    const refreshCache = String(req.query.refresh || "") === "1";
+    const offset = Math.max(0, Number(req.query.offset) || 0);
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 60));
+    const client2 = await getTelegramClient();
+    if (!cachedAudioAuditContext || refreshCache || Date.now() - cachedAudioAuditContext.fetchedAt > 15 * 6e4) {
+      const byId = /* @__PURE__ */ new Map();
+      try {
+        if (fs4.existsSync("public/movies-seed.json")) {
+          const seedArr = JSON.parse(fs4.readFileSync("public/movies-seed.json", "utf8"));
+          if (Array.isArray(seedArr)) {
+            for (const m of seedArr) {
+              if (m && m.id) byId.set(m.id, m);
+            }
+          }
+        }
+      } catch {
+      }
+      try {
+        const fsSnap = await Promise.race([
+          getDocsFromServer(collection(db, "movies")),
+          new Promise((r) => setTimeout(() => r(null), 1e4))
+        ]);
+        if (fsSnap) {
+          fsSnap.docs.forEach((d) => {
+            const data = d.data();
+            const prev = byId.get(d.id) || {};
+            byId.set(d.id, { ...prev, ...data, id: d.id });
+          });
+        }
+      } catch {
+      }
+      const allMovies2 = Array.from(byId.values());
+      const refs2 = [];
+      const addRef = (m, label, rawUrl) => {
+        const url = String(rawUrl || "").trim();
+        if (!url) return;
+        const p = parseTelegramUrl(url);
+        if (!p.isValid || p.isInviteLink || !p.messageId) return;
+        const chId = String(p.rawChannelId || p.chatId || "").replace(/^-100/, "");
+        const msgId = Number(p.messageId);
+        if (!chId || !Number.isFinite(msgId) || msgId <= 0) return;
+        refs2.push({
+          movieId: m.id,
+          title: String(m.title || ""),
+          releaseYear: m.releaseYear,
+          category: String(m.category || m.originalCategory || ""),
+          label,
+          url,
+          channelId: chId,
+          msgId
+        });
+      };
+      for (const m of allMovies2) {
+        addRef(m, "primary", m.streamingUrl);
+        if (m.videoQualities && typeof m.videoQualities === "object") {
+          for (const [q, u] of Object.entries(m.videoQualities)) {
+            if (typeof u === "string") addRef(m, `quality:${q}`, u);
+          }
+        }
+        if (Array.isArray(m.seasons)) {
+          for (const s of m.seasons) {
+            for (const ep of s.episodes || []) {
+              addRef(m, `S${s.seasonNumber}E${ep.episodeNumber}`, ep.streamUrl);
+              if (ep.videoQualities && typeof ep.videoQualities === "object") {
+                for (const [q, u] of Object.entries(ep.videoQualities)) {
+                  if (typeof u === "string") {
+                    addRef(m, `S${s.seasonNumber}E${ep.episodeNumber}:${q}`, u);
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      const uniqueRefByUrl = /* @__PURE__ */ new Map();
+      for (const r of refs2) {
+        if (!uniqueRefByUrl.has(r.url)) uniqueRefByUrl.set(r.url, r);
+      }
+      const uniqueRefs2 = Array.from(uniqueRefByUrl.values()).sort((a, b) => b.msgId - a.msgId);
+      cachedAudioAuditContext = {
+        fetchedAt: Date.now(),
+        allMovies: allMovies2,
+        refs: refs2,
+        uniqueRefs: uniqueRefs2,
+        msgMap: /* @__PURE__ */ new Map()
+      };
+    }
+    const { allMovies, refs, uniqueRefs, msgMap } = cachedAudioAuditContext;
+    const sliceRefs = uniqueRefs.slice(offset, offset + limit);
+    const missingByChannel = /* @__PURE__ */ new Map();
+    for (const r of sliceRefs) {
+      if (!msgMap.has(`${r.channelId}:${r.msgId}`)) {
+        if (!missingByChannel.has(r.channelId)) missingByChannel.set(r.channelId, /* @__PURE__ */ new Set());
+        missingByChannel.get(r.channelId).add(r.msgId);
+      }
+    }
+    for (const [chId, idSet] of missingByChannel.entries()) {
+      const accessHash = getCachedAccessHash(chId);
+      let peer = null;
+      if (accessHash && /^\d+$/.test(chId)) {
+        peer = new Api3.InputPeerChannel({
+          channelId: BigInt(chId),
+          accessHash: BigInt(accessHash)
+        });
+      } else {
+        try {
+          peer = await Promise.race([
+            client2.getEntity(/^\d+$/.test(chId) ? `-100${chId}` : chId),
+            new Promise((r) => setTimeout(() => r(null), 8e3))
+          ]);
+        } catch {
+        }
+      }
+      if (!peer) continue;
+      const ids = Array.from(idSet).sort((a, b) => b - a);
+      for (let i = 0; i < ids.length; i += 100) {
+        const chunk = ids.slice(i, i + 100);
+        try {
+          const msgs = await Promise.race([
+            client2.getMessages(peer, { ids: chunk }),
+            new Promise((r) => setTimeout(() => r(null), 12e3))
+          ]);
+          for (const msg of msgs || []) {
+            if (msg && msg.id) {
+              msgMap.set(`${chId}:${msg.id}`, msg);
+            }
+          }
+        } catch (err) {
+          console.warn(`[AudioAudit] getMessages chunk failed for ${chId}:`, err);
+        }
+      }
+    }
+    const urlStatus = /* @__PURE__ */ new Map();
+    await mapWithConcurrency(sliceRefs, 4, async (r) => {
+      const msg = msgMap.get(`${r.channelId}:${r.msgId}`);
+      if (!msg) {
+        urlStatus.set(r.url, { url: r.url, issue: "missing_message", fastAudio: false, probedAudio: false, audioTracksCount: 0, audioCodec: "" });
+        return;
+      }
+      const classified = classifyTelegramDocMedia(msg);
+      if (classified.kind !== "video") {
+        urlStatus.set(r.url, { url: r.url, fileName: classified.fileName || "", mime: classified.mime || "", issue: `not_video:${classified.kind}`, fastAudio: false, probedAudio: false, audioTracksCount: 0, audioCodec: "" });
+        return;
+      }
+      if (classified.hasExplicitNoSound) {
+        urlStatus.set(r.url, { url: r.url, fileName: classified.fileName, mime: classified.mime, issue: "tg_nosound_flag", fastAudio: false, probedAudio: false, audioTracksCount: 0, audioCodec: "" });
+        return;
+      }
+      if (/\bno[\s._-]*(sound|audio)\b|\bsilent\b|\bmute\b/i.test(`${classified.fileName} ${classified.caption}`)) {
+        urlStatus.set(r.url, { url: r.url, fileName: classified.fileName, mime: classified.mime, issue: "filename_no_sound", fastAudio: false, probedAudio: false, audioTracksCount: 0, audioCodec: "" });
+        return;
+      }
+      const entry = primeMediaCacheFromTelegramDoc(
+        r.url,
+        classified.doc,
+        classified.fileName,
+        classified.durationSec,
+        classified.mime
+      );
+      let fastAudio = null;
+      if (entry) {
+        fastAudio = await Promise.race([
+          checkTelegramDocHasAudioFast(client2, entry.docInfo).catch(() => null),
+          new Promise((resolve) => setTimeout(() => resolve(null), 6e3))
+        ]);
+      }
+      let probedAudio = null;
+      let audioTracksCount = 0;
+      let audioCodec = "";
+      if (entry && (fastAudio !== true || deepProbeAll)) {
+        const probe = await ensureMediaProbed(entry, r.url, {
+          timeoutMs: 12e3,
+          probesize: 15e5,
+          analyzeduration: 15e5
+        }).catch(() => null);
+        if (probe?.probedByFfprobe) {
+          audioTracksCount = probe.audioTracks.length;
+          audioCodec = probe.audioCodec || "";
+          probedAudio = audioTracksCount > 0 || Boolean(audioCodec && audioCodec !== "none");
+        }
+      }
+      let issue = "";
+      if (probedAudio === false) issue = "ffprobe_zero_audio";
+      else if (fastAudio === false && probedAudio !== true) issue = "header_zero_audio";
+      else if (fastAudio !== true && probedAudio !== true) issue = "unverified_audio";
+      urlStatus.set(r.url, {
+        url: r.url,
+        fileName: classified.fileName,
+        mime: classified.mime,
+        fastAudio,
+        probedAudio,
+        audioTracksCount,
+        audioCodec,
+        issue
+      });
+    });
+    const badRefs = refs.filter((r) => urlStatus.has(r.url) && Boolean(urlStatus.get(r.url).issue)).map((r) => ({ ...r, ...urlStatus.get(r.url) }));
+    return res.json({
+      success: true,
+      totalMovies: allMovies.length,
+      totalRefs: refs.length,
+      uniqueUrls: uniqueRefs.length,
+      offset,
+      checked: sliceRefs.length,
+      nextOffset: offset + sliceRefs.length < uniqueRefs.length ? offset + sliceRefs.length : null,
+      badCount: badRefs.length,
+      badRefs
+    });
+  } catch (err) {
+    console.error("[AudioAudit] Error:", err);
+    return res.status(500).json({ error: err?.message || "Audit failed" });
+  }
+});
 var serverAutoSyncTimer = null;
 var serverAutoSyncRunning = false;
 var pendingResyncReason = null;
@@ -10444,7 +10679,7 @@ app3.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
     time: (/* @__PURE__ */ new Date()).toISOString(),
-    version: "3.5.283",
+    version: "3.5.284",
     ffmpegAvailable: FFMPEG_AVAILABLE,
     ffprobeAvailable: FFPROBE_AVAILABLE,
     telegramConfigured,

@@ -81,11 +81,7 @@ export function hasConfirmedAudioTrack(input: {
     return { confirmed: false, definitelyNoAudio: true };
   }
 
-  // Fallback only when ffprobe couldn't inspect header; if Telegram DocumentAttributeVideo says nosound=false
-  if (input.hasVideoAttr) {
-    return { confirmed: true, definitelyNoAudio: false };
-  }
-
+  // If probe is missing/unavailable, do not assume confirmed audio (require probing)
   return { confirmed: false, definitelyNoAudio: false };
 }
 
