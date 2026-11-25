@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.281",
-  "minimumRequiredVersion": "3.5.281",
-  "latestVersionCode": 35281,
-  "minimumRequiredVersionCode": 35281,
+  "latestVersion": "3.5.282",
+  "minimumRequiredVersion": "3.5.282",
+  "latestVersionCode": 35282,
+  "minimumRequiredVersionCode": 35282,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Hub v3.5.281: 2026 release years fixed, incomplete & zero-episode series removed, Student of the Year: After Dark poster/title fixed, and instant channel sync ready.",
-  "releaseNotes": "v3.5.281: Fixed 2027->2026 metadata, removed incomplete & zero-episode series, fixed Student of the Year: After Dark duplicate, and updated bundled catalog."
+  "updateMessage": "Movie Hub v3.5.282: Featured Slide now strictly shows only 2026 uploads from the last 48 hours and auto-expires after 2 days; fixed all missing & slow mobile posters with bundled local posters and proxy fallback.",
+  "releaseNotes": "v3.5.282: Strict 48h 2026-only Featured Slide using real Telegram upload timestamps, eager & lightweight poster loading with proxy/retry fallback, and bundled Wikimedia posters."
 }

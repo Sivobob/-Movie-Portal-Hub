@@ -37,6 +37,7 @@ export interface AutoMatchedMovieDraft {
   channelId: string;
   channelTitle: string;
   msgId: number;
+  msgDateMs?: number;
   sourceMsgIds: number[];
   streamUrl: string;
   videoQualities: Record<string, string>;

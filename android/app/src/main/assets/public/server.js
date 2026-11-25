@@ -1637,6 +1637,67 @@ router.get("/detail", async (req, res) => {
   }
   return res.status(result.httpStatus || 404).json({ error: result.error || "Metadata details not found." });
 });
+var ALLOWED_POSTER_HOST_RE = /(?:^|\.)(media-amazon\.com|media-imdb\.com|images-amazon\.com|upload\.wikimedia\.org|image\.tmdb\.org|images\.unsplash\.com)$/i;
+var posterProxyCache = /* @__PURE__ */ new Map();
+var POSTER_PROXY_TTL_MS = 24 * 60 * 60 * 1e3;
+var MAX_POSTER_PROXY_ENTRIES = 250;
+router.get("/poster-proxy", async (req, res) => {
+  const rawUrl = String(req.query.url || "").trim();
+  if (!rawUrl) {
+    return res.status(400).json({ error: "Missing url parameter" });
+  }
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(rawUrl);
+  } catch {
+    return res.status(400).json({ error: "Invalid poster URL" });
+  }
+  if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
+    return res.status(400).json({ error: "Unsupported protocol" });
+  }
+  if (!ALLOWED_POSTER_HOST_RE.test(parsedUrl.hostname)) {
+    return res.status(403).json({ error: "Host not allowed" });
+  }
+  const cached = posterProxyCache.get(rawUrl);
+  if (cached && Date.now() - cached.storedAt < POSTER_PROXY_TTL_MS) {
+    res.setHeader("Content-Type", cached.contentType);
+    res.setHeader("Cache-Control", "public, max-age=604800");
+    return res.send(cached.data);
+  }
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1e4);
+    const upstream = await fetch(parsedUrl.toString(), {
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "MoviePortalHub/3.5 (https://github.com/Sivobob/-Movie-Portal-Hub)",
+        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"
+      }
+    });
+    clearTimeout(timer);
+    if (!upstream.ok) {
+      return res.status(upstream.status).json({ error: `Upstream returned ${upstream.status}` });
+    }
+    const contentType = String(upstream.headers.get("content-type") || "image/jpeg").split(";")[0].trim();
+    if (!contentType.startsWith("image/")) {
+      return res.status(415).json({ error: "Upstream response is not an image" });
+    }
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    if (buf.length === 0 || buf.length > 8 * 1024 * 1024) {
+      return res.status(502).json({ error: "Invalid image payload size" });
+    }
+    if (posterProxyCache.size >= MAX_POSTER_PROXY_ENTRIES) {
+      const oldestKey = posterProxyCache.keys().next().value;
+      if (oldestKey) posterProxyCache.delete(oldestKey);
+    }
+    posterProxyCache.set(rawUrl, { contentType, data: buf, storedAt: Date.now() });
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "public, max-age=604800");
+    return res.send(buf);
+  } catch (err) {
+    return res.status(502).json({ error: err?.message || "Failed to fetch poster" });
+  }
+});
 var metadataRouter_default = router;
 
 // src/server/telegramRouter.ts
@@ -8095,6 +8156,7 @@ async function runServerAutoSyncPass(reason) {
       );
       rawCandidates.push({
         msgId: Number(msg.id),
+        msgDateMs: Number(msg.date || 0) > 0 ? Number(msg.date) * 1e3 : 0,
         streamUrl,
         doc: classified.doc,
         mime: classified.mime,
@@ -8136,6 +8198,7 @@ async function runServerAutoSyncPass(reason) {
         }
         return {
           msgId: cand.msgId,
+          msgDateMs: cand.msgDateMs,
           streamUrl: cand.streamUrl,
           durationSec: check.durationSec || cand.durationSec,
           sizeBytes: cand.sizeBytes,
@@ -8213,11 +8276,14 @@ async function runServerAutoSyncPass(reason) {
       const bestDurSec = Math.max(0, ...grp.members.map((m) => m.durationSec || 0));
       const durationFormatted = bestDurSec > 0 ? formatDuration(bestDurSec) : "";
       const qualityBadge = filteredQualities["4K"] ? "4K" : "HD";
+      const msgDateList = grp.members.map((m) => m.msgDateMs).filter((t) => t > 0);
+      const realMsgDateMs = msgDateList.length > 0 ? Math.min(...msgDateList) : grp.primary.msgDateMs || 0;
       const draft = {
         draftId: `tg-${cleanChannelId}-${grp.primary.msgId}`,
         channelId: cleanChannelId,
         channelTitle,
         msgId: grp.primary.msgId,
+        msgDateMs: realMsgDateMs > 0 ? realMsgDateMs : void 0,
         sourceMsgIds: grp.members.map((m) => m.msgId),
         streamUrl: chosenStream,
         videoQualities: filteredQualities,
@@ -8260,6 +8326,7 @@ async function runServerAutoSyncPass(reason) {
       );
       if (cfg.autoPublishVerified) {
         const nowMs = Date.now();
+        const itemDateMs = realMsgDateMs > 0 ? realMsgDateMs : nowMs;
         const fallbackSvg = buildFallbackPosterDataUri(draft.title || mergedParsed.cleanTitle, candYear);
         const cleanPoster = (draft.posterUrl ? upgradePosterUrl(draft.posterUrl, 1080) || draft.posterUrl : "") || fallbackSvg;
         const cleanBackdrop = (draft.backdropUrl || draft.posterUrl ? upgradePosterUrl(draft.backdropUrl || cleanPoster, 1280) || cleanPoster : "") || fallbackSvg;
@@ -8400,8 +8467,9 @@ async function runServerAutoSyncPass(reason) {
               duration: bestDurSec || parseDurationToSeconds(draft.runtime) || 0,
               telegramMsgId: draft.msgId,
               telegramChannelId: cleanChannelId,
+              telegramDateMs: itemDateMs,
               updatedAt: nowMs,
-              createdAt: nowMs
+              createdAt: itemDateMs
             };
             seedCatalogMap.set(seriesDocId, seriesBase);
             await setDocWithQuotaGuard(
@@ -8409,7 +8477,7 @@ async function runServerAutoSyncPass(reason) {
               {
                 ...seriesBase,
                 updatedAt: serverTimestamp(),
-                createdAt: serverTimestamp()
+                createdAt: itemDateMs
               },
               { merge: true }
             ).catch(() => {
@@ -8534,8 +8602,9 @@ async function runServerAutoSyncPass(reason) {
           duration: draft.durationSec || parseDurationToSeconds(draft.runtime) || 0,
           telegramMsgId: draft.msgId,
           telegramChannelId: cleanChannelId,
+          telegramDateMs: itemDateMs,
           updatedAt: nowMs,
-          createdAt: nowMs
+          createdAt: itemDateMs
         };
         seedCatalogMap.set(deterministicDocId, movieBase);
         await setDocWithQuotaGuard(
@@ -8543,7 +8612,7 @@ async function runServerAutoSyncPass(reason) {
           {
             ...movieBase,
             updatedAt: serverTimestamp(),
-            createdAt: serverTimestamp()
+            createdAt: itemDateMs
           },
           { merge: true }
         ).catch(() => {
@@ -8922,6 +8991,7 @@ async function runBulkChannelSyncWorker(params) {
         );
         rawCands.push({
           msgId: Number(msg.id),
+          msgDateMs: Number(msg.date || 0) > 0 ? Number(msg.date) * 1e3 : 0,
           streamUrl,
           doc: classified.doc,
           mime: classified.mime,
@@ -8966,6 +9036,7 @@ async function runBulkChannelSyncWorker(params) {
           }
           return {
             msgId: cand.msgId,
+            msgDateMs: cand.msgDateMs,
             streamUrl: cand.streamUrl,
             durationSec: check.durationSec || cand.durationSec,
             sizeBytes: cand.sizeBytes,
@@ -9123,6 +9194,8 @@ async function runBulkChannelSyncWorker(params) {
               };
               existingUrlSet.add(bestStream.toLowerCase());
               existingRecords.push(newRec);
+              const bulkMsgDates = grp.members.map((m) => m.msgDateMs).filter((t) => t > 0);
+              const realBulkDateMs = (bulkMsgDates.length > 0 ? Math.min(...bulkMsgDates) : grp.primary.msgDateMs) || Date.now();
               const seriesPayload = {
                 id: seriesDocId,
                 title: matched.title.trim(),
@@ -9150,7 +9223,8 @@ async function runBulkChannelSyncWorker(params) {
                 duration: bestDurSec || parseDurationToSeconds(matched.runtime) || 0,
                 telegramMsgId: grp.primary.msgId,
                 telegramChannelId: cleanChannelId,
-                createdAt: Date.now(),
+                telegramDateMs: realBulkDateMs,
+                createdAt: realBulkDateMs,
                 updatedAt: Date.now()
               };
               seedCatalogMap.set(seriesDocId, {
@@ -9204,6 +9278,8 @@ async function runBulkChannelSyncWorker(params) {
               existingUrlSet.add(bestStream.toLowerCase());
             }
           } else {
+            const bulkMovieMsgDates = grp.members.map((m) => m.msgDateMs).filter((t) => t > 0);
+            const realMovieDateMs = (bulkMovieMsgDates.length > 0 ? Math.min(...bulkMovieMsgDates) : grp.primary.msgDateMs) || Date.now();
             const deterministicDocId = `tg_${cleanChannelId}_${grp.primary.msgId}`;
             const movieDocPayload = {
               id: deterministicDocId,
@@ -9233,8 +9309,9 @@ async function runBulkChannelSyncWorker(params) {
               duration: bestDurSec || parseDurationToSeconds(matched.runtime) || 0,
               telegramMsgId: grp.primary.msgId,
               telegramChannelId: cleanChannelId,
+              telegramDateMs: realMovieDateMs,
               updatedAt: Date.now(),
-              createdAt: Date.now()
+              createdAt: realMovieDateMs
             };
             seedCatalogMap.set(deterministicDocId, movieDocPayload);
             existingUrlSet.add(bestStream.toLowerCase());
@@ -10370,7 +10447,7 @@ app3.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
     time: (/* @__PURE__ */ new Date()).toISOString(),
-    version: "3.5.281",
+    version: "3.5.282",
     ffmpegAvailable: FFMPEG_AVAILABLE,
     ffprobeAvailable: FFPROBE_AVAILABLE,
     telegramConfigured,

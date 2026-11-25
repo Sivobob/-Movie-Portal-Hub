@@ -108,28 +108,25 @@ export default function HomePage() {
 
   const featuredMovies = useMemo(() => {
     const FORTY_EIGHT_HOURS_MS = 48 * 60 * 60 * 1000;
-    
-    // Only movies and series added within the last 2 days (48 hours), newest uploads first
-    const brandNewMovies = movies
+
+    // Strictly ONLY 2026 releases uploaded within the last 2 days (48 hours);
+    // once >48h pass they automatically leave the Featured Slide while remaining in the app.
+    const brandNew2026 = movies
       .filter((m: any) => {
         if (!m || m.published === false) return false;
-        const t = getTimestampMs(m.createdAt) || getTimestampMs(m.updatedAt) || 0;
-        if (t > 0) {
-          return (nowMs - t) < FORTY_EIGHT_HOURS_MS;
-        }
-        return is2026Release(m);
+        if (!is2026Release(m)) return false;
+        const t = getTimestampMs(m.telegramDateMs) || getTimestampMs(m.createdAt) || 0;
+        if (t <= 0) return false;
+        const ageMs = nowMs - t;
+        return ageMs >= -60_000 && ageMs < FORTY_EIGHT_HOURS_MS;
       })
       .sort((a: any, b: any) => {
-        const aTime = getTimestampMs(a.createdAt) || getTimestampMs(a.updatedAt) || 0;
-        const bTime = getTimestampMs(b.createdAt) || getTimestampMs(b.updatedAt) || 0;
+        const aTime = getTimestampMs(a.telegramDateMs) || getTimestampMs(a.createdAt) || 0;
+        const bTime = getTimestampMs(b.telegramDateMs) || getTimestampMs(b.createdAt) || 0;
         return bTime - aTime;
       });
 
-    if (brandNewMovies.length > 0) {
-      return brandNewMovies.slice(0, 5);
-    }
-
-    return movies.filter((m: any) => m && m.published !== false).slice(0, 5);
+    return brandNew2026.slice(0, 5);
   }, [movies, nowMs]);
 
   const categoryRef = useRef(category);
@@ -805,7 +802,7 @@ export default function HomePage() {
                       backdropUrl={currentFeatured.posterUrl}
                       title={currentFeatured.title}
                       year={currentFeatured.releaseYear}
-                      width={1600}
+                      width={900}
                       alt={currentFeatured.title}
                       loading="eager"
                       className="absolute inset-0 w-full h-full object-cover object-center brightness-105 contrast-105"

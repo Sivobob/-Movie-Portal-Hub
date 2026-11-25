@@ -546,4 +546,72 @@ router.get('/detail', async (req: Request, res: Response) => {
   return res.status(result.httpStatus || 404).json({ error: result.error || 'Metadata details not found.' });
 });
 
+const ALLOWED_POSTER_HOST_RE = /(?:^|\.)(media-amazon\.com|media-imdb\.com|images-amazon\.com|upload\.wikimedia\.org|image\.tmdb\.org|images\.unsplash\.com)$/i;
+const posterProxyCache = new Map<string, { contentType: string; data: Buffer; storedAt: number }>();
+const POSTER_PROXY_TTL_MS = 24 * 60 * 60 * 1000;
+const MAX_POSTER_PROXY_ENTRIES = 250;
+
+router.get('/poster-proxy', async (req: Request, res: Response) => {
+  const rawUrl = String(req.query.url || '').trim();
+  if (!rawUrl) {
+    return res.status(400).json({ error: 'Missing url parameter' });
+  }
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(rawUrl);
+  } catch {
+    return res.status(400).json({ error: 'Invalid poster URL' });
+  }
+  if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+    return res.status(400).json({ error: 'Unsupported protocol' });
+  }
+  if (!ALLOWED_POSTER_HOST_RE.test(parsedUrl.hostname)) {
+    return res.status(403).json({ error: 'Host not allowed' });
+  }
+
+  const cached = posterProxyCache.get(rawUrl);
+  if (cached && Date.now() - cached.storedAt < POSTER_PROXY_TTL_MS) {
+    res.setHeader('Content-Type', cached.contentType);
+    res.setHeader('Cache-Control', 'public, max-age=604800');
+    return res.send(cached.data);
+  }
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    const upstream = await fetch(parsedUrl.toString(), {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'MoviePortalHub/3.5 (https://github.com/Sivobob/-Movie-Portal-Hub)',
+        'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+      },
+    });
+    clearTimeout(timer);
+
+    if (!upstream.ok) {
+      return res.status(upstream.status).json({ error: `Upstream returned ${upstream.status}` });
+    }
+    const contentType = String(upstream.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
+    if (!contentType.startsWith('image/')) {
+      return res.status(415).json({ error: 'Upstream response is not an image' });
+    }
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    if (buf.length === 0 || buf.length > 8 * 1024 * 1024) {
+      return res.status(502).json({ error: 'Invalid image payload size' });
+    }
+
+    if (posterProxyCache.size >= MAX_POSTER_PROXY_ENTRIES) {
+      const oldestKey = posterProxyCache.keys().next().value;
+      if (oldestKey) posterProxyCache.delete(oldestKey);
+    }
+    posterProxyCache.set(rawUrl, { contentType, data: buf, storedAt: Date.now() });
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=604800');
+    return res.send(buf);
+  } catch (err: any) {
+    return res.status(502).json({ error: err?.message || 'Failed to fetch poster' });
+  }
+});
+
 export default router;

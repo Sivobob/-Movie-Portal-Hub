@@ -38,6 +38,7 @@ export interface MovieData {
   sourceMsgIds?: number[];
   createdAt?: any;
   updatedAt?: any;
+  telegramDateMs?: number;
   viewsCount?: number;
   contentType?: string | null;
   seasons?: Array<{
@@ -200,8 +201,8 @@ export function sortMoviesList<T extends Partial<MovieData>>(list: T[]): T[] {
   return [...list].sort((a, b) => {
     const yearDiff = (Number(b.releaseYear) || 0) - (Number(a.releaseYear) || 0);
     if (yearDiff !== 0) return yearDiff;
-    const aTime = getTimestampMs(a.createdAt) || getTimestampMs(a.updatedAt);
-    const bTime = getTimestampMs(b.createdAt) || getTimestampMs(b.updatedAt);
+    const aTime = getTimestampMs(a.telegramDateMs) || getTimestampMs(a.createdAt) || getTimestampMs(a.updatedAt);
+    const bTime = getTimestampMs(b.telegramDateMs) || getTimestampMs(b.createdAt) || getTimestampMs(b.updatedAt);
     if (bTime !== aTime) return bTime - aTime;
     return String(a.title || '').localeCompare(String(b.title || ''));
   });
@@ -209,7 +210,7 @@ export function sortMoviesList<T extends Partial<MovieData>>(list: T[]): T[] {
 
 const IDB_NAME = 'mp_catalog_cache_v1';
 const IDB_STORE = 'catalog';
-const IDB_KEY = 'movies_v1';
+const IDB_KEY = 'movies_v2';
 
 function openCatalogDb(): Promise<IDBDatabase | null> {
   if (typeof window === 'undefined' || !('indexedDB' in window)) return Promise.resolve(null);
@@ -441,7 +442,7 @@ export async function deleteMovieFromFirestore(id: string): Promise<void> {
   }
 }
 
-const STORAGE_KEY = 'movie_portal_movies_v2';
+const STORAGE_KEY = 'movie_portal_movies_v3';
 
 export const DEFAULT_INITIAL_MOVIES: MovieData[] = [];
 

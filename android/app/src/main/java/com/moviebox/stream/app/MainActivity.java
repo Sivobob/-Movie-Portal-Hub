@@ -145,9 +145,9 @@ public class MainActivity extends BridgeActivity {
     private static final String FIRESTORE_BACKEND_DOC_URL =
         "https://firestore.googleapis.com/v1/projects/gen-lang-client-0267042672/databases/ai-studio-movieportalhub-664a3e40-85f3-4758-945e-fd031bdc459f/documents/admins/backend";
     private static final String[] LIVE_WEB_CANDIDATES = new String[] {
-        "https://ais-pre-yaniwuwl6wc7ivl5tz2bbo-755452514312.asia-northeast1.run.app",
-        "https://ais-dev-yaniwuwl6wc7ivl5tz2bbo-755452514312.asia-northeast1.run.app",
-        "https://movie-portalhub-1012526016635.asia-southeast1.run.app"
+        "https://ais-pre-xnvcffdn7a5ydibjtjrezd-835315626292.asia-northeast1.run.app",
+        "https://ais-dev-xnvcffdn7a5ydibjtjrezd-835315626292.asia-northeast1.run.app",
+        "https://ais-pre-yaniwuwl6wc7ivl5tz2bbo-755452514312.asia-northeast1.run.app"
     };
 
     private static final String ACTION_APK_INSTALL_RESULT = "com.moviebox.stream.app.ACTION_APK_INSTALL_RESULT";
@@ -659,7 +659,7 @@ public class MainActivity extends BridgeActivity {
                 return pInfo.versionName.trim();
             }
         } catch (Exception ignored) {}
-        return "3.5.277";
+        return "3.5.282";
     }
 
     private int compareVersionStrings(String verA, String verB) {
@@ -692,7 +692,7 @@ public class MainActivity extends BridgeActivity {
             conn.setReadTimeout(timeoutMs);
             conn.setRequestProperty("Cache-Control", "no-store, no-cache");
             conn.setRequestProperty("Pragma", "no-cache");
-            conn.setRequestProperty("User-Agent", "MovieHub-Android-LiveSync/3.5.277");
+            conn.setRequestProperty("User-Agent", "MovieHub-Android-LiveSync/3.5.282");
             int code = conn.getResponseCode();
             if (code < 200 || code >= 300) return null;
             try (InputStream is = conn.getInputStream();
@@ -2290,7 +2290,7 @@ public class MainActivity extends BridgeActivity {
             conn.setConnectTimeout(30000);
             conn.setReadTimeout(60000);
             conn.setRequestMethod("GET");
-            conn.setRequestProperty("User-Agent", "MoviePortal-AndroidUpdater/3.5.277");
+            conn.setRequestProperty("User-Agent", "MoviePortal-AndroidUpdater/3.5.282");
             conn.setRequestProperty("Accept", "application/vnd.android.package-archive,application/octet-stream,*/*");
             conn.setRequestProperty("Accept-Encoding", "identity");
             conn.setRequestProperty("Cache-Control", "no-cache");
@@ -3333,11 +3333,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.277");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.282");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.277\",\"versionCode\":35277}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.282\",\"versionCode\":35282}";
             }
         }
 

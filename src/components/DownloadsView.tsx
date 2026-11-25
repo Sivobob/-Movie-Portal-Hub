@@ -1,4 +1,5 @@
 import React from 'react';
+import PosterImage from './PosterImage';
 import { 
   Download, 
   Play, 
@@ -125,18 +126,14 @@ export default function DownloadsView({
                   <div className="flex gap-3">
                     {/* Poster (offline safe) */}
                     <div className="w-14 h-20 rounded-xl overflow-hidden bg-neutral-900 border border-neutral-800 flex-shrink-0 relative flex items-center justify-center text-neutral-600">
-                      <Film size={20} />
-                      {task.posterUrl && (
-                        <img
-                          src={upgradePosterUrl(task.posterUrl, 500) || task.posterUrl}
-                          alt={task.title}
-                          referrerPolicy="no-referrer"
-                          className="w-full h-full object-cover absolute inset-0"
-                          onError={(e) => {
-                            e.currentTarget.style.display = 'none';
-                          }}
-                        />
-                      )}
+                      <PosterImage
+                        posterUrl={task.posterUrl}
+                        title={task.title}
+                        width={300}
+                        alt={task.title}
+                        compactFallback
+                        className="w-full h-full object-cover"
+                      />
                     </div>
 
                     {/* Progress details */}
@@ -277,18 +274,14 @@ export default function DownloadsView({
                   className="w-16 h-24 rounded-xl overflow-hidden bg-neutral-900 border border-neutral-800 flex-shrink-0 cursor-pointer relative flex items-center justify-center text-neutral-600"
                   onClick={() => onPlayMovie(item)}
                 >
-                  <Film size={22} />
-                  {item.posterUrl && (
-                    <img
-                      src={upgradePosterUrl(item.posterUrl, 500) || item.posterUrl}
-                      alt={item.title}
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full object-cover absolute inset-0 group-hover:scale-105 transition-transform duration-300"
-                      onError={(e) => {
-                        e.currentTarget.style.display = 'none';
-                      }}
-                    />
-                  )}
+                  <PosterImage
+                    posterUrl={item.posterUrl}
+                    title={item.title}
+                    width={300}
+                    alt={item.title}
+                    compactFallback
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                  />
                   <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10">
                     <div className="w-8 h-8 rounded-full bg-[#00d664] text-black flex items-center justify-center shadow-lg">
                       <Play size={14} className="ml-0.5 fill-black" />

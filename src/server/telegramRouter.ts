@@ -5083,6 +5083,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
 
     interface BgRawCandidate {
       msgId: number;
+      msgDateMs: number;
       streamUrl: string;
       doc: any;
       mime: string;
@@ -5124,6 +5125,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
 
       rawCandidates.push({
         msgId: Number(msg.id),
+        msgDateMs: Number(msg.date || 0) > 0 ? Number(msg.date) * 1000 : 0,
         streamUrl,
         doc: classified.doc,
         mime: classified.mime,
@@ -5140,6 +5142,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
 
     interface BgVideoCandidate {
       msgId: number;
+      msgDateMs: number;
       streamUrl: string;
       durationSec: number;
       sizeBytes: number;
@@ -5176,6 +5179,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
         }
         return {
           msgId: cand.msgId,
+          msgDateMs: cand.msgDateMs,
           streamUrl: cand.streamUrl,
           durationSec: check.durationSec || cand.durationSec,
           sizeBytes: cand.sizeBytes,
@@ -5292,11 +5296,15 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
       const durationFormatted = bestDurSec > 0 ? formatDuration(bestDurSec) : '';
       const qualityBadge: '4K' | 'HD' = filteredQualities['4K'] ? '4K' : 'HD';
 
+      const msgDateList = grp.members.map((m) => m.msgDateMs).filter((t) => t > 0);
+      const realMsgDateMs = msgDateList.length > 0 ? Math.min(...msgDateList) : grp.primary.msgDateMs || 0;
+
       const draft: AutoMatchedMovieDraft = {
         draftId: `tg-${cleanChannelId}-${grp.primary.msgId}`,
         channelId: cleanChannelId,
         channelTitle,
         msgId: grp.primary.msgId,
+        msgDateMs: realMsgDateMs > 0 ? realMsgDateMs : undefined,
         sourceMsgIds: grp.members.map((m) => m.msgId),
         streamUrl: chosenStream,
         videoQualities: filteredQualities,
@@ -5341,6 +5349,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
 
       if (cfg.autoPublishVerified) {
         const nowMs = Date.now();
+        const itemDateMs = realMsgDateMs > 0 ? realMsgDateMs : nowMs;
         const fallbackSvg = buildFallbackPosterDataUri(draft.title || mergedParsed.cleanTitle, candYear);
         const cleanPoster = (draft.posterUrl ? upgradePosterUrl(draft.posterUrl, 1080) || draft.posterUrl : '') || fallbackSvg;
         const cleanBackdrop = (draft.backdropUrl || draft.posterUrl ? upgradePosterUrl(draft.backdropUrl || cleanPoster, 1280) || cleanPoster : '') || fallbackSvg;
@@ -5492,8 +5501,9 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
               duration: bestDurSec || parseDurationToSeconds(draft.runtime) || 0,
               telegramMsgId: draft.msgId,
               telegramChannelId: cleanChannelId,
+              telegramDateMs: itemDateMs,
               updatedAt: nowMs,
-              createdAt: nowMs,
+              createdAt: itemDateMs,
             };
             seedCatalogMap.set(seriesDocId, seriesBase);
             await setDocWithQuotaGuard(
@@ -5501,7 +5511,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
               {
                 ...seriesBase,
                 updatedAt: serverTimestamp(),
-                createdAt: serverTimestamp(),
+                createdAt: itemDateMs,
               },
               { merge: true }
             ).catch(() => {});
@@ -5632,8 +5642,9 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
           duration: draft.durationSec || parseDurationToSeconds(draft.runtime) || 0,
           telegramMsgId: draft.msgId,
           telegramChannelId: cleanChannelId,
+          telegramDateMs: itemDateMs,
           updatedAt: nowMs,
-          createdAt: nowMs,
+          createdAt: itemDateMs,
         };
         seedCatalogMap.set(deterministicDocId, movieBase);
         await setDocWithQuotaGuard(
@@ -5641,7 +5652,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
           {
             ...movieBase,
             updatedAt: serverTimestamp(),
-            createdAt: serverTimestamp(),
+            createdAt: itemDateMs,
           },
           { merge: true }
         ).catch(() => {});
@@ -6061,6 +6072,7 @@ async function runBulkChannelSyncWorker(params: {
 
       interface BulkRawCand {
         msgId: number;
+        msgDateMs: number;
         streamUrl: string;
         doc: any;
         mime: string;
@@ -6110,6 +6122,7 @@ async function runBulkChannelSyncWorker(params: {
         );
         rawCands.push({
           msgId: Number(msg.id),
+          msgDateMs: Number(msg.date || 0) > 0 ? Number(msg.date) * 1000 : 0,
           streamUrl,
           doc: classified.doc,
           mime: classified.mime,
@@ -6126,6 +6139,7 @@ async function runBulkChannelSyncWorker(params: {
 
       interface BulkVerifiedCand {
         msgId: number;
+        msgDateMs: number;
         streamUrl: string;
         durationSec: number;
         sizeBytes: number;
@@ -6165,6 +6179,7 @@ async function runBulkChannelSyncWorker(params: {
           }
           return {
             msgId: cand.msgId,
+            msgDateMs: cand.msgDateMs,
             streamUrl: cand.streamUrl,
             durationSec: check.durationSec || cand.durationSec,
             sizeBytes: cand.sizeBytes,
@@ -6361,6 +6376,9 @@ async function runBulkChannelSyncWorker(params: {
               };
               existingUrlSet.add(bestStream.toLowerCase());
               existingRecords.push(newRec);
+              const bulkMsgDates = grp.members.map((m) => m.msgDateMs).filter((t) => t > 0);
+              const realBulkDateMs =
+                (bulkMsgDates.length > 0 ? Math.min(...bulkMsgDates) : grp.primary.msgDateMs) || Date.now();
               const seriesPayload = {
                 id: seriesDocId,
                 title: matched.title.trim(),
@@ -6388,7 +6406,8 @@ async function runBulkChannelSyncWorker(params: {
                 duration: bestDurSec || parseDurationToSeconds(matched.runtime) || 0,
                 telegramMsgId: grp.primary.msgId,
                 telegramChannelId: cleanChannelId,
-                createdAt: Date.now(),
+                telegramDateMs: realBulkDateMs,
+                createdAt: realBulkDateMs,
                 updatedAt: Date.now(),
               };
               seedCatalogMap.set(seriesDocId, {
@@ -6450,6 +6469,9 @@ async function runBulkChannelSyncWorker(params: {
               existingUrlSet.add(bestStream.toLowerCase());
             }
           } else {
+            const bulkMovieMsgDates = grp.members.map((m) => m.msgDateMs).filter((t) => t > 0);
+            const realMovieDateMs =
+              (bulkMovieMsgDates.length > 0 ? Math.min(...bulkMovieMsgDates) : grp.primary.msgDateMs) || Date.now();
             const deterministicDocId = `tg_${cleanChannelId}_${grp.primary.msgId}`;
             const movieDocPayload = {
               id: deterministicDocId,
@@ -6479,8 +6501,9 @@ async function runBulkChannelSyncWorker(params: {
               duration: bestDurSec || parseDurationToSeconds(matched.runtime) || 0,
               telegramMsgId: grp.primary.msgId,
               telegramChannelId: cleanChannelId,
+              telegramDateMs: realMovieDateMs,
               updatedAt: Date.now(),
-              createdAt: Date.now(),
+              createdAt: realMovieDateMs,
             };
 
             seedCatalogMap.set(deterministicDocId, movieDocPayload);

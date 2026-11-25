@@ -55,11 +55,23 @@ function mergeMovieRecord(existing: MovieData | undefined, incoming: MovieData, 
   const incomingEpCount = countMovieEpisodes(incoming);
   const incomingHasMoreContent = incomingEpCount > existingEpCount;
 
+  const incomingTgDate = getTimestampMs(incoming.telegramDateMs);
+  const existingTgDate = getTimestampMs(existing.telegramDateMs);
+  const preservedTgDate =
+    incomingTgDate > 0 && existingTgDate > 0
+      ? Math.min(incomingTgDate, existingTgDate)
+      : incomingTgDate || existingTgDate || undefined;
+
+  const incomingHasAuthenticSeedDate = incomingTgDate > 0 && existingTgDate <= 0;
+
   const base = preferIncoming
-    ? existingUpdated > incomingUpdated && !incomingHasMoreContent && hasRealPosterUrl(existing.posterUrl)
+    ? existingUpdated > incomingUpdated &&
+      !incomingHasMoreContent &&
+      !incomingHasAuthenticSeedDate &&
+      hasRealPosterUrl(existing.posterUrl)
       ? existing
       : incoming
-    : incomingHasMoreContent || incomingUpdated > existingUpdated
+    : incomingHasMoreContent || incomingUpdated > existingUpdated || incomingHasAuthenticSeedDate
     ? incoming
     : existing;
 
@@ -81,6 +93,7 @@ function mergeMovieRecord(existing: MovieData | undefined, incoming: MovieData, 
 
   return {
     ...base,
+    ...(preservedTgDate ? { telegramDateMs: preservedTgDate } : {}),
     posterUrl: bestPoster,
     backdropUrl: bestBackdrop,
   };
