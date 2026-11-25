@@ -3440,6 +3440,20 @@ public class MainActivity extends BridgeActivity {
             runOnUiThread(() -> startApkDownloadManager(targetUrl));
         }
 
+        @JavascriptInterface
+        public void openInExternalBrowser(final String urlStr) {
+            final String targetUrl = (urlStr != null && !urlStr.trim().isEmpty())
+                ? urlStr.trim()
+                : "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk";
+            runOnUiThread(() -> {
+                try {
+                    Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl));
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(intent);
+                } catch (Exception ignored) {}
+            });
+        }
+
         // --- GOOGLE CAST BRIDGE METHODS ---
         @JavascriptInterface
         public void startCastDiscovery() {

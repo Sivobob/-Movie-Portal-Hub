@@ -312,17 +312,23 @@ export default function UpdateNotification() {
             </button>
           )}
 
-          {(isInstalling || needsPermission) && (
-            <button
-              type="button"
-              onClick={handleStartDownload}
-              className="w-full bg-neutral-800 hover:bg-neutral-700 text-gray-200 font-bold text-xs py-2.5 px-4 rounded-xl border border-neutral-700 flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition-all"
-            >
-              <Download size={14} />
-              <span>Re-download Inside App</span>
-            </button>
-          )}
-
+          <button
+            type="button"
+            onClick={() => {
+              try {
+                const bridge = (window as any).AndroidPlayerBridge;
+                if (bridge && typeof bridge.openInExternalBrowser === 'function') {
+                  bridge.openInExternalBrowser(downloadUrl);
+                  return;
+                }
+              } catch {}
+              window.open(downloadUrl, '_blank');
+            }}
+            className="w-full bg-neutral-800 hover:bg-neutral-700 text-gray-200 font-bold text-xs py-3 px-4 rounded-xl border border-neutral-700 flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition-all"
+          >
+            <Download size={14} />
+            <span>Download via Browser / Chrome</span>
+          </button>
 
           {!isDownloading && (
             <button
