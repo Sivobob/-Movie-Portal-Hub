@@ -910,18 +910,18 @@ async function checkCandidateHasAudio(
     }
 
     const probe = await ensureMediaProbed(entry, candidate.streamUrl, {
-      timeoutMs: 4500,
-      probesize: 750_000,
-      analyzeduration: 750_000,
+      timeoutMs: 8000,
+      probesize: 1_500_000,
+      analyzeduration: 1_500_000,
     });
     if (probe.probedByFfprobe) {
-      const has = probe.audioTracks.length > 0 || Boolean(probe.audioCodec);
+      const has = probe.audioTracks.length > 0 || Boolean(probe.audioCodec && probe.audioCodec !== 'none');
       entry.hasAudio = has;
       return has;
     }
-    return true;
+    return fastAudio === true;
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -946,6 +946,7 @@ async function verifyCandidateAudioAndHd(
   effectiveQuality: '1080p' | '720p' | '';
   durationSec: number;
 }> {
+  // 1. Check explicit Telegram no-sound flag or silent/mute in filename/caption
   if (candidate.hasExplicitNoSound) {
     return {
       accepted: false,
@@ -955,14 +956,11 @@ async function verifyCandidateAudioAndHd(
     };
   }
 
-  if (!onlyValidAudioAndHd) {
+  if (/\bno[\s._-]*(sound|audio)\b|\bsilent\b|\bmute\b/i.test(`${candidate.fileName} ${candidate.caption || ''}`)) {
     return {
-      accepted: true,
-      reason: 'ok',
-      effectiveQuality:
-        candidate.parsedQuality === '1080p' || candidate.parsedQuality === '720p'
-          ? candidate.parsedQuality
-          : '',
+      accepted: false,
+      reason: 'no_audio',
+      effectiveQuality: '',
       durationSec: candidate.durationSec,
     };
   }
@@ -975,13 +973,13 @@ async function verifyCandidateAudioAndHd(
     candidate.mime
   );
 
-  // Fast header audio check first (1-2 blocks in RAM)
+  // Fast header audio check first (1-2 blocks in RAM: EBML Tracks / MP4 moov / AVI)
   let fastAudio: boolean | null = null;
   if (entry) {
     if (typeof entry.hasAudio === 'boolean') {
       fastAudio = entry.hasAudio;
     } else if (entry.probe?.probedByFfprobe) {
-      fastAudio = entry.probe.audioTracks.length > 0 || Boolean(entry.probe.audioCodec);
+      fastAudio = (entry.probe.audioTracks.length > 0) || Boolean(entry.probe.audioCodec && entry.probe.audioCodec !== 'none');
       entry.hasAudio = fastAudio;
     } else {
       fastAudio = await checkTelegramDocHasAudioFast(client, entry.docInfo).catch(() => null);
@@ -1010,15 +1008,25 @@ async function verifyCandidateAudioAndHd(
   let probeResult: ProbeMediaResult | null = entry?.probe || null;
   if (entry && (!probeResult || !probeResult.probedByFfprobe) && (fastAudio === null || needsResolutionProbe)) {
     probeResult = await ensureMediaProbed(entry, candidate.streamUrl, {
-      timeoutMs: 4500,
-      probesize: 750_000,
-      analyzeduration: 750_000,
+      timeoutMs: 8000,
+      probesize: 1_500_000,
+      analyzeduration: 1_500_000,
     }).catch(() => null);
     if (probeResult?.probedByFfprobe) {
-      const probedHasAudio = probeResult.audioTracks.length > 0 || Boolean(probeResult.audioCodec);
+      const probedHasAudio = probeResult.audioTracks.length > 0 || Boolean(probeResult.audioCodec && probeResult.audioCodec !== 'none');
       entry.hasAudio = probedHasAudio;
       fastAudio = probedHasAudio;
     }
+  }
+
+  // If ffprobe confirmed 0 audio tracks or no audio, reject strictly
+  if (probeResult?.probedByFfprobe && probeResult.audioTracks.length === 0 && (!probeResult.audioCodec || probeResult.audioCodec === 'none')) {
+    return {
+      accepted: false,
+      reason: 'no_audio',
+      effectiveQuality: '',
+      durationSec: candidate.durationSec,
+    };
   }
 
   const resolvedProbeLike = probeResult?.probedByFfprobe
@@ -1050,6 +1058,26 @@ async function verifyCandidateAudioAndHd(
     candidate.durationSec || 0,
     Math.round(probeResult?.durationSec || 0)
   );
+
+  // Strictly enforce audio rejection: any silent or unverified audio is rejected
+  if (!decision.hasValidAudio || decision.reason === 'no_audio' || decision.reason === 'unverified_audio') {
+    return {
+      accepted: false,
+      reason: 'no_audio',
+      effectiveQuality: '',
+      durationSec: bestDurationSec,
+    };
+  }
+
+  // If onlyValidAudioAndHd is false, allow lower quality resolutions (e.g. 480p) as long as audio is confirmed
+  if (!onlyValidAudioAndHd && decision.reason === 'low_quality') {
+    return {
+      accepted: true,
+      reason: 'ok',
+      effectiveQuality: '',
+      durationSec: bestDurationSec,
+    };
+  }
 
   return {
     accepted: decision.accepted,

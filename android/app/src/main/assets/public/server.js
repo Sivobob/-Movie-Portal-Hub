@@ -4690,18 +4690,18 @@ async function checkCandidateHasAudio(candidate, client2) {
       return fastAudio;
     }
     const probe = await ensureMediaProbed(entry, candidate.streamUrl, {
-      timeoutMs: 4500,
-      probesize: 75e4,
-      analyzeduration: 75e4
+      timeoutMs: 8e3,
+      probesize: 15e5,
+      analyzeduration: 15e5
     });
     if (probe.probedByFfprobe) {
-      const has = probe.audioTracks.length > 0 || Boolean(probe.audioCodec);
+      const has = probe.audioTracks.length > 0 || Boolean(probe.audioCodec && probe.audioCodec !== "none");
       entry.hasAudio = has;
       return has;
     }
-    return true;
+    return fastAudio === true;
   } catch {
-    return true;
+    return false;
   }
 }
 async function verifyCandidateAudioAndHd(candidate, client2, onlyValidAudioAndHd) {
@@ -4713,11 +4713,11 @@ async function verifyCandidateAudioAndHd(candidate, client2, onlyValidAudioAndHd
       durationSec: candidate.durationSec
     };
   }
-  if (!onlyValidAudioAndHd) {
+  if (/\bno[\s._-]*(sound|audio)\b|\bsilent\b|\bmute\b/i.test(`${candidate.fileName} ${candidate.caption || ""}`)) {
     return {
-      accepted: true,
-      reason: "ok",
-      effectiveQuality: candidate.parsedQuality === "1080p" || candidate.parsedQuality === "720p" ? candidate.parsedQuality : "",
+      accepted: false,
+      reason: "no_audio",
+      effectiveQuality: "",
       durationSec: candidate.durationSec
     };
   }
@@ -4733,7 +4733,7 @@ async function verifyCandidateAudioAndHd(candidate, client2, onlyValidAudioAndHd
     if (typeof entry.hasAudio === "boolean") {
       fastAudio = entry.hasAudio;
     } else if (entry.probe?.probedByFfprobe) {
-      fastAudio = entry.probe.audioTracks.length > 0 || Boolean(entry.probe.audioCodec);
+      fastAudio = entry.probe.audioTracks.length > 0 || Boolean(entry.probe.audioCodec && entry.probe.audioCodec !== "none");
       entry.hasAudio = fastAudio;
     } else {
       fastAudio = await checkTelegramDocHasAudioFast(client2, entry.docInfo).catch(() => null);
@@ -4752,15 +4752,23 @@ async function verifyCandidateAudioAndHd(candidate, client2, onlyValidAudioAndHd
   let probeResult = entry?.probe || null;
   if (entry && (!probeResult || !probeResult.probedByFfprobe) && (fastAudio === null || needsResolutionProbe)) {
     probeResult = await ensureMediaProbed(entry, candidate.streamUrl, {
-      timeoutMs: 4500,
-      probesize: 75e4,
-      analyzeduration: 75e4
+      timeoutMs: 8e3,
+      probesize: 15e5,
+      analyzeduration: 15e5
     }).catch(() => null);
     if (probeResult?.probedByFfprobe) {
-      const probedHasAudio = probeResult.audioTracks.length > 0 || Boolean(probeResult.audioCodec);
+      const probedHasAudio = probeResult.audioTracks.length > 0 || Boolean(probeResult.audioCodec && probeResult.audioCodec !== "none");
       entry.hasAudio = probedHasAudio;
       fastAudio = probedHasAudio;
     }
+  }
+  if (probeResult?.probedByFfprobe && probeResult.audioTracks.length === 0 && (!probeResult.audioCodec || probeResult.audioCodec === "none")) {
+    return {
+      accepted: false,
+      reason: "no_audio",
+      effectiveQuality: "",
+      durationSec: candidate.durationSec
+    };
   }
   const resolvedProbeLike = probeResult?.probedByFfprobe ? probeResult : fastAudio === true ? {
     probedByFfprobe: true,
@@ -4785,6 +4793,22 @@ async function verifyCandidateAudioAndHd(candidate, client2, onlyValidAudioAndHd
     candidate.durationSec || 0,
     Math.round(probeResult?.durationSec || 0)
   );
+  if (!decision.hasValidAudio || decision.reason === "no_audio" || decision.reason === "unverified_audio") {
+    return {
+      accepted: false,
+      reason: "no_audio",
+      effectiveQuality: "",
+      durationSec: bestDurationSec
+    };
+  }
+  if (!onlyValidAudioAndHd && decision.reason === "low_quality") {
+    return {
+      accepted: true,
+      reason: "ok",
+      effectiveQuality: "",
+      durationSec: bestDurationSec
+    };
+  }
   return {
     accepted: decision.accepted,
     reason: decision.reason,
