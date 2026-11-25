@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.277",
-  "minimumRequiredVersion": "3.5.277",
-  "latestVersionCode": 35277,
-  "minimumRequiredVersionCode": 35277,
+  "latestVersion": "3.5.281",
+  "minimumRequiredVersion": "3.5.281",
+  "latestVersionCode": 35281,
+  "minimumRequiredVersionCode": 35281,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Hub v3.5.277 is live! Instant playback on Watch Now, real 360p-1080p video quality switching, accurate episode durations, and stability upgrades.",
-  "releaseNotes": "v3.5.277: Fixed video quality switching (distinct 360p/480p/720p/1080p), accurate episode durations, instant Watch Now startup, and removed auto-tagging on newly synced series episodes."
+  "updateMessage": "Movie Hub v3.5.281: 2026 release years fixed, incomplete & zero-episode series removed, Student of the Year: After Dark poster/title fixed, and instant channel sync ready.",
+  "releaseNotes": "v3.5.281: Fixed 2027->2026 metadata, removed incomplete & zero-episode series, fixed Student of the Year: After Dark duplicate, and updated bundled catalog."
 }

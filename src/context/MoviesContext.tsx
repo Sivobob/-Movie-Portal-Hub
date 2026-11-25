@@ -14,11 +14,13 @@ import {
   getLocalMovies,
   getCatalogFromIdb,
   fetchSeedCatalogJson,
+  getTimestampMs,
   saveLocalMovies,
   sortMoviesList,
 } from '../services/movieStorage';
 import { normalizeMoviePosters } from '../utils/posterUrl';
 import { buildApiUrl } from '../utils/apiConfig';
+import { hasPlayableContent } from '../utils/seriesCompleteness';
 
 interface MoviesContextValue {
   movies: MovieData[];
@@ -40,14 +42,25 @@ function hasRealPosterUrl(url?: string | null): boolean {
   return Boolean(s && s !== 'N/A' && (/^https?:\/\//i.test(s) || s.startsWith('/posters/')));
 }
 
+function countMovieEpisodes(movie?: MovieData | null): number {
+  if (!movie || !Array.isArray(movie.seasons)) return 0;
+  return movie.seasons.reduce((acc, s) => acc + (Array.isArray(s?.episodes) ? s.episodes.length : 0), 0);
+}
+
 function mergeMovieRecord(existing: MovieData | undefined, incoming: MovieData, preferIncoming: boolean): MovieData {
   if (!existing) return incoming;
-  const existingUpdated = Number(existing.updatedAt || 0) || 0;
-  const incomingUpdated = Number(incoming.updatedAt || 0) || 0;
+  const existingUpdated = getTimestampMs(existing.updatedAt) || getTimestampMs(existing.createdAt) || 0;
+  const incomingUpdated = getTimestampMs(incoming.updatedAt) || getTimestampMs(incoming.createdAt) || 0;
+  const existingEpCount = countMovieEpisodes(existing);
+  const incomingEpCount = countMovieEpisodes(incoming);
+  const incomingHasMoreContent = incomingEpCount > existingEpCount;
+
   const base = preferIncoming
-    ? existingUpdated > incomingUpdated && hasRealPosterUrl(existing.posterUrl)
+    ? existingUpdated > incomingUpdated && !incomingHasMoreContent && hasRealPosterUrl(existing.posterUrl)
       ? existing
       : incoming
+    : incomingHasMoreContent || incomingUpdated > existingUpdated
+    ? incoming
     : existing;
 
   const bestPoster = hasRealPosterUrl(base.posterUrl)
@@ -75,38 +88,46 @@ function mergeMovieRecord(existing: MovieData | undefined, incoming: MovieData, 
 
 export function MoviesProvider({ children }: { children: React.ReactNode }) {
   const initialLocal = sortMoviesList(
-    getLocalMovies().filter((m: any) => m && m.published !== false)
+    getLocalMovies().filter((m: any) => m && m.published !== false && hasPlayableContent(m))
   );
 
   const [movies, setMovies] = useState<MovieData[]>(initialLocal);
   const [isLoading, setIsLoading] = useState<boolean>(initialLocal.length === 0);
   const lastCatalogMetaSigRef = useRef<string>('');
 
-  // Hydrate full catalog from IndexedDB + pre-bundled seed catalog without redundant 12s re-downloads
+  // Hydrate full catalog from IndexedDB + pre-bundled seed catalog + live SSE push updates
   useEffect(() => {
     let active = true;
+    let sse: EventSource | null = null;
+    let sseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let sseRetryMs = 1500;
 
     const mergeIntoState = (incoming: MovieData[], preferIncoming: boolean) => {
       if (!active || incoming.length === 0) return;
       const normalized = sortMoviesList(
         incoming
-          .filter((m: any) => m && m.id && m.published !== false)
+          .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m))
           .map((m: any) => normalizeMoviePosters(m) as MovieData)
       );
       setMovies((prev) => {
+        const prevById = new Map<string, MovieData>();
+        prev.forEach((p) => prevById.set(p.id, p));
+
         const map = new Map<string, MovieData>();
         if (preferIncoming) {
-          // Seed catalog is authoritative for all catalog IDs unless a newer local edit exists
           const incomingIds = new Set(normalized.map((m) => m.id));
           prev.forEach((m) => {
-            // Keep non-seed custom/Firestore items that have real posters; drop stale SVG placeholders/duplicates
-            if (!incomingIds.has(m.id) && !String(m.posterUrl || '').startsWith('data:image/svg+xml')) {
+            if (
+              !incomingIds.has(m.id) &&
+              !String(m.id).startsWith('tg_') &&
+              hasPlayableContent(m) &&
+              !String(m.posterUrl || '').startsWith('data:image/svg+xml')
+            ) {
               map.set(m.id, m);
             }
           });
           normalized.forEach((m) => {
-            const existing = prev.find((p) => p.id === m.id);
-            map.set(m.id, mergeMovieRecord(existing, m, true));
+            map.set(m.id, mergeMovieRecord(prevById.get(m.id), m, true));
           });
         } else {
           prev.forEach((m) => map.set(m.id, m));
@@ -151,13 +172,55 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
       } catch {}
     };
 
+    const connectLiveCatalogSse = () => {
+      if (!active || typeof window === 'undefined' || typeof EventSource === 'undefined') return;
+      if (sse) {
+        try {
+          sse.close();
+        } catch {}
+        sse = null;
+      }
+      try {
+        const url = buildApiUrl('/api/telegram/live-events');
+        sse = new EventSource(url);
+        sse.onopen = () => {
+          sseRetryMs = 1500;
+        };
+        sse.addEventListener('catalog_updated', () => {
+          if (!active) return;
+          void loadSeedCatalog();
+          void checkCatalogMetaAndReload();
+        });
+        sse.onerror = () => {
+          if (sse) {
+            try {
+              sse.close();
+            } catch {}
+            sse = null;
+          }
+          if (!active) return;
+          if (sseReconnectTimer) clearTimeout(sseReconnectTimer);
+          const wait = sseRetryMs;
+          sseRetryMs = Math.min(15000, sseRetryMs * 2);
+          sseReconnectTimer = setTimeout(connectLiveCatalogSse, wait);
+        };
+      } catch {}
+    };
+
     void loadSeedCatalog().then(() => checkCatalogMetaAndReload());
-    const interval = setInterval(checkCatalogMetaAndReload, 8000);
+    connectLiveCatalogSse();
+    const interval = setInterval(checkCatalogMetaAndReload, 4000);
     window.addEventListener('focus', checkCatalogMetaAndReload);
     document.addEventListener('visibilitychange', checkCatalogMetaAndReload);
     return () => {
       active = false;
       clearInterval(interval);
+      if (sseReconnectTimer) clearTimeout(sseReconnectTimer);
+      if (sse) {
+        try {
+          sse.close();
+        } catch {}
+      }
       window.removeEventListener('focus', checkCatalogMetaAndReload);
       document.removeEventListener('visibilitychange', checkCatalogMetaAndReload);
     };
@@ -173,7 +236,7 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
     if (!isMountedRef.current) return;
     const publishedOnly = sortMoviesList<MovieData>(
       rawList
-        .filter((m: any) => m && m.id && m.published !== false)
+        .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m))
         .map((m) => normalizeMoviePosters(m) as MovieData)
     );
 
@@ -337,7 +400,7 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
     // 5. Same-device & cross-tab instant updates
     const handleLocalMoviesUpdated = () => {
       const local = sortMoviesList(
-        getLocalMovies().filter((m: any) => m && m.published !== false)
+        getLocalMovies().filter((m: any) => m && m.published !== false && hasPlayableContent(m))
       );
       if (local.length > 0 || getLocalMovies().length === 0) {
         applyMovieList(local, true);

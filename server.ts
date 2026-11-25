@@ -22,6 +22,7 @@ import {
   getServerFirestoreQuotaStatus,
   markServerFirestoreQuotaExhausted,
 } from './src/server/firestoreQuotaFlag.ts';
+import { hasPlayableContent } from './src/utils/seriesCompleteness.ts';
 
 function checkBinaryAvailable(bin: string): boolean {
   try {
@@ -82,6 +83,7 @@ app.use('/api', (req, res, next) => {
   if (
     !req.path.startsWith('/stream') &&
     !req.path.startsWith('/telegram/hls') &&
+    !req.path.startsWith('/telegram/live-events') &&
     !req.path.startsWith('/telegram/subtitles.vtt') &&
     !req.path.startsWith('/ios-profile')
   ) {
@@ -97,7 +99,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     time: new Date().toISOString(),
-    version: '3.5.280',
+    version: '3.5.281',
     ffmpegAvailable: FFMPEG_AVAILABLE,
     ffprobeAvailable: FFPROBE_AVAILABLE,
     telegramConfigured,
@@ -244,6 +246,7 @@ app.post('/api/firestore/quota-exhausted', (req, res) => {
 });
 app.get('/api/movies/catalog', (_req, res) => {
   try {
+    const currentYear = new Date().getFullYear();
     const candidates = [
       path.resolve(process.cwd(), 'public/movies-seed.json'),
       path.resolve(process.cwd(), 'dist/movies-seed.json'),
@@ -251,10 +254,17 @@ app.get('/api/movies/catalog', (_req, res) => {
     ];
     for (const p of candidates) {
       if (fs.existsSync(p)) {
-        const raw = fs.readFileSync(p, 'utf8');
+        const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
+        const filtered = Array.isArray(parsed)
+          ? parsed
+              .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m))
+              .map((m: any) =>
+                Number(m.releaseYear) > currentYear ? { ...m, releaseYear: currentYear } : m
+              )
+          : [];
         res.setHeader('Content-Type', 'application/json');
-        res.setHeader('Cache-Control', 'no-cache');
-        return res.send(raw);
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+        return res.json(filtered);
       }
     }
     return res.json([]);
@@ -284,7 +294,9 @@ app.get('/api/movies/catalog-meta', (_req, res) => {
           let count = 0;
           try {
             const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
-            count = Array.isArray(parsed) ? parsed.length : 0;
+            count = Array.isArray(parsed)
+              ? parsed.filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m)).length
+              : 0;
           } catch {}
           cachedCatalogMeta = { filePath: p, mtimeMs: stat.mtimeMs, size: stat.size, count };
         }

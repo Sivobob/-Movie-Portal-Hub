@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.280",
-  "minimumRequiredVersion": "3.5.280",
-  "latestVersionCode": 35280,
-  "minimumRequiredVersionCode": 35280,
+  "latestVersion": "3.5.281",
+  "minimumRequiredVersion": "3.5.281",
+  "latestVersionCode": 35281,
+  "minimumRequiredVersionCode": 35281,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Hub v3.5.280: Saari 467+ movies aur series instant app sync ke saath live ho gayi hain! Ab channel pe naye uploads direct app me dikhenge bina restart kiye.",
-  "releaseNotes": "v3.5.280: Instant channel sync, all 467+ movies & web series bundled, real-time live updates, and direct catalog streaming."
+  "updateMessage": "Movie Hub v3.5.281: 2026 release years fixed, incomplete & zero-episode series removed, Student of the Year: After Dark poster/title fixed, and instant channel sync ready.",
+  "releaseNotes": "v3.5.281: Fixed 2027->2026 metadata, removed incomplete & zero-episode series, fixed Student of the Year: After Dark duplicate, and updated bundled catalog."
 }

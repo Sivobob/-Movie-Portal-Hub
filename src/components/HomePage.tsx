@@ -109,15 +109,21 @@ export default function HomePage() {
   const featuredMovies = useMemo(() => {
     const FORTY_EIGHT_HOURS_MS = 48 * 60 * 60 * 1000;
     
-    // Only movies and series added within the last 2 days (48 hours)
-    const brandNewMovies = movies.filter((m: any) => {
-      if (!m || m.published === false) return false;
-      const t = getTimestampMs(m.createdAt) || getTimestampMs(m.updatedAt) || 0;
-      if (t > 0) {
-        return (nowMs - t) < FORTY_EIGHT_HOURS_MS;
-      }
-      return is2026Release(m);
-    });
+    // Only movies and series added within the last 2 days (48 hours), newest uploads first
+    const brandNewMovies = movies
+      .filter((m: any) => {
+        if (!m || m.published === false) return false;
+        const t = getTimestampMs(m.createdAt) || getTimestampMs(m.updatedAt) || 0;
+        if (t > 0) {
+          return (nowMs - t) < FORTY_EIGHT_HOURS_MS;
+        }
+        return is2026Release(m);
+      })
+      .sort((a: any, b: any) => {
+        const aTime = getTimestampMs(a.createdAt) || getTimestampMs(a.updatedAt) || 0;
+        const bTime = getTimestampMs(b.createdAt) || getTimestampMs(b.updatedAt) || 0;
+        return bTime - aTime;
+      });
 
     if (brandNewMovies.length > 0) {
       return brandNewMovies.slice(0, 5);

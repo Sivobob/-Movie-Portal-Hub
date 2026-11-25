@@ -1489,11 +1489,21 @@ export default function AdminDashboard() {
         const posterUrl = upgradePosterUrl(rawPoster, 1080);
         const backdropUrl = upgradePosterUrl(rawPoster, 1280) || posterUrl;
 
+        const curYr = new Date().getFullYear();
+        const omdbYr = parseInt(omdbData.Year, 10);
+        const imdbYr = parseInt(imdbHit?.y, 10);
+        const safeClientYear =
+          Number.isFinite(imdbYr) && imdbYr >= 1900 && imdbYr <= curYr && (!Number.isFinite(omdbYr) || omdbYr > curYr)
+            ? imdbYr
+            : Number.isFinite(omdbYr) && omdbYr >= 1900
+            ? Math.min(omdbYr, curYr)
+            : curYr;
+
         return {
           imdbId: omdbData.imdbID || imdbIdToFetch,
           title: omdbData.Title || '',
           originalTitle: omdbData.Title || '',
-          releaseYear: parseInt(omdbData.Year) || new Date().getFullYear(),
+          releaseYear: safeClientYear,
           posterUrl,
           backdropUrl,
           genre,
@@ -1510,11 +1520,13 @@ export default function AdminDashboard() {
       if (imdbHit) {
         const posterUrl = upgradePosterUrl(imdbRawPoster, 1080);
         const backdropUrl = upgradePosterUrl(imdbRawPoster, 1280) || posterUrl;
+        const curYr = new Date().getFullYear();
+        const imdbYr = parseInt(imdbHit.y, 10);
         return {
           imdbId: imdbHit.id || imdbIdToFetch,
           title: imdbHit.l || '',
           originalTitle: imdbHit.l || '',
-          releaseYear: parseInt(imdbHit.y) || new Date().getFullYear(),
+          releaseYear: Number.isFinite(imdbYr) && imdbYr >= 1900 ? Math.min(imdbYr, curYr) : curYr,
           posterUrl,
           backdropUrl,
           genre: 'Action',

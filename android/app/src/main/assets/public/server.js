@@ -152,8 +152,8 @@ function buildApiUrl(path7) {
 var LIVE_BACKEND_URL, PRE_BACKEND_URL, ENV_BACKEND_URL, resolvedNativeBackendUrl, resolvedRemoteTranscodeUrl, PROBE_CACHE_TTL_MS;
 var init_apiConfig = __esm({
   "src/utils/apiConfig.ts"() {
-    LIVE_BACKEND_URL = "https://ais-dev-wc76ipqs2a7bm74r24a2mr-832989141722.asia-southeast1.run.app";
-    PRE_BACKEND_URL = "https://ais-pre-wc76ipqs2a7bm74r24a2mr-832989141722.asia-southeast1.run.app";
+    LIVE_BACKEND_URL = "https://ais-dev-xnvcffdn7a5ydibjtjrezd-835315626292.asia-northeast1.run.app";
+    PRE_BACKEND_URL = "https://ais-pre-xnvcffdn7a5ydibjtjrezd-835315626292.asia-northeast1.run.app";
     ENV_BACKEND_URL = (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL || "").toString().trim().replace(/\/+$/, "");
     resolvedNativeBackendUrl = null;
     resolvedRemoteTranscodeUrl = null;
@@ -1251,6 +1251,23 @@ function extractYear(query) {
   }
   return { title: query, year: null };
 }
+function resolveSafeReleaseYear(omdbYearRaw, imdbYearRaw) {
+  const currentYear = (/* @__PURE__ */ new Date()).getFullYear();
+  const omdbYr = parseInt(String(omdbYearRaw || "").slice(0, 4), 10);
+  const imdbYr = parseInt(String(imdbYearRaw || "").slice(0, 4), 10);
+  if (Number.isFinite(imdbYr) && imdbYr >= 1900 && imdbYr <= currentYear) {
+    if (!Number.isFinite(omdbYr) || omdbYr < 1900 || omdbYr > currentYear) {
+      return imdbYr;
+    }
+  }
+  if (Number.isFinite(omdbYr) && omdbYr >= 1900) {
+    return omdbYr > currentYear ? currentYear : omdbYr;
+  }
+  if (Number.isFinite(imdbYr) && imdbYr >= 1900) {
+    return imdbYr > currentYear ? currentYear : imdbYr;
+  }
+  return currentYear;
+}
 router.get("/test-auth", requireAdmin, (req, res) => {
   res.json({
     message: "Authentication successful",
@@ -1340,10 +1357,13 @@ async function fetchImdbSuggestions(query) {
         itemType = "game";
       }
       const poster = upgradePosterUrl(item.i?.imageUrl || "", 1080);
+      const currentYear = (/* @__PURE__ */ new Date()).getFullYear();
+      const rawY = Number(item.y);
+      const safeYear = Number.isFinite(rawY) && rawY >= 1900 ? Math.min(rawY, currentYear) : item.y || "N/A";
       return {
         imdbId: item.id,
         title: item.l,
-        year: item.y || "N/A",
+        year: safeYear,
         type: itemType,
         posterUrl: poster,
         cast: item.s || ""
@@ -1382,7 +1402,7 @@ async function searchMetadataInternal(rawQuery) {
           results: [{
             imdbId: data.imdbID,
             title: data.Title,
-            year: data.Year,
+            year: resolveSafeReleaseYear(data.Year, imdbHit?.year),
             type: data.Type || "movie",
             posterUrl: bestPoster,
             cast: data.Actors && data.Actors !== "N/A" ? data.Actors : imdbHit?.cast || ""
@@ -1439,7 +1459,7 @@ async function searchMetadataInternal(rawQuery) {
           combinedResults.push({
             imdbId: item.imdbID,
             title: item.Title,
-            year: item.Year,
+            year: resolveSafeReleaseYear(item.Year),
             type: item.Type || "movie",
             posterUrl: upgradePosterUrl(item.Poster, 1080)
           });
@@ -1533,7 +1553,7 @@ async function fetchMetadataDetailInternal(rawId, rawTitle) {
           imdbId: data.imdbID || id,
           title: data.Title || "",
           originalTitle: data.Title || "",
-          releaseYear: parseInt(data.Year) || (/* @__PURE__ */ new Date()).getFullYear(),
+          releaseYear: resolveSafeReleaseYear(data.Year, imdbHit?.year),
           posterUrl,
           backdropUrl,
           genre,
@@ -1557,7 +1577,7 @@ async function fetchMetadataDetailInternal(rawId, rawTitle) {
           imdbId: imdbHit.imdbId || id,
           title: imdbHit.title || "",
           originalTitle: imdbHit.title || "",
-          releaseYear: parseInt(String(imdbHit.year)) || (/* @__PURE__ */ new Date()).getFullYear(),
+          releaseYear: resolveSafeReleaseYear(null, imdbHit.year),
           posterUrl,
           backdropUrl,
           genre: "Action",
@@ -2964,7 +2984,7 @@ function cleanSingleTitleLine(rawLine) {
     text = text.slice(0, inlineMetaMatch.index).trim();
   }
   text = text.replace(/^\[[^\]]{2,40}\]\s*/g, "").trim();
-  const maxValidYear = (/* @__PURE__ */ new Date()).getFullYear() + 1;
+  const maxValidYear = (/* @__PURE__ */ new Date()).getFullYear();
   let detectedYear = null;
   let yearIndex = -1;
   const bracketYears = Array.from(text.matchAll(/[\[(]\s*((?:19|20)\d{2})\s*[\])]/g));
@@ -3112,7 +3132,7 @@ function looksGenericTelegramName(name) {
 }
 function parseTelegramMovieMeta(fileName, caption, width = 0, height = 0, durationSec = 0, sizeBytes = 0) {
   const rawLines = String(caption || "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  const maxValidYear = (/* @__PURE__ */ new Date()).getFullYear() + 1;
+  const maxValidYear = (/* @__PURE__ */ new Date()).getFullYear();
   let explicitCaptionYear = null;
   let explicitImdbId = null;
   const seasonEpisodeLines = [];
@@ -3316,18 +3336,21 @@ function mergeFinalLanguage(omdbLang, parsed) {
   return hint || omdbLang || "Hindi";
 }
 async function resolveBestImdbMatch(parsed) {
-  const fallbackYear = parsed.year || (/* @__PURE__ */ new Date()).getFullYear();
+  const currentYear = (/* @__PURE__ */ new Date()).getFullYear();
+  const fallbackYear = parsed.year && parsed.year <= currentYear ? parsed.year : currentYear;
   if (parsed.explicitImdbId) {
     const detail2 = await fetchMetadataDetailInternal(parsed.explicitImdbId);
     if (detail2.status === "ok" && detail2.data) {
       const d2 = detail2.data;
       const poster = upgradePosterUrl(d2.posterUrl, 1080) || d2.posterUrl || "";
       const backdrop = upgradePosterUrl(d2.backdropUrl || poster, 1280) || poster;
+      const rawYear = Number(d2.releaseYear) || fallbackYear;
+      const clampedYear = rawYear > currentYear ? fallbackYear : rawYear;
       return {
         imdbId: d2.imdbId || parsed.explicitImdbId,
         title: d2.title || parsed.cleanTitle,
         originalTitle: d2.originalTitle || d2.title || parsed.cleanTitle,
-        releaseYear: d2.releaseYear || fallbackYear,
+        releaseYear: clampedYear,
         posterUrl: poster,
         backdropUrl: backdrop,
         genre: d2.genre || "Action",
@@ -3411,7 +3434,10 @@ async function resolveBestImdbMatch(parsed) {
   const d = detail.status === "ok" ? detail.data : void 0;
   const bestPoster = upgradePosterUrl(d?.posterUrl || winner.cand.posterUrl, 1080) || d?.posterUrl || winner.cand.posterUrl || "";
   const bestBackdrop = upgradePosterUrl(d?.backdropUrl || bestPoster, 1280) || bestPoster;
-  const finalYear = Number(d?.releaseYear || parseInt(String(winner.cand.year || ""), 10) || fallbackYear) || fallbackYear;
+  const candYearParsed = parseInt(String(winner.cand.year || "").slice(0, 4), 10);
+  const detailYearParsed = Number(d?.releaseYear || 0);
+  const rawFinalYear = detailYearParsed > 0 && detailYearParsed <= currentYear ? detailYearParsed : Number.isFinite(candYearParsed) && candYearParsed >= 1900 && candYearParsed <= currentYear ? candYearParsed : fallbackYear;
+  const finalYear = rawFinalYear > currentYear ? fallbackYear : rawFinalYear;
   const rawSim = getTitleSimilarityScore(d?.title || winner.cand.title, parsed.cleanTitle);
   const winnerType = String(winner.cand.type || "").toLowerCase();
   const isSeriesYearMatch = parsed.isSeriesEpisode && winnerType === "series" && Boolean(parsed.year && finalYear <= parsed.year && parsed.year - finalYear <= 15);
@@ -3725,7 +3751,142 @@ function getServerFirestoreQuotaStatus() {
   };
 }
 
+// src/utils/seriesCompleteness.ts
+function expandEpisodeNumbers(ep) {
+  if (!ep) return [];
+  const label = String(ep.episodeLabel || "").trim();
+  const title = String(ep.title || "").trim();
+  const rangeMatch = label.match(/^(\d{1,4})\s*[-–—]\s*(\d{1,4})$/) || title.match(/\b(\d{1,4})\s*[-–—]\s*(\d{1,4})\b/);
+  if (rangeMatch) {
+    const start = parseInt(rangeMatch[1], 10);
+    const end = parseInt(rangeMatch[2], 10);
+    if (Number.isFinite(start) && Number.isFinite(end) && end >= start && start >= 1 && end - start <= 150) {
+      const nums = [];
+      for (let i = start; i <= end; i++) nums.push(i);
+      return nums;
+    }
+  }
+  const epNum = Number(ep.episodeNumber);
+  return Number.isFinite(epNum) && epNum > 0 ? [Math.floor(epNum)] : [];
+}
+function isMovieRecordSeries(movie) {
+  if (!movie) return false;
+  if (String(movie.id || "").startsWith("tg_series_")) return true;
+  if (Array.isArray(movie.seasons) && movie.seasons.length > 0) return true;
+  const orig = String(movie.originalCategory || "").toLowerCase();
+  const disp = String(movie.displayCategory || "").toLowerCase();
+  if (orig.includes("series") || disp.includes("series")) return true;
+  return false;
+}
+function getSeasonCoveredEpisodes(season) {
+  const covered = /* @__PURE__ */ new Set();
+  if (!season || !Array.isArray(season.episodes)) return covered;
+  for (const ep of season.episodes) {
+    if (!ep || !String(ep.streamUrl || "").trim()) continue;
+    for (const n of expandEpisodeNumbers(ep)) {
+      covered.add(n);
+    }
+  }
+  return covered;
+}
+function isSeriesComplete(movie, expectedSeasonCounts) {
+  if (!movie) return false;
+  if (!isMovieRecordSeries(movie)) {
+    return true;
+  }
+  const seasons = Array.isArray(movie.seasons) ? movie.seasons : [];
+  if (seasons.length === 0) return false;
+  const sortedSeasons = [...seasons].sort(
+    (a, b) => (Number(a?.seasonNumber) || 0) - (Number(b?.seasonNumber) || 0)
+  );
+  const seasonNumbers = sortedSeasons.map((s) => Number(s?.seasonNumber) || 0);
+  if (seasonNumbers[0] !== 1) return false;
+  for (let i = 0; i < seasonNumbers.length; i++) {
+    if (seasonNumbers[i] !== i + 1) return false;
+  }
+  for (const season of sortedSeasons) {
+    const sNum = Number(season?.seasonNumber) || 0;
+    const covered = getSeasonCoveredEpisodes(season);
+    if (covered.size === 0) return false;
+    const maxEp = Math.max(...covered);
+    const minEp = Math.min(...covered);
+    if (minEp !== 1) return false;
+    for (let ep = 1; ep <= maxEp; ep++) {
+      if (!covered.has(ep)) return false;
+    }
+    const expectedCount = expectedSeasonCounts?.[sNum];
+    if (typeof expectedCount === "number" && expectedCount > 0 && maxEp < expectedCount) {
+      return false;
+    }
+  }
+  return true;
+}
+function hasPlayableContent(movie) {
+  if (!movie) return false;
+  if (isMovieRecordSeries(movie)) {
+    return isSeriesComplete(movie);
+  }
+  const hasPrimary = Boolean(String(movie.streamingUrl || "").trim());
+  const hasQualities = Boolean(
+    movie.videoQualities && typeof movie.videoQualities === "object" && Object.values(movie.videoQualities).some((u) => Boolean(String(u || "").trim()))
+  );
+  return hasPrimary || hasQualities;
+}
+
 // src/server/telegramRouter.ts
+var TVMAZE_EP_COUNT_CACHE = /* @__PURE__ */ new Map();
+async function fetchExpectedSeasonEpisodeCounts(imdbId) {
+  const cleanId = String(imdbId || "").trim();
+  if (!/^tt\d+$/i.test(cleanId)) return null;
+  const cached = TVMAZE_EP_COUNT_CACHE.get(cleanId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.counts;
+  }
+  try {
+    const showResp = await fetch(
+      `https://api.tvmaze.com/lookup/shows?imdb=${encodeURIComponent(cleanId)}`,
+      { signal: AbortSignal.timeout(3500) }
+    );
+    if (!showResp.ok) {
+      TVMAZE_EP_COUNT_CACHE.set(cleanId, { counts: null, expiresAt: Date.now() + 30 * 6e4 });
+      return null;
+    }
+    const showJson = await showResp.json();
+    if (!showJson?.id) {
+      TVMAZE_EP_COUNT_CACHE.set(cleanId, { counts: null, expiresAt: Date.now() + 30 * 6e4 });
+      return null;
+    }
+    const epsResp = await fetch(`https://api.tvmaze.com/shows/${showJson.id}/episodes`, {
+      signal: AbortSignal.timeout(3500)
+    });
+    if (!epsResp.ok) {
+      TVMAZE_EP_COUNT_CACHE.set(cleanId, { counts: null, expiresAt: Date.now() + 30 * 6e4 });
+      return null;
+    }
+    const epsList = await epsResp.json();
+    const counts = {};
+    if (Array.isArray(epsList)) {
+      for (const ep of epsList) {
+        const s = Number(ep?.season);
+        const n = Number(ep?.number);
+        if (s > 0 && n > 0) {
+          counts[s] = Math.max(counts[s] || 0, n);
+        }
+      }
+    }
+    const result = Object.keys(counts).length > 0 ? counts : null;
+    TVMAZE_EP_COUNT_CACHE.set(cleanId, { counts: result, expiresAt: Date.now() + 6 * 36e5 });
+    return result;
+  } catch {
+    return null;
+  }
+}
+function clampReleaseYear(val) {
+  const currentYear = (/* @__PURE__ */ new Date()).getFullYear();
+  const parsed = Number(val);
+  if (!Number.isFinite(parsed) || parsed < 1900) return currentYear;
+  return Math.min(Math.floor(parsed), currentYear);
+}
 var directHttpProbeCache = /* @__PURE__ */ new Map();
 async function probeDirectHttpInfo(targetUrl) {
   const cached = directHttpProbeCache.get(targetUrl);
@@ -6733,7 +6894,8 @@ async function ensureChannelUploadWatcher(client2) {
         console.log(
           `[TelegramAutoWatcher] New channel video detected: "${classified.fileName || msg.id}" (${streamUrl})`
         );
-        scheduleServerAutoSync(`new_video_${cleanChannelId}_${msg.id}`, 8e3);
+        queuePriorityChannelMsgId(cleanChannelId, Number(msg.id));
+        scheduleServerAutoSync(`new_video_${cleanChannelId}_${msg.id}`, 1200);
       } catch (watchErr) {
         console.warn("[TelegramAutoWatcher] Handler warning:", watchErr?.message || watchErr);
       }
@@ -7433,8 +7595,120 @@ var DEFAULT_AUTO_SYNC_CHANNEL_URL = "https://t.me/+P5UeGT1YlQ9lOGZl";
 var DEFAULT_AUTO_SYNC_CHANNEL_ID = "4451036277";
 var AUTO_SYNC_CONFIG_VERSION = 3;
 var SEED_CATALOG_PATH = path3.resolve(process.cwd(), "public/movies-seed.json");
+var DIST_SEED_CATALOG_PATH = path3.resolve(process.cwd(), "dist/movies-seed.json");
+var AUTO_SYNC_STATE_FILE = path3.join(os2.tmpdir(), ".movie_hub_tg_autosync_state.json");
 var PENDING_DRAFTS_FILE = path3.join(os2.tmpdir(), ".movie_hub_tg_pending_drafts.json");
 var pendingServerDrafts = [];
+var pendingPriorityMsgIds = /* @__PURE__ */ new Map();
+var liveCatalogSseClients = /* @__PURE__ */ new Set();
+var localChannelCheckpoint = {};
+function loadLocalAutoSyncState() {
+  try {
+    if (fs4.existsSync(AUTO_SYNC_STATE_FILE)) {
+      const parsed = JSON.parse(fs4.readFileSync(AUTO_SYNC_STATE_FILE, "utf-8"));
+      if (parsed?.channels && typeof parsed.channels === "object") {
+        for (const [k, v] of Object.entries(parsed.channels)) {
+          const n = Number(v);
+          if (k && Number.isFinite(n) && n > 0) {
+            localChannelCheckpoint[k] = n;
+          }
+        }
+      }
+    }
+  } catch {
+  }
+}
+function saveLocalChannelCheckpoint(channelId, msgId) {
+  if (!channelId || !Number.isFinite(msgId) || msgId <= 0) return;
+  const prev = localChannelCheckpoint[channelId] || 0;
+  if (msgId <= prev) return;
+  localChannelCheckpoint[channelId] = msgId;
+  try {
+    fs4.writeFileSync(
+      AUTO_SYNC_STATE_FILE,
+      JSON.stringify({ channels: localChannelCheckpoint, updatedAt: Date.now() }),
+      "utf-8"
+    );
+  } catch {
+  }
+}
+loadLocalAutoSyncState();
+function queuePriorityChannelMsgId(channelId, msgId) {
+  if (!channelId || !Number.isFinite(msgId) || msgId <= 0) return;
+  let set = pendingPriorityMsgIds.get(channelId);
+  if (!set) {
+    set = /* @__PURE__ */ new Set();
+    pendingPriorityMsgIds.set(channelId, set);
+  }
+  set.add(msgId);
+}
+function consumePriorityChannelMsgIds(channelId) {
+  const set = pendingPriorityMsgIds.get(channelId);
+  if (!set || set.size === 0) return [];
+  const list = Array.from(set).sort((a, b) => a - b);
+  set.clear();
+  return list;
+}
+function writeSeedCatalogToDisk(items) {
+  const payload = JSON.stringify(items);
+  try {
+    fs4.writeFileSync(SEED_CATALOG_PATH, payload);
+  } catch {
+  }
+  try {
+    if (fs4.existsSync(path3.dirname(DIST_SEED_CATALOG_PATH))) {
+      fs4.writeFileSync(DIST_SEED_CATALOG_PATH, payload);
+    }
+  } catch {
+  }
+}
+function broadcastLiveCatalogUpdate(payload) {
+  if (liveCatalogSseClients.size === 0) return;
+  const frame = `event: catalog_updated
+data: ${JSON.stringify(payload)}
+
+`;
+  for (const clientRes of Array.from(liveCatalogSseClients)) {
+    try {
+      if (!clientRes.writableEnded) {
+        clientRes.write(frame);
+      } else {
+        liveCatalogSseClients.delete(clientRes);
+      }
+    } catch {
+      liveCatalogSseClients.delete(clientRes);
+    }
+  }
+}
+router2.get("/live-events", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders?.();
+  liveCatalogSseClients.add(res);
+  try {
+    res.write(`event: connected
+data: ${JSON.stringify({ ok: true, ts: Date.now() })}
+
+`);
+  } catch {
+  }
+  const pingTimer = setInterval(() => {
+    try {
+      if (!res.writableEnded) {
+        res.write(`: ping ${Date.now()}
+
+`);
+      }
+    } catch {
+    }
+  }, 2e4);
+  req.on("close", () => {
+    clearInterval(pingTimer);
+    liveCatalogSseClients.delete(res);
+  });
+});
 function loadPendingServerDrafts() {
   try {
     if (fs4.existsSync(PENDING_DRAFTS_FILE)) {
@@ -7477,8 +7751,13 @@ router2.post("/trigger-auto-sync", async (_req, res) => {
 });
 var serverAutoSyncTimer = null;
 var serverAutoSyncRunning = false;
+var pendingResyncReason = null;
 var cachedSyncConfig = null;
-function scheduleServerAutoSync(reason, delayMs = 8e3) {
+function scheduleServerAutoSync(reason, delayMs = 1200) {
+  if (serverAutoSyncRunning) {
+    pendingResyncReason = reason;
+    return;
+  }
   if (serverAutoSyncTimer) clearTimeout(serverAutoSyncTimer);
   serverAutoSyncTimer = setTimeout(() => {
     serverAutoSyncTimer = null;
@@ -7491,6 +7770,7 @@ async function getServerAutoSyncConfig(forceRefresh = false) {
   if (!forceRefresh && cachedSyncConfig && Date.now() - cachedSyncConfig.fetchedAt < 6e4) {
     return cachedSyncConfig;
   }
+  const prevCachedLastSynced = cachedSyncConfig?.lastSyncedMsgId || 0;
   try {
     const ref = doc2(db, "app_config", "telegram_auto_sync");
     const snap = await getDocFromServer2(ref);
@@ -7499,11 +7779,16 @@ async function getServerAutoSyncConfig(forceRefresh = false) {
     const rawVer = Number(d?.configVersion) || 1;
     const isOldDefaultChannel = rawUrl.includes("QSL_3k54YfBjMjE1") || rawUrl.includes("s2Qki5-sfnVjZTI1");
     if (!snap.exists() || rawVer < AUTO_SYNC_CONFIG_VERSION || isOldDefaultChannel || !rawUrl) {
+      const preservedLastSynced = Math.max(
+        prevCachedLastSynced,
+        isOldDefaultChannel ? 0 : Number(d?.lastSyncedMsgId) || 0,
+        localChannelCheckpoint[DEFAULT_AUTO_SYNC_CHANNEL_ID] || 0
+      );
       const migrated = {
         configVersion: AUTO_SYNC_CONFIG_VERSION,
         channelUrl: DEFAULT_AUTO_SYNC_CHANNEL_URL,
         activeChannelId: DEFAULT_AUTO_SYNC_CHANNEL_ID,
-        lastSyncedMsgId: 0,
+        lastSyncedMsgId: preservedLastSynced,
         autoWatchEnabled: true,
         autoPublishVerified: true,
         notifyOnNewPublish: true,
@@ -7516,7 +7801,7 @@ async function getServerAutoSyncConfig(forceRefresh = false) {
       cachedSyncConfig = {
         configVersion: AUTO_SYNC_CONFIG_VERSION,
         channelUrl: DEFAULT_AUTO_SYNC_CHANNEL_URL,
-        lastSyncedMsgId: 0,
+        lastSyncedMsgId: preservedLastSynced,
         autoWatchEnabled: true,
         autoPublishVerified: true,
         notifyOnNewPublish: true,
@@ -7527,7 +7812,11 @@ async function getServerAutoSyncConfig(forceRefresh = false) {
       cachedSyncConfig = {
         configVersion: rawVer,
         channelUrl: rawUrl,
-        lastSyncedMsgId: Number(d?.lastSyncedMsgId) || 0,
+        lastSyncedMsgId: Math.max(
+          prevCachedLastSynced,
+          Number(d?.lastSyncedMsgId) || 0,
+          localChannelCheckpoint[DEFAULT_AUTO_SYNC_CHANNEL_ID] || 0
+        ),
         autoWatchEnabled: typeof d?.autoWatchEnabled === "boolean" ? d.autoWatchEnabled : true,
         autoPublishVerified: typeof d?.autoPublishVerified === "boolean" ? d.autoPublishVerified : true,
         notifyOnNewPublish: typeof d?.notifyOnNewPublish === "boolean" ? d.notifyOnNewPublish : true,
@@ -7540,7 +7829,7 @@ async function getServerAutoSyncConfig(forceRefresh = false) {
       cachedSyncConfig = {
         configVersion: AUTO_SYNC_CONFIG_VERSION,
         channelUrl: DEFAULT_AUTO_SYNC_CHANNEL_URL,
-        lastSyncedMsgId: 0,
+        lastSyncedMsgId: localChannelCheckpoint[DEFAULT_AUTO_SYNC_CHANNEL_ID] || 0,
         autoWatchEnabled: true,
         autoPublishVerified: true,
         notifyOnNewPublish: true,
@@ -7624,42 +7913,77 @@ async function runServerAutoSyncPass(reason) {
     const resolved = await resolveChannelPeerFromLinkOrId(client2, cfg.channelUrl);
     if (!resolved) return;
     const { peer, cleanChannelId, channelTitle, publicUsername } = resolved;
-    let baseline = cfg.lastSyncedMsgId;
+    const priorityIds = consumePriorityChannelMsgIds(cleanChannelId);
+    try {
+      const { botToken } = getTelegramCredentials();
+      if (botToken && /^\d+$/.test(cleanChannelId)) {
+        const targetChatId = `-100${cleanChannelId}`;
+        const updResp = await fetch(`https://api.telegram.org/bot${botToken}/getUpdates?limit=30`);
+        const updJson = await updResp.json();
+        for (const u of updJson?.result || []) {
+          const src = u?.channel_post || u?.edited_channel_post;
+          if (src && String(src?.chat?.id || "") === targetChatId) {
+            const mid = Number(src.message_id || 0);
+            if (mid > 0) {
+              if (!priorityIds.includes(mid)) priorityIds.push(mid);
+              const prevKnown = channelMaxKnownMsgId.get(cleanChannelId) || 0;
+              if (mid > prevKnown) channelMaxKnownMsgId.set(cleanChannelId, mid);
+            }
+          }
+        }
+      }
+    } catch {
+    }
+    let baseline = Math.max(
+      cfg.lastSyncedMsgId,
+      localChannelCheckpoint[cleanChannelId] || 0
+    );
     let reconciledStaleBaseline = false;
+    const knownMax = channelMaxKnownMsgId.get(cleanChannelId) || 0;
     if (baseline <= 0) {
       const latest = await discoverChannelLatestMsgId(client2, peer, cleanChannelId);
-      if (latest <= 0) return;
+      if (latest <= 0 && priorityIds.length === 0) return;
       baseline = Math.max(0, latest - 25);
+    } else if (knownMax > baseline + 25) {
+      baseline = Math.max(baseline, knownMax - 25);
     }
-    const probeIds = [];
-    for (let id = baseline + 1; id <= baseline + 20; id++) probeIds.push(id);
-    const probedMsgs = await client2.getMessages(peer, { ids: probeIds }).catch(() => []);
-    let validMsgs = (probedMsgs || []).filter((m) => m && m.id);
-    const shouldReconcile = validMsgs.length === 0 && (reason === "boot" || reason === "manual_trigger" || Date.now() - lastReconcileCheckAt > 45e3);
+    const probeSet = new Set(priorityIds);
+    const probeStart = Math.max(baseline, knownMax > baseline + 25 ? knownMax - 25 : baseline);
+    for (let id = probeStart + 1; id <= probeStart + 25; id++) probeSet.add(id);
+    const probeIds = Array.from(probeSet).sort((a, b) => a - b);
+    const [probedMsgs, latestTailMsgs] = await Promise.all([
+      probeIds.length > 0 ? client2.getMessages(peer, { ids: probeIds }).catch(() => []) : Promise.resolve([]),
+      client2.getMessages(peer, { limit: 15 }).catch(() => [])
+    ]);
+    const validMsgMap = /* @__PURE__ */ new Map();
+    for (const m of [...probedMsgs || [], ...latestTailMsgs || []]) {
+      if (m && m.id) validMsgMap.set(Number(m.id), m);
+    }
+    const shouldReconcile = validMsgMap.size === 0 && (reason === "boot" || reason === "manual_trigger" || Date.now() - lastReconcileCheckAt > 3e4);
     if (shouldReconcile) {
       lastReconcileCheckAt = Date.now();
       const realLatest = await discoverChannelLatestMsgId(client2, peer, cleanChannelId);
-      if (realLatest > 0 && (baseline > realLatest || reason === "boot" || reason === "manual_trigger")) {
+      if (realLatest > 0 && (baseline > realLatest || realLatest > baseline || reason === "boot" || reason === "manual_trigger")) {
         if (baseline > realLatest) {
           reconciledStaleBaseline = true;
           baseline = 0;
         }
-        const scanStart = reconciledStaleBaseline ? 1 : Math.max(1, realLatest - 100);
-        const recMsgs = [];
+        const scanStart = reconciledStaleBaseline ? 1 : Math.max(1, realLatest - 60);
         for (let cur = scanStart; cur <= realLatest; cur += 100) {
           const endCur = Math.min(realLatest, cur + 99);
           const batch = [];
           for (let id = cur; id <= endCur; id++) batch.push(id);
           const got = await client2.getMessages(peer, { ids: batch }).catch(() => []);
           for (const m of got || []) {
-            if (m && m.id) recMsgs.push(m);
+            if (m && m.id) validMsgMap.set(Number(m.id), m);
           }
         }
-        validMsgs = recMsgs;
       }
     }
+    let validMsgs = Array.from(validMsgMap.values());
     if (validMsgs.length === 0) {
       if (reconciledStaleBaseline) {
+        localChannelCheckpoint[cleanChannelId] = 0;
         await setDocWithQuotaGuard(
           doc2(db, "app_config", "telegram_auto_sync"),
           { lastSyncedMsgId: 0, updatedAtMs: Date.now(), updatedAt: serverTimestamp() },
@@ -7670,13 +7994,16 @@ async function runServerAutoSyncPass(reason) {
       }
       return;
     }
-    if (!reconciledStaleBaseline && validMsgs.length >= 18) {
+    if (!reconciledStaleBaseline && validMsgs.length >= 20) {
       const moreIds = [];
-      for (let id = baseline + 21; id <= baseline + 150; id++) moreIds.push(id);
+      for (let id = baseline + 26; id <= baseline + 150; id++) moreIds.push(id);
       const moreMsgs = await client2.getMessages(peer, { ids: moreIds }).catch(() => []);
       for (const m of moreMsgs || []) {
-        if (m && m.id) validMsgs.push(m);
+        if (m && m.id && !validMsgMap.has(Number(m.id))) {
+          validMsgMap.set(Number(m.id), m);
+        }
       }
+      validMsgs = Array.from(validMsgMap.values());
     }
     validMsgs.sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
     const highestMsgId = Math.max(
@@ -7721,6 +8048,7 @@ async function runServerAutoSyncPass(reason) {
           releaseYear: Number(m?.releaseYear) || 0,
           originalCategory: cat,
           isSeries,
+          published: m?.published !== false,
           streamingUrl: String(m?.streamingUrl || "").trim(),
           videoQualities: m?.videoQualities && typeof m.videoQualities === "object" ? { ...m.videoQualities } : {},
           seasons: Array.isArray(m?.seasons) ? m.seasons : []
@@ -7822,14 +8150,15 @@ async function runServerAutoSyncPass(reason) {
     );
     const candidates = verifiedBgList.filter((c) => Boolean(c));
     if (candidates.length === 0) {
-      if (highestMsgId > cfg.lastSyncedMsgId) {
+      if (highestMsgId > cfg.lastSyncedMsgId || highestMsgId > (localChannelCheckpoint[cleanChannelId] || 0)) {
+        saveLocalChannelCheckpoint(cleanChannelId, highestMsgId);
+        if (cachedSyncConfig) cachedSyncConfig.lastSyncedMsgId = highestMsgId;
         await setDocWithQuotaGuard(
           doc2(db, "app_config", "telegram_auto_sync"),
           { lastSyncedMsgId: highestMsgId, updatedAtMs: Date.now(), updatedAt: serverTimestamp() },
           { merge: true }
         ).catch(() => {
         });
-        if (cachedSyncConfig) cachedSyncConfig.lastSyncedMsgId = highestMsgId;
       }
       return;
     }
@@ -7866,6 +8195,7 @@ async function runServerAutoSyncPass(reason) {
       }
     }
     let publishedCount = 0;
+    let catalogDirty = false;
     const queuedForReview = [];
     for (const grp of groups) {
       const bestStream = grp.videoQualities["1080p"] || grp.videoQualities["720p"] || grp.videoQualities["480p"] || grp.videoQualities["4K"] || grp.videoQualities["360p"] || grp.primary.streamUrl;
@@ -7954,14 +8284,24 @@ async function runServerAutoSyncPass(reason) {
             streamUrl: draft.streamUrl.trim(),
             ...durationFormatted ? { duration: durationFormatted } : {},
             ...bestDurSec > 0 ? { durationSec: bestDurSec } : {},
-            showInNewEpisodes: false
+            showInNewEpisodes: true,
+            newEpisodeEnabledAt: nowMs,
+            createdAt: nowMs,
+            addedAt: nowMs
           };
+          const seriesImdbId = (existingRec?.imdbId || draft.imdbId || "").trim();
+          const expectedCounts = seriesImdbId ? await fetchExpectedSeasonEpisodeCounts(seriesImdbId) : null;
           if (existingRec) {
             const { mergedSeasons, added } = mergeEpisodeIntoSeasons(existingRec.seasons, seasonNum, epObj);
             if (!added) {
               existingUrlSet.add(draft.streamUrl.toLowerCase());
               continue;
             }
+            const seriesReadyToPublish = isSeriesComplete(
+              { originalCategory: catToSave, seasons: mergedSeasons },
+              expectedCounts
+            );
+            const wasPublished = existingRec.published !== false;
             const nextStream = existingRec.streamingUrl || epObj.streamUrl;
             const prevSeed = seedCatalogMap.get(existingRec.id) || {};
             seedCatalogMap.set(existingRec.id, {
@@ -7969,13 +8309,17 @@ async function runServerAutoSyncPass(reason) {
               id: existingRec.id,
               seasons: mergedSeasons,
               streamingUrl: nextStream,
-              updatedAt: Date.now()
+              published: seriesReadyToPublish,
+              releaseYear: clampReleaseYear(prevSeed.releaseYear || draft.releaseYear),
+              ...seriesReadyToPublish && !wasPublished ? { createdAt: nowMs } : {},
+              updatedAt: nowMs
             });
             await setDocWithQuotaGuard(
               doc2(db, "movies", existingRec.id),
               {
                 seasons: mergedSeasons,
                 streamingUrl: nextStream,
+                published: seriesReadyToPublish,
                 updatedAt: serverTimestamp()
               },
               { merge: true }
@@ -7983,39 +8327,51 @@ async function runServerAutoSyncPass(reason) {
             });
             existingRec.seasons = mergedSeasons;
             existingRec.streamingUrl = nextStream;
+            existingRec.published = seriesReadyToPublish;
             existingUrlSet.add(draft.streamUrl.toLowerCase());
-            publishedCount++;
-            console.log(
-              `[ServerAutoSync] Added ${draft.title} S${seasonNum}E${epNum} -> movies/${existingRec.id}`
-            );
-            if (cfg.notifyOnNewPublish && publishedCount <= 3) {
-              await setDocWithQuotaGuard(
-                doc2(db, "announcements", `tg_rel_${cleanChannelId}_${draft.msgId}`),
-                {
-                  title: draft.title,
-                  releaseYear: Number(draft.releaseYear) || (/* @__PURE__ */ new Date()).getFullYear(),
-                  category: catToSave,
-                  isSeries: true,
-                  language: (draft.language || "Hindi").trim(),
-                  genre: (draft.genre || "Drama").trim(),
-                  qualityBadge: badge !== "NONE" ? badge : "",
-                  runtime: (draft.runtime || "").trim(),
-                  posterUrl: cleanPoster,
-                  backdropUrl: cleanBackdrop,
-                  message: `Season ${seasonNum} Episode ${draft.episodeLabel || epNum} Now Streaming!`,
-                  movieId: existingRec.id,
-                  createdAt: serverTimestamp(),
-                  createdAtMs: nowMs,
-                  expiresAt: new Date(nowMs + 48 * 60 * 60 * 1e3)
-                },
-                { merge: true }
-              ).catch(() => {
-              });
+            catalogDirty = true;
+            if (seriesReadyToPublish) {
+              publishedCount++;
+              console.log(
+                `[ServerAutoSync] Added ${draft.title} S${seasonNum}E${epNum} -> movies/${existingRec.id} (complete & published)`
+              );
+              if (cfg.notifyOnNewPublish && publishedCount <= 3) {
+                await setDocWithQuotaGuard(
+                  doc2(db, "announcements", `tg_rel_${cleanChannelId}_${draft.msgId}`),
+                  {
+                    title: draft.title,
+                    releaseYear: clampReleaseYear(draft.releaseYear),
+                    category: catToSave,
+                    isSeries: true,
+                    language: (draft.language || "Hindi").trim(),
+                    genre: (draft.genre || "Drama").trim(),
+                    qualityBadge: badge !== "NONE" ? badge : "",
+                    runtime: (draft.runtime || "").trim(),
+                    posterUrl: cleanPoster,
+                    backdropUrl: cleanBackdrop,
+                    message: !wasPublished ? "COMPLETE SERIES \u2022 GO STREAM or DOWNLOAD NOW" : `Season ${seasonNum} Episode ${draft.episodeLabel || epNum} Now Streaming!`,
+                    movieId: existingRec.id,
+                    createdAt: serverTimestamp(),
+                    createdAtMs: nowMs,
+                    expiresAt: new Date(nowMs + 48 * 60 * 60 * 1e3)
+                  },
+                  { merge: true }
+                ).catch(() => {
+                });
+              }
+            } else {
+              console.log(
+                `[ServerAutoSync] Staged incomplete series "${draft.title}" S${seasonNum}E${epNum} (published: false until all episodes arrive)`
+              );
             }
             continue;
           } else {
             const seriesDocId = `tg_series_${cleanChannelId}_${draft.msgId}`;
             const initialSeasons = [{ seasonNumber: seasonNum, episodes: [epObj] }];
+            const seriesReadyToPublish = isSeriesComplete(
+              { originalCategory: catToSave, seasons: initialSeasons },
+              expectedCounts
+            );
             const seriesBase = {
               id: seriesDocId,
               title: draft.title.trim(),
@@ -8023,7 +8379,7 @@ async function runServerAutoSyncPass(reason) {
               description: draft.description.trim(),
               posterUrl: cleanPoster,
               backdropUrl: cleanBackdrop,
-              releaseYear: Number(draft.releaseYear) || (/* @__PURE__ */ new Date()).getFullYear(),
+              releaseYear: clampReleaseYear(draft.releaseYear),
               originalCategory: catToSave,
               displayCategory: displayCat,
               contentType: catToSave.toLowerCase().includes("anime") ? "anime" : null,
@@ -8033,13 +8389,13 @@ async function runServerAutoSyncPass(reason) {
               cast: (draft.cast || "").trim(),
               runtime: (draft.runtime || "").trim(),
               rating: Number(draft.rating) || 8,
-              imdbId: (draft.imdbId || "").trim(),
+              imdbId: seriesImdbId,
               trailerUrl: "",
               streamingUrl: epObj.streamUrl,
               videoQualities: {},
               seasons: initialSeasons,
               featured: true,
-              published: true,
+              published: seriesReadyToPublish,
               qualityBadge: badge,
               duration: bestDurSec || parseDurationToSeconds(draft.runtime) || 0,
               telegramMsgId: draft.msgId,
@@ -8061,43 +8417,51 @@ async function runServerAutoSyncPass(reason) {
             existingUrlSet.add(draft.streamUrl.toLowerCase());
             existingRecords.push({
               id: seriesDocId,
-              imdbId: (draft.imdbId || "").trim(),
+              imdbId: seriesImdbId,
               title: draft.title.trim(),
               originalTitle: (draft.originalTitle || draft.title).trim(),
-              releaseYear: Number(draft.releaseYear) || (/* @__PURE__ */ new Date()).getFullYear(),
+              releaseYear: clampReleaseYear(draft.releaseYear),
               originalCategory: catToSave,
               isSeries: true,
+              published: seriesReadyToPublish,
               streamingUrl: epObj.streamUrl,
               videoQualities: {},
               seasons: initialSeasons
             });
-            publishedCount++;
-            console.log(
-              `[ServerAutoSync] Auto-Published Series "${draft.title}" S${seasonNum}E${epNum} (${draft.imdbId || "no-imdb"}) -> movies/${seriesDocId}`
-            );
-            if (cfg.notifyOnNewPublish && publishedCount <= 3) {
-              await setDocWithQuotaGuard(
-                doc2(db, "announcements", `tg_rel_${cleanChannelId}_${draft.msgId}`),
-                {
-                  title: draft.title,
-                  releaseYear: Number(draft.releaseYear) || (/* @__PURE__ */ new Date()).getFullYear(),
-                  category: catToSave,
-                  isSeries: true,
-                  language: (draft.language || "Hindi").trim(),
-                  genre: (draft.genre || "Drama").trim(),
-                  qualityBadge: badge !== "NONE" ? badge : "",
-                  runtime: (draft.runtime || "").trim(),
-                  posterUrl: cleanPoster,
-                  backdropUrl: cleanBackdrop,
-                  message: "NEW SERIES \u2022 GO STREAM or DOWNLOAD NOW",
-                  movieId: seriesDocId,
-                  createdAt: serverTimestamp(),
-                  createdAtMs: nowMs,
-                  expiresAt: new Date(nowMs + 48 * 60 * 60 * 1e3)
-                },
-                { merge: true }
-              ).catch(() => {
-              });
+            catalogDirty = true;
+            if (seriesReadyToPublish) {
+              publishedCount++;
+              console.log(
+                `[ServerAutoSync] Auto-Published Series "${draft.title}" S${seasonNum}E${epNum} (${seriesImdbId || "no-imdb"}) -> movies/${seriesDocId}`
+              );
+              if (cfg.notifyOnNewPublish && publishedCount <= 3) {
+                await setDocWithQuotaGuard(
+                  doc2(db, "announcements", `tg_rel_${cleanChannelId}_${draft.msgId}`),
+                  {
+                    title: draft.title,
+                    releaseYear: clampReleaseYear(draft.releaseYear),
+                    category: catToSave,
+                    isSeries: true,
+                    language: (draft.language || "Hindi").trim(),
+                    genre: (draft.genre || "Drama").trim(),
+                    qualityBadge: badge !== "NONE" ? badge : "",
+                    runtime: (draft.runtime || "").trim(),
+                    posterUrl: cleanPoster,
+                    backdropUrl: cleanBackdrop,
+                    message: "NEW SERIES \u2022 GO STREAM or DOWNLOAD NOW",
+                    movieId: seriesDocId,
+                    createdAt: serverTimestamp(),
+                    createdAtMs: nowMs,
+                    expiresAt: new Date(nowMs + 48 * 60 * 60 * 1e3)
+                  },
+                  { merge: true }
+                ).catch(() => {
+                });
+              }
+            } else {
+              console.log(
+                `[ServerAutoSync] Staged incomplete series "${draft.title}" S${seasonNum}E${epNum} (${seriesImdbId || "no-imdb"}) -> hidden until complete`
+              );
             }
             continue;
           }
@@ -8149,7 +8513,7 @@ async function runServerAutoSyncPass(reason) {
           description: draft.description.trim(),
           posterUrl: cleanPoster,
           backdropUrl: cleanBackdrop,
-          releaseYear: Number(draft.releaseYear) || (/* @__PURE__ */ new Date()).getFullYear(),
+          releaseYear: clampReleaseYear(draft.releaseYear),
           originalCategory: catToSave,
           displayCategory: displayCat,
           contentType: catToSave.toLowerCase().includes("anime") ? "anime" : null,
@@ -8190,23 +8554,24 @@ async function runServerAutoSyncPass(reason) {
           imdbId: (draft.imdbId || "").trim(),
           title: draft.title.trim(),
           originalTitle: (draft.originalTitle || draft.title).trim(),
-          releaseYear: Number(draft.releaseYear) || (/* @__PURE__ */ new Date()).getFullYear(),
+          releaseYear: clampReleaseYear(draft.releaseYear),
           originalCategory: catToSave,
           isSeries: false,
+          published: true,
           streamingUrl: draft.streamUrl.trim(),
           videoQualities: draft.videoQualities || {},
           seasons: []
         });
         publishedCount++;
         console.log(
-          `[ServerAutoSync] Auto-Published Movie "${draft.title}" (${draft.releaseYear}, ${draft.imdbId || "no-imdb"}) -> movies/${deterministicDocId}`
+          `[ServerAutoSync] Auto-Published Movie "${draft.title}" (${clampReleaseYear(draft.releaseYear)}, ${draft.imdbId || "no-imdb"}) -> movies/${deterministicDocId}`
         );
         if (cfg.notifyOnNewPublish && publishedCount <= 3) {
           await setDocWithQuotaGuard(
             doc2(db, "announcements", `tg_rel_${cleanChannelId}_${draft.msgId}`),
             {
               title: draft.title,
-              releaseYear: Number(draft.releaseYear) || (/* @__PURE__ */ new Date()).getFullYear(),
+              releaseYear: clampReleaseYear(draft.releaseYear),
               category: catToSave,
               isSeries: false,
               language: (draft.language || "Hindi").trim(),
@@ -8239,11 +8604,17 @@ async function runServerAutoSyncPass(reason) {
         savePendingServerDrafts();
       }
     }
+    if (publishedCount > 0 || catalogDirty) {
+      const updatedList = Array.from(seedCatalogMap.values());
+      writeSeedCatalogToDisk(updatedList);
+    }
     if (publishedCount > 0) {
-      try {
-        fs4.writeFileSync(SEED_CATALOG_PATH, JSON.stringify(Array.from(seedCatalogMap.values())));
-      } catch {
-      }
+      broadcastLiveCatalogUpdate({
+        type: "catalog_updated",
+        count: publishedCount,
+        updatedAt: Date.now(),
+        action: "auto_publish"
+      });
       await setDocWithQuotaGuard(
         doc2(db, "app_config", "catalog_sync"),
         {
@@ -8254,7 +8625,9 @@ async function runServerAutoSyncPass(reason) {
       ).catch(() => {
       });
     }
-    if (highestMsgId > cfg.lastSyncedMsgId || reconciledStaleBaseline) {
+    if (highestMsgId > cfg.lastSyncedMsgId || highestMsgId > (localChannelCheckpoint[cleanChannelId] || 0) || reconciledStaleBaseline) {
+      saveLocalChannelCheckpoint(cleanChannelId, highestMsgId);
+      if (cachedSyncConfig) cachedSyncConfig.lastSyncedMsgId = highestMsgId;
       await setDocWithQuotaGuard(
         doc2(db, "app_config", "telegram_auto_sync"),
         {
@@ -8265,18 +8638,22 @@ async function runServerAutoSyncPass(reason) {
         { merge: true }
       ).catch(() => {
       });
-      if (cachedSyncConfig) cachedSyncConfig.lastSyncedMsgId = highestMsgId;
     }
   } catch (err) {
     console.warn("[ServerAutoSync] Sync pass warning:", err?.message || err);
   } finally {
     serverAutoSyncRunning = false;
+    if (pendingResyncReason) {
+      const nextReason = pendingResyncReason;
+      pendingResyncReason = null;
+      scheduleServerAutoSync(nextReason, 500);
+    }
   }
 }
 function isFirestoreQuotaError(err) {
   return isFirestoreQuotaErrorLike(err);
 }
-async function setDocWithQuotaGuard(ref, data, options, timeoutMs = 1500) {
+async function setDocWithQuotaGuard(ref, data, options, timeoutMs = 4500) {
   if (!isServerFirestoreWriteAllowed()) {
     throw Object.assign(
       new Error("Firestore daily write quota exhausted (resource-exhausted)."),
@@ -8897,6 +9274,12 @@ async function runBulkChannelSyncWorker(params) {
         }
       }
       for (const [seriesId, dirty] of dirtySeriesUpdates.entries()) {
+        const expectedCounts = dirty.rec.imdbId ? await fetchExpectedSeasonEpisodeCounts(dirty.rec.imdbId) : null;
+        const seriesReadyToPublish = isSeriesComplete(
+          { originalCategory: dirty.rec.originalCategory, seasons: dirty.rec.seasons },
+          expectedCounts
+        );
+        dirty.rec.published = seriesReadyToPublish;
         const prevSeed = seedCatalogMap.get(seriesId) || {};
         const updatedSeed = {
           ...prevSeed,
@@ -8904,6 +9287,8 @@ async function runBulkChannelSyncWorker(params) {
           id: seriesId,
           seasons: dirty.rec.seasons,
           streamingUrl: dirty.rec.streamingUrl,
+          published: seriesReadyToPublish,
+          releaseYear: clampReleaseYear(prevSeed.releaseYear || dirty.rec.releaseYear),
           updatedAt: Date.now()
         };
         seedCatalogMap.set(seriesId, updatedSeed);
@@ -8913,6 +9298,8 @@ async function runBulkChannelSyncWorker(params) {
               doc2(db, "movies", seriesId),
               {
                 ...dirty.newPayload,
+                releaseYear: clampReleaseYear(dirty.newPayload.releaseYear),
+                published: seriesReadyToPublish,
                 seasons: dirty.rec.seasons,
                 updatedAt: serverTimestamp()
               },
@@ -8924,6 +9311,7 @@ async function runBulkChannelSyncWorker(params) {
               {
                 seasons: dirty.rec.seasons,
                 streamingUrl: dirty.rec.streamingUrl,
+                published: seriesReadyToPublish,
                 updatedAt: serverTimestamp()
               },
               { merge: true }
@@ -8958,7 +9346,13 @@ async function runBulkChannelSyncWorker(params) {
     }
     try {
       const finalList = Array.from(seedCatalogMap.values());
-      fs4.writeFileSync(SEED_CATALOG_PATH, JSON.stringify(finalList));
+      writeSeedCatalogToDisk(finalList);
+      broadcastLiveCatalogUpdate({
+        type: "catalog_updated",
+        count: bulkSyncJob.publishedCount + bulkSyncJob.mergedCount,
+        updatedAt: Date.now(),
+        action: "bulk_channel_sync"
+      });
       console.log(`[BulkChannelSync] Successfully completed and saved ${finalList.length} movies to public/movies-seed.json`);
     } catch {
     }
@@ -9103,8 +9497,8 @@ setTimeout(() => {
   setInterval(() => {
     runServerAutoSyncPass("periodic").catch(() => {
     });
-  }, 15e3);
-}, 5e3);
+  }, 8e3);
+}, 3e3);
 router2.get("/stream", handleStream);
 router2.head("/stream", handleStream);
 var telegramRouter_default = router2;
@@ -9965,7 +10359,7 @@ app3.use((req, res, next) => {
   next();
 });
 app3.use("/api", (req, res, next) => {
-  if (!req.path.startsWith("/stream") && !req.path.startsWith("/telegram/hls") && !req.path.startsWith("/telegram/subtitles.vtt") && !req.path.startsWith("/ios-profile")) {
+  if (!req.path.startsWith("/stream") && !req.path.startsWith("/telegram/hls") && !req.path.startsWith("/telegram/live-events") && !req.path.startsWith("/telegram/subtitles.vtt") && !req.path.startsWith("/ios-profile")) {
     res.setHeader("Content-Type", "application/json");
   }
   next();
@@ -9976,7 +10370,7 @@ app3.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
     time: (/* @__PURE__ */ new Date()).toISOString(),
-    version: "3.5.280",
+    version: "3.5.281",
     ffmpegAvailable: FFMPEG_AVAILABLE,
     ffprobeAvailable: FFPROBE_AVAILABLE,
     telegramConfigured,
@@ -10105,6 +10499,7 @@ app3.post("/api/firestore/quota-exhausted", (req, res) => {
 });
 app3.get("/api/movies/catalog", (_req, res) => {
   try {
+    const currentYear = (/* @__PURE__ */ new Date()).getFullYear();
     const candidates = [
       path6.resolve(process.cwd(), "public/movies-seed.json"),
       path6.resolve(process.cwd(), "dist/movies-seed.json"),
@@ -10112,10 +10507,13 @@ app3.get("/api/movies/catalog", (_req, res) => {
     ];
     for (const p of candidates) {
       if (fs7.existsSync(p)) {
-        const raw = fs7.readFileSync(p, "utf8");
+        const parsed = JSON.parse(fs7.readFileSync(p, "utf8"));
+        const filtered = Array.isArray(parsed) ? parsed.filter((m) => m && m.id && m.published !== false && hasPlayableContent(m)).map(
+          (m) => Number(m.releaseYear) > currentYear ? { ...m, releaseYear: currentYear } : m
+        ) : [];
         res.setHeader("Content-Type", "application/json");
-        res.setHeader("Cache-Control", "no-cache");
-        return res.send(raw);
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+        return res.json(filtered);
       }
     }
     return res.json([]);
@@ -10138,7 +10536,7 @@ app3.get("/api/movies/catalog-meta", (_req, res) => {
           let count = 0;
           try {
             const parsed = JSON.parse(fs7.readFileSync(p, "utf8"));
-            count = Array.isArray(parsed) ? parsed.length : 0;
+            count = Array.isArray(parsed) ? parsed.filter((m) => m && m.id && m.published !== false && hasPlayableContent(m)).length : 0;
           } catch {
           }
           cachedCatalogMeta = { filePath: p, mtimeMs: stat.mtimeMs, size: stat.size, count };

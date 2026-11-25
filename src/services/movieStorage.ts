@@ -7,6 +7,7 @@ import {
   isFirestoreWriteAllowed,
 } from './firestoreQuotaService';
 import { buildApiUrl } from '../utils/apiConfig';
+import { hasPlayableContent } from '../utils/seriesCompleteness';
 
 export interface MovieData {
   id: string;
@@ -27,9 +28,14 @@ export interface MovieData {
   imdbId?: string;
   trailerUrl?: string;
   streamingUrl?: string;
+  videoQualities?: Record<string, string>;
   featured?: boolean;
   published: boolean;
   qualityBadge?: 'HD' | 'HDTC' | 'NONE' | string;
+  duration?: number;
+  telegramMsgId?: number;
+  telegramChannelId?: string;
+  sourceMsgIds?: number[];
   createdAt?: any;
   updatedAt?: any;
   viewsCount?: number;
@@ -240,7 +246,9 @@ export async function getCatalogFromIdb(): Promise<MovieData[]> {
           if (Array.isArray(val)) {
             resolve(
               sortMoviesList(
-                val.filter((m: any) => m && m.id).map((m: any) => normalizeMoviePosters(m))
+                val
+                  .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m))
+                  .map((m: any) => normalizeMoviePosters(m))
               )
             );
           } else {
@@ -280,27 +288,30 @@ import { BUNDLED_SEED_CATALOG } from './seedCatalog';
 
 export async function fetchSeedCatalogJson(): Promise<MovieData[]> {
   const bundled = Array.isArray(BUNDLED_SEED_CATALOG)
-    ? BUNDLED_SEED_CATALOG.filter((m: any) => m && m.id).map((m: any) => normalizeMoviePosters(m) as MovieData)
+    ? BUNDLED_SEED_CATALOG
+        .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m))
+        .map((m: any) => normalizeMoviePosters(m) as MovieData)
     : [];
 
   try {
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const bust = Date.now();
     const urls = [
-      buildApiUrl('/api/movies/catalog'),
-      buildApiUrl('/movies-seed.json?v=' + Date.now()),
-      '/movies-seed.json?v=' + Date.now(),
-      origin ? `${origin}/movies-seed.json` : '',
-      '/api/movies/catalog',
+      buildApiUrl(`/api/movies/catalog?v=${bust}`),
+      buildApiUrl(`/movies-seed.json?v=${bust}`),
+      `/movies-seed.json?v=${bust}`,
+      origin ? `${origin}/movies-seed.json?v=${bust}` : '',
+      `/api/movies/catalog?v=${bust}`,
     ].filter(Boolean);
 
     for (const url of urls) {
       try {
-        const resp = await fetch(url);
+        const resp = await fetch(url, { cache: 'no-store' });
         if (!resp.ok) continue;
         const data = await resp.json();
         if (Array.isArray(data) && data.length > 0) {
           return data
-            .filter((m: any) => m && m.id)
+            .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m))
             .map((m: any) => normalizeMoviePosters(m) as MovieData);
         }
       } catch {}
@@ -332,9 +343,9 @@ export async function fetchMergedMoviesCatalog(): Promise<MovieData[]> {
   ]);
 
   const merged = new Map<string, MovieData>();
-  idbList.forEach((m) => merged.set(m.id, m));
-  seedList.forEach((m) => merged.set(m.id, m));
-  firestoreList.forEach((m) => merged.set(m.id, m));
+  idbList.filter((m) => hasPlayableContent(m)).forEach((m) => merged.set(m.id, m));
+  seedList.filter((m) => hasPlayableContent(m)).forEach((m) => merged.set(m.id, m));
+  firestoreList.filter((m) => hasPlayableContent(m)).forEach((m) => merged.set(m.id, m));
 
   const sorted = sortMoviesList<MovieData>(Array.from(merged.values()));
   if (sorted.length > 0) {
@@ -352,9 +363,9 @@ export async function fetchMoviesFromFirestore(): Promise<MovieData[]> {
     } catch {
       snapshot = await getDocs(collection(db, COLLECTION_NAME));
     }
-    const rawMovies: MovieData[] = snapshot.docs.map(
-      (d) => normalizeMoviePosters({ id: d.id, ...d.data() } as MovieData) as MovieData
-    );
+    const rawMovies: MovieData[] = snapshot.docs
+      .map((d) => normalizeMoviePosters({ id: d.id, ...d.data() } as MovieData) as MovieData)
+      .filter((m) => m.published !== false && hasPlayableContent(m));
     const movies = sortMoviesList<MovieData>(rawMovies);
     saveLocalMovies(movies);
     return movies;
@@ -442,7 +453,9 @@ function hasRealPoster(url?: string | null): boolean {
 export function getLocalMovies(): MovieData[] {
   try {
     const seedItems = Array.isArray(BUNDLED_SEED_CATALOG)
-      ? BUNDLED_SEED_CATALOG.filter((m: any) => m && m.id).map((m: any) => normalizeMoviePosters(m) as MovieData)
+      ? BUNDLED_SEED_CATALOG
+          .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m))
+          .map((m: any) => normalizeMoviePosters(m) as MovieData)
       : [];
 
     if (typeof window === 'undefined') return seedItems;
@@ -453,7 +466,9 @@ export function getLocalMovies(): MovieData[] {
       try {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length >= 100) {
-          cached = parsed.filter((m: any) => m && m.id).map((m: any) => normalizeMoviePosters(m) as MovieData);
+          cached = parsed
+            .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m))
+            .map((m: any) => normalizeMoviePosters(m) as MovieData);
         }
       } catch {}
     }
@@ -461,6 +476,10 @@ export function getLocalMovies(): MovieData[] {
     const map = new Map<string, MovieData>();
     seedItems.forEach((m) => map.set(m.id, m));
     cached.forEach((m) => {
+      if (String(m.id).startsWith('tg_') && !map.has(m.id)) {
+        // Do not resurrect tg_* items removed from authoritative seed catalog
+        return;
+      }
       const existing = map.get(m.id);
       if (!existing || !hasRealPoster(existing.posterUrl)) {
         map.set(m.id, m);
@@ -473,7 +492,9 @@ export function getLocalMovies(): MovieData[] {
     } catch {}
     return combined.length > 0 ? combined : seedItems;
   } catch {
-    return Array.isArray(BUNDLED_SEED_CATALOG) ? (BUNDLED_SEED_CATALOG as MovieData[]) : [];
+    return Array.isArray(BUNDLED_SEED_CATALOG)
+      ? (BUNDLED_SEED_CATALOG as MovieData[]).filter((m) => hasPlayableContent(m))
+      : [];
   }
 }
 

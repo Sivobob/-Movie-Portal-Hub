@@ -52,8 +52,15 @@ export function normalizeMoviePosters<T extends Record<string, any>>(movie: T): 
   if (!movie) return movie;
   const hdPoster = upgradePosterUrl(movie.posterUrl, 1080);
   const hdBackdrop = upgradePosterUrl(movie.backdropUrl || movie.posterUrl, 1200);
+  const currentYear = new Date().getFullYear();
+  const rawYear = Number(movie.releaseYear);
+  const safeReleaseYear =
+    Number.isFinite(rawYear) && rawYear > currentYear
+      ? currentYear
+      : movie.releaseYear;
   return {
     ...movie,
+    releaseYear: safeReleaseYear,
     posterUrl: hdPoster || movie.posterUrl || '',
     backdropUrl: hdBackdrop || movie.backdropUrl || hdPoster || movie.posterUrl || '',
     viewsCount: Math.max(0, Math.floor(Number(movie.viewsCount || 0) || 0)),

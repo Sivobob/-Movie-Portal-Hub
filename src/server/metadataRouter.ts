@@ -32,6 +32,25 @@ function extractYear(query: string): { title: string; year: string | null } {
   return { title: query, year: null };
 }
 
+function resolveSafeReleaseYear(omdbYearRaw?: string | number | null, imdbYearRaw?: string | number | null): number {
+  const currentYear = new Date().getFullYear();
+  const omdbYr = parseInt(String(omdbYearRaw || '').slice(0, 4), 10);
+  const imdbYr = parseInt(String(imdbYearRaw || '').slice(0, 4), 10);
+
+  if (Number.isFinite(imdbYr) && imdbYr >= 1900 && imdbYr <= currentYear) {
+    if (!Number.isFinite(omdbYr) || omdbYr < 1900 || omdbYr > currentYear) {
+      return imdbYr;
+    }
+  }
+  if (Number.isFinite(omdbYr) && omdbYr >= 1900) {
+    return omdbYr > currentYear ? currentYear : omdbYr;
+  }
+  if (Number.isFinite(imdbYr) && imdbYr >= 1900) {
+    return imdbYr > currentYear ? currentYear : imdbYr;
+  }
+  return currentYear;
+}
+
 router.get('/test-auth', requireAdmin, (req: AuthRequest, res: Response) => {
   res.json({
     message: 'Authentication successful',
@@ -148,10 +167,14 @@ async function fetchImdbSuggestions(query: string): Promise<Array<{
         // Preserve high-resolution poster image (1080px wide, QL90, uncropped)
         const poster = upgradePosterUrl(item.i?.imageUrl || '', 1080);
 
+        const currentYear = new Date().getFullYear();
+        const rawY = Number(item.y);
+        const safeYear = Number.isFinite(rawY) && rawY >= 1900 ? Math.min(rawY, currentYear) : (item.y || 'N/A');
+
         return {
           imdbId: item.id,
           title: item.l,
-          year: item.y || 'N/A',
+          year: safeYear,
           type: itemType,
           posterUrl: poster,
           cast: item.s || ''
@@ -210,7 +233,7 @@ export async function searchMetadataInternal(rawQuery: string): Promise<Internal
           results: [{
             imdbId: data.imdbID,
             title: data.Title,
-            year: data.Year,
+            year: resolveSafeReleaseYear(data.Year, imdbHit?.year),
             type: data.Type || 'movie',
             posterUrl: bestPoster,
             cast: data.Actors && data.Actors !== 'N/A' ? data.Actors : (imdbHit?.cast || '')
@@ -290,7 +313,7 @@ export async function searchMetadataInternal(rawQuery: string): Promise<Internal
           combinedResults.push({
             imdbId: item.imdbID,
             title: item.Title,
-            year: item.Year,
+            year: resolveSafeReleaseYear(item.Year),
             type: item.Type || 'movie',
             posterUrl: upgradePosterUrl(item.Poster, 1080),
           });
@@ -427,7 +450,7 @@ export async function fetchMetadataDetailInternal(rawId?: string, rawTitle?: str
           imdbId: data.imdbID || id,
           title: data.Title || '',
           originalTitle: data.Title || '',
-          releaseYear: parseInt(data.Year) || new Date().getFullYear(),
+          releaseYear: resolveSafeReleaseYear(data.Year, imdbHit?.year),
           posterUrl,
           backdropUrl,
           genre,
@@ -452,7 +475,7 @@ export async function fetchMetadataDetailInternal(rawId?: string, rawTitle?: str
           imdbId: imdbHit.imdbId || id,
           title: imdbHit.title || '',
           originalTitle: imdbHit.title || '',
-          releaseYear: parseInt(String(imdbHit.year)) || new Date().getFullYear(),
+          releaseYear: resolveSafeReleaseYear(null, imdbHit.year),
           posterUrl,
           backdropUrl,
           genre: 'Action',

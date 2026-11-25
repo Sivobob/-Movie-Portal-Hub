@@ -156,8 +156,8 @@ function cleanSingleTitleLine(rawLine: string): {
   // Remove bracketed site tags at start like [MoviesMod]
   text = text.replace(/^\[[^\]]{2,40}\]\s*/g, '').trim();
 
-  // Extract valid release year (1940 .. nextYear) and trim trailing release tags after the year
-  const maxValidYear = new Date().getFullYear() + 1;
+  // Extract valid release year (1940 .. currentYear) and trim trailing release tags after the year
+  const maxValidYear = new Date().getFullYear();
   let detectedYear: number | null = null;
   let yearIndex = -1;
 
@@ -373,7 +373,7 @@ export function parseTelegramMovieMeta(
     .filter(Boolean);
 
   // Extract explicit "Year: 2024" / "Release Year: 2024" / IMDb / Season-Episode lines before discarding noisy body text
-  const maxValidYear = new Date().getFullYear() + 1;
+  const maxValidYear = new Date().getFullYear();
   let explicitCaptionYear: number | null = null;
   let explicitImdbId: string | null = null;
   const seasonEpisodeLines: string[] = [];
@@ -673,7 +673,9 @@ export async function resolveBestImdbMatch(
   matchReason: string;
   alternateMatches: AutoMatchedCandidateSummary[];
 }> {
-  const fallbackYear = parsed.year || new Date().getFullYear();
+  const currentYear = new Date().getFullYear();
+  const fallbackYear =
+    parsed.year && parsed.year <= currentYear ? parsed.year : currentYear;
 
   // 1. Direct IMDb ID in Telegram caption/filename
   if (parsed.explicitImdbId) {
@@ -682,11 +684,13 @@ export async function resolveBestImdbMatch(
       const d = detail.data;
       const poster = upgradePosterUrl(d.posterUrl, 1080) || d.posterUrl || '';
       const backdrop = upgradePosterUrl(d.backdropUrl || poster, 1280) || poster;
+      const rawYear = Number(d.releaseYear) || fallbackYear;
+      const clampedYear = rawYear > currentYear ? fallbackYear : rawYear;
       return {
         imdbId: d.imdbId || parsed.explicitImdbId,
         title: d.title || parsed.cleanTitle,
         originalTitle: d.originalTitle || d.title || parsed.cleanTitle,
-        releaseYear: d.releaseYear || fallbackYear,
+        releaseYear: clampedYear,
         posterUrl: poster,
         backdropUrl: backdrop,
         genre: d.genre || 'Action',
@@ -793,7 +797,15 @@ export async function resolveBestImdbMatch(
   const bestBackdrop =
     upgradePosterUrl(d?.backdropUrl || bestPoster, 1280) || bestPoster;
 
-  const finalYear = Number(d?.releaseYear || parseInt(String(winner.cand.year || ''), 10) || fallbackYear) || fallbackYear;
+  const candYearParsed = parseInt(String(winner.cand.year || '').slice(0, 4), 10);
+  const detailYearParsed = Number(d?.releaseYear || 0);
+  const rawFinalYear =
+    detailYearParsed > 0 && detailYearParsed <= currentYear
+      ? detailYearParsed
+      : Number.isFinite(candYearParsed) && candYearParsed >= 1900 && candYearParsed <= currentYear
+      ? candYearParsed
+      : fallbackYear;
+  const finalYear = rawFinalYear > currentYear ? fallbackYear : rawFinalYear;
   const rawSim = getTitleSimilarityScore(d?.title || winner.cand.title, parsed.cleanTitle);
   const winnerType = String(winner.cand.type || '').toLowerCase();
   const isSeriesYearMatch =

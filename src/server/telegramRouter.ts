@@ -54,6 +54,63 @@ import {
   isServerFirestoreWriteAllowed,
   markServerFirestoreQuotaExhausted,
 } from './firestoreQuotaFlag.ts';
+import { isSeriesComplete } from '../utils/seriesCompleteness.ts';
+
+const TVMAZE_EP_COUNT_CACHE = new Map<string, { counts: Record<number, number> | null; expiresAt: number }>();
+
+async function fetchExpectedSeasonEpisodeCounts(imdbId?: string | null): Promise<Record<number, number> | null> {
+  const cleanId = String(imdbId || '').trim();
+  if (!/^tt\d+$/i.test(cleanId)) return null;
+  const cached = TVMAZE_EP_COUNT_CACHE.get(cleanId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.counts;
+  }
+  try {
+    const showResp = await fetch(
+      `https://api.tvmaze.com/lookup/shows?imdb=${encodeURIComponent(cleanId)}`,
+      { signal: AbortSignal.timeout(3500) }
+    );
+    if (!showResp.ok) {
+      TVMAZE_EP_COUNT_CACHE.set(cleanId, { counts: null, expiresAt: Date.now() + 30 * 60_000 });
+      return null;
+    }
+    const showJson: any = await showResp.json();
+    if (!showJson?.id) {
+      TVMAZE_EP_COUNT_CACHE.set(cleanId, { counts: null, expiresAt: Date.now() + 30 * 60_000 });
+      return null;
+    }
+    const epsResp = await fetch(`https://api.tvmaze.com/shows/${showJson.id}/episodes`, {
+      signal: AbortSignal.timeout(3500),
+    });
+    if (!epsResp.ok) {
+      TVMAZE_EP_COUNT_CACHE.set(cleanId, { counts: null, expiresAt: Date.now() + 30 * 60_000 });
+      return null;
+    }
+    const epsList: any[] = await epsResp.json();
+    const counts: Record<number, number> = {};
+    if (Array.isArray(epsList)) {
+      for (const ep of epsList) {
+        const s = Number(ep?.season);
+        const n = Number(ep?.number);
+        if (s > 0 && n > 0) {
+          counts[s] = Math.max(counts[s] || 0, n);
+        }
+      }
+    }
+    const result = Object.keys(counts).length > 0 ? counts : null;
+    TVMAZE_EP_COUNT_CACHE.set(cleanId, { counts: result, expiresAt: Date.now() + 6 * 3600_000 });
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+function clampReleaseYear(val: any): number {
+  const currentYear = new Date().getFullYear();
+  const parsed = Number(val);
+  if (!Number.isFinite(parsed) || parsed < 1900) return currentYear;
+  return Math.min(Math.floor(parsed), currentYear);
+}
 
 interface DirectHttpProbeInfo {
   fileSize: number;
@@ -3556,8 +3613,10 @@ async function ensureChannelUploadWatcher(client: any): Promise<void> {
           `[TelegramAutoWatcher] New channel video detected: "${classified.fileName || msg.id}" (${streamUrl})`
         );
 
-        // Trigger debounced server-side auto-IMDb & auto-publish pass (8s window groups multi-quality uploads)
-        scheduleServerAutoSync(`new_video_${cleanChannelId}_${msg.id}`, 8000);
+        queuePriorityChannelMsgId(cleanChannelId, Number(msg.id));
+
+        // Trigger fast server-side auto-IMDb & auto-publish pass (1.2s debounce)
+        scheduleServerAutoSync(`new_video_${cleanChannelId}_${msg.id}`, 1200);
       } catch (watchErr: any) {
         console.warn('[TelegramAutoWatcher] Handler warning:', watchErr?.message || watchErr);
       }
@@ -4446,8 +4505,125 @@ const DEFAULT_AUTO_SYNC_CHANNEL_URL = 'https://t.me/+P5UeGT1YlQ9lOGZl';
 const DEFAULT_AUTO_SYNC_CHANNEL_ID = '4451036277';
 const AUTO_SYNC_CONFIG_VERSION = 3;
 const SEED_CATALOG_PATH = path.resolve(process.cwd(), 'public/movies-seed.json');
+const DIST_SEED_CATALOG_PATH = path.resolve(process.cwd(), 'dist/movies-seed.json');
+const AUTO_SYNC_STATE_FILE = path.join(os.tmpdir(), '.movie_hub_tg_autosync_state.json');
 const PENDING_DRAFTS_FILE = path.join(os.tmpdir(), '.movie_hub_tg_pending_drafts.json');
 let pendingServerDrafts: AutoMatchedMovieDraft[] = [];
+
+const pendingPriorityMsgIds = new Map<string, Set<number>>();
+const liveCatalogSseClients = new Set<Response>();
+let localChannelCheckpoint: Record<string, number> = {};
+
+function loadLocalAutoSyncState() {
+  try {
+    if (fs.existsSync(AUTO_SYNC_STATE_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(AUTO_SYNC_STATE_FILE, 'utf-8'));
+      if (parsed?.channels && typeof parsed.channels === 'object') {
+        for (const [k, v] of Object.entries(parsed.channels)) {
+          const n = Number(v);
+          if (k && Number.isFinite(n) && n > 0) {
+            localChannelCheckpoint[k] = n;
+          }
+        }
+      }
+    }
+  } catch {}
+}
+
+function saveLocalChannelCheckpoint(channelId: string, msgId: number) {
+  if (!channelId || !Number.isFinite(msgId) || msgId <= 0) return;
+  const prev = localChannelCheckpoint[channelId] || 0;
+  if (msgId <= prev) return;
+  localChannelCheckpoint[channelId] = msgId;
+  try {
+    fs.writeFileSync(
+      AUTO_SYNC_STATE_FILE,
+      JSON.stringify({ channels: localChannelCheckpoint, updatedAt: Date.now() }),
+      'utf-8'
+    );
+  } catch {}
+}
+
+loadLocalAutoSyncState();
+
+function queuePriorityChannelMsgId(channelId: string, msgId: number) {
+  if (!channelId || !Number.isFinite(msgId) || msgId <= 0) return;
+  let set = pendingPriorityMsgIds.get(channelId);
+  if (!set) {
+    set = new Set<number>();
+    pendingPriorityMsgIds.set(channelId, set);
+  }
+  set.add(msgId);
+}
+
+function consumePriorityChannelMsgIds(channelId: string): number[] {
+  const set = pendingPriorityMsgIds.get(channelId);
+  if (!set || set.size === 0) return [];
+  const list = Array.from(set).sort((a, b) => a - b);
+  set.clear();
+  return list;
+}
+
+function writeSeedCatalogToDisk(items: any[]) {
+  const payload = JSON.stringify(items);
+  try {
+    fs.writeFileSync(SEED_CATALOG_PATH, payload);
+  } catch {}
+  try {
+    if (fs.existsSync(path.dirname(DIST_SEED_CATALOG_PATH))) {
+      fs.writeFileSync(DIST_SEED_CATALOG_PATH, payload);
+    }
+  } catch {}
+}
+
+function broadcastLiveCatalogUpdate(payload: {
+  type: 'catalog_updated';
+  count: number;
+  updatedAt: number;
+  action?: string;
+  latestTitle?: string;
+  latestId?: string;
+}) {
+  if (liveCatalogSseClients.size === 0) return;
+  const frame = `event: catalog_updated\ndata: ${JSON.stringify(payload)}\n\n`;
+  for (const clientRes of Array.from(liveCatalogSseClients)) {
+    try {
+      if (!clientRes.writableEnded) {
+        clientRes.write(frame);
+      } else {
+        liveCatalogSseClients.delete(clientRes);
+      }
+    } catch {
+      liveCatalogSseClients.delete(clientRes);
+    }
+  }
+}
+
+router.get('/live-events', (req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+
+  liveCatalogSseClients.add(res);
+  try {
+    res.write(`event: connected\ndata: ${JSON.stringify({ ok: true, ts: Date.now() })}\n\n`);
+  } catch {}
+
+  const pingTimer = setInterval(() => {
+    try {
+      if (!res.writableEnded) {
+        res.write(`: ping ${Date.now()}\n\n`);
+      }
+    } catch {}
+  }, 20000);
+
+  req.on('close', () => {
+    clearInterval(pingTimer);
+    liveCatalogSseClients.delete(res);
+  });
+});
 
 function loadPendingServerDrafts() {
   try {
@@ -4495,6 +4671,7 @@ router.post('/trigger-auto-sync', async (_req: Request, res: Response) => {
 
 let serverAutoSyncTimer: NodeJS.Timeout | null = null;
 let serverAutoSyncRunning = false;
+let pendingResyncReason: string | null = null;
 let cachedSyncConfig: {
   configVersion: number;
   channelUrl: string;
@@ -4506,7 +4683,11 @@ let cachedSyncConfig: {
   fetchedAt: number;
 } | null = null;
 
-function scheduleServerAutoSync(reason: string, delayMs = 8000) {
+function scheduleServerAutoSync(reason: string, delayMs = 1200) {
+  if (serverAutoSyncRunning) {
+    pendingResyncReason = reason;
+    return;
+  }
   if (serverAutoSyncTimer) clearTimeout(serverAutoSyncTimer);
   serverAutoSyncTimer = setTimeout(() => {
     serverAutoSyncTimer = null;
@@ -4520,6 +4701,7 @@ async function getServerAutoSyncConfig(forceRefresh = false) {
   if (!forceRefresh && cachedSyncConfig && Date.now() - cachedSyncConfig.fetchedAt < 60_000) {
     return cachedSyncConfig;
   }
+  const prevCachedLastSynced = cachedSyncConfig?.lastSyncedMsgId || 0;
   try {
     const ref = doc(db, 'app_config', 'telegram_auto_sync');
     const snap = await getDocFromServer(ref);
@@ -4530,11 +4712,16 @@ async function getServerAutoSyncConfig(forceRefresh = false) {
       rawUrl.includes('QSL_3k54YfBjMjE1') || rawUrl.includes('s2Qki5-sfnVjZTI1');
 
     if (!snap.exists() || rawVer < AUTO_SYNC_CONFIG_VERSION || isOldDefaultChannel || !rawUrl) {
+      const preservedLastSynced = Math.max(
+        prevCachedLastSynced,
+        isOldDefaultChannel ? 0 : Number(d?.lastSyncedMsgId) || 0,
+        localChannelCheckpoint[DEFAULT_AUTO_SYNC_CHANNEL_ID] || 0
+      );
       const migrated = {
         configVersion: AUTO_SYNC_CONFIG_VERSION,
         channelUrl: DEFAULT_AUTO_SYNC_CHANNEL_URL,
         activeChannelId: DEFAULT_AUTO_SYNC_CHANNEL_ID,
-        lastSyncedMsgId: 0,
+        lastSyncedMsgId: preservedLastSynced,
         autoWatchEnabled: true,
         autoPublishVerified: true,
         notifyOnNewPublish: true,
@@ -4546,7 +4733,7 @@ async function getServerAutoSyncConfig(forceRefresh = false) {
       cachedSyncConfig = {
         configVersion: AUTO_SYNC_CONFIG_VERSION,
         channelUrl: DEFAULT_AUTO_SYNC_CHANNEL_URL,
-        lastSyncedMsgId: 0,
+        lastSyncedMsgId: preservedLastSynced,
         autoWatchEnabled: true,
         autoPublishVerified: true,
         notifyOnNewPublish: true,
@@ -4557,7 +4744,11 @@ async function getServerAutoSyncConfig(forceRefresh = false) {
       cachedSyncConfig = {
         configVersion: rawVer,
         channelUrl: rawUrl,
-        lastSyncedMsgId: Number(d?.lastSyncedMsgId) || 0,
+        lastSyncedMsgId: Math.max(
+          prevCachedLastSynced,
+          Number(d?.lastSyncedMsgId) || 0,
+          localChannelCheckpoint[DEFAULT_AUTO_SYNC_CHANNEL_ID] || 0
+        ),
         autoWatchEnabled: typeof d?.autoWatchEnabled === 'boolean' ? d.autoWatchEnabled : true,
         autoPublishVerified: typeof d?.autoPublishVerified === 'boolean' ? d.autoPublishVerified : true,
         notifyOnNewPublish: typeof d?.notifyOnNewPublish === 'boolean' ? d.notifyOnNewPublish : true,
@@ -4570,7 +4761,7 @@ async function getServerAutoSyncConfig(forceRefresh = false) {
       cachedSyncConfig = {
         configVersion: AUTO_SYNC_CONFIG_VERSION,
         channelUrl: DEFAULT_AUTO_SYNC_CHANNEL_URL,
-        lastSyncedMsgId: 0,
+        lastSyncedMsgId: localChannelCheckpoint[DEFAULT_AUTO_SYNC_CHANNEL_ID] || 0,
         autoWatchEnabled: true,
         autoPublishVerified: true,
         notifyOnNewPublish: true,
@@ -4590,6 +4781,7 @@ interface ExistingMovieRecord {
   releaseYear: number;
   originalCategory: string;
   isSeries: boolean;
+  published?: boolean;
   streamingUrl: string;
   videoQualities: Record<string, string>;
   seasons: Array<{ seasonNumber: number; episodes: any[] }>;
@@ -4711,52 +4903,91 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
 
     const { peer, cleanChannelId, channelTitle, publicUsername } = resolved;
 
-    let baseline = cfg.lastSyncedMsgId;
+    const priorityIds = consumePriorityChannelMsgIds(cleanChannelId);
+
+    // Also inspect Bot API getUpdates for any brand-new channel_post in this channel
+    try {
+      const { botToken } = getTelegramCredentials();
+      if (botToken && /^\d+$/.test(cleanChannelId)) {
+        const targetChatId = `-100${cleanChannelId}`;
+        const updResp = await fetch(`https://api.telegram.org/bot${botToken}/getUpdates?limit=30`);
+        const updJson: any = await updResp.json();
+        for (const u of updJson?.result || []) {
+          const src = u?.channel_post || u?.edited_channel_post;
+          if (src && String(src?.chat?.id || '') === targetChatId) {
+            const mid = Number(src.message_id || 0);
+            if (mid > 0) {
+              if (!priorityIds.includes(mid)) priorityIds.push(mid);
+              const prevKnown = channelMaxKnownMsgId.get(cleanChannelId) || 0;
+              if (mid > prevKnown) channelMaxKnownMsgId.set(cleanChannelId, mid);
+            }
+          }
+        }
+      }
+    } catch {}
+
+    let baseline = Math.max(
+      cfg.lastSyncedMsgId,
+      localChannelCheckpoint[cleanChannelId] || 0
+    );
     let reconciledStaleBaseline = false;
 
+    const knownMax = channelMaxKnownMsgId.get(cleanChannelId) || 0;
     if (baseline <= 0) {
       const latest = await discoverChannelLatestMsgId(client, peer, cleanChannelId);
-      if (latest <= 0) return;
+      if (latest <= 0 && priorityIds.length === 0) return;
       baseline = Math.max(0, latest - 25);
+    } else if (knownMax > baseline + 25) {
+      // Jump ahead to the active channel tail if persisted baseline lagged far behind
+      baseline = Math.max(baseline, knownMax - 25);
     }
 
-    // Fast lightweight probe: check if ANY messages exist after `baseline`
-    const probeIds: number[] = [];
-    for (let id = baseline + 1; id <= baseline + 20; id++) probeIds.push(id);
-    const probedMsgs: any[] = await client.getMessages(peer, { ids: probeIds }).catch(() => []);
-    let validMsgs = (probedMsgs || []).filter((m) => m && m.id);
+    // Fast lightweight probe: check messages after `baseline` + priority NewMessage IDs + latest channel tail
+    const probeSet = new Set<number>(priorityIds);
+    const probeStart = Math.max(baseline, knownMax > baseline + 25 ? knownMax - 25 : baseline);
+    for (let id = probeStart + 1; id <= probeStart + 25; id++) probeSet.add(id);
+    const probeIds = Array.from(probeSet).sort((a, b) => a - b);
+    const [probedMsgs, latestTailMsgs] = await Promise.all([
+      probeIds.length > 0 ? client.getMessages(peer, { ids: probeIds }).catch(() => []) : Promise.resolve([]),
+      client.getMessages(peer, { limit: 15 }).catch(() => []),
+    ]);
+    const validMsgMap = new Map<number, any>();
+    for (const m of [...(probedMsgs || []), ...(latestTailMsgs || [])]) {
+      if (m && m.id) validMsgMap.set(Number(m.id), m);
+    }
 
-    // Reconcile if baseline is higher than actual channel messages (e.g., stale lastSyncedMsgId 157 when channel has msgs 1..7)
-    // OR on boot/manual trigger when nothing appeared after baseline
+    // Reconcile if baseline is higher than actual channel messages (e.g., stale lastSyncedMsgId when channel cleared)
+    // OR on boot/manual trigger/periodic when nothing appeared after baseline
     const shouldReconcile =
-      validMsgs.length === 0 &&
-      (reason === 'boot' || reason === 'manual_trigger' || Date.now() - lastReconcileCheckAt > 45_000);
+      validMsgMap.size === 0 &&
+      (reason === 'boot' || reason === 'manual_trigger' || Date.now() - lastReconcileCheckAt > 30_000);
 
     if (shouldReconcile) {
       lastReconcileCheckAt = Date.now();
       const realLatest = await discoverChannelLatestMsgId(client, peer, cleanChannelId);
-      if (realLatest > 0 && (baseline > realLatest || reason === 'boot' || reason === 'manual_trigger')) {
+      if (realLatest > 0 && (baseline > realLatest || realLatest > baseline || reason === 'boot' || reason === 'manual_trigger')) {
         if (baseline > realLatest) {
           reconciledStaleBaseline = true;
           baseline = 0;
         }
-        const scanStart = reconciledStaleBaseline ? 1 : Math.max(1, realLatest - 100);
-        const recMsgs: any[] = [];
+        const scanStart = reconciledStaleBaseline ? 1 : Math.max(1, realLatest - 60);
         for (let cur = scanStart; cur <= realLatest; cur += 100) {
           const endCur = Math.min(realLatest, cur + 99);
           const batch: number[] = [];
           for (let id = cur; id <= endCur; id++) batch.push(id);
           const got: any[] = await client.getMessages(peer, { ids: batch }).catch(() => []);
           for (const m of got || []) {
-            if (m && m.id) recMsgs.push(m);
+            if (m && m.id) validMsgMap.set(Number(m.id), m);
           }
         }
-        validMsgs = recMsgs;
       }
     }
 
+    let validMsgs = Array.from(validMsgMap.values());
+
     if (validMsgs.length === 0) {
       if (reconciledStaleBaseline) {
+        localChannelCheckpoint[cleanChannelId] = 0;
         await setDocWithQuotaGuard(
           doc(db, 'app_config', 'telegram_auto_sync'),
           { lastSyncedMsgId: 0, updatedAtMs: Date.now(), updatedAt: serverTimestamp() },
@@ -4768,13 +4999,16 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
     }
 
     // Fetch up to another 130 if the forward batch was nearly full
-    if (!reconciledStaleBaseline && validMsgs.length >= 18) {
+    if (!reconciledStaleBaseline && validMsgs.length >= 20) {
       const moreIds: number[] = [];
-      for (let id = baseline + 21; id <= baseline + 150; id++) moreIds.push(id);
+      for (let id = baseline + 26; id <= baseline + 150; id++) moreIds.push(id);
       const moreMsgs: any[] = await client.getMessages(peer, { ids: moreIds }).catch(() => []);
       for (const m of moreMsgs || []) {
-        if (m && m.id) validMsgs.push(m);
+        if (m && m.id && !validMsgMap.has(Number(m.id))) {
+          validMsgMap.set(Number(m.id), m);
+        }
       }
+      validMsgs = Array.from(validMsgMap.values());
     }
 
     validMsgs.sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
@@ -4823,6 +5057,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
           releaseYear: Number(m?.releaseYear) || 0,
           originalCategory: cat,
           isSeries,
+          published: m?.published !== false,
           streamingUrl: String(m?.streamingUrl || '').trim(),
           videoQualities: m?.videoQualities && typeof m.videoQualities === 'object' ? { ...m.videoQualities } : {},
           seasons: Array.isArray(m?.seasons) ? m.seasons : [],
@@ -4957,13 +5192,14 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
     const candidates = verifiedBgList.filter((c): c is BgVideoCandidate => Boolean(c));
 
     if (candidates.length === 0) {
-      if (highestMsgId > cfg.lastSyncedMsgId) {
+      if (highestMsgId > cfg.lastSyncedMsgId || highestMsgId > (localChannelCheckpoint[cleanChannelId] || 0)) {
+        saveLocalChannelCheckpoint(cleanChannelId, highestMsgId);
+        if (cachedSyncConfig) cachedSyncConfig.lastSyncedMsgId = highestMsgId;
         await setDocWithQuotaGuard(
           doc(db, 'app_config', 'telegram_auto_sync'),
           { lastSyncedMsgId: highestMsgId, updatedAtMs: Date.now(), updatedAt: serverTimestamp() },
           { merge: true }
         ).catch(() => {});
-        if (cachedSyncConfig) cachedSyncConfig.lastSyncedMsgId = highestMsgId;
       }
       return;
     }
@@ -5016,6 +5252,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
     }
 
     let publishedCount = 0;
+    let catalogDirty = false;
     const queuedForReview: AutoMatchedMovieDraft[] = [];
 
     for (const grp of groups) {
@@ -5133,8 +5370,16 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
             streamUrl: draft.streamUrl.trim(),
             ...(durationFormatted ? { duration: durationFormatted } : {}),
             ...(bestDurSec > 0 ? { durationSec: bestDurSec } : {}),
-            showInNewEpisodes: false,
+            showInNewEpisodes: true,
+            newEpisodeEnabledAt: nowMs,
+            createdAt: nowMs,
+            addedAt: nowMs,
           };
+
+          const seriesImdbId = (existingRec?.imdbId || draft.imdbId || '').trim();
+          const expectedCounts = seriesImdbId
+            ? await fetchExpectedSeasonEpisodeCounts(seriesImdbId)
+            : null;
 
           if (existingRec) {
             const { mergedSeasons, added } = mergeEpisodeIntoSeasons(existingRec.seasons, seasonNum, epObj);
@@ -5142,6 +5387,11 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
               existingUrlSet.add(draft.streamUrl.toLowerCase());
               continue;
             }
+            const seriesReadyToPublish = isSeriesComplete(
+              { originalCategory: catToSave, seasons: mergedSeasons },
+              expectedCounts
+            );
+            const wasPublished = existingRec.published !== false;
             const nextStream = existingRec.streamingUrl || epObj.streamUrl;
             const prevSeed = seedCatalogMap.get(existingRec.id) || {};
             seedCatalogMap.set(existingRec.id, {
@@ -5149,53 +5399,71 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
               id: existingRec.id,
               seasons: mergedSeasons,
               streamingUrl: nextStream,
-              updatedAt: Date.now(),
+              published: seriesReadyToPublish,
+              releaseYear: clampReleaseYear(prevSeed.releaseYear || draft.releaseYear),
+              ...(seriesReadyToPublish && !wasPublished ? { createdAt: nowMs } : {}),
+              updatedAt: nowMs,
             });
             await setDocWithQuotaGuard(
               doc(db, 'movies', existingRec.id),
               {
                 seasons: mergedSeasons,
                 streamingUrl: nextStream,
+                published: seriesReadyToPublish,
                 updatedAt: serverTimestamp(),
               },
               { merge: true }
             ).catch(() => {});
             existingRec.seasons = mergedSeasons;
             existingRec.streamingUrl = nextStream;
+            existingRec.published = seriesReadyToPublish;
             existingUrlSet.add(draft.streamUrl.toLowerCase());
-            publishedCount++;
+            catalogDirty = true;
 
-            console.log(
-              `[ServerAutoSync] Added ${draft.title} S${seasonNum}E${epNum} -> movies/${existingRec.id}`
-            );
+            if (seriesReadyToPublish) {
+              publishedCount++;
+              console.log(
+                `[ServerAutoSync] Added ${draft.title} S${seasonNum}E${epNum} -> movies/${existingRec.id} (complete & published)`
+              );
 
-            if (cfg.notifyOnNewPublish && publishedCount <= 3) {
-              await setDocWithQuotaGuard(
-                doc(db, 'announcements', `tg_rel_${cleanChannelId}_${draft.msgId}`),
-                {
-                  title: draft.title,
-                  releaseYear: Number(draft.releaseYear) || new Date().getFullYear(),
-                  category: catToSave,
-                  isSeries: true,
-                  language: (draft.language || 'Hindi').trim(),
-                  genre: (draft.genre || 'Drama').trim(),
-                  qualityBadge: badge !== 'NONE' ? badge : '',
-                  runtime: (draft.runtime || '').trim(),
-                  posterUrl: cleanPoster,
-                  backdropUrl: cleanBackdrop,
-                  message: `Season ${seasonNum} Episode ${draft.episodeLabel || epNum} Now Streaming!`,
-                  movieId: existingRec.id,
-                  createdAt: serverTimestamp(),
-                  createdAtMs: nowMs,
-                  expiresAt: new Date(nowMs + 48 * 60 * 60 * 1000),
-                },
-                { merge: true }
-              ).catch(() => {});
+              if (cfg.notifyOnNewPublish && publishedCount <= 3) {
+                await setDocWithQuotaGuard(
+                  doc(db, 'announcements', `tg_rel_${cleanChannelId}_${draft.msgId}`),
+                  {
+                    title: draft.title,
+                    releaseYear: clampReleaseYear(draft.releaseYear),
+                    category: catToSave,
+                    isSeries: true,
+                    language: (draft.language || 'Hindi').trim(),
+                    genre: (draft.genre || 'Drama').trim(),
+                    qualityBadge: badge !== 'NONE' ? badge : '',
+                    runtime: (draft.runtime || '').trim(),
+                    posterUrl: cleanPoster,
+                    backdropUrl: cleanBackdrop,
+                    message: !wasPublished
+                      ? 'COMPLETE SERIES • GO STREAM or DOWNLOAD NOW'
+                      : `Season ${seasonNum} Episode ${draft.episodeLabel || epNum} Now Streaming!`,
+                    movieId: existingRec.id,
+                    createdAt: serverTimestamp(),
+                    createdAtMs: nowMs,
+                    expiresAt: new Date(nowMs + 48 * 60 * 60 * 1000),
+                  },
+                  { merge: true }
+                ).catch(() => {});
+              }
+            } else {
+              console.log(
+                `[ServerAutoSync] Staged incomplete series "${draft.title}" S${seasonNum}E${epNum} (published: false until all episodes arrive)`
+              );
             }
             continue;
           } else {
             const seriesDocId = `tg_series_${cleanChannelId}_${draft.msgId}`;
             const initialSeasons = [{ seasonNumber: seasonNum, episodes: [epObj] }];
+            const seriesReadyToPublish = isSeriesComplete(
+              { originalCategory: catToSave, seasons: initialSeasons },
+              expectedCounts
+            );
             const seriesBase = {
               id: seriesDocId,
               title: draft.title.trim(),
@@ -5203,7 +5471,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
               description: draft.description.trim(),
               posterUrl: cleanPoster,
               backdropUrl: cleanBackdrop,
-              releaseYear: Number(draft.releaseYear) || new Date().getFullYear(),
+              releaseYear: clampReleaseYear(draft.releaseYear),
               originalCategory: catToSave,
               displayCategory: displayCat,
               contentType: catToSave.toLowerCase().includes('anime') ? 'anime' : null,
@@ -5213,13 +5481,13 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
               cast: (draft.cast || '').trim(),
               runtime: (draft.runtime || '').trim(),
               rating: Number(draft.rating) || 8.0,
-              imdbId: (draft.imdbId || '').trim(),
+              imdbId: seriesImdbId,
               trailerUrl: '',
               streamingUrl: epObj.streamUrl,
               videoQualities: {},
               seasons: initialSeasons,
               featured: true,
-              published: true,
+              published: seriesReadyToPublish,
               qualityBadge: badge,
               duration: bestDurSec || parseDurationToSeconds(draft.runtime) || 0,
               telegramMsgId: draft.msgId,
@@ -5240,44 +5508,52 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
             existingUrlSet.add(draft.streamUrl.toLowerCase());
             existingRecords.push({
               id: seriesDocId,
-              imdbId: (draft.imdbId || '').trim(),
+              imdbId: seriesImdbId,
               title: draft.title.trim(),
               originalTitle: (draft.originalTitle || draft.title).trim(),
-              releaseYear: Number(draft.releaseYear) || new Date().getFullYear(),
+              releaseYear: clampReleaseYear(draft.releaseYear),
               originalCategory: catToSave,
               isSeries: true,
+              published: seriesReadyToPublish,
               streamingUrl: epObj.streamUrl,
               videoQualities: {},
               seasons: initialSeasons,
             });
-            publishedCount++;
+            catalogDirty = true;
 
-            console.log(
-              `[ServerAutoSync] Auto-Published Series "${draft.title}" S${seasonNum}E${epNum} (${draft.imdbId || 'no-imdb'}) -> movies/${seriesDocId}`
-            );
+            if (seriesReadyToPublish) {
+              publishedCount++;
+              console.log(
+                `[ServerAutoSync] Auto-Published Series "${draft.title}" S${seasonNum}E${epNum} (${seriesImdbId || 'no-imdb'}) -> movies/${seriesDocId}`
+              );
 
-            if (cfg.notifyOnNewPublish && publishedCount <= 3) {
-              await setDocWithQuotaGuard(
-                doc(db, 'announcements', `tg_rel_${cleanChannelId}_${draft.msgId}`),
-                {
-                  title: draft.title,
-                  releaseYear: Number(draft.releaseYear) || new Date().getFullYear(),
-                  category: catToSave,
-                  isSeries: true,
-                  language: (draft.language || 'Hindi').trim(),
-                  genre: (draft.genre || 'Drama').trim(),
-                  qualityBadge: badge !== 'NONE' ? badge : '',
-                  runtime: (draft.runtime || '').trim(),
-                  posterUrl: cleanPoster,
-                  backdropUrl: cleanBackdrop,
-                  message: 'NEW SERIES • GO STREAM or DOWNLOAD NOW',
-                  movieId: seriesDocId,
-                  createdAt: serverTimestamp(),
-                  createdAtMs: nowMs,
-                  expiresAt: new Date(nowMs + 48 * 60 * 60 * 1000),
-                },
-                { merge: true }
-              ).catch(() => {});
+              if (cfg.notifyOnNewPublish && publishedCount <= 3) {
+                await setDocWithQuotaGuard(
+                  doc(db, 'announcements', `tg_rel_${cleanChannelId}_${draft.msgId}`),
+                  {
+                    title: draft.title,
+                    releaseYear: clampReleaseYear(draft.releaseYear),
+                    category: catToSave,
+                    isSeries: true,
+                    language: (draft.language || 'Hindi').trim(),
+                    genre: (draft.genre || 'Drama').trim(),
+                    qualityBadge: badge !== 'NONE' ? badge : '',
+                    runtime: (draft.runtime || '').trim(),
+                    posterUrl: cleanPoster,
+                    backdropUrl: cleanBackdrop,
+                    message: 'NEW SERIES • GO STREAM or DOWNLOAD NOW',
+                    movieId: seriesDocId,
+                    createdAt: serverTimestamp(),
+                    createdAtMs: nowMs,
+                    expiresAt: new Date(nowMs + 48 * 60 * 60 * 1000),
+                  },
+                  { merge: true }
+                ).catch(() => {});
+              }
+            } else {
+              console.log(
+                `[ServerAutoSync] Staged incomplete series "${draft.title}" S${seasonNum}E${epNum} (${seriesImdbId || 'no-imdb'}) -> hidden until complete`
+              );
             }
             continue;
           }
@@ -5335,7 +5611,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
           description: draft.description.trim(),
           posterUrl: cleanPoster,
           backdropUrl: cleanBackdrop,
-          releaseYear: Number(draft.releaseYear) || new Date().getFullYear(),
+          releaseYear: clampReleaseYear(draft.releaseYear),
           originalCategory: catToSave,
           displayCategory: displayCat,
           contentType: catToSave.toLowerCase().includes('anime') ? 'anime' : null,
@@ -5376,9 +5652,10 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
           imdbId: (draft.imdbId || '').trim(),
           title: draft.title.trim(),
           originalTitle: (draft.originalTitle || draft.title).trim(),
-          releaseYear: Number(draft.releaseYear) || new Date().getFullYear(),
+          releaseYear: clampReleaseYear(draft.releaseYear),
           originalCategory: catToSave,
           isSeries: false,
+          published: true,
           streamingUrl: draft.streamUrl.trim(),
           videoQualities: draft.videoQualities || {},
           seasons: [],
@@ -5386,7 +5663,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
         publishedCount++;
 
         console.log(
-          `[ServerAutoSync] Auto-Published Movie "${draft.title}" (${draft.releaseYear}, ${draft.imdbId || 'no-imdb'}) -> movies/${deterministicDocId}`
+          `[ServerAutoSync] Auto-Published Movie "${draft.title}" (${clampReleaseYear(draft.releaseYear)}, ${draft.imdbId || 'no-imdb'}) -> movies/${deterministicDocId}`
         );
 
         if (cfg.notifyOnNewPublish && publishedCount <= 3) {
@@ -5394,7 +5671,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
             doc(db, 'announcements', `tg_rel_${cleanChannelId}_${draft.msgId}`),
             {
               title: draft.title,
-              releaseYear: Number(draft.releaseYear) || new Date().getFullYear(),
+              releaseYear: clampReleaseYear(draft.releaseYear),
               category: catToSave,
               isSeries: false,
               language: (draft.language || 'Hindi').trim(),
@@ -5428,10 +5705,18 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
       }
     }
 
+    if (publishedCount > 0 || catalogDirty) {
+      const updatedList = Array.from(seedCatalogMap.values());
+      writeSeedCatalogToDisk(updatedList);
+    }
+
     if (publishedCount > 0) {
-      try {
-        fs.writeFileSync(SEED_CATALOG_PATH, JSON.stringify(Array.from(seedCatalogMap.values())));
-      } catch {}
+      broadcastLiveCatalogUpdate({
+        type: 'catalog_updated',
+        count: publishedCount,
+        updatedAt: Date.now(),
+        action: 'auto_publish',
+      });
       await setDocWithQuotaGuard(
         doc(db, 'app_config', 'catalog_sync'),
         {
@@ -5442,7 +5727,9 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
       ).catch(() => {});
     }
 
-    if (highestMsgId > cfg.lastSyncedMsgId || reconciledStaleBaseline) {
+    if (highestMsgId > cfg.lastSyncedMsgId || highestMsgId > (localChannelCheckpoint[cleanChannelId] || 0) || reconciledStaleBaseline) {
+      saveLocalChannelCheckpoint(cleanChannelId, highestMsgId);
+      if (cachedSyncConfig) cachedSyncConfig.lastSyncedMsgId = highestMsgId;
       await setDocWithQuotaGuard(
         doc(db, 'app_config', 'telegram_auto_sync'),
         {
@@ -5452,12 +5739,16 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
         },
         { merge: true }
       ).catch(() => {});
-      if (cachedSyncConfig) cachedSyncConfig.lastSyncedMsgId = highestMsgId;
     }
   } catch (err: any) {
     console.warn('[ServerAutoSync] Sync pass warning:', err?.message || err);
   } finally {
     serverAutoSyncRunning = false;
+    if (pendingResyncReason) {
+      const nextReason = pendingResyncReason;
+      pendingResyncReason = null;
+      scheduleServerAutoSync(nextReason, 500);
+    }
   }
 }
 
@@ -5478,7 +5769,7 @@ async function setDocWithQuotaGuard(
   ref: any,
   data: any,
   options?: { merge?: boolean },
-  timeoutMs = 1500
+  timeoutMs = 4500
 ): Promise<void> {
   if (!isServerFirestoreWriteAllowed()) {
     throw Object.assign(
@@ -6233,8 +6524,17 @@ async function runBulkChannelSyncWorker(params: {
         }
       }
 
-      // Flush coalesced series docs once per chunk
+      // Flush coalesced series docs once per chunk (only publish complete series)
       for (const [seriesId, dirty] of dirtySeriesUpdates.entries()) {
+        const expectedCounts = dirty.rec.imdbId
+          ? await fetchExpectedSeasonEpisodeCounts(dirty.rec.imdbId)
+          : null;
+        const seriesReadyToPublish = isSeriesComplete(
+          { originalCategory: dirty.rec.originalCategory, seasons: dirty.rec.seasons },
+          expectedCounts
+        );
+        dirty.rec.published = seriesReadyToPublish;
+
         const prevSeed = seedCatalogMap.get(seriesId) || {};
         const updatedSeed = {
           ...prevSeed,
@@ -6242,6 +6542,8 @@ async function runBulkChannelSyncWorker(params: {
           id: seriesId,
           seasons: dirty.rec.seasons,
           streamingUrl: dirty.rec.streamingUrl,
+          published: seriesReadyToPublish,
+          releaseYear: clampReleaseYear(prevSeed.releaseYear || dirty.rec.releaseYear),
           updatedAt: Date.now(),
         };
         seedCatalogMap.set(seriesId, updatedSeed);
@@ -6252,6 +6554,8 @@ async function runBulkChannelSyncWorker(params: {
               doc(db, 'movies', seriesId),
               {
                 ...dirty.newPayload,
+                releaseYear: clampReleaseYear(dirty.newPayload.releaseYear),
+                published: seriesReadyToPublish,
                 seasons: dirty.rec.seasons,
                 updatedAt: serverTimestamp(),
               },
@@ -6263,6 +6567,7 @@ async function runBulkChannelSyncWorker(params: {
               {
                 seasons: dirty.rec.seasons,
                 streamingUrl: dirty.rec.streamingUrl,
+                published: seriesReadyToPublish,
                 updatedAt: serverTimestamp(),
               },
               { merge: true }
@@ -6304,7 +6609,13 @@ async function runBulkChannelSyncWorker(params: {
     // Finalize catalog file
     try {
       const finalList = Array.from(seedCatalogMap.values());
-      fs.writeFileSync(SEED_CATALOG_PATH, JSON.stringify(finalList));
+      writeSeedCatalogToDisk(finalList);
+      broadcastLiveCatalogUpdate({
+        type: 'catalog_updated',
+        count: bulkSyncJob.publishedCount + bulkSyncJob.mergedCount,
+        updatedAt: Date.now(),
+        action: 'bulk_channel_sync',
+      });
       console.log(`[BulkChannelSync] Successfully completed and saved ${finalList.length} movies to public/movies-seed.json`);
     } catch {}
 
@@ -6460,7 +6771,7 @@ router.post('/bulk-sync-channel', async (req: Request, res: Response) => {
   }
 });
 
-// Start 24/7 MTProto channel watcher on server boot + 15s safety poll
+// Start 24/7 MTProto channel watcher on server boot + 8s safety poll
 setTimeout(() => {
   getTelegramClient()
     .then((client) => ensureChannelUploadWatcher(client))
@@ -6469,8 +6780,8 @@ setTimeout(() => {
 
   setInterval(() => {
     runServerAutoSyncPass('periodic').catch(() => {});
-  }, 15_000);
-}, 5000);
+  }, 8_000);
+}, 3000);
 
 router.get('/stream', handleStream);
 router.head('/stream', handleStream);
