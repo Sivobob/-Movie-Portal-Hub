@@ -1,6 +1,6 @@
 import React, { memo } from 'react';
 import { motion } from 'framer-motion';
-import { upgradePosterUrl } from '../utils/posterUrl';
+import PosterImage from './PosterImage';
 import { getVisibleQualityBadge } from '../utils/qualityBadge';
 
 const MovieCard = memo(({ 
@@ -10,9 +10,8 @@ const MovieCard = memo(({
   movie: any; 
   onClick: () => void; 
 }) => {
-  const rawPoster = movie.posterUrl || movie.backdropUrl || '';
-  const hdPoster = upgradePosterUrl(rawPoster, 1080) || rawPoster;
   const qualityBadge = getVisibleQualityBadge(movie);
+  const isSeries = Boolean(movie?.seasons && movie.seasons.length > 0);
 
   return (
     <motion.div 
@@ -22,22 +21,15 @@ const MovieCard = memo(({
     >
       <div className="relative rounded-xl overflow-hidden aspect-[2/3] shadow-lg border border-neutral-800/80 bg-neutral-950">
         {/* Clean HD Poster Image */}
-        <img 
-          src={hdPoster || undefined} 
-          alt={movie.title} 
-          loading="lazy"
-          decoding="async"
-          draggable={false}
-          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" 
-          onError={(e: any) => {
-            const img = e.currentTarget;
-            if (rawPoster && img.src !== rawPoster && !img.dataset.triedRaw) {
-              img.dataset.triedRaw = '1';
-              img.src = rawPoster;
-              return;
-            }
-            img.src = 'https://images.unsplash.com/photo-1595760205842-8356d2cf98b1?q=80&w=800';
-          }} 
+        <PosterImage
+          posterUrl={movie.posterUrl}
+          backdropUrl={movie.backdropUrl}
+          title={movie.title}
+          year={movie.releaseYear}
+          width={1080}
+          alt={movie.title}
+          isSeries={isSeries}
+          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
         />
 
         {/* Top Right Quality Badge (Admin-controlled: HD, HDTC, or hidden for No Badge) */}

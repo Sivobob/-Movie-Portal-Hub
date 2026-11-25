@@ -16,6 +16,8 @@
     "androidScheme": "https",
     "cleartext": true,
     "allowNavigation": [
+      "ais-pre-wc76ipqs2a7bm74r24a2mr-832989141722.asia-southeast1.run.app",
+      "ais-dev-wc76ipqs2a7bm74r24a2mr-832989141722.asia-southeast1.run.app",
       "ais-pre-yaniwuwl6wc7ivl5tz2bbo-755452514312.asia-northeast1.run.app",
       "ais-dev-yaniwuwl6wc7ivl5tz2bbo-755452514312.asia-northeast1.run.app",
       "movie-portalhub-1012526016635.asia-southeast1.run.app",

@@ -49,6 +49,11 @@ import {
   evaluateChannelVideoFilter,
   filterQualityMapForHdOnly,
 } from '../utils/channelSyncFilters.ts';
+import {
+  isFirestoreQuotaErrorLike,
+  isServerFirestoreWriteAllowed,
+  markServerFirestoreQuotaExhausted,
+} from './firestoreQuotaFlag.ts';
 
 interface DirectHttpProbeInfo {
   fileSize: number;
@@ -884,6 +889,15 @@ async function verifyCandidateAudioAndHd(
   effectiveQuality: '1080p' | '720p' | '';
   durationSec: number;
 }> {
+  if (candidate.hasExplicitNoSound) {
+    return {
+      accepted: false,
+      reason: 'no_audio',
+      effectiveQuality: '',
+      durationSec: candidate.durationSec,
+    };
+  }
+
   if (!onlyValidAudioAndHd) {
     return {
       accepted: true,
@@ -892,15 +906,6 @@ async function verifyCandidateAudioAndHd(
         candidate.parsedQuality === '1080p' || candidate.parsedQuality === '720p'
           ? candidate.parsedQuality
           : '',
-      durationSec: candidate.durationSec,
-    };
-  }
-
-  if (candidate.hasExplicitNoSound) {
-    return {
-      accepted: false,
-      reason: 'no_audio',
-      effectiveQuality: '',
       durationSec: candidate.durationSec,
     };
   }
@@ -4437,9 +4442,10 @@ function isDuplicateByTitleAndYear(
   return false;
 }
 
-const DEFAULT_AUTO_SYNC_CHANNEL_URL = 'https://t.me/+s2Qki5-sfnVjZTI1';
-const DEFAULT_AUTO_SYNC_CHANNEL_ID = '4498557265';
-const AUTO_SYNC_CONFIG_VERSION = 2;
+const DEFAULT_AUTO_SYNC_CHANNEL_URL = 'https://t.me/+P5UeGT1YlQ9lOGZl';
+const DEFAULT_AUTO_SYNC_CHANNEL_ID = '4451036277';
+const AUTO_SYNC_CONFIG_VERSION = 3;
+const SEED_CATALOG_PATH = path.resolve(process.cwd(), 'public/movies-seed.json');
 const PENDING_DRAFTS_FILE = path.join(os.tmpdir(), '.movie_hub_tg_pending_drafts.json');
 let pendingServerDrafts: AutoMatchedMovieDraft[] = [];
 
@@ -4520,7 +4526,8 @@ async function getServerAutoSyncConfig(forceRefresh = false) {
     const d = snap.exists() ? (snap.data() as any) : {};
     const rawUrl = String(d?.channelUrl || '').trim();
     const rawVer = Number(d?.configVersion) || 1;
-    const isOldDefaultChannel = rawUrl.includes('QSL_3k54YfBjMjE1');
+    const isOldDefaultChannel =
+      rawUrl.includes('QSL_3k54YfBjMjE1') || rawUrl.includes('s2Qki5-sfnVjZTI1');
 
     if (!snap.exists() || rawVer < AUTO_SYNC_CONFIG_VERSION || isOldDefaultChannel || !rawUrl) {
       const migrated = {
@@ -4531,11 +4538,11 @@ async function getServerAutoSyncConfig(forceRefresh = false) {
         autoWatchEnabled: true,
         autoPublishVerified: true,
         notifyOnNewPublish: true,
-        onlyValidAudioAndHd: true,
+        onlyValidAudioAndHd: false,
         updatedAtMs: Date.now(),
         updatedAt: serverTimestamp(),
       };
-      await setDoc(ref, migrated, { merge: true }).catch(() => {});
+      await setDocWithQuotaGuard(ref, migrated, { merge: true }).catch(() => {});
       cachedSyncConfig = {
         configVersion: AUTO_SYNC_CONFIG_VERSION,
         channelUrl: DEFAULT_AUTO_SYNC_CHANNEL_URL,
@@ -4543,7 +4550,7 @@ async function getServerAutoSyncConfig(forceRefresh = false) {
         autoWatchEnabled: true,
         autoPublishVerified: true,
         notifyOnNewPublish: true,
-        onlyValidAudioAndHd: true,
+        onlyValidAudioAndHd: false,
         fetchedAt: Date.now(),
       };
     } else {
@@ -4554,7 +4561,7 @@ async function getServerAutoSyncConfig(forceRefresh = false) {
         autoWatchEnabled: typeof d?.autoWatchEnabled === 'boolean' ? d.autoWatchEnabled : true,
         autoPublishVerified: typeof d?.autoPublishVerified === 'boolean' ? d.autoPublishVerified : true,
         notifyOnNewPublish: typeof d?.notifyOnNewPublish === 'boolean' ? d.notifyOnNewPublish : true,
-        onlyValidAudioAndHd: typeof d?.onlyValidAudioAndHd === 'boolean' ? d.onlyValidAudioAndHd : true,
+        onlyValidAudioAndHd: typeof d?.onlyValidAudioAndHd === 'boolean' ? d.onlyValidAudioAndHd : false,
         fetchedAt: Date.now(),
       };
     }
@@ -4567,7 +4574,7 @@ async function getServerAutoSyncConfig(forceRefresh = false) {
         autoWatchEnabled: true,
         autoPublishVerified: true,
         notifyOnNewPublish: true,
-        onlyValidAudioAndHd: true,
+        onlyValidAudioAndHd: false,
         fetchedAt: Date.now(),
       };
     }
@@ -4750,7 +4757,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
 
     if (validMsgs.length === 0) {
       if (reconciledStaleBaseline) {
-        await setDoc(
+        await setDocWithQuotaGuard(
           doc(db, 'app_config', 'telegram_auto_sync'),
           { lastSyncedMsgId: 0, updatedAtMs: Date.now(), updatedAt: serverTimestamp() },
           { merge: true }
@@ -4781,12 +4788,15 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
       saveRecentChannelPostsToDisk();
     }
 
-    // Load current movies & series from Firestore ONLY when new Telegram messages actually arrived
-    const existingSnap = await getDocsFromServer(collection(db, 'movies'));
+    // Load existing movies & series from public/movies-seed.json + Firestore
+    const seedCatalogMap = new Map<string, any>();
     const existingUrlSet = new Set<string>();
     const existingRecords: ExistingMovieRecord[] = [];
-    existingSnap.docs.forEach((d) => {
-      const m = d.data() as any;
+    const registerExistingDoc = (id: string, m: any) => {
+      if (!id || !m) return;
+      if (!seedCatalogMap.has(id)) {
+        seedCatalogMap.set(id, { id, ...m });
+      }
       const cat = String(m?.originalCategory || '');
       const isSeries = cat.toLowerCase().includes('series') || (Array.isArray(m?.seasons) && m.seasons.length > 0);
       if (m?.streamingUrl) existingUrlSet.add(String(m.streamingUrl).trim().toLowerCase());
@@ -4804,19 +4814,37 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
           }
         });
       }
-      existingRecords.push({
-        id: d.id,
-        imdbId: String(m?.imdbId || '').trim(),
-        title: String(m?.title || ''),
-        originalTitle: String(m?.originalTitle || ''),
-        releaseYear: Number(m?.releaseYear) || 0,
-        originalCategory: cat,
-        isSeries,
-        streamingUrl: String(m?.streamingUrl || '').trim(),
-        videoQualities: m?.videoQualities && typeof m.videoQualities === 'object' ? { ...m.videoQualities } : {},
-        seasons: Array.isArray(m?.seasons) ? m.seasons : [],
-      });
-    });
+      if (!existingRecords.some((r) => r.id === id)) {
+        existingRecords.push({
+          id,
+          imdbId: String(m?.imdbId || '').trim(),
+          title: String(m?.title || ''),
+          originalTitle: String(m?.originalTitle || ''),
+          releaseYear: Number(m?.releaseYear) || 0,
+          originalCategory: cat,
+          isSeries,
+          streamingUrl: String(m?.streamingUrl || '').trim(),
+          videoQualities: m?.videoQualities && typeof m.videoQualities === 'object' ? { ...m.videoQualities } : {},
+          seasons: Array.isArray(m?.seasons) ? m.seasons : [],
+        });
+      }
+    };
+
+    try {
+      if (fs.existsSync(SEED_CATALOG_PATH)) {
+        const rawSeed = JSON.parse(fs.readFileSync(SEED_CATALOG_PATH, 'utf8'));
+        if (Array.isArray(rawSeed)) {
+          rawSeed.forEach((m: any) => {
+            if (m?.id) registerExistingDoc(String(m.id), m);
+          });
+        }
+      }
+    } catch {}
+
+    try {
+      const existingSnap = await getDocsFromServer(collection(db, 'movies'));
+      existingSnap.docs.forEach((d) => registerExistingDoc(d.id, d.data()));
+    } catch {}
 
     interface BgRawCandidate {
       msgId: number;
@@ -4930,7 +4958,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
 
     if (candidates.length === 0) {
       if (highestMsgId > cfg.lastSyncedMsgId) {
-        await setDoc(
+        await setDocWithQuotaGuard(
           doc(db, 'app_config', 'telegram_auto_sync'),
           { lastSyncedMsgId: highestMsgId, updatedAtMs: Date.now(), updatedAt: serverTimestamp() },
           { merge: true }
@@ -5115,7 +5143,15 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
               continue;
             }
             const nextStream = existingRec.streamingUrl || epObj.streamUrl;
-            await setDoc(
+            const prevSeed = seedCatalogMap.get(existingRec.id) || {};
+            seedCatalogMap.set(existingRec.id, {
+              ...prevSeed,
+              id: existingRec.id,
+              seasons: mergedSeasons,
+              streamingUrl: nextStream,
+              updatedAt: Date.now(),
+            });
+            await setDocWithQuotaGuard(
               doc(db, 'movies', existingRec.id),
               {
                 seasons: mergedSeasons,
@@ -5123,7 +5159,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
                 updatedAt: serverTimestamp(),
               },
               { merge: true }
-            );
+            ).catch(() => {});
             existingRec.seasons = mergedSeasons;
             existingRec.streamingUrl = nextStream;
             existingUrlSet.add(draft.streamUrl.toLowerCase());
@@ -5134,7 +5170,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
             );
 
             if (cfg.notifyOnNewPublish && publishedCount <= 3) {
-              await setDoc(
+              await setDocWithQuotaGuard(
                 doc(db, 'announcements', `tg_rel_${cleanChannelId}_${draft.msgId}`),
                 {
                   title: draft.title,
@@ -5160,40 +5196,47 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
           } else {
             const seriesDocId = `tg_series_${cleanChannelId}_${draft.msgId}`;
             const initialSeasons = [{ seasonNumber: seasonNum, episodes: [epObj] }];
-            await setDoc(
+            const seriesBase = {
+              id: seriesDocId,
+              title: draft.title.trim(),
+              originalTitle: (draft.originalTitle || draft.title).trim(),
+              description: draft.description.trim(),
+              posterUrl: cleanPoster,
+              backdropUrl: cleanBackdrop,
+              releaseYear: Number(draft.releaseYear) || new Date().getFullYear(),
+              originalCategory: catToSave,
+              displayCategory: displayCat,
+              contentType: catToSave.toLowerCase().includes('anime') ? 'anime' : null,
+              language: (draft.language || 'Hindi').trim(),
+              genre: (draft.genre || 'Drama').trim(),
+              director: (draft.director || '').trim(),
+              cast: (draft.cast || '').trim(),
+              runtime: (draft.runtime || '').trim(),
+              rating: Number(draft.rating) || 8.0,
+              imdbId: (draft.imdbId || '').trim(),
+              trailerUrl: '',
+              streamingUrl: epObj.streamUrl,
+              videoQualities: {},
+              seasons: initialSeasons,
+              featured: true,
+              published: true,
+              qualityBadge: badge,
+              duration: bestDurSec || parseDurationToSeconds(draft.runtime) || 0,
+              telegramMsgId: draft.msgId,
+              telegramChannelId: cleanChannelId,
+              updatedAt: nowMs,
+              createdAt: nowMs,
+            };
+            seedCatalogMap.set(seriesDocId, seriesBase);
+            await setDocWithQuotaGuard(
               doc(db, 'movies', seriesDocId),
               {
-                title: draft.title.trim(),
-                originalTitle: (draft.originalTitle || draft.title).trim(),
-                description: draft.description.trim(),
-                posterUrl: cleanPoster,
-                backdropUrl: cleanBackdrop,
-                releaseYear: Number(draft.releaseYear) || new Date().getFullYear(),
-                originalCategory: catToSave,
-                displayCategory: displayCat,
-                contentType: catToSave.toLowerCase().includes('anime') ? 'anime' : null,
-                language: (draft.language || 'Hindi').trim(),
-                genre: (draft.genre || 'Drama').trim(),
-                director: (draft.director || '').trim(),
-                cast: (draft.cast || '').trim(),
-                runtime: (draft.runtime || '').trim(),
-                rating: Number(draft.rating) || 8.0,
-                imdbId: (draft.imdbId || '').trim(),
-                trailerUrl: '',
-                streamingUrl: epObj.streamUrl,
-                videoQualities: {},
-                seasons: initialSeasons,
-                featured: true,
-                published: true,
-                qualityBadge: badge,
-                duration: bestDurSec || parseDurationToSeconds(draft.runtime) || 0,
-                telegramMsgId: draft.msgId,
-                telegramChannelId: cleanChannelId,
+                ...seriesBase,
                 updatedAt: serverTimestamp(),
                 createdAt: serverTimestamp(),
               },
               { merge: true }
-            );
+            ).catch(() => {});
             existingUrlSet.add(draft.streamUrl.toLowerCase());
             existingRecords.push({
               id: seriesDocId,
@@ -5214,7 +5257,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
             );
 
             if (cfg.notifyOnNewPublish && publishedCount <= 3) {
-              await setDoc(
+              await setDocWithQuotaGuard(
                 doc(db, 'announcements', `tg_rel_${cleanChannelId}_${draft.msgId}`),
                 {
                   title: draft.title,
@@ -5240,7 +5283,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
           }
         }
 
-        // Single Movie: merge new quality if already in Firestore, otherwise publish new doc
+        // Single Movie: merge new quality if already present, otherwise publish new doc
         if (existingRec) {
           const mergedQualities = { ...existingRec.videoQualities };
           let qualityAdded = false;
@@ -5256,7 +5299,15 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
               mergedQualities['4K'] ||
               existingRec.streamingUrl ||
               draft.streamUrl.trim();
-            await setDoc(
+            const prevSeed = seedCatalogMap.get(existingRec.id) || {};
+            seedCatalogMap.set(existingRec.id, {
+              ...prevSeed,
+              id: existingRec.id,
+              videoQualities: mergedQualities,
+              streamingUrl: upgradedStream,
+              updatedAt: nowMs,
+            });
+            await setDocWithQuotaGuard(
               doc(db, 'movies', existingRec.id),
               {
                 videoQualities: mergedQualities,
@@ -5264,7 +5315,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
                 updatedAt: serverTimestamp(),
               },
               { merge: true }
-            );
+            ).catch(() => {});
             existingRec.videoQualities = mergedQualities;
             existingRec.streamingUrl = upgradedStream;
             existingUrlSet.add(draft.streamUrl.toLowerCase());
@@ -5277,40 +5328,47 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
         }
 
         const deterministicDocId = `tg_${cleanChannelId}_${draft.msgId}`;
-        await setDoc(
+        const movieBase = {
+          id: deterministicDocId,
+          title: draft.title.trim(),
+          originalTitle: (draft.originalTitle || draft.title).trim(),
+          description: draft.description.trim(),
+          posterUrl: cleanPoster,
+          backdropUrl: cleanBackdrop,
+          releaseYear: Number(draft.releaseYear) || new Date().getFullYear(),
+          originalCategory: catToSave,
+          displayCategory: displayCat,
+          contentType: catToSave.toLowerCase().includes('anime') ? 'anime' : null,
+          language: (draft.language || 'Hindi').trim(),
+          genre: (draft.genre || 'Action').trim(),
+          director: (draft.director || '').trim(),
+          cast: (draft.cast || '').trim(),
+          runtime: (draft.runtime || '').trim(),
+          rating: Number(draft.rating) || 8.0,
+          imdbId: (draft.imdbId || '').trim(),
+          trailerUrl: '',
+          streamingUrl: draft.streamUrl.trim(),
+          videoQualities: draft.videoQualities || {},
+          seasons: [],
+          featured: true,
+          published: true,
+          qualityBadge: badge,
+          duration: draft.durationSec || parseDurationToSeconds(draft.runtime) || 0,
+          telegramMsgId: draft.msgId,
+          telegramChannelId: cleanChannelId,
+          updatedAt: nowMs,
+          createdAt: nowMs,
+        };
+        seedCatalogMap.set(deterministicDocId, movieBase);
+        await setDocWithQuotaGuard(
           doc(db, 'movies', deterministicDocId),
           {
-            title: draft.title.trim(),
-            originalTitle: (draft.originalTitle || draft.title).trim(),
-            description: draft.description.trim(),
-            posterUrl: cleanPoster,
-            backdropUrl: cleanBackdrop,
-            releaseYear: Number(draft.releaseYear) || new Date().getFullYear(),
-            originalCategory: catToSave,
-            displayCategory: displayCat,
-            contentType: catToSave.toLowerCase().includes('anime') ? 'anime' : null,
-            language: (draft.language || 'Hindi').trim(),
-            genre: (draft.genre || 'Action').trim(),
-            director: (draft.director || '').trim(),
-            cast: (draft.cast || '').trim(),
-            runtime: (draft.runtime || '').trim(),
-            rating: Number(draft.rating) || 8.0,
-            imdbId: (draft.imdbId || '').trim(),
-            trailerUrl: '',
-            streamingUrl: draft.streamUrl.trim(),
-            videoQualities: draft.videoQualities || {},
-            seasons: [],
-            featured: true,
-            published: true,
-            qualityBadge: badge,
-            duration: draft.durationSec || parseDurationToSeconds(draft.runtime) || 0,
-            telegramMsgId: draft.msgId,
-            telegramChannelId: cleanChannelId,
+            ...movieBase,
             updatedAt: serverTimestamp(),
             createdAt: serverTimestamp(),
           },
           { merge: true }
-        );
+        ).catch(() => {});
 
         existingUrlSet.add(draft.streamUrl.toLowerCase());
         existingRecords.push({
@@ -5332,7 +5390,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
         );
 
         if (cfg.notifyOnNewPublish && publishedCount <= 3) {
-          await setDoc(
+          await setDocWithQuotaGuard(
             doc(db, 'announcements', `tg_rel_${cleanChannelId}_${draft.msgId}`),
             {
               title: draft.title,
@@ -5371,7 +5429,10 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
     }
 
     if (publishedCount > 0) {
-      await setDoc(
+      try {
+        fs.writeFileSync(SEED_CATALOG_PATH, JSON.stringify(Array.from(seedCatalogMap.values())));
+      } catch {}
+      await setDocWithQuotaGuard(
         doc(db, 'app_config', 'catalog_sync'),
         {
           updatedAt: Date.now(),
@@ -5382,7 +5443,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
     }
 
     if (highestMsgId > cfg.lastSyncedMsgId || reconciledStaleBaseline) {
-      await setDoc(
+      await setDocWithQuotaGuard(
         doc(db, 'app_config', 'telegram_auto_sync'),
         {
           lastSyncedMsgId: highestMsgId,
@@ -5410,17 +5471,8 @@ const FIREBASE_QUOTA_UPGRADE_URL =
   'https://console.firebase.google.com/project/gen-lang-client-0267042672/firestore/databases/ai-studio-movieportalhub-664a3e40-85f3-4758-945e-fd031bdc459f/data?openUpgradeDialog=true';
 
 function isFirestoreQuotaError(err: any): boolean {
-  const code = String(err?.code || '').toLowerCase();
-  const msg = String(err?.message || '').toLowerCase();
-  return (
-    code.includes('resource-exhausted') ||
-    msg.includes('resource-exhausted') ||
-    msg.includes('quota') ||
-    msg.includes('free daily write')
-  );
+  return isFirestoreQuotaErrorLike(err);
 }
-
-let firestoreQuotaExhaustedSession = true;
 
 async function setDocWithQuotaGuard(
   ref: any,
@@ -5428,7 +5480,7 @@ async function setDocWithQuotaGuard(
   options?: { merge?: boolean },
   timeoutMs = 1500
 ): Promise<void> {
-  if (firestoreQuotaExhaustedSession) {
+  if (!isServerFirestoreWriteAllowed()) {
     throw Object.assign(
       new Error('Firestore daily write quota exhausted (resource-exhausted).'),
       { code: 'resource-exhausted' }
@@ -5440,7 +5492,7 @@ async function setDocWithQuotaGuard(
       options ? setDoc(ref, data, options) : setDoc(ref, data),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
-          firestoreQuotaExhaustedSession = true;
+          markServerFirestoreQuotaExhausted('write-timeout');
           reject(
             Object.assign(
               new Error('Firestore daily write quota exhausted (write timeout).'),
@@ -5452,7 +5504,7 @@ async function setDocWithQuotaGuard(
     ]);
   } catch (err: any) {
     if (isFirestoreQuotaError(err)) {
-      firestoreQuotaExhaustedSession = true;
+      markServerFirestoreQuotaExhausted(err);
     }
     throw err;
   } finally {
@@ -5643,6 +5695,7 @@ async function runBulkChannelSyncWorker(params: {
     } catch {}
 
     const imdbMatchCache = new Map<string, Awaited<ReturnType<typeof resolveBestImdbMatch>>>();
+    const imdbInFlight = new Map<string, Promise<Awaited<ReturnType<typeof resolveBestImdbMatch>>>>();
     const resolveCachedImdb = async (parsedItem: ReturnType<typeof parseTelegramMovieMeta>) => {
       const key = parsedItem.explicitImdbId
         ? `id:${parsedItem.explicitImdbId.toLowerCase()}`
@@ -5651,9 +5704,50 @@ async function runBulkChannelSyncWorker(params: {
           }`;
       const hit = imdbMatchCache.get(key);
       if (hit) return hit;
-      const res = await resolveBestImdbMatch(parsedItem);
-      if (key.length > 3) imdbMatchCache.set(key, res);
-      return res;
+
+      const existingPromise = imdbInFlight.get(key);
+      if (existingPromise) return existingPromise;
+
+      const fallbackResult: Awaited<ReturnType<typeof resolveBestImdbMatch>> = {
+        imdbId: '',
+        title: parsedItem.cleanTitle || parsedItem.rawFileName || 'Untitled Movie',
+        originalTitle: parsedItem.cleanTitle || parsedItem.rawFileName || 'Untitled Movie',
+        releaseYear: parsedItem.year || new Date().getFullYear(),
+        posterUrl: '',
+        backdropUrl: '',
+        genre: parsedItem.isSeriesEpisode ? 'Drama' : 'Action',
+        description: '',
+        director: '',
+        cast: '',
+        runtime: '',
+        language: parsedItem.languageHint || 'Hindi',
+        rating: 7.5,
+        originalCategory: parsedItem.isSeriesEpisode ? 'Web Series' : 'Bollywood Movie',
+        matchConfidence: 'low',
+        confidenceScore: 0,
+        matchReason: 'Metadata lookup timed out — using parsed title',
+        alternateMatches: [],
+      };
+
+      const task = (async () => {
+        try {
+          const res = await Promise.race([
+            resolveBestImdbMatch(parsedItem),
+            new Promise<typeof fallbackResult>((resolve) =>
+              setTimeout(() => resolve(fallbackResult), 8000)
+            ),
+          ]);
+          if (key.length > 3) imdbMatchCache.set(key, res);
+          return res;
+        } catch {
+          return fallbackResult;
+        } finally {
+          imdbInFlight.delete(key);
+        }
+      })();
+
+      if (key.length > 3) imdbInFlight.set(key, task);
+      return task;
     };
 
     const CHUNK_MSGS = 100;
@@ -5845,10 +5939,10 @@ async function runBulkChannelSyncWorker(params: {
         }
       }
 
-      // Resolve IMDb metadata in parallel (cached per series/title)
+      // Resolve IMDb metadata in parallel (cached + deduplicated per series/title)
       const preparedGroups = await mapWithConcurrency(
         groups,
-        4,
+        8,
         async (grp) => {
           if (bulkSyncStopRequested) return null;
           const mergedParsed = {
@@ -6185,7 +6279,7 @@ async function runBulkChannelSyncWorker(params: {
       // Persist full catalog to public/movies-seed.json after each chunk!
       try {
         const currentList = Array.from(seedCatalogMap.values());
-        fs.writeFileSync('public/movies-seed.json', JSON.stringify(currentList, null, 2));
+        fs.writeFileSync(SEED_CATALOG_PATH, JSON.stringify(currentList));
       } catch (fErr) {
         console.warn('[BulkChannelSync] Could not write movies-seed.json:', fErr);
       }
@@ -6196,7 +6290,7 @@ async function runBulkChannelSyncWorker(params: {
         return;
       }
 
-      if (chunkPublished > 0 && !firestoreQuotaExhaustedSession) {
+      if (chunkPublished > 0 && isServerFirestoreWriteAllowed()) {
         setDocWithQuotaGuard(
           doc(db, 'app_config', 'catalog_sync'),
           { updatedAt: Date.now(), action: 'bulk_channel_sync' },
@@ -6210,11 +6304,11 @@ async function runBulkChannelSyncWorker(params: {
     // Finalize catalog file
     try {
       const finalList = Array.from(seedCatalogMap.values());
-      fs.writeFileSync('public/movies-seed.json', JSON.stringify(finalList, null, 2));
+      fs.writeFileSync(SEED_CATALOG_PATH, JSON.stringify(finalList));
       console.log(`[BulkChannelSync] Successfully completed and saved ${finalList.length} movies to public/movies-seed.json`);
     } catch {}
 
-    if (!firestoreQuotaExhaustedSession) {
+    if (isServerFirestoreWriteAllowed()) {
       setDocWithQuotaGuard(
         doc(db, 'app_config', 'telegram_auto_sync'),
         {
@@ -6263,7 +6357,7 @@ router.post('/bulk-sync-channel', async (req: Request, res: Response) => {
   const startMsgId = Math.max(1, Number(req.body?.startMsgId) || 1);
   const requestedEnd = Math.max(0, Number(req.body?.endMsgId) || 0);
   const onlyValidAudioAndHd =
-    typeof req.body?.onlyValidAudioAndHd === 'boolean' ? req.body.onlyValidAudioAndHd : true;
+    typeof req.body?.onlyValidAudioAndHd === 'boolean' ? req.body.onlyValidAudioAndHd : false;
 
   if (!channelRef) {
     return res.status(400).json({ error: 'Channel link ya post link daalna zaroori hai.' });
@@ -6324,7 +6418,7 @@ router.post('/bulk-sync-channel', async (req: Request, res: Response) => {
       upgradeUrl: '',
     };
 
-    void setDoc(
+    void setDocWithQuotaGuard(
       doc(db, 'app_config', 'telegram_auto_sync'),
       {
         channelUrl: channelRef,

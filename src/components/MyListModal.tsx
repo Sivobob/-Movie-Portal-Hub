@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { X, Bookmark, Film, Trash2, Play } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { fetchMyList, removeFromMyList, MyListItem } from '../services/userWatchService';
-import { upgradePosterUrl } from '../utils/posterUrl';
+import PosterImage from './PosterImage';
 import { getLocalMovies } from '../services/movieStorage';
 
 interface MyListModalProps {
@@ -93,7 +93,6 @@ export default function MyListModal({ isOpen, onClose, onPlayMovie }: MyListModa
                   (m) => m.id === item.movieId || (m.imdbId && m.imdbId === item.movieId)
                 );
                 const movie = liveMatch || item.movieData || item;
-                const poster = upgradePosterUrl(movie.posterUrl || item.posterUrl, 600) || item.posterUrl;
                 return (
                   <div
                     key={item.movieId}
@@ -104,11 +103,13 @@ export default function MyListModal({ isOpen, onClose, onPlayMovie }: MyListModa
                     className="group relative bg-neutral-950 rounded-xl overflow-hidden border border-neutral-800 hover:border-red-600/60 transition-all cursor-pointer flex flex-col shadow-lg"
                   >
                     <div className="relative aspect-[2/3] w-full bg-neutral-900 overflow-hidden">
-                      <img
-                        src={poster || 'https://images.unsplash.com/photo-1626814026160-2237a95fc5a0?q=80&w=600'}
+                      <PosterImage
+                        posterUrl={movie.posterUrl || item.posterUrl}
+                        backdropUrl={movie.backdropUrl}
+                        title={item.title}
+                        width={600}
                         alt={item.title}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        loading="lazy"
                       />
                       <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-between p-2.5">
                         <button

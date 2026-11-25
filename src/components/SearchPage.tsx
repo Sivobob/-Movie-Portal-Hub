@@ -31,7 +31,12 @@ export default function SearchPage() {
   const [selectedMovie, setSelectedMovie] = useState<any | null>(null);
   const [activeSeasonIndex, setActiveSeasonIndex] = useState(0);
   const [familyMode, setFamilyMode] = useState<boolean>(() => getAppPreferences().familyMode);
+  const [visibleLimit, setVisibleLimit] = useState<number>(120);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    setVisibleLimit(120);
+  }, [searchQuery, selectedGenres]);
 
   useEffect(() => {
     const onPrefs = () => setFamilyMode(getAppPreferences().familyMode);

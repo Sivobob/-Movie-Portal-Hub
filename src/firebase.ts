@@ -11,7 +11,12 @@ import {
   persistentMultipleTabManager,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { isFirestoreWriteAllowed } from './services/firestoreQuotaService';
+import {
+  hydrateFirestoreQuotaStatus,
+  isFirestoreWriteAllowed,
+  isQuotaErrorLike,
+  markFirestoreQuotaExhausted,
+} from './services/firestoreQuotaService';
 
 const app = initializeApp(firebaseConfig);
 
@@ -71,7 +76,9 @@ export const auth = getAuth(app);
 
 // Validate Firestore connectivity on startup only if write quota is normal
 async function testConnection() {
-  if (typeof window === 'undefined' || !isFirestoreWriteAllowed()) return;
+  if (typeof window === 'undefined') return;
+  await hydrateFirestoreQuotaStatus().catch(() => true);
+  if (!isFirestoreWriteAllowed()) return;
   try {
     await getDocFromServer(doc(db, 'app_config', 'connection'));
   } catch (error) {
@@ -115,25 +122,8 @@ export function handleFirestoreError(
   shouldThrow: boolean = false
 ) {
   const errMsg = error instanceof Error ? error.message : String(error);
-  const isQuota =
-    errMsg.includes('resource-exhausted') ||
-    errMsg.includes('Quota limit exceeded') ||
-    errMsg.includes('quota') ||
-    errMsg.includes('exhausted');
-
-  if (isQuota && typeof window !== 'undefined' && window.localStorage) {
-    try {
-      const now = new Date();
-      const nextUtcMidnight = Date.UTC(
-        now.getUTCFullYear(),
-        now.getUTCMonth(),
-        now.getUTCDate() + 1,
-        1, 0, 0
-      );
-      const expiry = Math.max(Date.now() + 12 * 3600 * 1000, nextUtcMidnight);
-      localStorage.setItem('mp_firestore_write_quota_exceeded_until_v1', String(expiry));
-    } catch {}
-    console.warn('[Firestore Quota Notice] Free daily write quota reached. Switched to offline/local fallback.');
+  if (isQuotaErrorLike(error)) {
+    markFirestoreQuotaExhausted(error);
     return;
   }
 

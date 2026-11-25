@@ -40,7 +40,7 @@ export default defineConfig(() => {
             '**/*.mkv',
             '**/aistudio/**',
           ],
-          maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
+          maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
           navigateFallback: null,
           navigateFallbackDenylist: [/^\/api\//],
           runtimeCaching: [

@@ -494,7 +494,11 @@ export default function DownloadOptionsModal({
                 <img
                   src={posterSrc}
                   alt={movie.title}
+                  referrerPolicy="no-referrer"
                   className="w-full h-full object-cover"
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                  }}
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-neutral-600 text-xs font-bold">

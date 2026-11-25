@@ -38,10 +38,8 @@ export function getAppPreferences(): AppPreferences {
 
 import {
   isFirestoreWriteAllowed,
-  checkAndHandleQuotaError,
+  guardedFirestoreWrite,
 } from './firestoreQuotaService';
-
-let isPrefsQuotaExceeded = !isFirestoreWriteAllowed();
 
 export async function saveAppPreferences(
   partial: Partial<AppPreferences>,
@@ -55,22 +53,19 @@ export async function saveAppPreferences(
     localStorage.setItem(PREFS_STORAGE_KEY, JSON.stringify(next));
   } catch {}
 
-  if (userId && userId !== 'guest_user' && !isPrefsQuotaExceeded && isFirestoreWriteAllowed()) {
-    try {
-      await setDoc(
+  if (userId && userId !== 'guest_user' && isFirestoreWriteAllowed()) {
+    const res = await guardedFirestoreWrite(() =>
+      setDoc(
         doc(db, 'users', userId, 'preferences', 'app'),
         {
           ...next,
           updatedAt: serverTimestamp(),
         },
         { merge: true }
-      );
-    } catch (e: any) {
-      if (checkAndHandleQuotaError(e)) {
-        isPrefsQuotaExceeded = true;
-      } else {
-        console.warn('Failed to sync preferences to Firestore:', e);
-      }
+      )
+    );
+    if (!res.ok && !res.quotaExhausted && res.error) {
+      console.warn('Failed to sync preferences to Firestore:', res.error);
     }
   }
 

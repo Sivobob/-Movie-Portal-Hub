@@ -20,7 +20,7 @@ import {
   getEpisodeDisplayLabel,
   getTimestampMs,
 } from '../services/movieStorage';
-import { upgradePosterUrl } from '../utils/posterUrl';
+import PosterImage from './PosterImage';
 import { getVisibleQualityBadge } from '../utils/qualityBadge';
 import { parseDurationToSeconds } from '../utils/duration';
 import { resolveEpisodePlaybackDurationSec } from '../utils/playerHelpers';
@@ -87,6 +87,7 @@ export default function HomePage() {
   // My List state
   const [myListIds, setMyListIds] = useState<Set<string>>(new Set());
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const [categoryVisibleCount, setCategoryVisibleCount] = useState<number>(60);
 
   // Helper: Strictly verify 2026 release year for Featured and Latest sections
   const is2026Release = (m: any): boolean => {
@@ -106,30 +107,23 @@ export default function HomePage() {
   };
 
   const featuredMovies = useMemo(() => {
-    // Strictly ONLY movies and web series released in 2026
-    const only2026 = movies.filter((m: any) => is2026Release(m));
-    if (only2026.length === 0) return [];
-
-    const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
-    const validFeatured = only2026.filter((m: any) => {
-      if (!m.featured) return false;
-      const featTime = getTimestampMs(m.featuredAt) || getTimestampMs(m.createdAt) || getTimestampMs(m.updatedAt) || 0;
-      if (featTime > 0) {
-        return (nowMs - featTime) < TWENTY_FOUR_HOURS_MS;
-      }
-      return true;
-    });
-
-    if (validFeatured.length > 0) return validFeatured;
-
-    // Fallback if no 2026 movies featured within last 24h: show recent 2026 movies from last 48h
-    const recentFallback = only2026.filter((m: any) => {
+    const FORTY_EIGHT_HOURS_MS = 48 * 60 * 60 * 1000;
+    
+    // Only movies and series added within the last 2 days (48 hours)
+    const brandNewMovies = movies.filter((m: any) => {
+      if (!m || m.published === false) return false;
       const t = getTimestampMs(m.createdAt) || getTimestampMs(m.updatedAt) || 0;
-      return t > 0 && (nowMs - t) < (48 * 3600 * 1000);
+      if (t > 0) {
+        return (nowMs - t) < FORTY_EIGHT_HOURS_MS;
+      }
+      return is2026Release(m);
     });
 
-    if (recentFallback.length > 0) return recentFallback.slice(0, 5);
-    return only2026.slice(0, 5);
+    if (brandNewMovies.length > 0) {
+      return brandNewMovies.slice(0, 5);
+    }
+
+    return movies.filter((m: any) => m && m.published !== false).slice(0, 5);
   }, [movies, nowMs]);
 
   const categoryRef = useRef(category);
@@ -151,6 +145,7 @@ export default function HomePage() {
   }, [playingMovie]);
 
   useEffect(() => {
+    setCategoryVisibleCount(60);
     try {
       window.scrollTo({ top: 0, behavior: 'auto' });
       document.getElementById('root')?.scrollTo({ top: 0, behavior: 'auto' });
@@ -746,15 +741,17 @@ export default function HomePage() {
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2 sm:gap-3 px-2 sm:px-4">
-              {categoryMovies.map((movie) => {
-                return (
-                  <div key={movie.id} className="relative group">
-                    <MovieCard movie={movie} onClick={() => handleMovieClick(movie)} />
-                  </div>
-                );
-              })}
-            </div>
+            <>
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2 sm:gap-3 px-2 sm:px-4">
+                {categoryMovies.map((movie) => {
+                  return (
+                    <div key={movie.id} className="relative group">
+                      <MovieCard movie={movie} onClick={() => handleMovieClick(movie)} />
+                    </div>
+                  );
+                })}
+              </div>
+            </>
           )}
         </div>
       ) : movies.length === 0 ? (
@@ -797,10 +794,14 @@ export default function HomePage() {
                       }
                     }}
                   >
-                    <img
-                      src={upgradePosterUrl(currentFeatured.backdropUrl || currentFeatured.posterUrl, 1600) || currentFeatured.backdropUrl || currentFeatured.posterUrl}
+                    <PosterImage
+                      posterUrl={currentFeatured.backdropUrl || currentFeatured.posterUrl}
+                      backdropUrl={currentFeatured.posterUrl}
+                      title={currentFeatured.title}
+                      year={currentFeatured.releaseYear}
+                      width={1600}
                       alt={currentFeatured.title}
-                      draggable={false}
+                      loading="eager"
                       className="absolute inset-0 w-full h-full object-cover object-center brightness-105 contrast-105"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black via-black/35 to-transparent" />
@@ -844,9 +845,13 @@ export default function HomePage() {
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-12 h-14 sm:w-14 sm:h-16 rounded-xl overflow-hidden bg-neutral-950 flex-shrink-0 border border-white/10 shadow">
-                      <img
-                        src={upgradePosterUrl(currentFeatured.posterUrl || currentFeatured.backdropUrl, 300) || currentFeatured.posterUrl}
+                      <PosterImage
+                        posterUrl={currentFeatured.posterUrl || currentFeatured.backdropUrl}
+                        backdropUrl={currentFeatured.backdropUrl}
+                        title={currentFeatured.title}
+                        width={300}
                         alt={currentFeatured.title}
+                        compactFallback
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                       />
                     </div>
@@ -895,8 +900,13 @@ export default function HomePage() {
                       className="flex-shrink-0 w-36 sm:w-44 bg-neutral-900 rounded-xl overflow-hidden border border-neutral-800 hover:border-red-600/60 flex flex-col shadow-lg cursor-pointer group transition-colors"
                     >
                       <div className="relative aspect-[3/4] w-full bg-neutral-950 overflow-hidden">
-                        <img
-                          src={upgradePosterUrl(item.movie.posterUrl || item.movie.backdropUrl, 400) || item.movie.posterUrl}
+                        <PosterImage
+                          posterUrl={item.movie.posterUrl || item.movie.backdropUrl}
+                          backdropUrl={item.movie.backdropUrl}
+                          title={item.movie.title}
+                          year={item.movie.releaseYear}
+                          width={400}
+                          isSeries
                           alt={`${item.movie.title} ${epCode}`}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                         />
@@ -956,8 +966,12 @@ export default function HomePage() {
                     className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer"
                   >
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
-                      <img
-                        src={upgradePosterUrl(movie.posterUrl, 400) || movie.posterUrl}
+                      <PosterImage
+                        posterUrl={movie.posterUrl}
+                        backdropUrl={movie.backdropUrl}
+                        title={movie.title}
+                        year={movie.releaseYear}
+                        width={400}
                         alt={movie.title}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                       />
@@ -975,11 +989,15 @@ export default function HomePage() {
                 Suspenseful Movies
               </h3>
               <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
-                {suspenseMovies.map((movie) => (
+                {suspenseMovies.slice(0, 25).map((movie) => (
                   <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
-                      <img
-                        src={upgradePosterUrl(movie.posterUrl, 400) || movie.posterUrl}
+                      <PosterImage
+                        posterUrl={movie.posterUrl}
+                        backdropUrl={movie.backdropUrl}
+                        title={movie.title}
+                        year={movie.releaseYear}
+                        width={400}
                         alt={movie.title}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                       />
@@ -997,11 +1015,15 @@ export default function HomePage() {
                 Blockbuster Action & Adventure Movies
               </h3>
               <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
-                {actionMovies.map((movie) => (
+                {actionMovies.slice(0, 25).map((movie) => (
                   <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
-                      <img
-                        src={upgradePosterUrl(movie.posterUrl, 400) || movie.posterUrl}
+                      <PosterImage
+                        posterUrl={movie.posterUrl}
+                        backdropUrl={movie.backdropUrl}
+                        title={movie.title}
+                        year={movie.releaseYear}
+                        width={400}
                         alt={movie.title}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                       />
@@ -1026,8 +1048,13 @@ export default function HomePage() {
                     className="flex-shrink-0 w-28 sm:w-32 cursor-pointer group relative"
                   >
                     <div className="relative aspect-[2/3] w-full bg-neutral-950 rounded-xl overflow-hidden border border-neutral-800/90 shadow-md">
-                      <img
-                        src={upgradePosterUrl(movie.posterUrl || movie.backdropUrl, 400) || movie.posterUrl}
+                      <PosterImage
+                        posterUrl={movie.posterUrl || movie.backdropUrl}
+                        backdropUrl={movie.backdropUrl}
+                        title={movie.title}
+                        year={movie.releaseYear}
+                        width={400}
+                        isSeries
                         alt={movie.title}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                       />
@@ -1048,10 +1075,10 @@ export default function HomePage() {
                 Comedy Movies
               </h3>
               <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
-                {comedyMovies.map((movie) => (
+                {comedyMovies.slice(0, 25).map((movie) => (
                   <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
-                      <img src={upgradePosterUrl(movie.posterUrl, 400) || movie.posterUrl} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                      <PosterImage posterUrl={movie.posterUrl} backdropUrl={movie.backdropUrl} title={movie.title} year={movie.releaseYear} width={400} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                     </div>
                   </div>
                 ))}
@@ -1066,10 +1093,10 @@ export default function HomePage() {
                 Romantic Movies
               </h3>
               <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
-                {romanceMovies.map((movie) => (
+                {romanceMovies.slice(0, 25).map((movie) => (
                   <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
-                      <img src={upgradePosterUrl(movie.posterUrl, 400) || movie.posterUrl} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                      <PosterImage posterUrl={movie.posterUrl} backdropUrl={movie.backdropUrl} title={movie.title} year={movie.releaseYear} width={400} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                     </div>
                   </div>
                 ))}
@@ -1084,10 +1111,10 @@ export default function HomePage() {
                 Thriller & Horror Movies
               </h3>
               <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
-                {thrillerHorrorMovies.map((movie) => (
+                {thrillerHorrorMovies.slice(0, 25).map((movie) => (
                   <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
-                      <img src={upgradePosterUrl(movie.posterUrl, 400) || movie.posterUrl} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                      <PosterImage posterUrl={movie.posterUrl} backdropUrl={movie.backdropUrl} title={movie.title} year={movie.releaseYear} width={400} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                     </div>
                   </div>
                 ))}
@@ -1102,10 +1129,10 @@ export default function HomePage() {
                 Drama Movies
               </h3>
               <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
-                {dramaMovies.map((movie) => (
+                {dramaMovies.slice(0, 25).map((movie) => (
                   <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
                     <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
-                      <img src={upgradePosterUrl(movie.posterUrl, 400) || movie.posterUrl} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                      <PosterImage posterUrl={movie.posterUrl} backdropUrl={movie.backdropUrl} title={movie.title} year={movie.releaseYear} width={400} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                     </div>
                   </div>
                 ))}

@@ -25,7 +25,7 @@ import {
   MyLikeItem,
 } from '../services/userWatchService';
 import { getLocalMovies, getEpisodeDisplayLabel } from '../services/movieStorage';
-import { upgradePosterUrl } from '../utils/posterUrl';
+import PosterImage from './PosterImage';
 import { parseDurationToSeconds } from '../utils/duration';
 import { resolveEpisodePlaybackDurationSec } from '../utils/playerHelpers';
 import MovieDetailsModal from './MovieDetailsModal';
@@ -462,14 +462,20 @@ export default function MePage() {
                 <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 max-w-2xl mx-auto">
                   {myList.map((item) => {
                     const movieObj = resolveLiveMovie(item);
-                    const poster = upgradePosterUrl(movieObj.posterUrl || item.posterUrl, 500) || item.posterUrl;
                     return (
                       <div key={item.movieId} className="space-y-1.5 group">
                         <div
                           onClick={() => openMovieDetails(movieObj)}
                           className="relative aspect-[2/3] rounded-lg overflow-hidden bg-[#1a1d24] border border-white/[0.06] cursor-pointer"
                         >
-                          <img src={poster} alt={item.title} className="w-full h-full object-cover" />
+                          <PosterImage
+                            posterUrl={movieObj.posterUrl || item.posterUrl}
+                            backdropUrl={movieObj.backdropUrl}
+                            title={item.title}
+                            width={500}
+                            alt={item.title}
+                            className="w-full h-full object-cover"
+                          />
                           <button
                             type="button"
                             onClick={async (e) => {
@@ -505,14 +511,20 @@ export default function MePage() {
                 <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 max-w-2xl mx-auto">
                   {myLikes.map((item) => {
                     const movieObj = resolveLiveMovie(item);
-                    const poster = upgradePosterUrl(movieObj.posterUrl || item.posterUrl, 500) || item.posterUrl;
                     return (
                       <div key={item.movieId} className="space-y-1.5">
                         <div
                           onClick={() => openMovieDetails(movieObj)}
                           className="relative aspect-[2/3] rounded-lg overflow-hidden bg-[#1a1d24] border border-white/[0.06] cursor-pointer"
                         >
-                          <img src={poster} alt={item.title} className="w-full h-full object-cover" />
+                          <PosterImage
+                            posterUrl={movieObj.posterUrl || item.posterUrl}
+                            backdropUrl={movieObj.backdropUrl}
+                            title={item.title}
+                            width={500}
+                            alt={item.title}
+                            className="w-full h-full object-cover"
+                          />
                           <button
                             type="button"
                             onClick={async (e) => {

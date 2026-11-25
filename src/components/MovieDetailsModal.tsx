@@ -16,9 +16,9 @@ import {
   Volume2,
 } from 'lucide-react';
 import DownloadOptionsModal from './DownloadOptionsModal';
+import PosterImage from './PosterImage';
 import { buildApiUrl } from '../utils/apiConfig';
 import { useDownloads } from '../hooks/useDownloads';
-import { upgradePosterUrl } from '../utils/posterUrl';
 import { addToMyList, removeFromMyList } from '../services/userWatchService';
 import { getAppPreferences } from '../services/userPreferencesService';
 import {
@@ -431,9 +431,7 @@ export default function MovieDetailsModal({
     ? 1
     : 0;
 
-  const rawBanner = movie.backdropUrl || movie.posterUrl || '';
-  const hdBanner = upgradePosterUrl(rawBanner, 1280) || rawBanner;
-  const fallbackPoster = upgradePosterUrl(movie.posterUrl, 800) || movie.posterUrl || '';
+  const hasBannerSource = Boolean(movie.backdropUrl || movie.posterUrl);
 
   const selectedSeasonLabel = `Season ${String(
     currentSeason?.seasonNumber || safeSeasonIndex + 1
@@ -467,22 +465,17 @@ export default function MovieDetailsModal({
           {/* Top Rounded Hero Artwork Card with Top-Right X Close Button */}
           <div className="px-3 sm:px-5 pt-[max(0.75rem,env(safe-area-inset-top))]">
             <div className="relative w-full aspect-[16/10] sm:aspect-[16/9] max-h-[380px] rounded-2xl sm:rounded-3xl overflow-hidden bg-neutral-950 shadow-2xl border border-white/[0.06]">
-              {hdBanner ? (
-                <img
-                  src={hdBanner}
+              {hasBannerSource ? (
+                <PosterImage
+                  posterUrl={movie.backdropUrl || movie.posterUrl}
+                  backdropUrl={movie.posterUrl}
+                  title={movie.title}
+                  year={movie.releaseYear}
+                  width={1280}
                   alt={movie.title}
-                  draggable={false}
+                  loading="eager"
+                  isSeries={hasRealSeasons}
                   className="w-full h-full object-cover object-center"
-                  onError={(e) => {
-                    const img = e.currentTarget;
-                    if (fallbackPoster && img.src !== fallbackPoster && !img.dataset.triedFallback) {
-                      img.dataset.triedFallback = '1';
-                      img.src = fallbackPoster;
-                      return;
-                    }
-                    img.src =
-                      'https://images.unsplash.com/photo-1595760205842-8356d2cf98b1?q=80&w=1200';
-                  }}
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-neutral-700">
@@ -918,10 +911,13 @@ export default function MovieDetailsModal({
                       className="text-left group cursor-pointer focus:outline-none"
                     >
                       <div className="relative aspect-[2/3] bg-[#121212] rounded-xl overflow-hidden border border-white/[0.08]">
-                        <img
-                          src={upgradePosterUrl(item.posterUrl, 400) || item.posterUrl}
+                        <PosterImage
+                          posterUrl={item.posterUrl}
+                          backdropUrl={item.backdropUrl}
+                          title={item.title}
+                          year={item.releaseYear}
+                          width={400}
                           alt={item.title}
-                          loading="lazy"
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                         />
                       </div>

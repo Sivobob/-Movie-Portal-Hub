@@ -5,6 +5,11 @@ import http from 'http';
 import https from 'https';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase.ts';
+import {
+  isFirestoreQuotaErrorLike,
+  isServerFirestoreWriteAllowed,
+  markServerFirestoreQuotaExhausted,
+} from './firestoreQuotaFlag.ts';
 
 const downloadCastRouter = Router();
 
@@ -86,18 +91,23 @@ async function updateServerInstallStats(opts: {
   versionName?: string;
   isNew?: boolean;
 }): Promise<number> {
+  if (!isServerFirestoreWriteAllowed()) return 0;
   try {
     const statsUrl = `${FIRESTORE_ADMINS_BASE}/app_stats`;
     const res = await fetch(statsUrl, { cache: 'no-store' });
+    if (res.status === 429) {
+      markServerFirestoreQuotaExhausted('firestore-rest-429-get');
+      return 0;
+    }
     let currentCount = 0;
     if (res.ok) {
       const data: any = await res.json();
       currentCount = Math.max(0, Number(data?.fields?.installedAppUsers?.integerValue) || 0);
     }
 
-    if (opts.isNew) {
+    if (opts.isNew && isServerFirestoreWriteAllowed()) {
       currentCount += 1;
-      await fetch(
+      const patchRes = await fetch(
         `${statsUrl}?updateMask.fieldPaths=installedAppUsers&updateMask.fieldPaths=lastActiveAt&updateMask.fieldPaths=updatedAt`,
         {
           method: 'PATCH',
@@ -111,12 +121,19 @@ async function updateServerInstallStats(opts: {
           }),
         }
       );
+      if (!patchRes.ok) {
+        const bodyTxt = await patchRes.text().catch(() => '');
+        if (patchRes.status === 429 || isFirestoreQuotaErrorLike(bodyTxt)) {
+          markServerFirestoreQuotaExhausted(bodyTxt || `http-${patchRes.status}`);
+          return currentCount;
+        }
+      }
     }
 
-    if (opts.deviceId) {
+    if (opts.deviceId && isServerFirestoreWriteAllowed()) {
       const cleanDevId = opts.deviceId.startsWith('dev_') ? opts.deviceId : `dev_${opts.deviceId}`;
       const devUrl = `${FIRESTORE_ADMINS_BASE}/${cleanDevId}`;
-      await fetch(devUrl, {
+      const devRes = await fetch(devUrl, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -129,11 +146,19 @@ async function updateServerInstallStats(opts: {
           },
         }),
       });
+      if (!devRes.ok) {
+        const bodyTxt = await devRes.text().catch(() => '');
+        if (devRes.status === 429 || isFirestoreQuotaErrorLike(bodyTxt)) {
+          markServerFirestoreQuotaExhausted(bodyTxt || `http-${devRes.status}`);
+        }
+      }
     }
 
     return currentCount;
   } catch (e) {
-    console.warn('[Install Stats Server Notice]', e);
+    if (isFirestoreQuotaErrorLike(e)) {
+      markServerFirestoreQuotaExhausted(e);
+    }
     return 0;
   }
 }
@@ -144,29 +169,41 @@ downloadCastRouter.get('/download/apk', async (_req: Request, res: Response) => 
   const latest = await fetchLatestGitHubApk();
   console.log(`[Download Router] User downloading APK: ${latest.url}`);
 
-  // Track download hit asynchronously
-  (async () => {
-    try {
-      const statsUrl = `${FIRESTORE_ADMINS_BASE}/app_stats`;
-      const sRes = await fetch(statsUrl, { cache: 'no-store' });
-      let clicks = 0;
-      if (sRes.ok) {
-        const d: any = await sRes.json();
-        clicks = Number(d?.fields?.totalApkClicks?.integerValue) || 0;
-      }
-      clicks += 1;
-      await fetch(`${statsUrl}?updateMask.fieldPaths=totalApkClicks&updateMask.fieldPaths=lastDownloadAt`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fields: {
-            totalApkClicks: { integerValue: String(clicks) },
-            lastDownloadAt: { timestampValue: new Date().toISOString() },
-          },
-        }),
-      });
-    } catch {}
-  })().catch(() => {});
+  // Track download hit asynchronously (only if Firestore daily write quota allows)
+  if (isServerFirestoreWriteAllowed()) {
+    (async () => {
+      try {
+        const statsUrl = `${FIRESTORE_ADMINS_BASE}/app_stats`;
+        const sRes = await fetch(statsUrl, { cache: 'no-store' });
+        if (sRes.status === 429) {
+          markServerFirestoreQuotaExhausted('apk-click-429');
+          return;
+        }
+        let clicks = 0;
+        if (sRes.ok) {
+          const d: any = await sRes.json();
+          clicks = Number(d?.fields?.totalApkClicks?.integerValue) || 0;
+        }
+        clicks += 1;
+        const pRes = await fetch(`${statsUrl}?updateMask.fieldPaths=totalApkClicks&updateMask.fieldPaths=lastDownloadAt`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fields: {
+              totalApkClicks: { integerValue: String(clicks) },
+              lastDownloadAt: { timestampValue: new Date().toISOString() },
+            },
+          }),
+        });
+        if (!pRes.ok) {
+          const bodyTxt = await pRes.text().catch(() => '');
+          if (pRes.status === 429 || isFirestoreQuotaErrorLike(bodyTxt)) {
+            markServerFirestoreQuotaExhausted(bodyTxt || `http-${pRes.status}`);
+          }
+        }
+      } catch {}
+    })().catch(() => {});
+  }
 
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.redirect(302, latest.url);

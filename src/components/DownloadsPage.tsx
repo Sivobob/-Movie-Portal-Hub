@@ -20,7 +20,7 @@ import {
   saveWatchProgress,
 } from '../services/userWatchService';
 import { getAppPreferences, isMatureContent } from '../services/userPreferencesService';
-import { upgradePosterUrl } from '../utils/posterUrl';
+import PosterImage from './PosterImage';
 import { parseDurationToSeconds } from '../utils/duration';
 import { getOfflineVideoPlayableUrl } from '../services/offlineStorage';
 
@@ -667,10 +667,13 @@ export default function DownloadsPage() {
                     className="text-left group cursor-pointer focus:outline-none"
                   >
                     <div className="relative aspect-[2/3] rounded-lg overflow-hidden bg-[#1a1d24] border border-white/[0.06] shadow-md">
-                      <img
-                        src={upgradePosterUrl(item.posterUrl, 500) || item.posterUrl}
+                      <PosterImage
+                        posterUrl={item.posterUrl}
+                        backdropUrl={item.backdropUrl}
+                        title={item.title}
+                        year={item.releaseYear}
+                        width={500}
                         alt={item.title}
-                        loading="lazy"
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                       />
                       {langBadge && (

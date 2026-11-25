@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.277",
-  "minimumRequiredVersion": "3.5.277",
-  "latestVersionCode": 35277,
-  "minimumRequiredVersionCode": 35277,
+  "latestVersion": "3.5.280",
+  "minimumRequiredVersion": "3.5.280",
+  "latestVersionCode": 35280,
+  "minimumRequiredVersionCode": 35280,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Hub v3.5.277 is live! Instant playback on Watch Now, real 360p-1080p video quality switching, accurate episode durations, and stability upgrades.",
-  "releaseNotes": "v3.5.277: Fixed video quality switching (distinct 360p/480p/720p/1080p), accurate episode durations, instant Watch Now startup, and removed auto-tagging on newly synced series episodes."
+  "updateMessage": "Movie Hub v3.5.280: Saari 467+ movies aur series instant app sync ke saath live ho gayi hain! Ab channel pe naye uploads direct app me dikhenge bina restart kiye.",
+  "releaseNotes": "v3.5.280: Instant channel sync, all 467+ movies & web series bundled, real-time live updates, and direct catalog streaming."
 }

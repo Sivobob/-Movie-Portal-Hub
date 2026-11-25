@@ -130,6 +130,7 @@ export default function DownloadsView({
                         <img
                           src={upgradePosterUrl(task.posterUrl, 500) || task.posterUrl}
                           alt={task.title}
+                          referrerPolicy="no-referrer"
                           className="w-full h-full object-cover absolute inset-0"
                           onError={(e) => {
                             e.currentTarget.style.display = 'none';
@@ -281,6 +282,7 @@ export default function DownloadsView({
                     <img
                       src={upgradePosterUrl(item.posterUrl, 500) || item.posterUrl}
                       alt={item.title}
+                      referrerPolicy="no-referrer"
                       className="w-full h-full object-cover absolute inset-0 group-hover:scale-105 transition-transform duration-300"
                       onError={(e) => {
                         e.currentTarget.style.display = 'none';

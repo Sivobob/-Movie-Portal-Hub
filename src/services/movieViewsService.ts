@@ -1,6 +1,10 @@
 import { doc, increment, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { checkAndHandleQuotaError, isFirestoreWriteAllowed } from './firestoreQuotaService';
+import {
+  checkAndHandleQuotaError,
+  guardedFirestoreWrite,
+  isFirestoreWriteAllowed,
+} from './firestoreQuotaService';
 import { getLocalMovies, saveLocalMovies } from './movieStorage';
 
 const DEVICE_UUID_KEY = 'mp_device_uuid_v1';
@@ -118,27 +122,41 @@ export async function recordMovieViewStart(
     const viewerRef = doc(db, 'users', viewerKey, 'watched_movies', movieId);
     const movieRef = doc(db, 'movies', movieId);
 
-    const newlyCounted = await runTransaction(db, async (tx) => {
-      const viewerSnap = await tx.get(viewerRef);
-      if (viewerSnap.exists()) {
-        return false;
-      }
+    const txRes = await guardedFirestoreWrite(() =>
+      runTransaction(db, async (tx) => {
+        const viewerSnap = await tx.get(viewerRef);
+        if (viewerSnap.exists()) {
+          return false;
+        }
 
-      const movieSnap = await tx.get(movieRef);
-      if (!movieSnap.exists()) {
-        return false;
-      }
+        const movieSnap = await tx.get(movieRef);
+        if (!movieSnap.exists()) {
+          return false;
+        }
 
-      tx.set(viewerRef, {
-        viewerKey,
-        movieId,
-        startedAt: serverTimestamp(),
-      });
-      tx.update(movieRef, {
-        viewsCount: increment(1),
-      });
-      return true;
-    });
+        tx.set(viewerRef, {
+          viewerKey,
+          movieId,
+          startedAt: serverTimestamp(),
+        });
+        tx.update(movieRef, {
+          viewsCount: increment(1),
+        });
+        return true;
+      })
+    );
+    if (!txRes.ok) {
+      if (!txRes.quotaExhausted && txRes.error && isFirestoreWriteAllowed()) {
+        handleFirestoreError(
+          txRes.error,
+          OperationType.WRITE,
+          `users/${viewerKey}/watched_movies/${movieId}`,
+          false
+        );
+      }
+      return false;
+    }
+    const newlyCounted = Boolean(txRes.value);
 
     markViewRecordedLocally(cacheKey);
 

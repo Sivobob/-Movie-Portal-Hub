@@ -36,17 +36,9 @@ export interface GitHubApkStats {
 
 import {
   isFirestoreWriteAllowed,
-  markFirestoreQuotaExhausted,
   checkAndHandleQuotaError,
+  guardedFirestoreWrite,
 } from './firestoreQuotaService';
-
-let isStatsQuotaExceeded = false;
-
-function checkStatsQuotaError(err: any) {
-  if (checkAndHandleQuotaError(err)) {
-    isStatsQuotaExceeded = true;
-  }
-}
 
 export async function recordApkDownloadClick(
   source: 'web_promo' | 'in_app_update' | 'direct_link'
@@ -61,30 +53,28 @@ export async function recordApkDownloadClick(
     }
   } catch {}
 
-  if (isStatsQuotaExceeded || !isFirestoreWriteAllowed()) return;
+  if (!isFirestoreWriteAllowed()) return;
 
-  try {
-    const payload: Record<string, any> = {
-      totalApkClicks: increment(1),
-      lastDownloadAt: serverTimestamp(),
-      lastDownloadSource: source,
-    };
+  const payload: Record<string, any> = {
+    totalApkClicks: increment(1),
+    lastDownloadAt: serverTimestamp(),
+    lastDownloadSource: source,
+  };
 
-    if (isFirstDownloadOnDevice) {
-      payload.uniqueDownloadUsers = increment(1);
-    }
-    if (source === 'in_app_update') {
-      payload.inAppUpdateDownloads = increment(1);
-    }
+  if (isFirstDownloadOnDevice) {
+    payload.uniqueDownloadUsers = increment(1);
+  }
+  if (source === 'in_app_update') {
+    payload.inAppUpdateDownloads = increment(1);
+  }
 
-    await setDoc(doc(db, APP_STATS_COLLECTION, APP_STATS_DOC_ID), payload, {
+  const res = await guardedFirestoreWrite(() =>
+    setDoc(doc(db, APP_STATS_COLLECTION, APP_STATS_DOC_ID), payload, {
       merge: true,
-    });
-  } catch (err) {
-    checkStatsQuotaError(err);
-    if (!isStatsQuotaExceeded && isFirestoreWriteAllowed()) {
-      handleFirestoreError(err, OperationType.WRITE, `${APP_STATS_COLLECTION}/${APP_STATS_DOC_ID}`);
-    }
+    })
+  );
+  if (!res.ok && !res.quotaExhausted && res.error && isFirestoreWriteAllowed()) {
+    handleFirestoreError(res.error, OperationType.WRITE, `${APP_STATS_COLLECTION}/${APP_STATS_DOC_ID}`);
   }
 }
 
@@ -93,8 +83,8 @@ export async function recordInstalledApkDevice(versionName?: string): Promise<vo
 }
 
 /**
- * Registers or updates the current device in Firestore 'admins' collection on app startup,
- * ensuring accurate active device tracking for all installed phone users without permission blocks.
+ * Registers or updates the current device via the backend server endpoint
+ * (avoiding automatic browser Firestore writes on startup so free-tier quota is preserved).
  */
 export async function registerActiveDeviceInstall(versionName?: string): Promise<void> {
   try {
@@ -106,69 +96,27 @@ export async function registerActiveDeviceInstall(versionName?: string): Promise
       localStorage.setItem(DEVICE_UUID_KEY, deviceId);
     }
 
-    const deviceDocId = deviceId.startsWith('dev_') ? deviceId : `dev_${deviceId}`;
-    const platform = Capacitor.isNativePlatform() ? 'android' : (/android/i.test(navigator.userAgent) ? 'android_web' : 'web');
-    const userAgent = navigator.userAgent || '';
+    const platform = Capacitor.isNativePlatform()
+      ? 'android'
+      : (/android/i.test(navigator.userAgent) ? 'android_web' : 'web');
     const REGISTERED_FLAG = 'mp_device_registered_flag_v1';
-    const LAST_SYNC_KEY = 'mp_device_last_firestore_sync_ts';
     const alreadyCounted = localStorage.getItem(REGISTERED_FLAG);
-    const lastSyncTime = Number(localStorage.getItem(LAST_SYNC_KEY) || 0);
-    const needsFirestoreSync = !alreadyCounted || (Date.now() - lastSyncTime > 24 * 3600 * 1000);
-
-    if (!isStatsQuotaExceeded && isFirestoreWriteAllowed() && needsFirestoreSync) {
-      try {
-        // 1. Write active device document into admins collection
-        await setDoc(
-          doc(db, APP_INSTALLS_COLLECTION, deviceDocId),
-          {
-            deviceId,
-            platform,
-            versionName: versionName || '3.5.235',
-            lastActiveAt: serverTimestamp(),
-            userAgent,
-            updatedAt: Date.now(),
-          },
-          { merge: true }
-        );
-
-        // 2. Increment global active install counter if new device
-        const statsPayload: Record<string, any> = {
-          lastInstalledVersion: versionName || '3.5.235',
-          lastActiveAt: serverTimestamp(),
-          updatedAt: Date.now(),
-        };
-
-        if (!alreadyCounted) {
-          statsPayload.installedAppUsers = increment(1);
-          localStorage.setItem(REGISTERED_FLAG, 'true');
-        }
-        localStorage.setItem(LAST_SYNC_KEY, String(Date.now()));
-
-        await setDoc(
-          doc(db, APP_STATS_COLLECTION, APP_STATS_DOC_ID),
-          statsPayload,
-          { merge: true }
-        );
-      } catch (writeErr) {
-        checkStatsQuotaError(writeErr);
-      }
+    if (!alreadyCounted) {
+      localStorage.setItem(REGISTERED_FLAG, 'true');
     }
 
-    // 3. Dual-layer fallback: Ping backend server endpoint for server-level reliability (does not use Firestore quota)
-    try {
-      fetch(buildApiUrl('/api/app/ping-install'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          deviceId,
-          platform,
-          versionName: versionName || '3.5.235',
-          isNew: !alreadyCounted,
-        }),
-      }).catch(() => {});
-    } catch {}
+    fetch(buildApiUrl('/api/app/ping-install'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deviceId,
+        platform,
+        versionName: versionName || '3.5.235',
+        isNew: !alreadyCounted,
+      }),
+    }).catch(() => {});
   } catch (err) {
-    checkStatsQuotaError(err);
+    checkAndHandleQuotaError(err);
   }
 }
 

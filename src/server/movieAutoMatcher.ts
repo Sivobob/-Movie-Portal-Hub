@@ -100,6 +100,7 @@ const TRAILING_LANG_SEASON_RE =
 
 function stripDecorativeSymbols(input: string): string {
   return String(input || '')
+    .normalize('NFKD')
     .replace(/[\u{1F000}-\u{1FAFF}\u{2190}-\u{2BFF}\u{FE00}-\u{FE0F}\u{200D}\u{20E3}★☆⭐🎬📺🔥✨👉👇━═─│┃•●◆◇■□▪▫»«›‹➤➜➞➣]+/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -116,13 +117,14 @@ function cleanSingleTitleLine(rawLine: string): {
 } {
   let text = stripFileExtension(String(rawLine || '').trim());
 
-  // Strip emojis, stars, arrows, bullets, and decorative Unicode symbols
+  // Strip emojis, stars, arrows, bullets, and decorative Unicode symbols (including NFKD bold/italic fonts)
   text = stripDecorativeSymbols(text);
 
-  // Remove URLs, @mentions, and #hashtags
+  // Remove URLs, #hashtags, and @channel mentions WITHOUT swallowing underscore-separated movie titles (e.g. @Channel_Movie_Name)
   text = text.replace(/https?:\/\/\S+/gi, ' ');
   text = text.replace(/t\.me\/\S+/gi, ' ');
-  text = text.replace(/@[a-zA-Z0-9_]{3,}/g, ' ');
+  text = text.replace(/(?:^|\s)@[a-zA-Z0-9]{2,}(?=[_\s\-.:|]|$)/g, ' ');
+  text = text.replace(/@[a-zA-Z0-9_]{3,}(?=\s|$)/g, ' ');
   text = text.replace(/(?:^|\s)#[^\s]+/g, ' ');
 
   // Remove size tokens like 1.4GB, 850 MB
@@ -131,6 +133,11 @@ function cleanSingleTitleLine(rawLine: string): {
   // Replace dots/underscores/pipes used as separators with spaces
   text = text.replace(/[._|]+/g, ' ');
   text = text.replace(/\s+/g, ' ').trim();
+
+  // Strip leading channel/ripper prefixes like "TG :", "DVDWOALL -", "M4UHD -"
+  text = text
+    .replace(/^(?:tg|dvdwoall|m4uhd|kmmovies|moviesmod|vegamovies|hdhub4u|rd)\s*[:\-–—]+\s*/i, '')
+    .trim();
 
   // Check and remove leading label prefixes like "Movie Name:", "Series Name:", "Title:", "Name:"
   let hasExplicitLabel = false;
@@ -342,10 +349,14 @@ function normalizeTitleKey(title: string): string {
     .trim();
 }
 
+const ONLY_LANG_QUALITY_TOKENS_RE =
+  /^(?:hindi|english|tamil|telugu|malayalam|kannada|punjabi|bengali|marathi|gujarati|bhojpuri|odia|japanese|korean|chinese|spanish|french|dual|multi|audio|dubbed|subbed|org|original|esub|esubs|msub|480p|720p|1080p|2160p|4k|uhd|fhd|hd|webrip|webdl|hdrip|bluray|hevc|x264|x265|10bit|and|\s|,|\.|\/|-)+$/i;
+
 function looksGenericTelegramName(name: string): boolean {
   const clean = normalizeTitleKey(name);
   if (!clean || clean.length < 2) return true;
-  return /^(?:vid|video|img|document|doc|file|movie|telegram|episode|msg|mp4|mkv|year|title|name)\s*\d*$/i.test(clean);
+  if (ONLY_LANG_QUALITY_TOKENS_RE.test(clean)) return true;
+  return /^(?:vid|video|img|document|doc|file|movie|telegram|tg|episode|msg|mp4|mkv|year|title|name|unknown)\s*\d*$/i.test(clean);
 }
 
 export function parseTelegramMovieMeta(
@@ -407,6 +418,7 @@ export function parseTelegramMovieMeta(
     if (/^(?:#[^\s]+\s*)+$/.test(plain)) return false;
     if (PROMO_LINE_RE.test(plain) || /^(?:join|http|@|visit|follow|share|download|click)/i.test(plain)) return false;
     if (NON_TITLE_META_LINE_RE.test(plain)) return false;
+    if (ONLY_LANG_QUALITY_TOKENS_RE.test(plain)) return false;
     // Pure standalone year line (handled via adjacentYearLine)
     if (/^[\[(]?\s*(?:19|20)\d{2}\s*[\])]?$/.test(plain)) return false;
     // Ignore long descriptive/plot sentences unless explicitly prefixed with Movie/Series Name

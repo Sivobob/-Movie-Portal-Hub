@@ -25,17 +25,9 @@ export interface MyListItem {
 
 import {
   isFirestoreWriteAllowed,
-  markFirestoreQuotaExhausted,
   checkAndHandleQuotaError,
+  guardedFirestoreWrite,
 } from './firestoreQuotaService';
-
-let isFirestoreQuotaExceeded = !isFirestoreWriteAllowed();
-
-function checkQuotaError(e: any) {
-  if (checkAndHandleQuotaError(e)) {
-    isFirestoreQuotaExceeded = true;
-  }
-}
 
 export async function saveWatchProgress(userId: string, movie: any, currentTime: number, duration: number) {
   if (!userId || !movie) return;
@@ -55,13 +47,9 @@ export async function saveWatchProgress(userId: string, movie: any, currentTime:
     movieData: movie,
   };
 
-  if (!isFirestoreQuotaExceeded) {
-    try {
-      const ref = doc(db, 'users', userId, 'watch_history', movieId);
-      await setDoc(ref, payload, { merge: true });
-    } catch (e) {
-      checkQuotaError(e);
-    }
+  if (isFirestoreWriteAllowed()) {
+    const ref = doc(db, 'users', userId, 'watch_history', movieId);
+    await guardedFirestoreWrite(() => setDoc(ref, payload, { merge: true }));
   }
 
   // Also save locally as fallback
@@ -76,7 +64,7 @@ export async function saveWatchProgress(userId: string, movie: any, currentTime:
 
 export async function fetchWatchHistory(userId: string): Promise<WatchHistoryItem[]> {
   if (!userId) return [];
-  if (!isFirestoreQuotaExceeded) {
+  if (isFirestoreWriteAllowed()) {
     try {
       const ref = collection(db, 'users', userId, 'watch_history');
       const q = query(ref, orderBy('updatedAt', 'desc'));
@@ -85,7 +73,7 @@ export async function fetchWatchHistory(userId: string): Promise<WatchHistoryIte
         return snap.docs.map((d) => d.data() as WatchHistoryItem);
       }
     } catch (e) {
-      checkQuotaError(e);
+      checkAndHandleQuotaError(e);
     }
   }
 
@@ -100,13 +88,9 @@ export async function fetchWatchHistory(userId: string): Promise<WatchHistoryIte
 
 export async function removeWatchHistoryItem(userId: string, movieId: string) {
   if (!userId || !movieId) return;
-  if (!isFirestoreQuotaExceeded) {
-    try {
-      const ref = doc(db, 'users', userId, 'watch_history', movieId);
-      await deleteDoc(ref);
-    } catch (e: any) {
-      checkQuotaError(e);
-    }
+  if (isFirestoreWriteAllowed()) {
+    const ref = doc(db, 'users', userId, 'watch_history', movieId);
+    await guardedFirestoreWrite(() => deleteDoc(ref));
   }
 
   try {
@@ -129,13 +113,9 @@ export async function addToMyList(userId: string, movie: any) {
     movieData: movie,
   };
 
-  if (!isFirestoreQuotaExceeded) {
-    try {
-      const ref = doc(db, 'users', userId, 'my_list', movieId);
-      await setDoc(ref, payload, { merge: true });
-    } catch (e: any) {
-      checkQuotaError(e);
-    }
+  if (isFirestoreWriteAllowed()) {
+    const ref = doc(db, 'users', userId, 'my_list', movieId);
+    await guardedFirestoreWrite(() => setDoc(ref, payload, { merge: true }));
   }
 
   try {
@@ -150,13 +130,9 @@ export async function addToMyList(userId: string, movie: any) {
 
 export async function removeFromMyList(userId: string, movieId: string) {
   if (!userId || !movieId) return;
-  if (!isFirestoreQuotaExceeded) {
-    try {
-      const ref = doc(db, 'users', userId, 'my_list', movieId);
-      await deleteDoc(ref);
-    } catch (e: any) {
-      checkQuotaError(e);
-    }
+  if (isFirestoreWriteAllowed()) {
+    const ref = doc(db, 'users', userId, 'my_list', movieId);
+    await guardedFirestoreWrite(() => deleteDoc(ref));
   }
 
   try {
@@ -169,7 +145,7 @@ export async function removeFromMyList(userId: string, movieId: string) {
 
 export async function fetchMyList(userId: string): Promise<MyListItem[]> {
   if (!userId) return [];
-  if (!isFirestoreQuotaExceeded) {
+  if (isFirestoreWriteAllowed()) {
     try {
       const ref = collection(db, 'users', userId, 'my_list');
       const snap = await getDocs(ref);
@@ -177,7 +153,7 @@ export async function fetchMyList(userId: string): Promise<MyListItem[]> {
         return snap.docs.map((d) => d.data() as MyListItem);
       }
     } catch (e) {
-      checkQuotaError(e);
+      checkAndHandleQuotaError(e);
     }
   }
 
@@ -197,13 +173,9 @@ export async function saveUserRating(userId: string, movieId: string, rating: nu
     updatedAt: serverTimestamp(),
   };
 
-  if (!isFirestoreQuotaExceeded) {
-    try {
-      const ref = doc(db, 'users', userId, 'ratings', movieId);
-      await setDoc(ref, payload, { merge: true });
-    } catch (e) {
-      checkQuotaError(e);
-    }
+  if (isFirestoreWriteAllowed()) {
+    const ref = doc(db, 'users', userId, 'ratings', movieId);
+    await guardedFirestoreWrite(() => setDoc(ref, payload, { merge: true }));
   }
 
   try {
@@ -213,7 +185,7 @@ export async function saveUserRating(userId: string, movieId: string, rating: nu
 
 export async function getUserRating(userId: string, movieId: string): Promise<number | null> {
   if (!userId || !movieId) return null;
-  if (!isFirestoreQuotaExceeded) {
+  if (isFirestoreWriteAllowed()) {
     try {
       const ref = doc(db, 'users', userId, 'ratings', movieId);
       const snap = await getDoc(ref);
@@ -221,7 +193,7 @@ export async function getUserRating(userId: string, movieId: string): Promise<nu
         return (snap.data() as any).rating ?? null;
       }
     } catch (e) {
-      checkQuotaError(e);
+      checkAndHandleQuotaError(e);
     }
   }
 
@@ -249,12 +221,8 @@ export async function submitContentReport(
     status: 'pending',
   };
 
-  if (!isFirestoreQuotaExceeded) {
-    try {
-      await addDoc(collection(db, 'reports'), payload);
-    } catch (e) {
-      checkQuotaError(e);
-    }
+  if (isFirestoreWriteAllowed()) {
+    await guardedFirestoreWrite(() => addDoc(collection(db, 'reports'), payload));
   }
 
   try {
@@ -285,13 +253,9 @@ export async function addToMyLikes(userId: string, movie: any) {
     movieData: movie,
   };
 
-  if (!isFirestoreQuotaExceeded) {
-    try {
-      const ref = doc(db, 'users', userId, 'likes', movieId);
-      await setDoc(ref, payload, { merge: true });
-    } catch (e) {
-      checkQuotaError(e);
-    }
+  if (isFirestoreWriteAllowed()) {
+    const ref = doc(db, 'users', userId, 'likes', movieId);
+    await guardedFirestoreWrite(() => setDoc(ref, payload, { merge: true }));
   }
 
   try {
@@ -306,13 +270,9 @@ export async function addToMyLikes(userId: string, movie: any) {
 
 export async function removeFromMyLikes(userId: string, movieId: string) {
   if (!userId || !movieId) return;
-  if (!isFirestoreQuotaExceeded) {
-    try {
-      const ref = doc(db, 'users', userId, 'likes', movieId);
-      await deleteDoc(ref);
-    } catch (e) {
-      checkQuotaError(e);
-    }
+  if (isFirestoreWriteAllowed()) {
+    const ref = doc(db, 'users', userId, 'likes', movieId);
+    await guardedFirestoreWrite(() => deleteDoc(ref));
   }
 
   try {
@@ -325,7 +285,7 @@ export async function removeFromMyLikes(userId: string, movieId: string) {
 
 export async function fetchMyLikes(userId: string): Promise<MyLikeItem[]> {
   if (!userId) return [];
-  if (!isFirestoreQuotaExceeded) {
+  if (isFirestoreWriteAllowed()) {
     try {
       const ref = collection(db, 'users', userId, 'likes');
       const snap = await getDocs(ref);
@@ -333,7 +293,7 @@ export async function fetchMyLikes(userId: string): Promise<MyLikeItem[]> {
         return snap.docs.map((d) => d.data() as MyLikeItem);
       }
     } catch (e) {
-      checkQuotaError(e);
+      checkAndHandleQuotaError(e);
     }
   }
 
@@ -347,14 +307,12 @@ export async function fetchMyLikes(userId: string): Promise<MyLikeItem[]> {
 
 export async function clearWatchHistory(userId: string) {
   if (!userId) return;
-  if (!isFirestoreQuotaExceeded) {
-    try {
+  if (isFirestoreWriteAllowed()) {
+    await guardedFirestoreWrite(async () => {
       const ref = collection(db, 'users', userId, 'watch_history');
       const snap = await getDocs(ref);
       await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
-    } catch (e) {
-      checkQuotaError(e);
-    }
+    });
   }
 
   try {

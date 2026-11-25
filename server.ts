@@ -18,6 +18,10 @@ import videoRouter from './src/server/videoRouter.ts';
 import downloadCastRouter from './src/server/downloadCastRouter.ts';
 import pushRouter from './src/server/pushRouter.ts';
 import { getTelegramCredentials, isTelegramConnected } from './src/utils/telegramClient.ts';
+import {
+  getServerFirestoreQuotaStatus,
+  markServerFirestoreQuotaExhausted,
+} from './src/server/firestoreQuotaFlag.ts';
 
 function checkBinaryAvailable(bin: string): boolean {
   try {
@@ -93,7 +97,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     time: new Date().toISOString(),
-    version: '3.5.277',
+    version: '3.5.280',
     ffmpegAvailable: FFMPEG_AVAILABLE,
     ffprobeAvailable: FFPROBE_AVAILABLE,
     telegramConfigured,
@@ -225,6 +229,19 @@ app.head('/api/stream', handleStream);
 app.use('/api/video', videoRouter);
 app.use('/api/push', pushRouter);
 app.use('/api', downloadCastRouter);
+
+app.get('/api/firestore/quota-status', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  return res.json(getServerFirestoreQuotaStatus());
+});
+
+app.post('/api/firestore/quota-exhausted', (req, res) => {
+  const exhaustedUntilMs = markServerFirestoreQuotaExhausted(
+    req.body?.reason || 'client-reported-resource-exhausted'
+  );
+  res.setHeader('Cache-Control', 'no-store');
+  return res.json({ writeAllowed: false, exhaustedUntilMs });
+});
 app.get('/api/movies/catalog', (_req, res) => {
   try {
     const candidates = [
@@ -236,12 +253,52 @@ app.get('/api/movies/catalog', (_req, res) => {
       if (fs.existsSync(p)) {
         const raw = fs.readFileSync(p, 'utf8');
         res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Cache-Control', 'no-cache');
         return res.send(raw);
       }
     }
     return res.json([]);
   } catch (err: any) {
     return res.status(500).json({ error: err?.message || 'Failed to read movies catalog' });
+  }
+});
+
+let cachedCatalogMeta: { filePath: string; mtimeMs: number; size: number; count: number } | null = null;
+
+app.get('/api/movies/catalog-meta', (_req, res) => {
+  try {
+    const candidates = [
+      path.resolve(process.cwd(), 'public/movies-seed.json'),
+      path.resolve(process.cwd(), 'dist/movies-seed.json'),
+      path.resolve(__dirname, 'public/movies-seed.json'),
+    ];
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        const stat = fs.statSync(p);
+        if (
+          !cachedCatalogMeta ||
+          cachedCatalogMeta.filePath !== p ||
+          cachedCatalogMeta.mtimeMs !== stat.mtimeMs ||
+          cachedCatalogMeta.size !== stat.size
+        ) {
+          let count = 0;
+          try {
+            const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
+            count = Array.isArray(parsed) ? parsed.length : 0;
+          } catch {}
+          cachedCatalogMeta = { filePath: p, mtimeMs: stat.mtimeMs, size: stat.size, count };
+        }
+        res.setHeader('Cache-Control', 'no-store');
+        return res.json({
+          count: cachedCatalogMeta.count,
+          size: cachedCatalogMeta.size,
+          mtimeMs: Math.round(cachedCatalogMeta.mtimeMs),
+        });
+      }
+    }
+    return res.json({ count: 0, size: 0, mtimeMs: 0 });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || 'Failed to read catalog meta' });
   }
 });
 

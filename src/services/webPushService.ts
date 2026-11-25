@@ -8,7 +8,7 @@ import {
   where,
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { isFirestoreWriteAllowed } from './firestoreQuotaService';
+import { guardedFirestoreWrite, isFirestoreWriteAllowed } from './firestoreQuotaService';
 import { buildApiUrl } from '../utils/apiConfig';
 import { isNativeAndroid } from '../utils/platform';
 
@@ -199,9 +199,9 @@ export async function ensureWebPushSubscribed(
     } catch {}
 
     if (prevSig !== sig && isFirestoreWriteAllowed()) {
-      try {
-        const subId = hashEndpointId(endpoint);
-        await setDoc(
+      const subId = hashEndpointId(endpoint);
+      const res = await guardedFirestoreWrite(() =>
+        setDoc(
           doc(db, 'app_installs', subId),
           {
             type: 'web_push',
@@ -211,11 +211,13 @@ export async function ensureWebPushSubscribed(
             updatedAtMs: payload.updatedAtMs,
           },
           { merge: true }
-        );
+        )
+      );
+      if (res.ok) {
         try {
           localStorage.setItem(PUSH_SYNC_SIG_KEY, sig);
         } catch {}
-      } catch {}
+      }
     }
 
     return { supported: true, permission, subscribed: true };
@@ -242,7 +244,9 @@ export async function unsubscribeWebPush(): Promise<void> {
         body: JSON.stringify({ endpoint }),
       }).catch(() => {});
       if (isFirestoreWriteAllowed() && endpoint) {
-        await deleteDoc(doc(db, 'app_installs', hashEndpointId(endpoint))).catch(() => {});
+        await guardedFirestoreWrite(() =>
+          deleteDoc(doc(db, 'app_installs', hashEndpointId(endpoint)))
+        );
       }
     }
     try {
@@ -308,8 +312,9 @@ export async function broadcastWebPushNotification(payload: {
     const expired: string[] = Array.isArray(result?.expiredEndpoints) ? result.expiredEndpoints : [];
     if (expired.length > 0 && isFirestoreWriteAllowed()) {
       for (const ep of expired) {
+        if (!isFirestoreWriteAllowed()) break;
         const docId = docIdByEndpoint.get(ep) || hashEndpointId(ep);
-        deleteDoc(doc(db, 'app_installs', docId)).catch(() => {});
+        await guardedFirestoreWrite(() => deleteDoc(doc(db, 'app_installs', docId)));
       }
     }
     return {

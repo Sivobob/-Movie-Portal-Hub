@@ -1,7 +1,7 @@
-export const CLOUD_RUN_BACKEND_URL = 'https://movie-portalhub-1012526016635.asia-southeast1.run.app';
-export const LIVE_BACKEND_URL = 'https://ais-dev-yaniwuwl6wc7ivl5tz2bbo-755452514312.asia-northeast1.run.app';
-export const PRE_BACKEND_URL = 'https://ais-pre-yaniwuwl6wc7ivl5tz2bbo-755452514312.asia-northeast1.run.app';
-export const APP_VERSION = 'v3.5.277';
+export const CLOUD_RUN_BACKEND_URL = 'https://ais-pre-wc76ipqs2a7bm74r24a2mr-832989141722.asia-southeast1.run.app';
+export const LIVE_BACKEND_URL = 'https://ais-dev-wc76ipqs2a7bm74r24a2mr-832989141722.asia-southeast1.run.app';
+export const PRE_BACKEND_URL = 'https://ais-pre-wc76ipqs2a7bm74r24a2mr-832989141722.asia-southeast1.run.app';
+export const APP_VERSION = 'v3.5.280';
 
 const ENV_BACKEND_URL = (
   (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_BASE_URL) ||
@@ -130,8 +130,16 @@ export function getApiBaseUrl(): string {
     return resolvedRemoteTranscodeUrl || resolvedNativeBackendUrl || '';
   }
 
-  // 4. For Native APK loaded from bundled localhost: prefer healthy public backend, else built-in Android local bridge
-  return resolvedRemoteTranscodeUrl || ENV_BACKEND_URL || resolvedNativeBackendUrl || getNativeLocalBridgeUrl() || '';
+  // 4. For Native APK loaded from bundled localhost: prefer healthy public backend, else live Cloud Run URL
+  return (
+    resolvedRemoteTranscodeUrl ||
+    ENV_BACKEND_URL ||
+    resolvedNativeBackendUrl ||
+    PRE_BACKEND_URL ||
+    LIVE_BACKEND_URL ||
+    getNativeLocalBridgeUrl() ||
+    ''
+  );
 }
 
 interface HealthCheckResult {

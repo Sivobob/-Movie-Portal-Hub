@@ -27,6 +27,10 @@ import {
   X,
 } from 'lucide-react';
 import { db } from '../firebase';
+import {
+  guardedFirestoreWrite,
+  isFirestoreWriteAllowed,
+} from '../services/firestoreQuotaService';
 import { MovieData, saveMovieLocally, touchCatalogSyncMarker } from '../services/movieStorage';
 import { getDisplayCategory } from '../utils/categoryMapping';
 import { formatHumanDuration, parseDurationToSeconds } from '../utils/duration';
@@ -141,8 +145,8 @@ interface TelegramAutoMovieSyncProps {
 
 const LOCAL_SYNC_CONFIG_KEY = 'movie_hub_tg_auto_movie_sync_v1';
 const CONFIG_DOC_PATH = ['app_config', 'telegram_auto_sync'] as const;
-const DEFAULT_CHANNEL_URL = 'https://t.me/+s2Qki5-sfnVjZTI1';
-const AUTO_SYNC_CONFIG_VERSION = 2;
+const DEFAULT_CHANNEL_URL = 'https://t.me/+P5UeGT1YlQ9lOGZl';
+const AUTO_SYNC_CONFIG_VERSION = 3;
 
 const CATEGORY_OPTIONS = [
   'Bollywood Movie',
@@ -356,7 +360,8 @@ export default function TelegramAutoMovieSync({
         const parsed = JSON.parse(saved);
         const savedVer = Number(parsed?.configVersion) || 1;
         const savedUrl = String(parsed?.channelUrl || '').trim();
-        const isOldDefault = savedUrl.includes('QSL_3k54YfBjMjE1');
+        const isOldDefault =
+          savedUrl.includes('QSL_3k54YfBjMjE1') || savedUrl.includes('s2Qki5-sfnVjZTI1');
         if (savedVer >= AUTO_SYNC_CONFIG_VERSION && savedUrl && !isOldDefault) {
           return {
             configVersion: savedVer,
@@ -365,7 +370,7 @@ export default function TelegramAutoMovieSync({
             autoWatchEnabled: Boolean(parsed?.autoWatchEnabled ?? true),
             autoPublishVerified: Boolean(parsed?.autoPublishVerified ?? true),
             notifyOnNewPublish: Boolean(parsed?.notifyOnNewPublish ?? true),
-            onlyValidAudioAndHd: Boolean(parsed?.onlyValidAudioAndHd ?? true),
+            onlyValidAudioAndHd: Boolean(parsed?.onlyValidAudioAndHd ?? false),
           };
         }
       }
@@ -377,7 +382,7 @@ export default function TelegramAutoMovieSync({
       autoWatchEnabled: true,
       autoPublishVerified: true,
       notifyOnNewPublish: true,
-      onlyValidAudioAndHd: true,
+      onlyValidAudioAndHd: false,
     };
   });
   const [resolvedChannelTitle, setResolvedChannelTitle] = useState<string>('');
@@ -426,17 +431,19 @@ export default function TelegramAutoMovieSync({
     try {
       localStorage.setItem(LOCAL_SYNC_CONFIG_KEY, JSON.stringify(withVersion));
     } catch {}
-    try {
-      await setDoc(
-        doc(db, CONFIG_DOC_PATH[0], CONFIG_DOC_PATH[1]),
-        {
-          ...withVersion,
-          updatedAtMs: Date.now(),
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
+    if (isFirestoreWriteAllowed()) {
+      await guardedFirestoreWrite(() =>
+        setDoc(
+          doc(db, CONFIG_DOC_PATH[0], CONFIG_DOC_PATH[1]),
+          {
+            ...withVersion,
+            updatedAtMs: Date.now(),
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        )
       );
-    } catch {}
+    }
   };
 
   // Load saved Firestore config on mount (and auto-migrate old default channel)
@@ -449,7 +456,8 @@ export default function TelegramAutoMovieSync({
           const data = snap.exists() ? (snap.data() as any) : {};
           const rawUrl = String(data?.channelUrl || '').trim();
           const rawVer = Number(data?.configVersion) || 1;
-          const isOldDefault = rawUrl.includes('QSL_3k54YfBjMjE1');
+          const isOldDefault =
+            rawUrl.includes('QSL_3k54YfBjMjE1') || rawUrl.includes('s2Qki5-sfnVjZTI1');
 
           if (!snap.exists() || rawVer < AUTO_SYNC_CONFIG_VERSION || isOldDefault || !rawUrl) {
             const migrated: SyncConfigState = {
@@ -459,7 +467,7 @@ export default function TelegramAutoMovieSync({
               autoWatchEnabled: true,
               autoPublishVerified: true,
               notifyOnNewPublish: true,
-              onlyValidAudioAndHd: true,
+              onlyValidAudioAndHd: false,
             };
             await saveSyncConfig(migrated);
           } else {
@@ -656,15 +664,22 @@ export default function TelegramAutoMovieSync({
           return { published: false, skippedDuplicate: true };
         }
         const nextStream = existingMatch.streamingUrl || epObj.streamUrl;
-        await setDoc(
-          doc(db, 'movies', existingMatch.id),
-          {
-            seasons: mergedSeasons,
-            streamingUrl: nextStream,
-            updatedAt: serverTimestamp(),
-          },
-          { merge: true }
-        );
+        if (isFirestoreWriteAllowed()) {
+          const wRes = await guardedFirestoreWrite(() =>
+            setDoc(
+              doc(db, 'movies', existingMatch.id),
+              {
+                seasons: mergedSeasons,
+                streamingUrl: nextStream,
+                updatedAt: serverTimestamp(),
+              },
+              { merge: true }
+            )
+          );
+          if (!wRes.ok && !wRes.quotaExhausted && wRes.error) {
+            throw wRes.error;
+          }
+        }
         const updatedMovie: MovieData = {
           ...existingMatch,
           seasons: mergedSeasons,
@@ -741,12 +756,23 @@ export default function TelegramAutoMovieSync({
 
       const seriesDocId =
         draft.channelId && draft.msgId ? `tg_series_${draft.channelId}_${draft.msgId}` : '';
-      let publishedDocId = seriesDocId;
-      if (seriesDocId) {
-        await setDoc(doc(db, 'movies', seriesDocId), seriesPayload, { merge: true });
-      } else {
-        const docRef = await addDoc(collection(db, 'movies'), seriesPayload);
-        publishedDocId = docRef.id;
+      let publishedDocId = seriesDocId || `local_series_${nowMs}`;
+      if (isFirestoreWriteAllowed()) {
+        if (seriesDocId) {
+          const wRes = await guardedFirestoreWrite(() =>
+            setDoc(doc(db, 'movies', seriesDocId), seriesPayload, { merge: true })
+          );
+          if (!wRes.ok && !wRes.quotaExhausted && wRes.error) throw wRes.error;
+        } else {
+          const wRes = await guardedFirestoreWrite(() =>
+            addDoc(collection(db, 'movies'), seriesPayload)
+          );
+          if (wRes.ok && wRes.value?.id) {
+            publishedDocId = wRes.value.id;
+          } else if (!wRes.ok && !wRes.quotaExhausted && wRes.error) {
+            throw wRes.error;
+          }
+        }
       }
 
       const localSeries: MovieData = {
@@ -805,15 +831,22 @@ export default function TelegramAutoMovieSync({
         mergedQualities['4K'] ||
         existingMatch.streamingUrl ||
         draft.streamUrl.trim();
-      await setDoc(
-        doc(db, 'movies', existingMatch.id),
-        {
-          videoQualities: mergedQualities,
-          streamingUrl: upgradedStream,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
+      if (isFirestoreWriteAllowed()) {
+        const wRes = await guardedFirestoreWrite(() =>
+          setDoc(
+            doc(db, 'movies', existingMatch.id),
+            {
+              videoQualities: mergedQualities,
+              streamingUrl: upgradedStream,
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true }
+          )
+        );
+        if (!wRes.ok && !wRes.quotaExhausted && wRes.error) {
+          throw wRes.error;
+        }
+      }
       const updatedMovie = {
         ...existingMatch,
         videoQualities: mergedQualities,
@@ -872,12 +905,23 @@ export default function TelegramAutoMovieSync({
 
     const deterministicDocId =
       draft.channelId && draft.msgId ? `tg_${draft.channelId}_${draft.msgId}` : '';
-    let publishedDocId = deterministicDocId;
-    if (deterministicDocId) {
-      await setDoc(doc(db, 'movies', deterministicDocId), moviePayload, { merge: true });
-    } else {
-      const docRef = await addDoc(collection(db, 'movies'), moviePayload);
-      publishedDocId = docRef.id;
+    let publishedDocId = deterministicDocId || `local_${nowMs}`;
+    if (isFirestoreWriteAllowed()) {
+      if (deterministicDocId) {
+        const wRes = await guardedFirestoreWrite(() =>
+          setDoc(doc(db, 'movies', deterministicDocId), moviePayload, { merge: true })
+        );
+        if (!wRes.ok && !wRes.quotaExhausted && wRes.error) throw wRes.error;
+      } else {
+        const wRes = await guardedFirestoreWrite(() =>
+          addDoc(collection(db, 'movies'), moviePayload)
+        );
+        if (wRes.ok && wRes.value?.id) {
+          publishedDocId = wRes.value.id;
+        } else if (!wRes.ok && !wRes.quotaExhausted && wRes.error) {
+          throw wRes.error;
+        }
+      }
     }
     const localMovie: MovieData = {
       ...moviePayload,
@@ -1625,7 +1669,7 @@ export default function TelegramAutoMovieSync({
                         type="text"
                         value={rangeEndUrl}
                         onChange={(e) => setRangeEndUrl(e.target.value)}
-                        placeholder={config.channelUrl || 'https://t.me/+s2Qki5-sfnVjZTI1'}
+                        placeholder={config.channelUrl || 'https://t.me/+P5UeGT1YlQ9lOGZl'}
                         className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-yellow-400"
                       />
                     </div>
@@ -1958,6 +2002,7 @@ export default function TelegramAutoMovieSync({
                             <img
                               src={draft.posterUrl}
                               alt={draft.title}
+                              referrerPolicy="no-referrer"
                               className="w-full h-full object-cover"
                             />
                           ) : (
@@ -2111,6 +2156,7 @@ export default function TelegramAutoMovieSync({
                                   <img
                                     src={cand.posterUrl}
                                     alt={cand.title}
+                                    referrerPolicy="no-referrer"
                                     className="w-7 h-10 object-cover rounded flex-shrink-0"
                                   />
                                 ) : (

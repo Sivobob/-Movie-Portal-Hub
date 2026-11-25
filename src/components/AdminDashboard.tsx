@@ -13,6 +13,10 @@ import {
   query
 } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
+import {
+  guardedFirestoreWrite,
+  isFirestoreWriteAllowed,
+} from '../services/firestoreQuotaService';
 import { useAuth, isAuthorizedAdminEmail, AUTHORIZED_ADMIN_EMAILS } from '../context/AuthContext';
 import { getDisplayCategory } from '../utils/categoryMapping';
 import { broadcastWebPushNotification } from '../services/webPushService';
@@ -57,7 +61,7 @@ import TelegramAutoMovieSync from './TelegramAutoMovieSync';
 import { 
   getLocalMovies,
   saveLocalMovies,
-  fetchMoviesFromFirestore,
+  fetchMergedMoviesCatalog,
   saveMovieToFirestore,
   deleteMovieFromFirestore,
   saveMovieLocally,
@@ -201,13 +205,21 @@ export default function AdminDashboard() {
   const handleBoostInstalls = async (delta: number) => {
     try {
       const newCount = Math.max(0, firestoreAppStats.installedAppUsers + delta);
-      await setDoc(
-        doc(db, APP_STATS_COLLECTION, APP_STATS_DOC_ID),
-        { installedAppUsers: newCount, updatedAt: Date.now() },
-        { merge: true }
+      const res = await guardedFirestoreWrite(() =>
+        setDoc(
+          doc(db, APP_STATS_COLLECTION, APP_STATS_DOC_ID),
+          { installedAppUsers: newCount, updatedAt: Date.now() },
+          { merge: true }
+        )
       );
-      showNotification('success', `✅ Phone App Installs updated to ${newCount}!`);
-    } catch (e) {
+      if (res.ok) {
+        showNotification('success', `✅ Phone App Installs updated to ${newCount}!`);
+      } else if (res.quotaExhausted) {
+        showNotification('error', 'Firebase daily free write quota reached. Resets daily UTC.');
+      } else {
+        showNotification('error', 'Failed to update install count.');
+      }
+    } catch {
       showNotification('error', 'Failed to update install count.');
     }
   };
@@ -236,10 +248,11 @@ export default function AdminDashboard() {
   const [channelInviteInput, setChannelInviteInput] = useState(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('movie_portal_telegram_channel') || '';
-      if (saved && !saved.includes('QSL_3k54YfBjMjE1')) return saved;
+      if (saved && !saved.includes('QSL_3k54YfBjMjE1') && !saved.includes('s2Qki5-sfnVjZTI1')) return saved;
     }
-    return 'https://t.me/+s2Qki5-sfnVjZTI1';
+    return 'https://t.me/+P5UeGT1YlQ9lOGZl';
   });
+  const [adminVisibleLimit, setAdminVisibleLimit] = useState<number>(100);
   const [connectingChannel, setConnectingChannel] = useState(false);
   const [telegramStatus, setTelegramStatus] = useState<any | null>(null);
   const [showChannelPanel, setShowChannelPanel] = useState(false);
@@ -1284,10 +1297,14 @@ export default function AdminDashboard() {
           }),
         }));
         try {
-          await updateDoc(doc(db, 'movies', editingMovie.id), {
-            seasons: updatedMovieSeasons,
-            updatedAt: serverTimestamp(),
-          });
+          if (isFirestoreWriteAllowed()) {
+            await guardedFirestoreWrite(() =>
+              updateDoc(doc(db, 'movies', editingMovie.id), {
+                seasons: updatedMovieSeasons,
+                updatedAt: serverTimestamp(),
+              })
+            );
+          }
           const updatedMovie: MovieData = {
             ...editingMovie,
             seasons: updatedMovieSeasons,
@@ -1582,10 +1599,10 @@ export default function AdminDashboard() {
   const fetchMovies = async () => {
     setLoadingMovies(true);
     try {
-      const items = await fetchMoviesFromFirestore();
+      const items = await fetchMergedMoviesCatalog();
       setMovies(items);
     } catch (err: any) {
-      console.error('Firestore fetch failed in Admin Dashboard', err);
+      console.error('Catalog fetch failed in Admin Dashboard', err);
       handleFirestoreError(err, OperationType.LIST, 'movies');
     } finally {
       setLoadingMovies(false);
@@ -1599,36 +1616,59 @@ export default function AdminDashboard() {
       return;
     }
 
+    if (!isFirestoreWriteAllowed()) {
+      showNotification('error', 'Firebase daily write quota reached today. Resets at UTC midnight.');
+      return;
+    }
+
     setFormLoading(true);
     let synced = 0;
     let failed = 0;
+    let quotaStopped = false;
 
     for (const movie of local) {
+      if (!isFirestoreWriteAllowed()) {
+        quotaStopped = true;
+        break;
+      }
       // Check if already in Firestore
       const exists = movies.find(m => m.id === movie.id || (m.imdbId && m.imdbId === movie.imdbId));
       if (!exists) {
-        try {
-          // Remove local-only id to let Firestore generate one, or keep if preferred
-          const { id, ...payload } = movie as any;
-          const cleanPoster = upgradePosterUrl(payload.posterUrl, 1080) || payload.posterUrl || '';
-          const cleanBackdrop = upgradePosterUrl(payload.backdropUrl || payload.posterUrl, 1280) || cleanPoster;
-          await addDoc(collection(db, 'movies'), {
+        const { id: _localId, ...payload } = movie as any;
+        const cleanPoster = upgradePosterUrl(payload.posterUrl, 1080) || payload.posterUrl || '';
+        const cleanBackdrop = upgradePosterUrl(payload.backdropUrl || payload.posterUrl, 1280) || cleanPoster;
+        const wRes = await guardedFirestoreWrite(() =>
+          addDoc(collection(db, 'movies'), {
             ...payload,
             posterUrl: cleanPoster,
             backdropUrl: cleanBackdrop,
             qualityBadge: normalizeQualityBadge(payload.qualityBadge),
-            published: true, // Ensure they are published
-            updatedAt: serverTimestamp()
-          });
+            published: true,
+            updatedAt: serverTimestamp(),
+          })
+        );
+        if (wRes.ok) {
           synced++;
-        } catch (e) {
+        } else if (wRes.quotaExhausted) {
+          quotaStopped = true;
+          break;
+        } else {
           failed++;
         }
       }
     }
 
     setFormLoading(false);
-    if (synced > 0) {
+    if (quotaStopped) {
+      showNotification(
+        synced > 0 ? 'success' : 'error',
+        `Synced ${synced} movie(s) before Firebase daily free write quota limit was reached.`
+      );
+      if (synced > 0) {
+        broadcastMoviesUpdated('bulk_sync', 'import');
+        fetchMovies();
+      }
+    } else if (synced > 0) {
       broadcastMoviesUpdated('bulk_sync', 'import');
       showNotification('success', `Successfully synced ${synced} movies to cloud!`);
       fetchMovies();
@@ -2342,11 +2382,15 @@ export default function AdminDashboard() {
     };
 
     let announcementDocId = `ann-${createdAtMs}`;
-    try {
-      const ref = await addDoc(collection(db, 'announcements'), announcementPayload);
-      announcementDocId = ref.id;
-    } catch (annFsErr) {
-      console.warn('Firestore announcement write warning:', annFsErr);
+    if (isFirestoreWriteAllowed()) {
+      const annRes = await guardedFirestoreWrite(() =>
+        addDoc(collection(db, 'announcements'), announcementPayload)
+      );
+      if (annRes.ok && annRes.value?.id) {
+        announcementDocId = annRes.value.id;
+      } else if (!annRes.ok && !annRes.quotaExhausted && annRes.error) {
+        console.warn('Firestore announcement write warning:', annRes.error);
+      }
     }
 
     const yearPart = announcementPayload.releaseYear && String(announcementPayload.releaseYear) !== '0'
@@ -2388,48 +2432,52 @@ export default function AdminDashboard() {
     };
 
     // Mirror latest release feed to admins/latest_release_notification so Android background workers can read directly via public Firestore REST
-    try {
-      const feedRef = doc(db, 'admins', 'latest_release_notification');
-      let existingItems: any[] = [];
+    if (isFirestoreWriteAllowed()) {
       try {
-        const prevSnap = await getDocFromServer(feedRef);
-        if (prevSnap.exists()) {
-          const parsed = JSON.parse(String(prevSnap.data()?.itemsJson || '[]'));
-          if (Array.isArray(parsed)) existingItems = parsed;
-        }
-      } catch {}
-      const cutoff = createdAtMs - 48 * 60 * 60 * 1000;
-      const mergedItems = [
-        broadcastPayload,
-        ...existingItems.filter((item: any) => item && item.id !== broadcastPayload.id && Number(item.createdAtMs || 0) >= cutoff),
-      ].slice(0, 8);
-      await setDoc(
-        feedRef,
-        {
-          latestId: broadcastPayload.id,
-          movieId: broadcastPayload.movieId,
-          title: broadcastPayload.title,
-          releaseYear: String(broadcastPayload.releaseYear || ''),
-          category: broadcastPayload.category,
-          isSeries: broadcastPayload.isSeries,
-          language: broadcastPayload.language,
-          genre: broadcastPayload.genre,
-          qualityBadge: broadcastPayload.qualityBadge,
-          runtime: broadcastPayload.runtime,
-          posterUrl: broadcastPayload.posterUrl,
-          backdropUrl: broadcastPayload.backdropUrl,
-          imageUrl: broadcastPayload.imageUrl,
-          message: broadcastPayload.message,
-          notificationTitle: broadcastPayload.notificationTitle,
-          notificationBody: broadcastPayload.notificationBody,
-          createdAtMs,
-          itemsJson: JSON.stringify(mergedItems),
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-    } catch (mirrorErr) {
-      console.warn('Release feed mirror warning:', mirrorErr);
+        const feedRef = doc(db, 'admins', 'latest_release_notification');
+        let existingItems: any[] = [];
+        try {
+          const prevSnap = await getDocFromServer(feedRef);
+          if (prevSnap.exists()) {
+            const parsed = JSON.parse(String(prevSnap.data()?.itemsJson || '[]'));
+            if (Array.isArray(parsed)) existingItems = parsed;
+          }
+        } catch {}
+        const cutoff = createdAtMs - 48 * 60 * 60 * 1000;
+        const mergedItems = [
+          broadcastPayload,
+          ...existingItems.filter((item: any) => item && item.id !== broadcastPayload.id && Number(item.createdAtMs || 0) >= cutoff),
+        ].slice(0, 8);
+        await guardedFirestoreWrite(() =>
+          setDoc(
+            feedRef,
+            {
+              latestId: broadcastPayload.id,
+              movieId: broadcastPayload.movieId,
+              title: broadcastPayload.title,
+              releaseYear: String(broadcastPayload.releaseYear || ''),
+              category: broadcastPayload.category,
+              isSeries: broadcastPayload.isSeries,
+              language: broadcastPayload.language,
+              genre: broadcastPayload.genre,
+              qualityBadge: broadcastPayload.qualityBadge,
+              runtime: broadcastPayload.runtime,
+              posterUrl: broadcastPayload.posterUrl,
+              backdropUrl: broadcastPayload.backdropUrl,
+              imageUrl: broadcastPayload.imageUrl,
+              message: broadcastPayload.message,
+              notificationTitle: broadcastPayload.notificationTitle,
+              notificationBody: broadcastPayload.notificationBody,
+              createdAtMs,
+              itemsJson: JSON.stringify(mergedItems),
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true }
+          )
+        );
+      } catch (mirrorErr) {
+        console.warn('Release feed mirror warning:', mirrorErr);
+      }
     }
 
     try {
@@ -2617,61 +2665,31 @@ export default function AdminDashboard() {
       };
 
       if (editingMovie) {
-        try {
-          await updateDoc(doc(db, 'movies', editingMovie.id), moviePayload);
-          const updatedLocal = {
-            ...editingMovie,
-            ...moviePayload,
-            id: editingMovie.id,
-            updatedAt: Date.now(),
-          } as MovieData;
-          saveMovieLocally(updatedLocal);
-          broadcastMoviesUpdated(editingMovie.id, 'edit');
-          setMovies((prev) => prev.map((m) => (m.id === editingMovie.id ? updatedLocal : m)));
+        const wRes = isFirestoreWriteAllowed()
+          ? await guardedFirestoreWrite(() =>
+              updateDoc(doc(db, 'movies', editingMovie.id), moviePayload)
+            )
+          : { ok: false, quotaExhausted: true, error: undefined };
 
-          if (!asDraft && notifyOnUpdate) {
-            await publishReleaseAnnouncement({
-              movieId: editingMovie.id,
-              title: moviePayload.title,
-              releaseYear: moviePayload.releaseYear,
-              originalCategory: moviePayload.originalCategory,
-              isSeries,
-              language: moviePayload.language,
-              genre: moviePayload.genre,
-              qualityBadge: moviePayload.qualityBadge !== 'NONE' ? moviePayload.qualityBadge : '',
-              runtime: moviePayload.runtime,
-              posterUrl: moviePayload.posterUrl,
-              backdropUrl: moviePayload.backdropUrl,
-            });
-          }
-
-          showNotification(
-            'success',
-            `✅ Updated "${moviePayload.title}"${!asDraft && notifyOnUpdate ? ' & notified all app users!' : ` (Badge: ${qualityBadge === 'NONE' ? 'No Badge' : qualityBadge}).`}`
-          );
-          resetMovieForm();
-          await fetchMovies();
-        } catch (fsErr: any) {
-          console.error('Firestore update failed:', fsErr);
-          handleFirestoreError(fsErr, OperationType.UPDATE, 'movies');
-          throw new Error(fsErr.message || 'Database update failed.');
+        if (!wRes.ok && !wRes.quotaExhausted && wRes.error) {
+          console.error('Firestore update failed:', wRes.error);
+          handleFirestoreError(wRes.error, OperationType.UPDATE, 'movies');
+          throw new Error(wRes.error?.message || 'Database update failed.');
         }
-        return;
-      }
 
-      let newDocId = `local-${Date.now()}`;
-      try {
-        const docRef = await addDoc(collection(db, 'movies'), {
+        const updatedLocal = {
+          ...editingMovie,
           ...moviePayload,
-          createdAt: serverTimestamp(),
-        });
-        newDocId = docRef.id;
+          id: editingMovie.id,
+          updatedAt: Date.now(),
+        } as MovieData;
+        saveMovieLocally(updatedLocal);
+        broadcastMoviesUpdated(editingMovie.id, 'edit');
+        setMovies((prev) => prev.map((m) => (m.id === editingMovie.id ? updatedLocal : m)));
 
-        // Create a rich public release notification for all installed app users
-        let pushNote = '';
-        if (!asDraft) {
-          const pushStats = await publishReleaseAnnouncement({
-            movieId: newDocId,
+        if (!asDraft && notifyOnUpdate) {
+          await publishReleaseAnnouncement({
+            movieId: editingMovie.id,
             title: moviePayload.title,
             releaseYear: moviePayload.releaseYear,
             originalCategory: moviePayload.originalCategory,
@@ -2683,56 +2701,99 @@ export default function AdminDashboard() {
             posterUrl: moviePayload.posterUrl,
             backdropUrl: moviePayload.backdropUrl,
           });
-          if (pushStats && pushStats.totalTargets > 0) {
-            pushNote = ` (${pushStats.sentCount}/${pushStats.totalTargets} phone push sent)`;
-          }
-        }
-
-        // Always persist to local cache as well
-        const nowMs = Date.now();
-        saveMovieLocally({
-          id: newDocId,
-          ...moviePayload,
-          createdAt: nowMs,
-          updatedAt: nowMs,
-        } as any);
-        broadcastMoviesUpdated(newDocId, 'add');
-
-        resetMovieForm();
-
-        // Trigger transcoding if requested
-        if (autoTranscode && imdbId.trim() && (url1080p.trim() || url720p.trim())) {
-          const sourceUrl = url1080p.trim() || url720p.trim();
-          const targets = [];
-          if (!url480p.trim()) targets.push('480p');
-          if (!url720p.trim() && url1080p.trim()) targets.push('720p');
-
-          if (targets.length > 0) {
-            authFetch('/api/video/transcode', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                url: sourceUrl,
-                imdbId: imdbId.trim(),
-                targetQualities: targets
-              })
-            }).catch(err => console.error('Failed to trigger transcode:', err));
-          }
         }
 
         showNotification(
-          'success', 
-          asDraft 
-            ? `Saved "${moviePayload.title}" as Draft (Unpublished).` 
-            : `🎉 Successfully PUBLISHED "${moviePayload.title}" into ${autoDisplayCategory} Section!${pushNote}`
+          'success',
+          wRes.ok
+            ? `✅ Updated "${moviePayload.title}"${!asDraft && notifyOnUpdate ? ' & notified all app users!' : ` (Badge: ${qualityBadge === 'NONE' ? 'No Badge' : qualityBadge}).`}`
+            : `✅ Saved "${moviePayload.title}" locally (Firebase daily write quota reached today).`
         );
-        
+        resetMovieForm();
         await fetchMovies();
-      } catch (fsErr: any) {
-        console.error('Firestore write failed:', fsErr);
-        handleFirestoreError(fsErr, OperationType.CREATE, 'movies');
-        throw new Error(fsErr.message || 'Database write denied. Check connection or permissions.');
+        return;
       }
+
+      let newDocId = `local-${Date.now()}`;
+      const addRes = isFirestoreWriteAllowed()
+        ? await guardedFirestoreWrite(() =>
+            addDoc(collection(db, 'movies'), {
+              ...moviePayload,
+              createdAt: serverTimestamp(),
+            })
+          )
+        : { ok: false, quotaExhausted: true, value: undefined, error: undefined };
+
+      if (!addRes.ok && !addRes.quotaExhausted && addRes.error) {
+        console.error('Firestore write failed:', addRes.error);
+        handleFirestoreError(addRes.error, OperationType.CREATE, 'movies');
+        throw new Error(addRes.error?.message || 'Database write denied. Check connection or permissions.');
+      }
+
+      if (addRes.ok && addRes.value?.id) {
+        newDocId = addRes.value.id;
+      }
+
+      let pushNote = '';
+      if (!asDraft) {
+        const pushStats = await publishReleaseAnnouncement({
+          movieId: newDocId,
+          title: moviePayload.title,
+          releaseYear: moviePayload.releaseYear,
+          originalCategory: moviePayload.originalCategory,
+          isSeries,
+          language: moviePayload.language,
+          genre: moviePayload.genre,
+          qualityBadge: moviePayload.qualityBadge !== 'NONE' ? moviePayload.qualityBadge : '',
+          runtime: moviePayload.runtime,
+          posterUrl: moviePayload.posterUrl,
+          backdropUrl: moviePayload.backdropUrl,
+        });
+        if (pushStats && pushStats.totalTargets > 0) {
+          pushNote = ` (${pushStats.sentCount}/${pushStats.totalTargets} phone push sent)`;
+        }
+      }
+
+      const nowMs = Date.now();
+      saveMovieLocally({
+        id: newDocId,
+        ...moviePayload,
+        createdAt: nowMs,
+        updatedAt: nowMs,
+      } as any);
+      broadcastMoviesUpdated(newDocId, 'add');
+
+      resetMovieForm();
+
+      if (autoTranscode && imdbId.trim() && (url1080p.trim() || url720p.trim())) {
+        const sourceUrl = url1080p.trim() || url720p.trim();
+        const targets = [];
+        if (!url480p.trim()) targets.push('480p');
+        if (!url720p.trim() && url1080p.trim()) targets.push('720p');
+
+        if (targets.length > 0) {
+          authFetch('/api/video/transcode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              url: sourceUrl,
+              imdbId: imdbId.trim(),
+              targetQualities: targets,
+            }),
+          }).catch(err => console.error('Failed to trigger transcode:', err));
+        }
+      }
+
+      showNotification(
+        'success',
+        !addRes.ok
+          ? `✅ Saved "${moviePayload.title}" locally (Firebase daily write quota reached today).`
+          : asDraft
+            ? `Saved "${moviePayload.title}" as Draft (Unpublished).`
+            : `🎉 Successfully PUBLISHED "${moviePayload.title}" into ${autoDisplayCategory} Section!${pushNote}`
+      );
+
+      await fetchMovies();
     } catch (err: any) {
       console.error('Error saving content:', err);
       showNotification('error', `Failed to save content: ${err?.message || 'Database write denied'}`);
@@ -2808,11 +2869,9 @@ export default function AdminDashboard() {
     if (!canDeleteContent()) return;
     setIsDeleting(true);
     try {
-      // 1. Delete from Firestore if permitted
-      try {
-        await deleteDoc(doc(db, 'movies', movie.id));
-      } catch (fsErr) {
-        console.warn('Firestore delete failed, deleting from local cache:', fsErr);
+      // 1. Delete from Firestore if permitted & quota allows
+      if (isFirestoreWriteAllowed()) {
+        await guardedFirestoreWrite(() => deleteDoc(doc(db, 'movies', movie.id)));
       }
       
       // 2. Update local storage and local state
@@ -2839,10 +2898,8 @@ export default function AdminDashboard() {
     const countToDelete = selectedMovieIds.length;
     try {
       for (const id of selectedMovieIds) {
-        try {
-          await deleteDoc(doc(db, 'movies', id));
-        } catch (e) {
-          console.warn(`Firestore delete failed for ${id}:`, e);
+        if (isFirestoreWriteAllowed()) {
+          await guardedFirestoreWrite(() => deleteDoc(doc(db, 'movies', id)));
         }
         deleteMovieLocally(id);
       }
@@ -2865,13 +2922,16 @@ export default function AdminDashboard() {
     if (!canDeleteContent()) return;
     setIsDeleting(true);
     try {
-      try {
-        const querySnapshot = await getDocs(collection(db, 'movies'));
-        for (const docSnap of querySnapshot.docs) {
-          await deleteDoc(doc(db, 'movies', docSnap.id));
+      if (isFirestoreWriteAllowed()) {
+        try {
+          const querySnapshot = await getDocs(collection(db, 'movies'));
+          for (const docSnap of querySnapshot.docs) {
+            if (!isFirestoreWriteAllowed()) break;
+            await guardedFirestoreWrite(() => deleteDoc(doc(db, 'movies', docSnap.id)));
+          }
+        } catch (e) {
+          console.warn('Firestore bulk delete warning:', e);
         }
-      } catch (e) {
-        console.warn('Firestore bulk delete warning:', e);
       }
       clearAllMoviesLocally();
       broadcastMoviesUpdated();
@@ -2891,13 +2951,13 @@ export default function AdminDashboard() {
   const handleTogglePublish = async (movie: MovieData) => {
     const newStatus = !movie.published;
     try {
-      try {
-        await updateDoc(doc(db, 'movies', movie.id), {
-          published: newStatus,
-          updatedAt: serverTimestamp(),
-        });
-      } catch (fsErr) {
-        console.warn('Firestore publish toggle failed, updating in local cache:', fsErr);
+      if (isFirestoreWriteAllowed()) {
+        await guardedFirestoreWrite(() =>
+          updateDoc(doc(db, 'movies', movie.id), {
+            published: newStatus,
+            updatedAt: serverTimestamp(),
+          })
+        );
       }
       togglePublishLocally(movie.id);
       broadcastMoviesUpdated(movie.id, 'toggle_publish');
@@ -2915,13 +2975,13 @@ export default function AdminDashboard() {
   const handleToggleFeatured = async (movie: MovieData) => {
     const newFeatured = !movie.featured;
     try {
-      try {
-        await updateDoc(doc(db, 'movies', movie.id), {
-          featured: newFeatured,
-          updatedAt: serverTimestamp(),
-        });
-      } catch (fsErr) {
-        console.warn('Firestore featured toggle failed, updating in local cache:', fsErr);
+      if (isFirestoreWriteAllowed()) {
+        await guardedFirestoreWrite(() =>
+          updateDoc(doc(db, 'movies', movie.id), {
+            featured: newFeatured,
+            updatedAt: serverTimestamp(),
+          })
+        );
       }
       toggleFeaturedLocally(movie.id);
       broadcastMoviesUpdated(movie.id, 'toggle_featured');
@@ -2944,14 +3004,19 @@ export default function AdminDashboard() {
     setFormLoading(true);
     let deletedCount = 0;
     try {
-      try {
-        const querySnapshot = await getDocs(collection(db, 'movies'));
-        for (const movieDoc of querySnapshot.docs) {
-          await deleteDoc(doc(db, 'movies', movieDoc.id));
-          deletedCount++;
+      if (isFirestoreWriteAllowed()) {
+        try {
+          const querySnapshot = await getDocs(collection(db, 'movies'));
+          for (const movieDoc of querySnapshot.docs) {
+            if (!isFirestoreWriteAllowed()) break;
+            const res = await guardedFirestoreWrite(() =>
+              deleteDoc(doc(db, 'movies', movieDoc.id))
+            );
+            if (res.ok) deletedCount++;
+          }
+        } catch (fsErr) {
+          console.warn('Firestore wipe remote error:', fsErr);
         }
-      } catch (fsErr) {
-        console.warn('Firestore wipe remote error:', fsErr);
       }
       
       saveLocalMovies([]);
@@ -3603,6 +3668,7 @@ export default function AdminDashboard() {
                               <img
                                 src={item.posterUrl}
                                 alt={item.title}
+                                referrerPolicy="no-referrer"
                                 className="w-12 h-16 object-cover rounded-md bg-neutral-800 shadow-md border border-neutral-800 group-hover:border-yellow-400/50 transition-colors"
                               />
                             ) : (
@@ -3870,6 +3936,7 @@ export default function AdminDashboard() {
                     <img
                       src={upgradePosterUrl(posterUrl, 1080) || posterUrl || undefined}
                       alt="Preview"
+                      referrerPolicy="no-referrer"
                       className="w-12 h-16 object-cover rounded bg-neutral-900"
                       onError={(e: any) => {
                         const img = e.currentTarget;
@@ -5214,7 +5281,10 @@ export default function AdminDashboard() {
                     {(['all', 'Bollywood', 'Hollywood', 'Series'] as const).map((tab) => (
                       <button
                         key={tab}
-                        onClick={() => setActiveTab(tab)}
+                        onClick={() => {
+                          setActiveTab(tab);
+                          setAdminVisibleLimit(100);
+                        }}
                         className={`px-2.5 py-1 rounded font-semibold capitalize transition-colors ${
                           activeTab === tab
                             ? 'bg-yellow-400 text-black'
@@ -5269,6 +5339,7 @@ export default function AdminDashboard() {
                         <img
                           src={upgradePosterUrl(movie.posterUrl, 1080) || movie.posterUrl || undefined}
                           alt={movie.title}
+                          referrerPolicy="no-referrer"
                           onError={(e: any) => {
                             const img = e.currentTarget;
                             if (movie.posterUrl && img.src !== movie.posterUrl && !img.dataset.triedRaw) {
@@ -5436,6 +5507,7 @@ export default function AdminDashboard() {
                 <img
                   src={upgradePosterUrl(deleteModal.item.posterUrl, 1080) || deleteModal.item.posterUrl || 'https://images.unsplash.com/photo-1595760205842-8356d2cf98b1?q=80&w=800'}
                   alt={deleteModal.item.title}
+                  referrerPolicy="no-referrer"
                   className="w-12 h-16 object-cover rounded bg-neutral-800 flex-shrink-0"
                 />
                 <div className="min-w-0 flex-grow text-xs">

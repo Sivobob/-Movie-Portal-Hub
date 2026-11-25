@@ -12,10 +12,13 @@ import { db, handleFirestoreError, OperationType } from '../firebase';
 import {
   MovieData,
   getLocalMovies,
+  getCatalogFromIdb,
+  fetchSeedCatalogJson,
   saveLocalMovies,
   sortMoviesList,
 } from '../services/movieStorage';
 import { normalizeMoviePosters } from '../utils/posterUrl';
+import { buildApiUrl } from '../utils/apiConfig';
 
 interface MoviesContextValue {
   movies: MovieData[];
@@ -32,61 +35,131 @@ const MoviesContext = createContext<MoviesContextValue>({
 const FOREGROUND_HEARTBEAT_MS = 8000;
 const MIN_SERVER_SYNC_GAP_MS = 2000;
 
-export function MoviesProvider({ children }: { children: React.ReactNode }) {
-  // Fallback to pre-bundled seed catalog on fresh install / app reinstall
-  let baseLocal = getLocalMovies();
-  if (baseLocal.length === 0) {
-    try {
-      // Synchronous localStorage seed load fallback
-      if (typeof window !== 'undefined') {
-        const cachedSeed = localStorage.getItem('movie_portal_seed_loaded_v1');
-        if (!cachedSeed) {
-          // We can fetch seed synchronously or pre-populate localStorage on first render
-        }
-      }
-    } catch {}
-  }
+function hasRealPosterUrl(url?: string | null): boolean {
+  const s = String(url || '').trim();
+  return Boolean(s && s !== 'N/A' && (/^https?:\/\//i.test(s) || s.startsWith('/posters/')));
+}
 
+function mergeMovieRecord(existing: MovieData | undefined, incoming: MovieData, preferIncoming: boolean): MovieData {
+  if (!existing) return incoming;
+  const existingUpdated = Number(existing.updatedAt || 0) || 0;
+  const incomingUpdated = Number(incoming.updatedAt || 0) || 0;
+  const base = preferIncoming
+    ? existingUpdated > incomingUpdated && hasRealPosterUrl(existing.posterUrl)
+      ? existing
+      : incoming
+    : existing;
+
+  const bestPoster = hasRealPosterUrl(base.posterUrl)
+    ? base.posterUrl
+    : hasRealPosterUrl(incoming.posterUrl)
+    ? incoming.posterUrl
+    : hasRealPosterUrl(existing.posterUrl)
+    ? existing.posterUrl
+    : base.posterUrl || incoming.posterUrl || existing.posterUrl || '';
+
+  const bestBackdrop = hasRealPosterUrl(base.backdropUrl)
+    ? base.backdropUrl
+    : hasRealPosterUrl(incoming.backdropUrl)
+    ? incoming.backdropUrl
+    : hasRealPosterUrl(existing.backdropUrl)
+    ? existing.backdropUrl
+    : bestPoster;
+
+  return {
+    ...base,
+    posterUrl: bestPoster,
+    backdropUrl: bestBackdrop,
+  };
+}
+
+export function MoviesProvider({ children }: { children: React.ReactNode }) {
   const initialLocal = sortMoviesList(
-    baseLocal.filter((m: any) => m && m.published !== false)
+    getLocalMovies().filter((m: any) => m && m.published !== false)
   );
 
   const [movies, setMovies] = useState<MovieData[]>(initialLocal);
   const [isLoading, setIsLoading] = useState<boolean>(initialLocal.length === 0);
+  const lastCatalogMetaSigRef = useRef<string>('');
 
-  // Load and merge pre-bundled seed catalog on boot and periodically
+  // Hydrate full catalog from IndexedDB + pre-bundled seed catalog without redundant 12s re-downloads
   useEffect(() => {
     let active = true;
-    const loadSeedCatalog = () => {
-      fetch('/movies-seed.json?v=' + Date.now())
-        .then((r) => r.json())
-        .then((seedData) => {
-          if (!active) return;
-          if (Array.isArray(seedData) && seedData.length > 0) {
-            const normalized = sortMoviesList(
-              seedData
-                .filter((m: any) => m && m.id && m.published !== false)
-                .map((m: any) => normalizeMoviePosters(m))
-            );
-            setMovies((prev) => {
-              const map = new Map<string, MovieData>();
-              normalized.forEach((m) => map.set(m.id, m));
-              prev.forEach((m) => map.set(m.id, m));
-              const combined = sortMoviesList(Array.from(map.values()));
-              saveLocalMovies(combined);
-              return combined;
-            });
-            setIsLoading(false);
-          }
-        })
-        .catch(() => {});
+
+    const mergeIntoState = (incoming: MovieData[], preferIncoming: boolean) => {
+      if (!active || incoming.length === 0) return;
+      const normalized = sortMoviesList(
+        incoming
+          .filter((m: any) => m && m.id && m.published !== false)
+          .map((m: any) => normalizeMoviePosters(m) as MovieData)
+      );
+      setMovies((prev) => {
+        const map = new Map<string, MovieData>();
+        if (preferIncoming) {
+          // Seed catalog is authoritative for all catalog IDs unless a newer local edit exists
+          const incomingIds = new Set(normalized.map((m) => m.id));
+          prev.forEach((m) => {
+            // Keep non-seed custom/Firestore items that have real posters; drop stale SVG placeholders/duplicates
+            if (!incomingIds.has(m.id) && !String(m.posterUrl || '').startsWith('data:image/svg+xml')) {
+              map.set(m.id, m);
+            }
+          });
+          normalized.forEach((m) => {
+            const existing = prev.find((p) => p.id === m.id);
+            map.set(m.id, mergeMovieRecord(existing, m, true));
+          });
+        } else {
+          prev.forEach((m) => map.set(m.id, m));
+          normalized.forEach((m) => {
+            map.set(m.id, mergeMovieRecord(map.get(m.id), m, false));
+          });
+        }
+        const combined = sortMoviesList(Array.from(map.values()));
+        saveLocalMovies(combined);
+        return combined;
+      });
+      setIsLoading(false);
     };
 
-    loadSeedCatalog();
-    const interval = setInterval(loadSeedCatalog, 12000);
+    getCatalogFromIdb()
+      .then((idbItems) => {
+        if (active && idbItems.length > 0) {
+          mergeIntoState(idbItems, false);
+        }
+      })
+      .catch(() => {});
+
+    const loadSeedCatalog = async () => {
+      const seedData = await fetchSeedCatalogJson();
+      if (active && seedData.length > 0) {
+        mergeIntoState(seedData, true);
+      }
+    };
+
+    const checkCatalogMetaAndReload = async () => {
+      try {
+        const metaResp = await fetch(buildApiUrl('/api/movies/catalog-meta'), { cache: 'no-store' });
+        if (!metaResp.ok) return;
+        const meta = await metaResp.json();
+        const sig = `${Number(meta?.count) || 0}:${Number(meta?.mtimeMs) || 0}:${Number(meta?.size) || 0}`;
+        if (lastCatalogMetaSigRef.current && sig !== lastCatalogMetaSigRef.current && Number(meta?.count) > 0) {
+          lastCatalogMetaSigRef.current = sig;
+          await loadSeedCatalog();
+        } else if (!lastCatalogMetaSigRef.current && sig) {
+          lastCatalogMetaSigRef.current = sig;
+        }
+      } catch {}
+    };
+
+    void loadSeedCatalog().then(() => checkCatalogMetaAndReload());
+    const interval = setInterval(checkCatalogMetaAndReload, 8000);
+    window.addEventListener('focus', checkCatalogMetaAndReload);
+    document.addEventListener('visibilitychange', checkCatalogMetaAndReload);
     return () => {
       active = false;
       clearInterval(interval);
+      window.removeEventListener('focus', checkCatalogMetaAndReload);
+      document.removeEventListener('visibilitychange', checkCatalogMetaAndReload);
     };
   }, []);
 
@@ -96,7 +169,7 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
   const syncInFlightRef = useRef<Promise<void> | null>(null);
   const resubscribeTriggerRef = useRef<() => void>(() => {});
 
-  const applyMovieList = useCallback((rawList: MovieData[], fromCache: boolean) => {
+  const applyMovieList = useCallback((rawList: MovieData[], _fromCache: boolean) => {
     if (!isMountedRef.current) return;
     const publishedOnly = sortMoviesList<MovieData>(
       rawList
@@ -104,11 +177,13 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
         .map((m) => normalizeMoviePosters(m) as MovieData)
     );
 
-    // Merge incoming Firestore updates with existing seed catalog
+    // Merge incoming Firestore updates with existing seed catalog without overwriting valid posters with empty/SVG
     setMovies((currentMovies) => {
       const mergedMap = new Map<string, MovieData>();
       currentMovies.forEach((m) => mergedMap.set(m.id, m));
-      publishedOnly.forEach((m) => mergedMap.set(m.id, m));
+      publishedOnly.forEach((m) => {
+        mergedMap.set(m.id, mergeMovieRecord(mergedMap.get(m.id), m, true));
+      });
       const combined = sortMoviesList(Array.from(mergedMap.values()));
       saveLocalMovies(combined);
       return combined;

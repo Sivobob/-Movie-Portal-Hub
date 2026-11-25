@@ -1,7 +1,12 @@
 import { db } from '../firebase';
 import { collection, getDocs, getDocsFromServer, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { normalizeMoviePosters } from '../utils/posterUrl';
-import { checkAndHandleQuotaError, isFirestoreWriteAllowed } from './firestoreQuotaService';
+import {
+  checkAndHandleQuotaError,
+  guardedFirestoreWrite,
+  isFirestoreWriteAllowed,
+} from './firestoreQuotaService';
+import { buildApiUrl } from '../utils/apiConfig';
 
 export interface MovieData {
   id: string;
@@ -187,13 +192,156 @@ export function getNewEpisodesWithin24h(
 
 export function sortMoviesList<T extends Partial<MovieData>>(list: T[]): T[] {
   return [...list].sort((a, b) => {
+    const yearDiff = (Number(b.releaseYear) || 0) - (Number(a.releaseYear) || 0);
+    if (yearDiff !== 0) return yearDiff;
     const aTime = getTimestampMs(a.createdAt) || getTimestampMs(a.updatedAt);
     const bTime = getTimestampMs(b.createdAt) || getTimestampMs(b.updatedAt);
     if (bTime !== aTime) return bTime - aTime;
-    const yearDiff = (Number(b.releaseYear) || 0) - (Number(a.releaseYear) || 0);
-    if (yearDiff !== 0) return yearDiff;
     return String(a.title || '').localeCompare(String(b.title || ''));
   });
+}
+
+const IDB_NAME = 'mp_catalog_cache_v1';
+const IDB_STORE = 'catalog';
+const IDB_KEY = 'movies_v1';
+
+function openCatalogDb(): Promise<IDBDatabase | null> {
+  if (typeof window === 'undefined' || !('indexedDB' in window)) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    try {
+      const req = window.indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = () => {
+        try {
+          const dbInst = req.result;
+          if (!dbInst.objectStoreNames.contains(IDB_STORE)) {
+            dbInst.createObjectStore(IDB_STORE);
+          }
+        } catch {}
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+export async function getCatalogFromIdb(): Promise<MovieData[]> {
+  try {
+    const idb = await openCatalogDb();
+    if (!idb) return [];
+    return await new Promise((resolve) => {
+      try {
+        const tx = idb.transaction(IDB_STORE, 'readonly');
+        const store = tx.objectStore(IDB_STORE);
+        const getReq = store.get(IDB_KEY);
+        getReq.onsuccess = () => {
+          const val = getReq.result;
+          if (Array.isArray(val)) {
+            resolve(
+              sortMoviesList(
+                val.filter((m: any) => m && m.id).map((m: any) => normalizeMoviePosters(m))
+              )
+            );
+          } else {
+            resolve([]);
+          }
+        };
+        getReq.onerror = () => resolve([]);
+      } catch {
+        resolve([]);
+      }
+    });
+  } catch {
+    return [];
+  }
+}
+
+export async function saveCatalogToIdb(movies: MovieData[]): Promise<void> {
+  try {
+    if (!Array.isArray(movies)) return;
+    const idb = await openCatalogDb();
+    if (!idb) return;
+    await new Promise<void>((resolve) => {
+      try {
+        const tx = idb.transaction(IDB_STORE, 'readwrite');
+        const store = tx.objectStore(IDB_STORE);
+        store.put(movies, IDB_KEY);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      } catch {
+        resolve();
+      }
+    });
+  } catch {}
+}
+
+import { BUNDLED_SEED_CATALOG } from './seedCatalog';
+
+export async function fetchSeedCatalogJson(): Promise<MovieData[]> {
+  const bundled = Array.isArray(BUNDLED_SEED_CATALOG)
+    ? BUNDLED_SEED_CATALOG.filter((m: any) => m && m.id).map((m: any) => normalizeMoviePosters(m) as MovieData)
+    : [];
+
+  try {
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const urls = [
+      buildApiUrl('/api/movies/catalog'),
+      buildApiUrl('/movies-seed.json?v=' + Date.now()),
+      '/movies-seed.json?v=' + Date.now(),
+      origin ? `${origin}/movies-seed.json` : '',
+      '/api/movies/catalog',
+    ].filter(Boolean);
+
+    for (const url of urls) {
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) continue;
+        const data = await resp.json();
+        if (Array.isArray(data) && data.length > 0) {
+          return data
+            .filter((m: any) => m && m.id)
+            .map((m: any) => normalizeMoviePosters(m) as MovieData);
+        }
+      } catch {}
+    }
+  } catch {}
+
+  return bundled;
+}
+
+export async function fetchMergedMoviesCatalog(): Promise<MovieData[]> {
+  const [seedList, firestoreList, idbList] = await Promise.all([
+    fetchSeedCatalogJson(),
+    (async () => {
+      try {
+        let snapshot;
+        try {
+          snapshot = await getDocsFromServer(collection(db, COLLECTION_NAME));
+        } catch {
+          snapshot = await getDocs(collection(db, COLLECTION_NAME));
+        }
+        return snapshot.docs.map(
+          (d) => normalizeMoviePosters({ id: d.id, ...d.data() } as MovieData) as MovieData
+        );
+      } catch {
+        return [] as MovieData[];
+      }
+    })(),
+    getCatalogFromIdb(),
+  ]);
+
+  const merged = new Map<string, MovieData>();
+  idbList.forEach((m) => merged.set(m.id, m));
+  seedList.forEach((m) => merged.set(m.id, m));
+  firestoreList.forEach((m) => merged.set(m.id, m));
+
+  const sorted = sortMoviesList<MovieData>(Array.from(merged.values()));
+  if (sorted.length > 0) {
+    saveLocalMovies(sorted);
+    return sorted;
+  }
+  return sortMoviesList(getLocalMovies());
 }
 
 export async function fetchMoviesFromFirestore(): Promise<MovieData[]> {
@@ -212,6 +360,8 @@ export async function fetchMoviesFromFirestore(): Promise<MovieData[]> {
     return movies;
   } catch (e) {
     console.error('Error fetching movies from Firestore', e);
+    const idbList = await getCatalogFromIdb();
+    if (idbList.length > 0) return idbList;
     return sortMoviesList(getLocalMovies());
   }
 }
@@ -230,8 +380,8 @@ function notifyMoviesUpdated(movie?: MovieData): void {
 
 export async function touchCatalogSyncMarker(movieId = '', action = 'update'): Promise<void> {
   if (!isFirestoreWriteAllowed()) return;
-  try {
-    await setDoc(
+  await guardedFirestoreWrite(() =>
+    setDoc(
       doc(db, 'app_config', 'catalog_sync'),
       {
         updatedAt: Date.now(),
@@ -239,36 +389,42 @@ export async function touchCatalogSyncMarker(movieId = '', action = 'update'): P
         action: String(action || 'update'),
       },
       { merge: true }
-    );
-  } catch (e) {
-    checkAndHandleQuotaError(e);
-  }
+    )
+  );
 }
 
 export async function saveMovieToFirestore(movie: MovieData): Promise<void> {
+  const normalized = normalizeMoviePosters(movie);
   try {
-    const normalized = normalizeMoviePosters(movie);
-    await setDoc(doc(db, COLLECTION_NAME, normalized.id), normalized);
-    touchCatalogSyncMarker(normalized.id, 'save').catch(() => {});
+    if (isFirestoreWriteAllowed()) {
+      const res = await guardedFirestoreWrite(() =>
+        setDoc(doc(db, COLLECTION_NAME, normalized.id), normalized)
+      );
+      if (res.ok) {
+        touchCatalogSyncMarker(normalized.id, 'save').catch(() => {});
+      }
+    }
     saveMovieLocally(normalized);
     notifyMoviesUpdated(normalized);
   } catch (e) {
     checkAndHandleQuotaError(e);
-    console.warn('Error saving movie to Firestore (saved locally):', e);
-    saveMovieLocally(movie);
-    notifyMoviesUpdated(movie);
+    saveMovieLocally(normalized);
+    notifyMoviesUpdated(normalized);
   }
 }
 
 export async function deleteMovieFromFirestore(id: string): Promise<void> {
   try {
-    await deleteDoc(doc(db, COLLECTION_NAME, id));
-    touchCatalogSyncMarker(id, 'delete').catch(() => {});
+    if (isFirestoreWriteAllowed()) {
+      const res = await guardedFirestoreWrite(() => deleteDoc(doc(db, COLLECTION_NAME, id)));
+      if (res.ok) {
+        touchCatalogSyncMarker(id, 'delete').catch(() => {});
+      }
+    }
     deleteMovieLocally(id);
     notifyMoviesUpdated();
   } catch (e) {
     checkAndHandleQuotaError(e);
-    console.warn('Error deleting movie from Firestore (deleted locally):', e);
     deleteMovieLocally(id);
     notifyMoviesUpdated();
   }
@@ -278,22 +434,46 @@ const STORAGE_KEY = 'movie_portal_movies_v2';
 
 export const DEFAULT_INITIAL_MOVIES: MovieData[] = [];
 
+function hasRealPoster(url?: string | null): boolean {
+  const s = String(url || '').trim();
+  return Boolean(s && s !== 'N/A' && !s.startsWith('data:image/svg+xml'));
+}
+
 export function getLocalMovies(): MovieData[] {
   try {
-    if (typeof window === 'undefined') return [];
+    const seedItems = Array.isArray(BUNDLED_SEED_CATALOG)
+      ? BUNDLED_SEED_CATALOG.filter((m: any) => m && m.id).map((m: any) => normalizeMoviePosters(m) as MovieData)
+      : [];
+
+    if (typeof window === 'undefined') return seedItems;
+
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw === null) {
-      return [];
+    let cached: MovieData[] = [];
+    if (raw !== null) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length >= 100) {
+          cached = parsed.filter((m: any) => m && m.id).map((m: any) => normalizeMoviePosters(m) as MovieData);
+        }
+      } catch {}
     }
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      return sortMoviesList(
-        parsed.filter((m: any) => m && m.id).map((m: any) => normalizeMoviePosters(m))
-      );
-    }
-    return [];
+
+    const map = new Map<string, MovieData>();
+    seedItems.forEach((m) => map.set(m.id, m));
+    cached.forEach((m) => {
+      const existing = map.get(m.id);
+      if (!existing || !hasRealPoster(existing.posterUrl)) {
+        map.set(m.id, m);
+      }
+    });
+
+    const combined = sortMoviesList(Array.from(map.values()));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(combined));
+    } catch {}
+    return combined.length > 0 ? combined : seedItems;
   } catch {
-    return [];
+    return Array.isArray(BUNDLED_SEED_CATALOG) ? (BUNDLED_SEED_CATALOG as MovieData[]) : [];
   }
 }
 
@@ -301,16 +481,35 @@ export function saveLocalMovies(movies: MovieData[]): void {
   try {
     if (typeof window === 'undefined') return;
     if (!Array.isArray(movies)) return;
+    void saveCatalogToIdb(movies);
+
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(movies));
+      const json = JSON.stringify(movies);
+      if (json.length <= 2_000_000) {
+        localStorage.setItem(STORAGE_KEY, json);
+        return;
+      }
+      const compacted = movies.slice(0, 250).map((m) => ({
+        ...m,
+        description: m.description ? String(m.description).slice(0, 140) : '',
+      }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(compacted));
     } catch {
-      // QuotaExceededError safety: store compact metadata without long descriptions so NO movies are dropped
       try {
-        const compacted = movies.map((m) => ({
-          ...m,
-          description: m.description ? String(m.description).slice(0, 180) : '',
+        const subset = movies.slice(0, 120).map((m) => ({
+          id: m.id,
+          title: m.title,
+          posterUrl: m.posterUrl,
+          backdropUrl: m.backdropUrl,
+          releaseYear: m.releaseYear,
+          originalCategory: m.originalCategory,
+          displayCategory: m.displayCategory,
+          genre: m.genre,
+          published: m.published,
+          featured: m.featured,
+          streamingUrl: m.streamingUrl,
         }));
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(compacted));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(subset));
       } catch (innerErr) {
         console.warn('Failed to save compacted movies to localStorage', innerErr);
       }
@@ -365,6 +564,7 @@ export function clearAllMoviesLocally(): void {
     if (typeof window !== 'undefined') {
       localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
       localStorage.removeItem('movie_portal_movies');
+      void saveCatalogToIdb([]);
       notifyMoviesUpdated();
     }
   } catch (e) {
