@@ -1,0 +1,4675 @@
+[
+  {
+    "id": "G64yIIuI3JMbWcGVKUOk",
+    "streamingUrl": "https://t.me/c/3432917101/30",
+    "contentType": "anime",
+    "imdbId": "tt0988824",
+    "displayCategory": "Series",
+    "cast": "Alexandre Crépet, Junko Takeuchi, Maile Flanagan",
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1794893449,
+      "nanoseconds": 513000000
+    },
+    "genre": "Animation, Action, Adventure",
+    "director": "",
+    "qualityBadge": "HD",
+    "viewsCount": 6,
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BNTk3MDA1ZjAtNTRhYS00YzNiLTgwOGEtYWRmYTQ3NjA0NTAwXkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "description": "Naruto Uzumaki wants to be the best ninja in the land. He's done well so far, but with the looming danger posed by the mysterious Akatsuki organization, Naruto knows he must train harder than ever and leaves his village for intense exercises that will push him to his limits.",
+    "rating": 8.7,
+    "trailerUrl": "",
+    "originalCategory": "Anime Series",
+    "language": "Japanese",
+    "runtime": "24 min",
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BNTk3MDA1ZjAtNTRhYS00YzNiLTgwOGEtYWRmYTQ3NjA0NTAwXkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "originalTitle": "Naruto: Shippuden",
+    "duration": 1440,
+    "releaseYear": 2007,
+    "seasons": [
+      {
+        "seasonNumber": 1,
+        "episodes": [
+          {
+            "streamUrl": "https://t.me/c/3432917101/30",
+            "durationSec": 1388,
+            "showInNewEpisodes": false,
+            "episodeNumber": 1,
+            "duration": "23:08",
+            "title": "Episode 1"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/34",
+            "showInNewEpisodes": false,
+            "durationSec": 1388,
+            "title": "Episode 2",
+            "duration": "23:08",
+            "episodeNumber": 2
+          },
+          {
+            "episodeNumber": 3,
+            "title": "Episode 3",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/38",
+            "durationSec": 1398,
+            "duration": "23:18"
+          },
+          {
+            "duration": "23:15",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/42",
+            "title": "Episode 4",
+            "episodeNumber": 4,
+            "durationSec": 1395
+          },
+          {
+            "episodeNumber": 5,
+            "durationSec": 1397,
+            "streamUrl": "https://t.me/c/3432917101/46",
+            "title": "Episode 5",
+            "showInNewEpisodes": false,
+            "duration": "23:17"
+          },
+          {
+            "duration": "23:13",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/50",
+            "episodeNumber": 6,
+            "durationSec": 1393,
+            "title": "Episode 6"
+          },
+          {
+            "episodeNumber": 7,
+            "durationSec": 1395,
+            "streamUrl": "https://t.me/c/3432917101/54",
+            "title": "Episode 7",
+            "duration": "23:15",
+            "showInNewEpisodes": false
+          },
+          {
+            "showInNewEpisodes": false,
+            "durationSec": 1394,
+            "duration": "23:14",
+            "streamUrl": "https://t.me/c/3432917101/58",
+            "title": "Episode 8",
+            "episodeNumber": 8
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/62",
+            "title": "Episode 9",
+            "episodeNumber": 9,
+            "durationSec": 1388,
+            "showInNewEpisodes": false,
+            "duration": "23:08"
+          },
+          {
+            "showInNewEpisodes": false,
+            "episodeNumber": 10,
+            "streamUrl": "https://t.me/c/3432917101/66",
+            "duration": "23:06",
+            "durationSec": 1386,
+            "title": "Episode 10"
+          },
+          {
+            "duration": "23:15",
+            "durationSec": 1395,
+            "streamUrl": "https://t.me/c/3432917101/70",
+            "title": "Episode 11",
+            "showInNewEpisodes": false,
+            "episodeNumber": 11
+          },
+          {
+            "showInNewEpisodes": false,
+            "episodeNumber": 12,
+            "title": "Episode 12",
+            "streamUrl": "https://t.me/c/3432917101/74",
+            "durationSec": 1395,
+            "duration": "23:15"
+          },
+          {
+            "episodeNumber": 13,
+            "streamUrl": "https://t.me/c/3432917101/78",
+            "duration": "23:15",
+            "showInNewEpisodes": false,
+            "title": "Episode 13",
+            "durationSec": 1395
+          },
+          {
+            "durationSec": 1396,
+            "showInNewEpisodes": false,
+            "duration": "23:16",
+            "streamUrl": "https://t.me/c/3432917101/82",
+            "episodeNumber": 14,
+            "title": "Episode 14"
+          },
+          {
+            "episodeNumber": 15,
+            "streamUrl": "https://t.me/c/3432917101/86",
+            "title": "Episode 15",
+            "duration": "23:17",
+            "showInNewEpisodes": false,
+            "durationSec": 1397
+          },
+          {
+            "title": "Episode 16",
+            "duration": "23:14",
+            "episodeNumber": 16,
+            "durationSec": 1394,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/90"
+          },
+          {
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/94",
+            "durationSec": 1396,
+            "episodeNumber": 17,
+            "title": "Episode 17",
+            "duration": "23:16"
+          },
+          {
+            "episodeNumber": 18,
+            "duration": "23:15",
+            "showInNewEpisodes": false,
+            "title": "Episode 18",
+            "durationSec": 1395,
+            "streamUrl": "https://t.me/c/3432917101/98"
+          },
+          {
+            "duration": "23:16",
+            "durationSec": 1396,
+            "title": "Episode 19",
+            "episodeNumber": 19,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/102"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/106",
+            "episodeNumber": 20,
+            "showInNewEpisodes": false,
+            "duration": "23:14",
+            "title": "Episode 20",
+            "durationSec": 1394
+          },
+          {
+            "title": "Episode 21",
+            "streamUrl": "https://t.me/c/3432917101/110",
+            "episodeNumber": 21,
+            "showInNewEpisodes": false,
+            "durationSec": 1394,
+            "duration": "23:14"
+          },
+          {
+            "duration": "23:15",
+            "episodeNumber": 22,
+            "durationSec": 1395,
+            "title": "Episode 22",
+            "streamUrl": "https://t.me/c/3432917101/114",
+            "showInNewEpisodes": false
+          },
+          {
+            "durationSec": 1394,
+            "duration": "23:14",
+            "episodeNumber": 23,
+            "showInNewEpisodes": false,
+            "title": "Episode 23",
+            "streamUrl": "https://t.me/c/3432917101/118"
+          },
+          {
+            "title": "Episode 24",
+            "durationSec": 1395,
+            "episodeNumber": 24,
+            "streamUrl": "https://t.me/c/3432917101/122",
+            "duration": "23:15",
+            "showInNewEpisodes": false
+          },
+          {
+            "episodeNumber": 25,
+            "duration": "23:14",
+            "durationSec": 1394,
+            "showInNewEpisodes": false,
+            "title": "Episode 25",
+            "streamUrl": "https://t.me/c/3432917101/126"
+          },
+          {
+            "duration": "23:11",
+            "durationSec": 1391,
+            "streamUrl": "https://t.me/c/3432917101/130",
+            "episodeNumber": 26,
+            "title": "Episode 26",
+            "showInNewEpisodes": false
+          },
+          {
+            "episodeNumber": 27,
+            "showInNewEpisodes": false,
+            "title": "Episode 27",
+            "durationSec": 1395,
+            "duration": "23:15",
+            "streamUrl": "https://t.me/c/3432917101/134"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/138",
+            "showInNewEpisodes": false,
+            "episodeNumber": 28,
+            "title": "Episode 28",
+            "durationSec": 1398,
+            "duration": "23:18"
+          },
+          {
+            "duration": "23:16",
+            "episodeNumber": 29,
+            "durationSec": 1396,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/142",
+            "title": "Episode 29"
+          },
+          {
+            "title": "Episode 30",
+            "episodeNumber": 30,
+            "duration": "23:17",
+            "durationSec": 1397,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/146"
+          },
+          {
+            "durationSec": 1395,
+            "duration": "23:15",
+            "episodeNumber": 31,
+            "streamUrl": "https://t.me/c/3432917101/150",
+            "title": "Episode 31",
+            "showInNewEpisodes": false
+          },
+          {
+            "showInNewEpisodes": false,
+            "duration": "23:16",
+            "durationSec": 1396,
+            "streamUrl": "https://t.me/c/3432917101/154",
+            "episodeNumber": 32,
+            "title": "Episode 32"
+          }
+        ]
+      },
+      {
+        "seasonNumber": 2,
+        "episodes": [
+          {
+            "showInNewEpisodes": false,
+            "duration": "23:13",
+            "durationSec": 1393,
+            "episodeNumber": 1,
+            "title": "Episode 1",
+            "streamUrl": "https://t.me/c/3432917101/160"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/164",
+            "durationSec": 1394,
+            "title": "Episode 2",
+            "showInNewEpisodes": false,
+            "episodeNumber": 2,
+            "duration": "23:14"
+          },
+          {
+            "episodeNumber": 3,
+            "title": "Episode 3",
+            "duration": "23:12",
+            "durationSec": 1392,
+            "streamUrl": "https://t.me/c/3432917101/168",
+            "showInNewEpisodes": false
+          },
+          {
+            "showInNewEpisodes": false,
+            "durationSec": 1395,
+            "duration": "23:15",
+            "episodeNumber": 4,
+            "streamUrl": "https://t.me/c/3432917101/172",
+            "title": "Episode 4"
+          },
+          {
+            "duration": "23:13",
+            "episodeNumber": 5,
+            "showInNewEpisodes": false,
+            "title": "Episode 5",
+            "durationSec": 1393,
+            "streamUrl": "https://t.me/c/3432917101/176"
+          },
+          {
+            "title": "Episode 6",
+            "durationSec": 1394,
+            "streamUrl": "https://t.me/c/3432917101/180",
+            "duration": "23:14",
+            "showInNewEpisodes": false,
+            "episodeNumber": 6
+          },
+          {
+            "showInNewEpisodes": false,
+            "title": "Episode 7",
+            "streamUrl": "https://t.me/c/3432917101/184",
+            "durationSec": 1394,
+            "duration": "23:14",
+            "episodeNumber": 7
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/188",
+            "title": "Episode 8",
+            "showInNewEpisodes": false,
+            "durationSec": 1395,
+            "episodeNumber": 8,
+            "duration": "23:15"
+          },
+          {
+            "durationSec": 1392,
+            "showInNewEpisodes": false,
+            "duration": "23:12",
+            "title": "Episode 9",
+            "streamUrl": "https://t.me/c/3432917101/192",
+            "episodeNumber": 9
+          },
+          {
+            "durationSec": 1393,
+            "showInNewEpisodes": false,
+            "title": "Episode 10",
+            "streamUrl": "https://t.me/c/3432917101/196",
+            "duration": "23:13",
+            "episodeNumber": 10
+          },
+          {
+            "showInNewEpisodes": false,
+            "durationSec": 1395,
+            "streamUrl": "https://t.me/c/3432917101/200",
+            "duration": "23:15",
+            "episodeNumber": 11,
+            "title": "Episode 11"
+          },
+          {
+            "duration": "23:14",
+            "episodeNumber": 12,
+            "streamUrl": "https://t.me/c/3432917101/204",
+            "title": "Episode 12",
+            "durationSec": 1394,
+            "showInNewEpisodes": false
+          },
+          {
+            "title": "Episode 13",
+            "duration": "23:15",
+            "episodeNumber": 13,
+            "streamUrl": "https://t.me/c/3432917101/208",
+            "showInNewEpisodes": false,
+            "durationSec": 1395
+          },
+          {
+            "durationSec": 1395,
+            "title": "Episode 14",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/211",
+            "duration": "23:15",
+            "episodeNumber": 14
+          },
+          {
+            "duration": "23:15",
+            "streamUrl": "https://t.me/c/3432917101/215",
+            "episodeNumber": 15,
+            "showInNewEpisodes": false,
+            "title": "Episode 15",
+            "durationSec": 1395
+          },
+          {
+            "duration": "23:15",
+            "streamUrl": "https://t.me/c/3432917101/219",
+            "durationSec": 1395,
+            "showInNewEpisodes": false,
+            "title": "Episode 16",
+            "episodeNumber": 16
+          },
+          {
+            "episodeNumber": 17,
+            "durationSec": 1392,
+            "streamUrl": "https://t.me/c/3432917101/223",
+            "duration": "23:12",
+            "title": "Episode 17",
+            "showInNewEpisodes": false
+          },
+          {
+            "duration": "23:13",
+            "showInNewEpisodes": false,
+            "episodeNumber": 18,
+            "title": "Episode 18",
+            "durationSec": 1393,
+            "streamUrl": "https://t.me/c/3432917101/227"
+          },
+          {
+            "episodeNumber": 19,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/229",
+            "durationSec": 1395,
+            "duration": "23:15",
+            "title": "Episode 19"
+          },
+          {
+            "title": "Episode 20",
+            "showInNewEpisodes": false,
+            "durationSec": 1394,
+            "streamUrl": "https://t.me/c/3432917101/235",
+            "episodeNumber": 20,
+            "duration": "23:14"
+          },
+          {
+            "duration": "23:11",
+            "durationSec": 1391,
+            "episodeNumber": 21,
+            "streamUrl": "https://t.me/c/3432917101/239",
+            "title": "Episode 21",
+            "showInNewEpisodes": false
+          }
+        ]
+      },
+      {
+        "episodes": [
+          {
+            "durationSec": 1392,
+            "showInNewEpisodes": false,
+            "title": "Episode 1",
+            "duration": "23:12",
+            "streamUrl": "https://t.me/c/3432917101/243",
+            "episodeNumber": 1
+          },
+          {
+            "showInNewEpisodes": false,
+            "duration": "23:14",
+            "title": "Episode 2",
+            "streamUrl": "https://t.me/c/3432917101/247",
+            "episodeNumber": 2,
+            "durationSec": 1394
+          },
+          {
+            "title": "Episode 3",
+            "duration": "23:15",
+            "streamUrl": "https://t.me/c/3432917101/253",
+            "durationSec": 1395,
+            "episodeNumber": 3,
+            "showInNewEpisodes": false
+          },
+          {
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/255",
+            "durationSec": 1395,
+            "episodeNumber": 4,
+            "duration": "23:15",
+            "title": "Episode 4"
+          },
+          {
+            "episodeNumber": 5,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/259",
+            "durationSec": 1396,
+            "title": "Episode 5",
+            "duration": "23:16"
+          },
+          {
+            "title": "Episode 6",
+            "durationSec": 1395,
+            "duration": "23:15",
+            "episodeNumber": 6,
+            "streamUrl": "https://t.me/c/3432917101/265",
+            "showInNewEpisodes": false
+          },
+          {
+            "title": "Episode 7",
+            "duration": "23:15",
+            "episodeNumber": 7,
+            "streamUrl": "https://t.me/c/3432917101/269",
+            "durationSec": 1395,
+            "showInNewEpisodes": false
+          },
+          {
+            "duration": "23:14",
+            "durationSec": 1394,
+            "episodeNumber": 8,
+            "showInNewEpisodes": false,
+            "title": "Episode 8",
+            "streamUrl": "https://t.me/c/3432917101/271"
+          },
+          {
+            "duration": "23:14",
+            "title": "Episode 9",
+            "episodeNumber": 9,
+            "showInNewEpisodes": false,
+            "durationSec": 1394,
+            "streamUrl": "https://t.me/c/3432917101/275"
+          },
+          {
+            "showInNewEpisodes": false,
+            "episodeNumber": 10,
+            "durationSec": 1397,
+            "title": "Episode 10",
+            "duration": "23:17",
+            "streamUrl": "https://t.me/c/3432917101/279"
+          },
+          {
+            "showInNewEpisodes": false,
+            "episodeNumber": 11,
+            "title": "Episode 11",
+            "durationSec": 1397,
+            "streamUrl": "https://t.me/c/3432917101/283",
+            "duration": "23:17"
+          },
+          {
+            "durationSec": 1394,
+            "duration": "23:14",
+            "episodeNumber": 12,
+            "streamUrl": "https://t.me/c/3432917101/287",
+            "showInNewEpisodes": false,
+            "title": "Episode 12"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/291",
+            "durationSec": 1394,
+            "duration": "23:14",
+            "episodeNumber": 13,
+            "title": "Episode 13",
+            "showInNewEpisodes": false
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/297",
+            "title": "Episode 14",
+            "showInNewEpisodes": false,
+            "durationSec": 1395,
+            "duration": "23:15",
+            "episodeNumber": 14
+          },
+          {
+            "title": "Episode 15",
+            "showInNewEpisodes": false,
+            "durationSec": 1393,
+            "streamUrl": "https://t.me/c/3432917101/301",
+            "duration": "23:13",
+            "episodeNumber": 15
+          },
+          {
+            "duration": "23:16",
+            "showInNewEpisodes": false,
+            "durationSec": 1396,
+            "title": "Episode 16",
+            "streamUrl": "https://t.me/c/3432917101/303",
+            "episodeNumber": 16
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/307",
+            "duration": "23:16",
+            "episodeNumber": 17,
+            "title": "Episode 17",
+            "durationSec": 1396,
+            "showInNewEpisodes": false
+          },
+          {
+            "episodeNumber": 18,
+            "durationSec": 1396,
+            "duration": "23:16",
+            "title": "Episode 18",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/309"
+          }
+        ],
+        "seasonNumber": 3
+      },
+      {
+        "seasonNumber": 4,
+        "episodes": [
+          {
+            "duration": "23:14",
+            "title": "Episode 1",
+            "streamUrl": "https://t.me/c/3432917101/314",
+            "episodeNumber": 1,
+            "durationSec": 1394,
+            "showInNewEpisodes": false
+          },
+          {
+            "duration": "23:14",
+            "title": "Episode 2",
+            "streamUrl": "https://t.me/c/3432917101/318",
+            "episodeNumber": 2,
+            "durationSec": 1394,
+            "showInNewEpisodes": false
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/322",
+            "title": "Episode 3",
+            "showInNewEpisodes": false,
+            "episodeNumber": 3,
+            "duration": "23:15",
+            "durationSec": 1395
+          },
+          {
+            "title": "Episode 4",
+            "duration": "23:16",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/326",
+            "episodeNumber": 4,
+            "durationSec": 1396
+          },
+          {
+            "title": "Episode 5",
+            "streamUrl": "https://t.me/c/3432917101/329",
+            "showInNewEpisodes": false,
+            "episodeNumber": 5,
+            "duration": "23:15",
+            "durationSec": 1395
+          },
+          {
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/334",
+            "episodeNumber": 6,
+            "durationSec": 1395,
+            "duration": "23:15",
+            "title": "Episode 6"
+          },
+          {
+            "durationSec": 1393,
+            "title": "Episode 7",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/338",
+            "episodeNumber": 7,
+            "duration": "23:13"
+          },
+          {
+            "durationSec": 1389,
+            "episodeNumber": 8,
+            "streamUrl": "https://t.me/c/3432917101/342",
+            "duration": "23:09",
+            "title": "Episode 8",
+            "showInNewEpisodes": false
+          },
+          {
+            "episodeNumber": 9,
+            "duration": "23:17",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/346",
+            "durationSec": 1397,
+            "title": "Episode 9"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/350",
+            "showInNewEpisodes": false,
+            "duration": "23:13",
+            "episodeNumber": 10,
+            "title": "Episode 10",
+            "durationSec": 1393
+          },
+          {
+            "durationSec": 1390,
+            "title": "Episode 11",
+            "streamUrl": "https://t.me/c/3432917101/354",
+            "episodeNumber": 11,
+            "showInNewEpisodes": false,
+            "duration": "23:10"
+          },
+          {
+            "episodeNumber": 12,
+            "showInNewEpisodes": false,
+            "durationSec": 1395,
+            "streamUrl": "https://t.me/c/3432917101/358",
+            "duration": "23:15",
+            "title": "Episode 12"
+          },
+          {
+            "showInNewEpisodes": false,
+            "durationSec": 1394,
+            "streamUrl": "https://t.me/c/3432917101/362",
+            "episodeNumber": 13,
+            "title": "Episode 13",
+            "duration": "23:14"
+          },
+          {
+            "duration": "23:15",
+            "title": "Episode 14",
+            "episodeNumber": 14,
+            "streamUrl": "https://t.me/c/3432917101/366",
+            "durationSec": 1395,
+            "showInNewEpisodes": false
+          },
+          {
+            "durationSec": 1394,
+            "duration": "23:14",
+            "episodeNumber": 15,
+            "title": "Episode 15",
+            "streamUrl": "https://t.me/c/3432917101/371",
+            "showInNewEpisodes": false
+          },
+          {
+            "duration": "23:15",
+            "episodeNumber": 16,
+            "showInNewEpisodes": false,
+            "title": "Episode 16",
+            "durationSec": 1395,
+            "streamUrl": "https://t.me/c/3432917101/376"
+          },
+          {
+            "showInNewEpisodes": false,
+            "durationSec": 1395,
+            "streamUrl": "https://t.me/c/3432917101/381",
+            "duration": "23:15",
+            "title": "Episode 17",
+            "episodeNumber": 17
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/386",
+            "title": "Episode 18",
+            "showInNewEpisodes": false,
+            "episodeNumber": 18,
+            "durationSec": 1393,
+            "duration": "23:13"
+          },
+          {
+            "showInNewEpisodes": false,
+            "duration": "23:06",
+            "episodeNumber": 19,
+            "title": "Episode 19",
+            "durationSec": 1386,
+            "streamUrl": "https://t.me/c/3432917101/391"
+          },
+          {
+            "episodeNumber": 20,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/395",
+            "durationSec": 1385,
+            "duration": "23:05",
+            "title": "Episode 20"
+          },
+          {
+            "duration": "23:10",
+            "showInNewEpisodes": false,
+            "episodeNumber": 21,
+            "streamUrl": "https://t.me/c/3432917101/400",
+            "durationSec": 1390,
+            "title": "Episode 21"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/404",
+            "durationSec": 1390,
+            "title": "Episode 22",
+            "duration": "23:10",
+            "episodeNumber": 22,
+            "showInNewEpisodes": false
+          },
+          {
+            "durationSec": 1390,
+            "duration": "23:10",
+            "episodeNumber": 23,
+            "streamUrl": "https://t.me/c/3432917101/408",
+            "showInNewEpisodes": false,
+            "title": "Episode 23"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/412",
+            "duration": "23:10",
+            "episodeNumber": 24,
+            "title": "Episode 24",
+            "durationSec": 1390,
+            "showInNewEpisodes": false
+          },
+          {
+            "episodeNumber": 25,
+            "duration": "23:10",
+            "streamUrl": "https://t.me/c/3432917101/415",
+            "title": "Episode 25",
+            "durationSec": 1390,
+            "showInNewEpisodes": false
+          }
+        ]
+      },
+      {
+        "seasonNumber": 5,
+        "episodes": [
+          {
+            "durationSec": 1390,
+            "title": "Episode 1",
+            "episodeNumber": 1,
+            "streamUrl": "https://t.me/c/3432917101/421",
+            "duration": "23:10",
+            "showInNewEpisodes": false
+          },
+          {
+            "title": "Episode 2",
+            "duration": "23:10",
+            "showInNewEpisodes": false,
+            "durationSec": 1390,
+            "episodeNumber": 2,
+            "streamUrl": "https://t.me/c/3432917101/427"
+          },
+          {
+            "showInNewEpisodes": false,
+            "title": "Episode 3",
+            "duration": "23:05",
+            "episodeNumber": 3,
+            "durationSec": 1385,
+            "streamUrl": "https://t.me/c/3432917101/437"
+          },
+          {
+            "title": "Episode 4",
+            "episodeNumber": 4,
+            "streamUrl": "https://t.me/c/3432917101/440",
+            "duration": "23:10",
+            "durationSec": 1390,
+            "showInNewEpisodes": false
+          },
+          {
+            "durationSec": 1390,
+            "episodeNumber": 5,
+            "duration": "23:10",
+            "showInNewEpisodes": false,
+            "title": "Episode 5",
+            "streamUrl": "https://t.me/c/3432917101/443"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/447",
+            "title": "Episode 6",
+            "duration": "23:10",
+            "showInNewEpisodes": false,
+            "episodeNumber": 6,
+            "durationSec": 1390
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/453",
+            "durationSec": 1389,
+            "duration": "23:09",
+            "episodeNumber": 7,
+            "showInNewEpisodes": false,
+            "title": "Episode 7"
+          },
+          {
+            "title": "Episode 8",
+            "streamUrl": "https://t.me/c/3432917101/461",
+            "durationSec": 1390,
+            "episodeNumber": 8,
+            "showInNewEpisodes": false,
+            "duration": "23:10"
+          },
+          {
+            "episodeNumber": 9,
+            "showInNewEpisodes": false,
+            "title": "Episode 9",
+            "streamUrl": "https://t.me/c/3432917101/466",
+            "durationSec": 1390,
+            "duration": "23:10"
+          },
+          {
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/469",
+            "duration": "23:05",
+            "title": "Episode 10",
+            "durationSec": 1385,
+            "episodeNumber": 10
+          }
+        ]
+      },
+      {
+        "seasonNumber": 6,
+        "episodes": [
+          {
+            "episodeNumber": 1,
+            "duration": "23:05",
+            "showInNewEpisodes": false,
+            "title": "Episode 1",
+            "streamUrl": "https://t.me/c/3432917101/470",
+            "durationSec": 1385
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/475",
+            "episodeNumber": 2,
+            "title": "Episode 2",
+            "duration": "23:02",
+            "showInNewEpisodes": false,
+            "durationSec": 1382
+          },
+          {
+            "episodeNumber": 3,
+            "title": "Episode 3",
+            "duration": "23:04",
+            "durationSec": 1384,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/477"
+          },
+          {
+            "duration": "23:06",
+            "title": "Episode 4",
+            "durationSec": 1386,
+            "streamUrl": "https://t.me/c/3432917101/479",
+            "showInNewEpisodes": false,
+            "episodeNumber": 4
+          },
+          {
+            "duration": "23:04",
+            "durationSec": 1384,
+            "episodeNumber": 5,
+            "showInNewEpisodes": false,
+            "title": "Episode 5",
+            "streamUrl": "https://t.me/c/3432917101/481"
+          },
+          {
+            "episodeNumber": 6,
+            "durationSec": 1385,
+            "duration": "23:05",
+            "title": "Episode 6",
+            "streamUrl": "https://t.me/c/3432917101/484",
+            "showInNewEpisodes": false
+          },
+          {
+            "episodeNumber": 7,
+            "showInNewEpisodes": false,
+            "duration": "23:04",
+            "title": "Episode 7",
+            "durationSec": 1384,
+            "streamUrl": "https://t.me/c/3432917101/486"
+          },
+          {
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/487",
+            "duration": "23:03",
+            "durationSec": 1383,
+            "title": "Episode 8",
+            "episodeNumber": 8
+          },
+          {
+            "title": "Episode 9",
+            "episodeNumber": 9,
+            "streamUrl": "https://t.me/c/3432917101/492",
+            "duration": "23:05",
+            "showInNewEpisodes": false,
+            "durationSec": 1385
+          },
+          {
+            "showInNewEpisodes": false,
+            "title": "Episode 10",
+            "episodeNumber": 10,
+            "streamUrl": "https://t.me/c/3432917101/494",
+            "durationSec": 1385,
+            "duration": "23:05"
+          },
+          {
+            "showInNewEpisodes": false,
+            "episodeNumber": 11,
+            "durationSec": 1383,
+            "title": "Episode 11",
+            "streamUrl": "https://t.me/c/3432917101/497",
+            "duration": "23:03"
+          },
+          {
+            "title": "Episode 12",
+            "duration": "23:05",
+            "durationSec": 1385,
+            "streamUrl": "https://t.me/c/3432917101/498",
+            "episodeNumber": 12,
+            "showInNewEpisodes": false
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/501",
+            "episodeNumber": 13,
+            "durationSec": 1389,
+            "duration": "23:09",
+            "showInNewEpisodes": false,
+            "title": "Episode 13"
+          },
+          {
+            "showInNewEpisodes": false,
+            "duration": "23:17",
+            "episodeNumber": 14,
+            "streamUrl": "https://t.me/c/3432917101/506",
+            "title": "Episode 14",
+            "durationSec": 1397
+          },
+          {
+            "duration": "23:03",
+            "streamUrl": "https://t.me/c/3432917101/507",
+            "durationSec": 1383,
+            "title": "Episode 15",
+            "episodeNumber": 15,
+            "showInNewEpisodes": false
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/510",
+            "title": "Episode 16",
+            "durationSec": 1390,
+            "showInNewEpisodes": false,
+            "episodeNumber": 16,
+            "duration": "23:10"
+          },
+          {
+            "title": "Episode 17",
+            "episodeNumber": 17,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/513",
+            "duration": "23:05",
+            "durationSec": 1385
+          },
+          {
+            "episodeNumber": 18,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/518",
+            "duration": "23:05",
+            "title": "Episode 18",
+            "durationSec": 1385
+          },
+          {
+            "durationSec": 1385,
+            "title": "Episode 19",
+            "duration": "23:05",
+            "episodeNumber": 19,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/521"
+          },
+          {
+            "showInNewEpisodes": false,
+            "durationSec": 1385,
+            "streamUrl": "https://t.me/c/3432917101/522",
+            "episodeNumber": 20,
+            "title": "Episode 20",
+            "duration": "23:05"
+          },
+          {
+            "duration": "23:03",
+            "showInNewEpisodes": false,
+            "durationSec": 1383,
+            "episodeNumber": 21,
+            "streamUrl": "https://t.me/c/3432917101/527",
+            "title": "Episode 21"
+          },
+          {
+            "episodeNumber": 22,
+            "durationSec": 1384,
+            "streamUrl": "https://t.me/c/3432917101/528",
+            "title": "Episode 22",
+            "duration": "23:04",
+            "showInNewEpisodes": false
+          },
+          {
+            "episodeNumber": 23,
+            "duration": "23:10",
+            "streamUrl": "https://t.me/c/3432917101/532",
+            "showInNewEpisodes": false,
+            "title": "Episode 23",
+            "durationSec": 1390
+          },
+          {
+            "showInNewEpisodes": false,
+            "duration": "23:01",
+            "episodeNumber": 24,
+            "title": "Episode 24",
+            "streamUrl": "https://t.me/c/3432917101/534",
+            "durationSec": 1381
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/537",
+            "duration": "23:09",
+            "showInNewEpisodes": false,
+            "episodeNumber": 25,
+            "title": "Episode 25",
+            "durationSec": 1389
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/540",
+            "durationSec": 1381,
+            "title": "Episode 26",
+            "showInNewEpisodes": false,
+            "episodeNumber": 26,
+            "duration": "23:01"
+          },
+          {
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/543",
+            "duration": "23:04",
+            "durationSec": 1384,
+            "title": "Episode 27",
+            "episodeNumber": 27
+          },
+          {
+            "duration": "23:04",
+            "showInNewEpisodes": false,
+            "episodeNumber": 28,
+            "title": "Episode 28",
+            "durationSec": 1384,
+            "streamUrl": "https://t.me/c/3432917101/546"
+          },
+          {
+            "duration": "23:05",
+            "showInNewEpisodes": false,
+            "title": "Episode 29",
+            "episodeNumber": 29,
+            "streamUrl": "https://t.me/c/3432917101/549",
+            "durationSec": 1385
+          },
+          {
+            "showInNewEpisodes": false,
+            "title": "Episode 30",
+            "duration": "23:06",
+            "episodeNumber": 30,
+            "durationSec": 1386,
+            "streamUrl": "https://t.me/c/3432917101/552"
+          },
+          {
+            "durationSec": 1385,
+            "showInNewEpisodes": false,
+            "duration": "23:05",
+            "streamUrl": "https://t.me/c/3432917101/555",
+            "episodeNumber": 31,
+            "title": "Episode 31"
+          }
+        ]
+      },
+      {
+        "seasonNumber": 7,
+        "episodes": [
+          {
+            "episodeNumber": 1,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/559",
+            "durationSec": 1385,
+            "title": "Episode 1",
+            "duration": "23:05"
+          },
+          {
+            "episodeNumber": 2,
+            "streamUrl": "https://t.me/c/3432917101/562",
+            "showInNewEpisodes": false,
+            "duration": "23:04",
+            "durationSec": 1384,
+            "title": "Episode 2"
+          },
+          {
+            "showInNewEpisodes": false,
+            "title": "Episode 3",
+            "episodeNumber": 3,
+            "duration": "23:05",
+            "durationSec": 1385,
+            "streamUrl": "https://t.me/c/3432917101/565"
+          },
+          {
+            "showInNewEpisodes": false,
+            "title": "Episode 4",
+            "durationSec": 1385,
+            "episodeNumber": 4,
+            "streamUrl": "https://t.me/c/3432917101/568",
+            "duration": "23:05"
+          },
+          {
+            "title": "Episode 5",
+            "episodeNumber": 5,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/571",
+            "durationSec": 1385,
+            "duration": "23:05"
+          },
+          {
+            "episodeNumber": 6,
+            "showInNewEpisodes": false,
+            "title": "Episode 6",
+            "durationSec": 1385,
+            "duration": "23:05",
+            "streamUrl": "https://t.me/c/3432917101/576"
+          },
+          {
+            "title": "Episode 7",
+            "duration": "23:04",
+            "showInNewEpisodes": false,
+            "episodeNumber": 7,
+            "durationSec": 1384,
+            "streamUrl": "https://t.me/c/3432917101/582"
+          }
+        ]
+      },
+      {
+        "seasonNumber": 8,
+        "episodes": [
+          {
+            "title": "Episode 1",
+            "streamUrl": "https://t.me/c/3432917101/585",
+            "durationSec": 1385,
+            "duration": "23:05",
+            "episodeNumber": 1,
+            "showInNewEpisodes": false
+          },
+          {
+            "title": "Episode 2",
+            "showInNewEpisodes": false,
+            "duration": "23:03",
+            "streamUrl": "https://t.me/c/3432917101/586",
+            "durationSec": 1383,
+            "episodeNumber": 2
+          },
+          {
+            "duration": "23:05",
+            "streamUrl": "https://t.me/c/3432917101/590",
+            "title": "Episode 3",
+            "durationSec": 1385,
+            "episodeNumber": 3,
+            "showInNewEpisodes": false
+          },
+          {
+            "episodeNumber": 4,
+            "streamUrl": "https://t.me/c/3432917101/593",
+            "title": "Episode 4",
+            "durationSec": 1386,
+            "showInNewEpisodes": false,
+            "duration": "23:06"
+          },
+          {
+            "duration": "23:05",
+            "title": "Episode 5",
+            "streamUrl": "https://t.me/c/3432917101/596",
+            "durationSec": 1385,
+            "episodeNumber": 5,
+            "showInNewEpisodes": false
+          },
+          {
+            "showInNewEpisodes": false,
+            "duration": "23:05",
+            "streamUrl": "https://t.me/c/3432917101/599",
+            "title": "Episode 6",
+            "episodeNumber": 6,
+            "durationSec": 1385
+          },
+          {
+            "title": "Episode 7",
+            "episodeNumber": 7,
+            "streamUrl": "https://t.me/c/3432917101/602",
+            "showInNewEpisodes": false,
+            "duration": "23:05",
+            "durationSec": 1385
+          },
+          {
+            "durationSec": 1385,
+            "title": "Episode 8",
+            "duration": "23:05",
+            "episodeNumber": 8,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/605"
+          },
+          {
+            "title": "Episode 9",
+            "streamUrl": "https://t.me/c/3432917101/620",
+            "episodeNumber": 9,
+            "showInNewEpisodes": false
+          },
+          {
+            "duration": "23:09",
+            "durationSec": 1389,
+            "episodeNumber": 10,
+            "title": "Episode 10",
+            "streamUrl": "https://t.me/c/3432917101/623",
+            "showInNewEpisodes": false
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/625",
+            "showInNewEpisodes": false,
+            "episodeNumber": 11,
+            "duration": "23:08",
+            "title": "Episode 11",
+            "durationSec": 1388
+          },
+          {
+            "duration": "23:06",
+            "episodeNumber": 12,
+            "durationSec": 1386,
+            "streamUrl": "https://t.me/c/3432917101/628",
+            "showInNewEpisodes": false,
+            "title": "Episode 12"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/631",
+            "durationSec": 1390,
+            "title": "Episode 13",
+            "showInNewEpisodes": false,
+            "episodeNumber": 13,
+            "duration": "23:10"
+          },
+          {
+            "durationSec": 1388,
+            "streamUrl": "https://t.me/c/3432917101/634",
+            "episodeNumber": 14,
+            "title": "Episode 14",
+            "showInNewEpisodes": false,
+            "duration": "23:08"
+          },
+          {
+            "title": "Episode 15",
+            "durationSec": 1388,
+            "duration": "23:08",
+            "episodeNumber": 15,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/637"
+          },
+          {
+            "durationSec": 1387,
+            "title": "Episode 16",
+            "streamUrl": "https://t.me/c/3432917101/641",
+            "duration": "23:07",
+            "episodeNumber": 16,
+            "showInNewEpisodes": false
+          },
+          {
+            "showInNewEpisodes": false,
+            "episodeNumber": 17,
+            "duration": "23:06",
+            "title": "Episode 17",
+            "durationSec": 1386,
+            "streamUrl": "https://t.me/c/3432917101/645"
+          },
+          {
+            "title": "Episode 18",
+            "durationSec": 1388,
+            "streamUrl": "https://t.me/c/3432917101/650",
+            "showInNewEpisodes": false,
+            "episodeNumber": 18,
+            "duration": "23:08"
+          },
+          {
+            "title": "Episode 19",
+            "showInNewEpisodes": false,
+            "episodeNumber": 19,
+            "durationSec": 1387,
+            "streamUrl": "https://t.me/c/3432917101/654",
+            "duration": "23:07"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/659",
+            "durationSec": 1387,
+            "episodeNumber": 20,
+            "showInNewEpisodes": false,
+            "duration": "23:07",
+            "title": "Episode 20"
+          }
+        ]
+      },
+      {
+        "episodes": [
+          {
+            "title": "Episode 1",
+            "duration": "23:07",
+            "episodeNumber": 1,
+            "durationSec": 1387,
+            "streamUrl": "https://t.me/c/3432917101/663",
+            "showInNewEpisodes": false
+          },
+          {
+            "showInNewEpisodes": false,
+            "episodeNumber": 2,
+            "title": "Episode 2",
+            "durationSec": 1386,
+            "duration": "23:06",
+            "streamUrl": "https://t.me/c/3432917101/666"
+          },
+          {
+            "durationSec": 1386,
+            "streamUrl": "https://t.me/c/3432917101/670",
+            "duration": "23:06",
+            "showInNewEpisodes": false,
+            "title": "Episode 3",
+            "episodeNumber": 3
+          },
+          {
+            "title": "Episode 4",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/674",
+            "episodeNumber": 4
+          },
+          {
+            "title": "Episode 5",
+            "streamUrl": "https://t.me/c/3432917101/676",
+            "episodeNumber": 5,
+            "duration": "23:07",
+            "showInNewEpisodes": false,
+            "durationSec": 1387
+          },
+          {
+            "episodeNumber": 6,
+            "duration": "23:06",
+            "durationSec": 1386,
+            "title": "Episode 6",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/682"
+          },
+          {
+            "showInNewEpisodes": false,
+            "episodeNumber": 7,
+            "streamUrl": "https://t.me/c/3432917101/686",
+            "title": "Episode 7"
+          },
+          {
+            "durationSec": 1386,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/690",
+            "title": "Episode 8",
+            "duration": "23:06",
+            "episodeNumber": 8
+          },
+          {
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/693",
+            "episodeNumber": 9,
+            "title": "Episode 9"
+          },
+          {
+            "episodeNumber": 10,
+            "title": "Episode 10",
+            "streamUrl": "https://t.me/c/3432917101/698",
+            "showInNewEpisodes": false
+          },
+          {
+            "episodeNumber": 11,
+            "title": "Episode 11",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/702"
+          },
+          {
+            "showInNewEpisodes": false,
+            "durationSec": 1388,
+            "streamUrl": "https://t.me/c/3432917101/706",
+            "duration": "23:08",
+            "episodeNumber": 12,
+            "title": "Episode 12"
+          },
+          {
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/710",
+            "durationSec": 1388,
+            "episodeNumber": 13,
+            "duration": "23:08",
+            "title": "Episode 13"
+          },
+          {
+            "duration": "23:07",
+            "episodeNumber": 14,
+            "title": "Episode 14",
+            "durationSec": 1387,
+            "streamUrl": "https://t.me/c/3432917101/714",
+            "showInNewEpisodes": false
+          },
+          {
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/718",
+            "title": "Episode 15",
+            "episodeNumber": 15
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/722",
+            "title": "Episode 16",
+            "episodeNumber": 16,
+            "showInNewEpisodes": false
+          },
+          {
+            "episodeNumber": 17,
+            "title": "Episode 17",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/726"
+          },
+          {
+            "showInNewEpisodes": false,
+            "durationSec": 1387,
+            "duration": "23:07",
+            "title": "Episode 18",
+            "episodeNumber": 18,
+            "streamUrl": "https://t.me/c/3432917101/730"
+          },
+          {
+            "showInNewEpisodes": false,
+            "title": "Episode 19",
+            "episodeNumber": 19,
+            "streamUrl": "https://t.me/c/3432917101/735",
+            "durationSec": 1387,
+            "duration": "23:07"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/739",
+            "showInNewEpisodes": false,
+            "durationSec": 1386,
+            "episodeNumber": 20,
+            "title": "Episode 20",
+            "duration": "23:06"
+          },
+          {
+            "title": "Episode 21",
+            "duration": "23:05",
+            "streamUrl": "https://t.me/c/3432917101/743",
+            "durationSec": 1385,
+            "episodeNumber": 21,
+            "showInNewEpisodes": false
+          }
+        ],
+        "seasonNumber": 9
+      },
+      {
+        "episodes": [
+          {
+            "showInNewEpisodes": false,
+            "episodeNumber": 1,
+            "streamUrl": "https://t.me/c/3432917101/748",
+            "title": "Episode 1",
+            "durationSec": 1391,
+            "duration": "23:11"
+          },
+          {
+            "durationSec": 1390,
+            "episodeNumber": 2,
+            "title": "Episode 2",
+            "duration": "23:10",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/752"
+          },
+          {
+            "durationSec": 1391,
+            "episodeNumber": 3,
+            "showInNewEpisodes": false,
+            "title": "Episode 3",
+            "streamUrl": "https://t.me/c/3432917101/756",
+            "duration": "23:11"
+          },
+          {
+            "showInNewEpisodes": false,
+            "durationSec": 1390,
+            "duration": "23:10",
+            "episodeNumber": 4,
+            "title": "Episode 4",
+            "streamUrl": "https://t.me/c/3432917101/760"
+          },
+          {
+            "durationSec": 1390,
+            "duration": "23:10",
+            "streamUrl": "https://t.me/c/3432917101/762",
+            "title": "Episode 5",
+            "showInNewEpisodes": false,
+            "episodeNumber": 5
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/769",
+            "durationSec": 1391,
+            "title": "Episode 6",
+            "episodeNumber": 6,
+            "duration": "23:11",
+            "showInNewEpisodes": false
+          },
+          {
+            "duration": "23:10",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/774",
+            "episodeNumber": 7,
+            "durationSec": 1390,
+            "title": "Episode 7"
+          },
+          {
+            "episodeNumber": 8,
+            "title": "Episode 8",
+            "showInNewEpisodes": false,
+            "duration": "23:10",
+            "durationSec": 1390,
+            "streamUrl": "https://t.me/c/3432917101/778"
+          },
+          {
+            "showInNewEpisodes": false,
+            "durationSec": 1391,
+            "title": "Episode 9",
+            "episodeNumber": 9,
+            "duration": "23:11",
+            "streamUrl": "https://t.me/c/3432917101/782"
+          },
+          {
+            "showInNewEpisodes": false,
+            "episodeNumber": 10,
+            "duration": "23:10",
+            "title": "Episode 10",
+            "durationSec": 1390,
+            "streamUrl": "https://t.me/c/3432917101/786"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/790",
+            "episodeNumber": 11,
+            "title": "Episode 11",
+            "durationSec": 1391,
+            "duration": "23:11",
+            "showInNewEpisodes": false
+          },
+          {
+            "title": "Episode 12",
+            "durationSec": 1391,
+            "showInNewEpisodes": false,
+            "duration": "23:11",
+            "streamUrl": "https://t.me/c/3432917101/794",
+            "episodeNumber": 12
+          },
+          {
+            "showInNewEpisodes": false,
+            "episodeNumber": 13,
+            "streamUrl": "https://t.me/c/3432917101/799",
+            "title": "Episode 13",
+            "duration": "23:11",
+            "durationSec": 1391
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/803",
+            "durationSec": 1392,
+            "episodeNumber": 14,
+            "showInNewEpisodes": false,
+            "duration": "23:12",
+            "title": "Episode 14"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/808",
+            "durationSec": 1390,
+            "duration": "23:10",
+            "showInNewEpisodes": false,
+            "title": "Episode 15",
+            "episodeNumber": 15
+          },
+          {
+            "duration": "23:11",
+            "showInNewEpisodes": false,
+            "durationSec": 1391,
+            "episodeNumber": 16,
+            "streamUrl": "https://t.me/c/3432917101/812",
+            "title": "Episode 16"
+          },
+          {
+            "duration": "23:13",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/817",
+            "episodeNumber": 17,
+            "title": "Episode 17",
+            "durationSec": 1393
+          },
+          {
+            "duration": "23:12",
+            "durationSec": 1392,
+            "streamUrl": "https://t.me/c/3432917101/821",
+            "showInNewEpisodes": false,
+            "title": "Episode 18",
+            "episodeNumber": 18
+          },
+          {
+            "title": "Episode 19",
+            "episodeNumber": 19,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/824",
+            "duration": "23:12",
+            "durationSec": 1392
+          },
+          {
+            "durationSec": 1391,
+            "duration": "23:11",
+            "streamUrl": "https://t.me/c/3432917101/830",
+            "episodeNumber": 20,
+            "title": "Episode 20",
+            "showInNewEpisodes": false
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/833",
+            "episodeNumber": 21,
+            "showInNewEpisodes": false,
+            "title": "Episode 21",
+            "duration": "23:07",
+            "durationSec": 1387
+          },
+          {
+            "episodeNumber": 22,
+            "streamUrl": "https://t.me/c/3432917101/839",
+            "duration": "23:09",
+            "showInNewEpisodes": false,
+            "durationSec": 1389,
+            "title": "Episode 22"
+          },
+          {
+            "showInNewEpisodes": false,
+            "title": "Episode 23",
+            "streamUrl": "https://t.me/c/3432917101/843",
+            "episodeNumber": 23
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/847",
+            "showInNewEpisodes": false,
+            "title": "Episode 24",
+            "duration": "23:09",
+            "durationSec": 1389,
+            "episodeNumber": 24
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/849",
+            "duration": "23:09",
+            "title": "Episode 25",
+            "episodeNumber": 25,
+            "durationSec": 1389,
+            "showInNewEpisodes": false
+          }
+        ],
+        "seasonNumber": 10
+      },
+      {
+        "seasonNumber": 11,
+        "episodes": [
+          {
+            "title": "Episode 1",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/859",
+            "durationSec": 1389,
+            "episodeNumber": 1,
+            "duration": "23:09"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/860",
+            "episodeNumber": 2,
+            "showInNewEpisodes": false,
+            "durationSec": 1389,
+            "title": "Episode 2",
+            "duration": "23:09"
+          },
+          {
+            "durationSec": 1388,
+            "title": "Episode 3",
+            "showInNewEpisodes": false,
+            "episodeNumber": 3,
+            "streamUrl": "https://t.me/c/3432917101/866",
+            "duration": "23:08"
+          },
+          {
+            "durationSec": 1389,
+            "duration": "23:09",
+            "title": "Episode 4",
+            "streamUrl": "https://t.me/c/3432917101/870",
+            "showInNewEpisodes": false,
+            "episodeNumber": 4
+          },
+          {
+            "title": "Episode 5",
+            "episodeNumber": 5,
+            "showInNewEpisodes": false,
+            "durationSec": 1389,
+            "duration": "23:09",
+            "streamUrl": "https://t.me/c/3432917101/872"
+          },
+          {
+            "title": "Episode 6",
+            "streamUrl": "https://t.me/c/3432917101/878",
+            "showInNewEpisodes": false,
+            "durationSec": 1389,
+            "duration": "23:09",
+            "episodeNumber": 6
+          },
+          {
+            "durationSec": 1391,
+            "streamUrl": "https://t.me/c/3432917101/882",
+            "title": "Episode 7",
+            "duration": "23:11",
+            "showInNewEpisodes": false,
+            "episodeNumber": 7
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/886",
+            "durationSec": 1389,
+            "title": "Episode 8",
+            "episodeNumber": 8,
+            "showInNewEpisodes": false,
+            "duration": "23:09"
+          },
+          {
+            "duration": "23:09",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/888",
+            "episodeNumber": 9,
+            "title": "Episode 9",
+            "durationSec": 1389
+          },
+          {
+            "title": "Episode 10",
+            "episodeNumber": 10,
+            "durationSec": 1389,
+            "streamUrl": "https://t.me/c/3432917101/894",
+            "showInNewEpisodes": false,
+            "duration": "23:09"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/896",
+            "title": "Episode 11",
+            "durationSec": 1387,
+            "duration": "23:07",
+            "episodeNumber": 11,
+            "showInNewEpisodes": false
+          },
+          {
+            "showInNewEpisodes": false,
+            "episodeNumber": 12,
+            "durationSec": 1389,
+            "title": "Episode 12",
+            "streamUrl": "https://t.me/c/3432917101/900",
+            "duration": "23:09"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/906",
+            "showInNewEpisodes": false,
+            "durationSec": 1390,
+            "title": "Episode 13",
+            "duration": "23:10",
+            "episodeNumber": 13
+          },
+          {
+            "showInNewEpisodes": false,
+            "duration": "23:09",
+            "episodeNumber": 14,
+            "title": "Episode 14",
+            "streamUrl": "https://t.me/c/3432917101/909",
+            "durationSec": 1389
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/911",
+            "duration": "23:09",
+            "durationSec": 1389,
+            "title": "Episode 15",
+            "episodeNumber": 15,
+            "showInNewEpisodes": false
+          },
+          {
+            "duration": "23:10",
+            "title": "Episode 16",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/917",
+            "durationSec": 1390,
+            "episodeNumber": 16
+          },
+          {
+            "title": "Episode 17",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/919",
+            "episodeNumber": 17,
+            "duration": "23:09",
+            "durationSec": 1389
+          },
+          {
+            "durationSec": 1390,
+            "episodeNumber": 18,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/923",
+            "title": "Episode 18",
+            "duration": "23:10"
+          },
+          {
+            "duration": "23:09",
+            "durationSec": 1389,
+            "showInNewEpisodes": false,
+            "episodeNumber": 19,
+            "streamUrl": "https://t.me/c/3432917101/927",
+            "title": "Episode 19"
+          },
+          {
+            "episodeNumber": 20,
+            "title": "Episode 20",
+            "duration": "23:11",
+            "durationSec": 1391,
+            "streamUrl": "https://t.me/c/3432917101/930",
+            "showInNewEpisodes": false
+          },
+          {
+            "showInNewEpisodes": false,
+            "duration": "23:09",
+            "durationSec": 1389,
+            "streamUrl": "https://t.me/c/3432917101/936",
+            "title": "Episode 21",
+            "episodeNumber": 21
+          },
+          {
+            "episodeNumber": 22,
+            "durationSec": 1389,
+            "showInNewEpisodes": false,
+            "duration": "23:09",
+            "streamUrl": "https://t.me/c/3432917101/940",
+            "title": "Episode 22"
+          }
+        ]
+      },
+      {
+        "seasonNumber": 12,
+        "episodes": [
+          {
+            "title": "Episode 1",
+            "episodeNumber": 1,
+            "streamUrl": "https://t.me/c/3432917101/946",
+            "duration": "23:10",
+            "showInNewEpisodes": false,
+            "durationSec": 1390
+          },
+          {
+            "title": "Episode 2",
+            "duration": "23:09",
+            "streamUrl": "https://t.me/c/3432917101/950",
+            "showInNewEpisodes": false,
+            "episodeNumber": 2,
+            "durationSec": 1389
+          },
+          {
+            "episodeNumber": 3,
+            "duration": "23:09",
+            "durationSec": 1389,
+            "title": "Episode 3",
+            "streamUrl": "https://t.me/c/3432917101/955",
+            "showInNewEpisodes": false
+          },
+          {
+            "episodeNumber": 4,
+            "durationSec": 1390,
+            "streamUrl": "https://t.me/c/3432917101/959",
+            "showInNewEpisodes": false,
+            "duration": "23:10",
+            "title": "Episode 4"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/963",
+            "episodeNumber": 5,
+            "durationSec": 1389,
+            "title": "Episode 5",
+            "showInNewEpisodes": false,
+            "duration": "23:09"
+          },
+          {
+            "duration": "23:10",
+            "streamUrl": "https://t.me/c/3432917101/968",
+            "showInNewEpisodes": false,
+            "title": "Episode 6",
+            "episodeNumber": 6,
+            "durationSec": 1390
+          },
+          {
+            "showInNewEpisodes": false,
+            "episodeNumber": 7,
+            "title": "Episode 7",
+            "streamUrl": "https://t.me/c/3432917101/972",
+            "durationSec": 1389,
+            "duration": "23:09"
+          },
+          {
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/976",
+            "durationSec": 1389,
+            "title": "Episode 8",
+            "duration": "23:09",
+            "episodeNumber": 8
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/978",
+            "title": "Episode 9",
+            "episodeNumber": 9,
+            "durationSec": 1390,
+            "showInNewEpisodes": false,
+            "duration": "23:10"
+          },
+          {
+            "durationSec": 1380,
+            "streamUrl": "https://t.me/c/3432917101/980",
+            "episodeNumber": 10,
+            "showInNewEpisodes": false,
+            "title": "Episode 10",
+            "duration": "23:00"
+          },
+          {
+            "showInNewEpisodes": false,
+            "durationSec": 1389,
+            "episodeNumber": 11,
+            "streamUrl": "https://t.me/c/3432917101/982",
+            "duration": "23:09",
+            "title": "Episode 11"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/988",
+            "title": "Episode 12",
+            "showInNewEpisodes": false,
+            "episodeNumber": 12,
+            "durationSec": 1390,
+            "duration": "23:10"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/992",
+            "showInNewEpisodes": false,
+            "episodeNumber": 13,
+            "durationSec": 1389,
+            "duration": "23:09",
+            "title": "Episode 13"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/996",
+            "title": "Episode 14",
+            "episodeNumber": 14,
+            "showInNewEpisodes": false,
+            "durationSec": 1389,
+            "duration": "23:09"
+          },
+          {
+            "duration": "23:10",
+            "durationSec": 1390,
+            "title": "Episode 15",
+            "episodeNumber": 15,
+            "streamUrl": "https://t.me/c/3432917101/998",
+            "showInNewEpisodes": false
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/1003",
+            "showInNewEpisodes": false,
+            "duration": "23:09",
+            "title": "Episode 16",
+            "episodeNumber": 16,
+            "durationSec": 1389
+          },
+          {
+            "duration": "23:09",
+            "durationSec": 1389,
+            "streamUrl": "https://t.me/c/3432917101/1007",
+            "showInNewEpisodes": false,
+            "title": "Episode 17",
+            "episodeNumber": 17
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/1011",
+            "showInNewEpisodes": false,
+            "durationSec": 1389,
+            "duration": "23:09",
+            "title": "Episode 18",
+            "episodeNumber": 18
+          },
+          {
+            "durationSec": 1390,
+            "duration": "23:10",
+            "showInNewEpisodes": false,
+            "title": "Episode 19",
+            "episodeNumber": 19,
+            "streamUrl": "https://t.me/c/3432917101/1016"
+          },
+          {
+            "durationSec": 1390,
+            "title": "Episode 20",
+            "streamUrl": "https://t.me/c/3432917101/1020",
+            "duration": "23:10",
+            "showInNewEpisodes": false,
+            "episodeNumber": 20
+          },
+          {
+            "episodeNumber": 21,
+            "streamUrl": "https://t.me/c/3432917101/1024",
+            "showInNewEpisodes": false,
+            "durationSec": 1390,
+            "title": "Episode 21",
+            "duration": "23:10"
+          },
+          {
+            "episodeNumber": 22,
+            "durationSec": 1390,
+            "streamUrl": "https://t.me/c/3432917101/1027",
+            "duration": "23:10",
+            "title": "Episode 22",
+            "showInNewEpisodes": false
+          },
+          {
+            "title": "Episode 23",
+            "streamUrl": "https://t.me/c/3432917101/1032",
+            "duration": "23:10",
+            "showInNewEpisodes": false,
+            "episodeNumber": 23,
+            "durationSec": 1390
+          },
+          {
+            "episodeNumber": 24,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/1036",
+            "title": "Episode 24",
+            "duration": "23:10",
+            "durationSec": 1390
+          },
+          {
+            "title": "Episode 25",
+            "duration": "23:10",
+            "streamUrl": "https://t.me/c/3432917101/1040",
+            "durationSec": 1390,
+            "episodeNumber": 25,
+            "showInNewEpisodes": false
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/1045",
+            "episodeNumber": 26,
+            "showInNewEpisodes": false,
+            "duration": "23:11",
+            "title": "Episode 26",
+            "durationSec": 1391
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/1049",
+            "showInNewEpisodes": false,
+            "durationSec": 1386,
+            "episodeNumber": 27,
+            "duration": "23:06",
+            "title": "Episode 27"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/1053",
+            "durationSec": 1386,
+            "showInNewEpisodes": false,
+            "duration": "23:06",
+            "title": "Episode 28",
+            "episodeNumber": 28
+          },
+          {
+            "duration": "23:06",
+            "durationSec": 1386,
+            "showInNewEpisodes": false,
+            "title": "Episode 29",
+            "episodeNumber": 29,
+            "streamUrl": "https://t.me/c/3432917101/1057"
+          },
+          {
+            "episodeNumber": 30,
+            "streamUrl": "https://t.me/c/3432917101/1061",
+            "durationSec": 1386,
+            "showInNewEpisodes": false,
+            "title": "Episode 30",
+            "duration": "23:06"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/1065",
+            "title": "Episode 31",
+            "durationSec": 1385,
+            "episodeNumber": 31,
+            "showInNewEpisodes": false,
+            "duration": "23:05"
+          },
+          {
+            "title": "Episode 32",
+            "durationSec": 1386,
+            "episodeNumber": 32,
+            "streamUrl": "https://t.me/c/3432917101/1069",
+            "duration": "23:06",
+            "showInNewEpisodes": false
+          },
+          {
+            "durationSec": 1386,
+            "episodeNumber": 33,
+            "duration": "23:06",
+            "streamUrl": "https://t.me/c/3432917101/1073",
+            "title": "Episode 33",
+            "showInNewEpisodes": false
+          },
+          {
+            "duration": "23:06",
+            "durationSec": 1386,
+            "title": "Episode 34",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/1077",
+            "episodeNumber": 34
+          }
+        ]
+      },
+      {
+        "seasonNumber": 13,
+        "episodes": [
+          {
+            "durationSec": 1386,
+            "showInNewEpisodes": false,
+            "episodeNumber": 1,
+            "title": "Episode 1",
+            "duration": "23:06",
+            "streamUrl": "https://t.me/c/3432917101/1083"
+          },
+          {
+            "showInNewEpisodes": false,
+            "duration": "23:04",
+            "episodeNumber": 2,
+            "streamUrl": "https://t.me/c/3432917101/1091",
+            "title": "Episode 2",
+            "durationSec": 1384
+          },
+          {
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/1095",
+            "episodeNumber": 3,
+            "title": "Episode 3",
+            "durationSec": 1386,
+            "duration": "23:06"
+          },
+          {
+            "showInNewEpisodes": false,
+            "durationSec": 1386,
+            "title": "Episode 4",
+            "duration": "23:06",
+            "streamUrl": "https://t.me/c/3432917101/1099",
+            "episodeNumber": 4
+          },
+          {
+            "title": "Episode 5",
+            "durationSec": 1385,
+            "episodeNumber": 5,
+            "streamUrl": "https://t.me/c/3432917101/1103",
+            "showInNewEpisodes": false,
+            "duration": "23:05"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/1107",
+            "duration": "23:05",
+            "title": "Episode 6",
+            "episodeNumber": 6,
+            "showInNewEpisodes": false,
+            "durationSec": 1385
+          },
+          {
+            "duration": "23:06",
+            "showInNewEpisodes": false,
+            "episodeNumber": 7,
+            "streamUrl": "https://t.me/c/3432917101/1111",
+            "durationSec": 1386,
+            "title": "Episode 7"
+          },
+          {
+            "showInNewEpisodes": false,
+            "title": "Episode 8",
+            "duration": "23:05",
+            "episodeNumber": 8,
+            "durationSec": 1385,
+            "streamUrl": "https://t.me/c/3432917101/1116"
+          },
+          {
+            "durationSec": 1386,
+            "episodeNumber": 9,
+            "streamUrl": "https://t.me/c/3432917101/1121",
+            "showInNewEpisodes": false,
+            "duration": "23:06",
+            "title": "Episode 9"
+          },
+          {
+            "title": "Episode 10",
+            "showInNewEpisodes": false,
+            "episodeNumber": 10,
+            "duration": "23:05",
+            "streamUrl": "https://t.me/c/3432917101/1125",
+            "durationSec": 1385
+          },
+          {
+            "duration": "23:06",
+            "title": "Episode 11",
+            "streamUrl": "https://t.me/c/3432917101/1129",
+            "durationSec": 1386,
+            "episodeNumber": 11,
+            "showInNewEpisodes": false
+          },
+          {
+            "title": "Episode 12",
+            "durationSec": 1386,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/1134",
+            "duration": "23:06",
+            "episodeNumber": 12
+          },
+          {
+            "episodeNumber": 13,
+            "duration": "23:04",
+            "showInNewEpisodes": false,
+            "durationSec": 1384,
+            "streamUrl": "https://t.me/c/3432917101/1139",
+            "title": "Episode 13"
+          },
+          {
+            "durationSec": 1385,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/1143",
+            "episodeNumber": 14,
+            "duration": "23:05",
+            "title": "Episode 14"
+          },
+          {
+            "durationSec": 1441,
+            "showInNewEpisodes": false,
+            "title": "Episode 15",
+            "episodeNumber": 15,
+            "streamUrl": "https://t.me/c/3432917101/1147",
+            "duration": "24:01"
+          },
+          {
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/1151",
+            "episodeNumber": 16,
+            "title": "Episode 16",
+            "duration": "23:00",
+            "durationSec": 1380
+          },
+          {
+            "title": "Episode 17",
+            "streamUrl": "https://t.me/c/3432917101/1155",
+            "showInNewEpisodes": false,
+            "duration": "23:08",
+            "episodeNumber": 17,
+            "durationSec": 1388
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/1160",
+            "durationSec": 1424,
+            "episodeNumber": 18,
+            "showInNewEpisodes": false,
+            "title": "Episode 18",
+            "duration": "23:44"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/1165",
+            "title": "Episode 19",
+            "episodeNumber": 19,
+            "showInNewEpisodes": false,
+            "durationSec": 1386,
+            "duration": "23:06"
+          },
+          {
+            "durationSec": 1769,
+            "showInNewEpisodes": false,
+            "duration": "29:29",
+            "streamUrl": "https://t.me/c/3432917101/1169",
+            "episodeNumber": 20,
+            "title": "Episode 20"
+          }
+        ]
+      },
+      {
+        "episodes": [
+          {
+            "showInNewEpisodes": false,
+            "episodeNumber": 1,
+            "duration": "23:07",
+            "streamUrl": "https://t.me/c/3432917101/1175",
+            "title": "Episode 1",
+            "durationSec": 1387
+          },
+          {
+            "duration": "23:06",
+            "showInNewEpisodes": false,
+            "title": "Episode 2",
+            "streamUrl": "https://t.me/c/3432917101/1179",
+            "episodeNumber": 2,
+            "durationSec": 1386
+          },
+          {
+            "showInNewEpisodes": false,
+            "episodeNumber": 3,
+            "title": "Episode 3",
+            "durationSec": 1386,
+            "streamUrl": "https://t.me/c/3432917101/1183",
+            "duration": "23:06"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/1187",
+            "showInNewEpisodes": false,
+            "episodeNumber": 4,
+            "title": "Episode 4",
+            "duration": "23:05",
+            "durationSec": 1385
+          },
+          {
+            "durationSec": 1386,
+            "title": "Episode 5",
+            "episodeNumber": 5,
+            "streamUrl": "https://t.me/c/3432917101/1191",
+            "showInNewEpisodes": false,
+            "duration": "23:06"
+          },
+          {
+            "title": "Episode 6",
+            "durationSec": 1385,
+            "duration": "23:05",
+            "episodeNumber": 6,
+            "streamUrl": "https://t.me/c/3432917101/1195",
+            "showInNewEpisodes": false
+          },
+          {
+            "episodeNumber": 7,
+            "showInNewEpisodes": false,
+            "duration": "23:05",
+            "title": "Episode 7",
+            "durationSec": 1385,
+            "streamUrl": "https://t.me/c/3432917101/1199"
+          },
+          {
+            "duration": "23:04",
+            "durationSec": 1384,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/1203",
+            "episodeNumber": 8,
+            "title": "Episode 8"
+          },
+          {
+            "durationSec": 1385,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/1206",
+            "title": "Episode 9",
+            "duration": "23:05",
+            "episodeNumber": 9
+          },
+          {
+            "durationSec": 1385,
+            "showInNewEpisodes": false,
+            "duration": "23:05",
+            "title": "Episode 10",
+            "episodeNumber": 10,
+            "streamUrl": "https://t.me/c/3432917101/1211"
+          },
+          {
+            "durationSec": 1386,
+            "title": "Episode 11",
+            "duration": "23:06",
+            "streamUrl": "https://t.me/c/3432917101/1215",
+            "showInNewEpisodes": false,
+            "episodeNumber": 11
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/1219",
+            "showInNewEpisodes": false,
+            "duration": "23:06",
+            "durationSec": 1386,
+            "episodeNumber": 12,
+            "title": "Episode 12"
+          },
+          {
+            "duration": "23:06",
+            "streamUrl": "https://t.me/c/3432917101/1223",
+            "durationSec": 1386,
+            "showInNewEpisodes": false,
+            "title": "Episode 13",
+            "episodeNumber": 13
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/1227",
+            "episodeNumber": 14,
+            "title": "Episode 14",
+            "duration": "23:08",
+            "durationSec": 1388,
+            "showInNewEpisodes": false
+          },
+          {
+            "duration": "23:05",
+            "title": "Episode 15",
+            "streamUrl": "https://t.me/c/3432917101/1231",
+            "episodeNumber": 15,
+            "durationSec": 1385,
+            "showInNewEpisodes": false
+          },
+          {
+            "duration": "23:05",
+            "episodeNumber": 16,
+            "durationSec": 1385,
+            "streamUrl": "https://t.me/c/3432917101/1235",
+            "showInNewEpisodes": false,
+            "title": "Episode 16"
+          },
+          {
+            "durationSec": 1386,
+            "streamUrl": "https://t.me/c/3432917101/1239",
+            "title": "Episode 17",
+            "showInNewEpisodes": false,
+            "duration": "23:06",
+            "episodeNumber": 17
+          },
+          {
+            "title": "Episode 18",
+            "duration": "23:06",
+            "streamUrl": "https://t.me/c/3432917101/1243",
+            "durationSec": 1386,
+            "showInNewEpisodes": false,
+            "episodeNumber": 18
+          },
+          {
+            "duration": "23:06",
+            "title": "Episode 19",
+            "episodeNumber": 19,
+            "durationSec": 1386,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/1247"
+          },
+          {
+            "title": "Episode 20",
+            "showInNewEpisodes": false,
+            "durationSec": 1386,
+            "streamUrl": "https://t.me/c/3432917101/1251",
+            "episodeNumber": 20,
+            "duration": "23:06"
+          },
+          {
+            "showInNewEpisodes": false,
+            "episodeNumber": 21,
+            "durationSec": 1386,
+            "streamUrl": "https://t.me/c/3432917101/1255",
+            "duration": "23:06",
+            "title": "Episode 21"
+          },
+          {
+            "episodeNumber": 22,
+            "showInNewEpisodes": false,
+            "durationSec": 1386,
+            "duration": "23:06",
+            "title": "Episode 22",
+            "streamUrl": "https://t.me/c/3432917101/1259"
+          },
+          {
+            "durationSec": 1386,
+            "showInNewEpisodes": false,
+            "title": "Episode 23",
+            "streamUrl": "https://t.me/c/3432917101/1263",
+            "episodeNumber": 23,
+            "duration": "23:06"
+          },
+          {
+            "episodeNumber": 24,
+            "title": "Episode 24",
+            "durationSec": 1386,
+            "duration": "23:06",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/1267"
+          },
+          {
+            "duration": "23:06",
+            "durationSec": 1386,
+            "title": "Episode 25",
+            "episodeNumber": 25,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/1271"
+          }
+        ],
+        "seasonNumber": 14
+      },
+      {
+        "episodes": [
+          {
+            "streamUrl": "https://t.me/c/3432917101/1279",
+            "episodeNumber": 1,
+            "showInNewEpisodes": false,
+            "title": "Episode 1",
+            "duration": "23:06",
+            "durationSec": 1386
+          },
+          {
+            "duration": "23:06",
+            "streamUrl": "https://t.me/c/3432917101/1283",
+            "episodeNumber": 2,
+            "durationSec": 1386,
+            "showInNewEpisodes": false,
+            "title": "Episode 2"
+          },
+          {
+            "episodeNumber": 3,
+            "durationSec": 1384,
+            "showInNewEpisodes": false,
+            "duration": "23:04",
+            "title": "Episode 3",
+            "streamUrl": "https://t.me/c/3432917101/1287"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/1290",
+            "showInNewEpisodes": false,
+            "duration": "23:06",
+            "title": "Episode 4",
+            "episodeNumber": 4,
+            "durationSec": 1386
+          },
+          {
+            "duration": "23:06",
+            "streamUrl": "https://t.me/c/3432917101/1295",
+            "showInNewEpisodes": false,
+            "title": "Episode 5",
+            "durationSec": 1386,
+            "episodeNumber": 5
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/1302",
+            "episodeNumber": 6,
+            "durationSec": 1385,
+            "title": "Episode 6",
+            "duration": "23:05",
+            "showInNewEpisodes": false
+          },
+          {
+            "durationSec": 1386,
+            "showInNewEpisodes": false,
+            "title": "Episode 7",
+            "episodeNumber": 7,
+            "streamUrl": "https://t.me/c/3432917101/1307",
+            "duration": "23:06"
+          },
+          {
+            "episodeNumber": 8,
+            "title": "Episode 8",
+            "streamUrl": "https://t.me/c/3432917101/1310",
+            "duration": "23:06",
+            "showInNewEpisodes": false,
+            "durationSec": 1386
+          },
+          {
+            "episodeNumber": 9,
+            "streamUrl": "https://t.me/c/3432917101/1314",
+            "showInNewEpisodes": false,
+            "title": "Episode 9",
+            "durationSec": 1385,
+            "duration": "23:05"
+          },
+          {
+            "showInNewEpisodes": false,
+            "duration": "23:07",
+            "title": "Episode 10",
+            "durationSec": 1387,
+            "streamUrl": "https://t.me/c/3432917101/1320",
+            "episodeNumber": 10
+          },
+          {
+            "episodeNumber": 11,
+            "title": "Episode 11",
+            "durationSec": 1386,
+            "duration": "23:06",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/1324"
+          },
+          {
+            "durationSec": 1382,
+            "duration": "23:02",
+            "showInNewEpisodes": false,
+            "episodeNumber": 12,
+            "title": "Episode 12",
+            "streamUrl": "https://t.me/c/3432917101/1328"
+          },
+          {
+            "title": "Episode 13",
+            "episodeNumber": 13,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/1332",
+            "durationSec": 1385,
+            "duration": "23:05"
+          },
+          {
+            "episodeNumber": 14,
+            "durationSec": 1386,
+            "duration": "23:06",
+            "title": "Episode 14",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/1339"
+          },
+          {
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/1340",
+            "title": "Episode 15",
+            "durationSec": 1386,
+            "duration": "23:06",
+            "episodeNumber": 15
+          },
+          {
+            "duration": "23:02",
+            "title": "Episode 16",
+            "durationSec": 1382,
+            "showInNewEpisodes": false,
+            "episodeNumber": 16,
+            "streamUrl": "https://t.me/c/3432917101/1345"
+          },
+          {
+            "title": "Episode 17",
+            "durationSec": 1384,
+            "episodeNumber": 17,
+            "streamUrl": "https://t.me/c/3432917101/1349",
+            "showInNewEpisodes": false,
+            "duration": "23:04"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/1351",
+            "duration": "23:04",
+            "episodeNumber": 18,
+            "title": "Episode 18",
+            "showInNewEpisodes": false,
+            "durationSec": 1384
+          },
+          {
+            "durationSec": 1385,
+            "showInNewEpisodes": false,
+            "title": "Episode 19",
+            "streamUrl": "https://t.me/c/3432917101/1356",
+            "duration": "23:05",
+            "episodeNumber": 19
+          },
+          {
+            "title": "Episode 20",
+            "duration": "23:04",
+            "streamUrl": "https://t.me/c/3432917101/1360",
+            "durationSec": 1384,
+            "episodeNumber": 20,
+            "showInNewEpisodes": false
+          },
+          {
+            "duration": "23:05",
+            "streamUrl": "https://t.me/c/3432917101/1363",
+            "title": "Episode 21",
+            "episodeNumber": 21,
+            "durationSec": 1385,
+            "showInNewEpisodes": false
+          },
+          {
+            "durationSec": 1384,
+            "showInNewEpisodes": false,
+            "duration": "23:04",
+            "episodeNumber": 22,
+            "streamUrl": "https://t.me/c/3432917101/1367",
+            "title": "Episode 22"
+          },
+          {
+            "episodeNumber": 23,
+            "title": "Episode 23",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/1373",
+            "durationSec": 1385,
+            "duration": "23:05"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/1375",
+            "durationSec": 1384,
+            "showInNewEpisodes": false,
+            "duration": "23:04",
+            "episodeNumber": 24,
+            "title": "Episode 24"
+          },
+          {
+            "duration": "23:05",
+            "showInNewEpisodes": false,
+            "episodeNumber": 25,
+            "streamUrl": "https://t.me/c/3432917101/1379",
+            "title": "Episode 25",
+            "durationSec": 1385
+          },
+          {
+            "showInNewEpisodes": false,
+            "episodeNumber": 26,
+            "duration": "23:04",
+            "durationSec": 1384,
+            "title": "Episode 26",
+            "streamUrl": "https://t.me/c/3432917101/1383"
+          }
+        ],
+        "seasonNumber": 15
+      },
+      {
+        "episodes": [
+          {
+            "duration": "23:04",
+            "showInNewEpisodes": false,
+            "title": "Episode 1",
+            "streamUrl": "https://t.me/c/3432917101/1387",
+            "episodeNumber": 1,
+            "durationSec": 1384
+          },
+          {
+            "episodeNumber": 2,
+            "durationSec": 1384,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/1391",
+            "duration": "23:04",
+            "title": "Episode 2"
+          },
+          {
+            "title": "Episode 3",
+            "streamUrl": "https://t.me/c/3432917101/1395",
+            "episodeNumber": 3,
+            "durationSec": 1385,
+            "showInNewEpisodes": false,
+            "duration": "23:05"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/1401",
+            "episodeNumber": 4,
+            "durationSec": 1385,
+            "showInNewEpisodes": false,
+            "duration": "23:05",
+            "title": "Episode 4"
+          },
+          {
+            "durationSec": 1385,
+            "showInNewEpisodes": false,
+            "title": "Episode 5",
+            "streamUrl": "https://t.me/c/3432917101/1405",
+            "duration": "23:05",
+            "episodeNumber": 5
+          },
+          {
+            "durationSec": 1383,
+            "showInNewEpisodes": false,
+            "duration": "23:03",
+            "episodeNumber": 6,
+            "title": "Episode 6",
+            "streamUrl": "https://t.me/c/3432917101/1409"
+          },
+          {
+            "title": "Episode 7",
+            "duration": "23:01",
+            "showInNewEpisodes": false,
+            "durationSec": 1381,
+            "episodeNumber": 7,
+            "streamUrl": "https://t.me/c/3432917101/1414"
+          },
+          {
+            "episodeNumber": 8,
+            "durationSec": 1385,
+            "duration": "23:05",
+            "showInNewEpisodes": false,
+            "title": "Episode 8",
+            "streamUrl": "https://t.me/c/3432917101/1418"
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/1421",
+            "durationSec": 1385,
+            "duration": "23:05",
+            "episodeNumber": 9,
+            "showInNewEpisodes": false,
+            "title": "Episode 9"
+          },
+          {
+            "duration": "23:06",
+            "episodeNumber": 10,
+            "title": "Episode 10",
+            "showInNewEpisodes": false,
+            "durationSec": 1386,
+            "streamUrl": "https://t.me/c/3432917101/1425"
+          },
+          {
+            "title": "Episode 11",
+            "durationSec": 1385,
+            "streamUrl": "https://t.me/c/3432917101/1429",
+            "showInNewEpisodes": false,
+            "duration": "23:05",
+            "episodeNumber": 11
+          },
+          {
+            "title": "Episode 12",
+            "durationSec": 1385,
+            "showInNewEpisodes": false,
+            "duration": "23:05",
+            "streamUrl": "https://t.me/c/3432917101/1433",
+            "episodeNumber": 12
+          },
+          {
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/1438",
+            "episodeNumber": 13,
+            "durationSec": 1386,
+            "duration": "23:06",
+            "title": "Episode 13"
+          },
+          {
+            "title": "Episode 14",
+            "showInNewEpisodes": false,
+            "duration": "00:30",
+            "durationSec": 30,
+            "episodeNumber": 14,
+            "streamUrl": "https://t.me/c/3432917101/1443"
+          },
+          {
+            "episodeNumber": 15,
+            "streamUrl": "https://t.me/c/3432917101/1464",
+            "durationSec": 1386,
+            "title": "Episode 15",
+            "showInNewEpisodes": false,
+            "duration": "23:06"
+          }
+        ],
+        "seasonNumber": 16
+      },
+      {
+        "episodes": [
+          {
+            "episodeNumber": 1,
+            "showInNewEpisodes": false,
+            "duration": "23:06",
+            "title": "Episode 1",
+            "streamUrl": "https://t.me/c/3432917101/1468",
+            "durationSec": 1386
+          },
+          {
+            "streamUrl": "https://t.me/c/3432917101/1470",
+            "episodeNumber": 2,
+            "showInNewEpisodes": false,
+            "title": "Episode 2",
+            "duration": "23:06",
+            "durationSec": 1386
+          },
+          {
+            "episodeNumber": 3,
+            "streamUrl": "https://t.me/c/3432917101/1479",
+            "showInNewEpisodes": false,
+            "title": "Episode 3",
+            "duration": "23:06",
+            "durationSec": 1386
+          },
+          {
+            "duration": "23:06",
+            "title": "Episode 4",
+            "episodeNumber": 4,
+            "durationSec": 1386,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/3432917101/1486"
+          },
+          {
+            "showInNewEpisodes": false,
+            "title": "Episode 5",
+            "duration": "23:07",
+            "streamUrl": "https://t.me/c/3432917101/1495",
+            "durationSec": 1387,
+            "episodeNumber": 5
+          },
+          {
+            "episodeNumber": 6,
+            "title": "Episode 6",
+            "streamUrl": "https://t.me/c/3432917101/1508",
+            "showInNewEpisodes": false,
+            "durationSec": 1386,
+            "duration": "23:06"
+          },
+          {
+            "episodeNumber": 7,
+            "streamUrl": "https://t.me/c/3432917101/1517",
+            "durationSec": 1352,
+            "showInNewEpisodes": false,
+            "duration": "22:32",
+            "title": "Episode 7"
+          },
+          {
+            "durationSec": 1386,
+            "showInNewEpisodes": false,
+            "episodeNumber": 8,
+            "duration": "23:06",
+            "title": "Episode 8",
+            "streamUrl": "https://t.me/c/3432917101/1537"
+          },
+          {
+            "durationSec": 1386,
+            "duration": "23:06",
+            "title": "Episode 9",
+            "streamUrl": "https://t.me/c/3432917101/1546",
+            "showInNewEpisodes": false,
+            "episodeNumber": 9
+          },
+          {
+            "episodeNumber": 10,
+            "duration": "23:05",
+            "durationSec": 1385,
+            "streamUrl": "https://t.me/c/3432917101/1562",
+            "title": "Episode 10",
+            "showInNewEpisodes": false
+          },
+          {
+            "durationSec": 1387,
+            "duration": "23:07",
+            "showInNewEpisodes": false,
+            "episodeNumber": 11,
+            "title": "Episode 11",
+            "streamUrl": "https://t.me/Naruto_Shippuden_HindiiDubb/20"
+          },
+          {
+            "durationSec": 1387,
+            "showInNewEpisodes": false,
+            "episodeNumber": 12,
+            "streamUrl": "https://t.me/Naruto_Shippuden_HindiiDubb/21",
+            "title": "Episode 12",
+            "duration": "23:07"
+          },
+          {
+            "episodeNumber": 13,
+            "duration": "23:05",
+            "streamUrl": "https://t.me/Naruto_Shippuden_HindiiDubb/25",
+            "showInNewEpisodes": false,
+            "title": "Episode 13",
+            "durationSec": 1385
+          }
+        ],
+        "seasonNumber": 17
+      },
+      {
+        "episodes": [
+          {
+            "streamUrl": "https://t.me/Naruto_Shippuden_HindiiDubb/30",
+            "showInNewEpisodes": false,
+            "episodeNumber": 1,
+            "duration": "23:05",
+            "title": "Episode 1",
+            "durationSec": 1385
+          },
+          {
+            "durationSec": 1385,
+            "showInNewEpisodes": false,
+            "duration": "23:05",
+            "episodeNumber": 2,
+            "title": "Episode 2",
+            "streamUrl": "https://t.me/Naruto_Shippuden_HindiiDubb/36"
+          },
+          {
+            "title": "Episode 3",
+            "showInNewEpisodes": false,
+            "episodeNumber": 3,
+            "durationSec": 1386,
+            "duration": "23:06",
+            "streamUrl": "https://t.me/Naruto_Shippuden_HindiiDubb/44"
+          },
+          {
+            "streamUrl": "https://t.me/Naruto_Shippuden_HindiiDubb/78",
+            "episodeNumber": 4,
+            "duration": "23:04",
+            "showInNewEpisodes": false,
+            "title": "Episode 4",
+            "durationSec": 1384
+          },
+          {
+            "showInNewEpisodes": false,
+            "durationSec": 1385,
+            "episodeNumber": 5,
+            "streamUrl": "https://t.me/Naruto_Shippuden_HindiiDubb/84",
+            "duration": "23:05",
+            "title": "Episode 5"
+          },
+          {
+            "durationSec": 1383,
+            "episodeNumber": 6,
+            "streamUrl": "https://t.me/Naruto_Shippuden_HindiiDubb/91",
+            "duration": "23:03",
+            "title": "Episode 6",
+            "showInNewEpisodes": false
+          },
+          {
+            "durationSec": 1385,
+            "episodeNumber": 7,
+            "title": "Episode 7",
+            "streamUrl": "https://t.me/Naruto_Shippuden_HindiiDubb/98",
+            "showInNewEpisodes": false,
+            "duration": "23:05"
+          },
+          {
+            "episodeNumber": 8,
+            "title": "Episode 8",
+            "streamUrl": "https://t.me/Naruto_Shippuden_HindiiDubb/108",
+            "showInNewEpisodes": false,
+            "durationSec": 1384,
+            "duration": "23:04"
+          },
+          {
+            "title": "Episode 9",
+            "episodeNumber": 9,
+            "showInNewEpisodes": false,
+            "duration": "23:06",
+            "streamUrl": "https://t.me/Naruto_Shippuden_HindiiDubb/113",
+            "durationSec": 1386
+          },
+          {
+            "title": "Episode 10",
+            "durationSec": 1385,
+            "streamUrl": "https://t.me/Naruto_Shippuden_HindiiDubb/119",
+            "showInNewEpisodes": false,
+            "episodeNumber": 10,
+            "duration": "23:05"
+          },
+          {
+            "duration": "23:05",
+            "title": "Episode 11",
+            "episodeNumber": 11,
+            "streamUrl": "https://t.me/Naruto_Shippuden_HindiiDubb/124",
+            "durationSec": 1385,
+            "showInNewEpisodes": false
+          },
+          {
+            "episodeNumber": 12,
+            "durationSec": 1386,
+            "streamUrl": "https://t.me/Naruto_Shippuden_HindiiDubb/130",
+            "title": "Episode 12",
+            "showInNewEpisodes": false,
+            "duration": "23:06"
+          },
+          {
+            "streamUrl": "https://t.me/Naruto_Shippuden_HindiiDubb/136",
+            "duration": "23:06",
+            "title": "Episode 13",
+            "episodeNumber": 13,
+            "durationSec": 1386,
+            "showInNewEpisodes": false
+          },
+          {
+            "durationSec": 1385,
+            "duration": "23:05",
+            "title": "Episode 14",
+            "episodeNumber": 14,
+            "streamUrl": "https://t.me/Naruto_Shippuden_HindiiDubb/143",
+            "showInNewEpisodes": false
+          },
+          {
+            "duration": "23:06",
+            "episodeNumber": 15,
+            "durationSec": 1386,
+            "streamUrl": "https://t.me/Naruto_Shippuden_HindiiDubb/150",
+            "showInNewEpisodes": false,
+            "title": "Episode 15"
+          },
+          {
+            "title": "Episode 16",
+            "episodeNumber": 16,
+            "streamUrl": "https://t.me/Naruto_Shippuden_HindiiDubb/156",
+            "duration": "23:05",
+            "showInNewEpisodes": false,
+            "durationSec": 1385
+          },
+          {
+            "duration": "23:06",
+            "title": "Episode 17",
+            "showInNewEpisodes": false,
+            "episodeNumber": 17,
+            "durationSec": 1386,
+            "streamUrl": "https://t.me/Naruto_Shippuden_HindiiDubb/161"
+          },
+          {
+            "duration": "23:06",
+            "showInNewEpisodes": false,
+            "episodeNumber": 18,
+            "addedAt": 1794896506607,
+            "durationSec": 1386,
+            "title": "Episode 18",
+            "streamUrl": "https://t.me/Naruto_Shippuden_HindiiDubb/177",
+            "createdAt": 1794896506607
+          }
+        ],
+        "seasonNumber": 18
+      }
+    ],
+    "published": true,
+    "title": "Naruto: Shippuden",
+    "videoQualities": {},
+    "featured": false,
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1794902482,
+      "nanoseconds": 456000000
+    }
+  },
+  {
+    "id": "tg_4451036277_109",
+    "telegramChannelId": "4451036277",
+    "releaseYear": 2026,
+    "director": "Michael Spierig, Peter Spierig",
+    "originalTitle": "Fall 2: Deadpoint",
+    "rating": 5.3,
+    "cast": "Harriet Slater, Arsema Thomas, Tom Brittney",
+    "published": true,
+    "runtime": "01:37:52",
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537449,
+      "nanoseconds": 644000000
+    },
+    "qualityBadge": "NONE",
+    "imdbId": "tt31192372",
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BOTI4MjNjNDgtOWY2ZC00YTdjLThhMGItZjZiYjRhNmVhY2JhXkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "seasons": [],
+    "genre": "Adventure, Drama, Thriller",
+    "streamingUrl": "https://t.me/c/4451036277/109",
+    "displayCategory": "Hollywood",
+    "telegramMsgId": 109,
+    "title": "Fall 2: Deadpoint",
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BOTI4MjNjNDgtOWY2ZC00YTdjLThhMGItZjZiYjRhNmVhY2JhXkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "videoQualities": {
+      "720p": "https://t.me/c/4451036277/108",
+      "1080p": "https://t.me/c/4451036277/109"
+    },
+    "trailerUrl": "",
+    "description": "Overwhelmed by her sister Hunter's death, Jax (Slater) connects with Luce (Thomas), Hunter's fearless friend. To heal, they attempt the infamous plank walk of Mount Kwan in Thailand. After a sudden rockslide leaves them stranded on a fragile plank 3000 feet in the air, Jax must confront her deepest fears and fight for survival to find closure.",
+    "featured": true,
+    "language": "English",
+    "contentType": null,
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537449,
+      "nanoseconds": 644000000
+    },
+    "originalCategory": "Hollywood Movie",
+    "duration": 5872
+  },
+  {
+    "id": "tg_4451036277_115",
+    "duration": 5429,
+    "rating": 8,
+    "contentType": null,
+    "language": "Hindi, Chinese",
+    "title": "The Butcher's Blade",
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537449,
+      "nanoseconds": 803000000
+    },
+    "published": true,
+    "featured": true,
+    "originalCategory": "Hollywood Movie",
+    "description": "A low-ranking constable faces persecution, becomes a scapegoat in a theft case, and gets rescued by his teacher. Now caught between serving corrupt officials or fighting for freedom, he must choose his path.",
+    "imdbId": "tt39314786",
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BMjNlMDM2OWItY2IxNC00YWI0LTgyNTUtNDQ0ZWRiMjliMjQ2XkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BMjNlMDM2OWItY2IxNC00YWI0LTgyNTUtNDQ0ZWRiMjliMjQ2XkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "streamingUrl": "https://t.me/c/4451036277/115",
+    "displayCategory": "Hollywood",
+    "videoQualities": {
+      "1080p": "https://t.me/c/4451036277/115",
+      "720p": "https://t.me/c/4451036277/113"
+    },
+    "seasons": [],
+    "telegramMsgId": 115,
+    "cast": "Fengchao Liu, Shanshan Chunyu, Fufu Yuan",
+    "telegramChannelId": "4451036277",
+    "runtime": "01:30:29",
+    "qualityBadge": "NONE",
+    "releaseYear": 2026,
+    "director": "Liu Wenpu",
+    "originalTitle": "The Butcher's Blade",
+    "trailerUrl": "",
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537449,
+      "nanoseconds": 803000000
+    },
+    "genre": "Action, Crime"
+  },
+  {
+    "id": "tg_4451036277_119",
+    "language": "Hindi",
+    "originalTitle": "Saale Aashiq",
+    "published": true,
+    "duration": 7621,
+    "contentType": null,
+    "seasons": [],
+    "videoQualities": {
+      "720p": "https://t.me/c/4451036277/119"
+    },
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537449,
+      "nanoseconds": 947000000
+    },
+    "description": "The story is about standing up to the hate politics, age-old traditions and an eventual death threats as a couple faces opposition from their respective families.",
+    "runtime": "02:07:01",
+    "telegramMsgId": 119,
+    "featured": true,
+    "title": "Saale Aashiq",
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BMzNiMGU2NDItZThkOS00ZjQ0LTkzNzQtOGMxZTgwM2EyYzY2XkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "genre": "Drama",
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BMzNiMGU2NDItZThkOS00ZjQ0LTkzNzQtOGMxZTgwM2EyYzY2XkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "trailerUrl": "",
+    "qualityBadge": "NONE",
+    "imdbId": "tt15464150",
+    "displayCategory": "Bollywood",
+    "director": "Siddharth Singh, Garima Wahal",
+    "cast": "Chunky Pandey, Tahir Raj Bhasin, Mithila Palkar",
+    "originalCategory": "Bollywood Movie",
+    "rating": 8,
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537449,
+      "nanoseconds": 947000000
+    },
+    "telegramChannelId": "4451036277",
+    "releaseYear": 2024,
+    "streamingUrl": "https://t.me/c/4451036277/119"
+  },
+  {
+    "id": "tg_4451036277_120",
+    "cast": "Fatima Arrif, Rumana Molla",
+    "runtime": "02:07:01",
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BMTc4ZTQxNjMtMmNjZS00MDM0LWFjZWUtMGYwZTYzNzg1ZWY2XkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "streamingUrl": "https://t.me/c/4451036277/120",
+    "imdbId": "tt36433990",
+    "originalCategory": "Bollywood Movie",
+    "rating": 8,
+    "qualityBadge": "NONE",
+    "director": "",
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537450,
+      "nanoseconds": 104000000
+    },
+    "title": "Saali sharafat",
+    "published": true,
+    "releaseYear": 2025,
+    "seasons": [],
+    "displayCategory": "Bollywood",
+    "duration": 7621,
+    "telegramChannelId": "4451036277",
+    "genre": "Action",
+    "language": "Hindi",
+    "contentType": null,
+    "telegramMsgId": 120,
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537450,
+      "nanoseconds": 104000000
+    },
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BMTc4ZTQxNjMtMmNjZS00MDM0LWFjZWUtMGYwZTYzNzg1ZWY2XkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "featured": true,
+    "description": "",
+    "trailerUrl": "",
+    "originalTitle": "Saali sharafat",
+    "videoQualities": {
+      "720p": "https://t.me/c/4451036277/120"
+    }
+  },
+  {
+    "id": "tg_4451036277_121",
+    "featured": true,
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537450,
+      "nanoseconds": 260000000
+    },
+    "rating": 9.8,
+    "published": true,
+    "qualityBadge": "NONE",
+    "description": "Jude loves his cousin Annie. After Annie's father Arokiya seeks marriage prospects and tells Jude's mom, he dies in an accident. His body vanishes at the Dead House. Inspector Chakaravarthy probes suspects and searches.",
+    "seasons": [],
+    "originalCategory": "Bollywood Movie",
+    "trailerUrl": "",
+    "genre": "Action",
+    "streamingUrl": "https://t.me/c/4451036277/121",
+    "duration": 7621,
+    "contentType": null,
+    "runtime": "02:07:01",
+    "videoQualities": {
+      "1080p": "https://t.me/c/4451036277/121"
+    },
+    "displayCategory": "Bollywood",
+    "language": "Hindi, Tamil",
+    "imdbId": "tt39110374",
+    "telegramMsgId": 121,
+    "releaseYear": 2025,
+    "telegramChannelId": "4451036277",
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BOTRlYTBlY2QtZmJlMS00MzBkLTg0NzctOWVlOTYwOGEyN2I5XkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "director": "Anton Ajith",
+    "originalTitle": "Saa Vee",
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537450,
+      "nanoseconds": 260000000
+    },
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BOTRlYTBlY2QtZmJlMS00MzBkLTg0NzctOWVlOTYwOGEyN2I5XkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "title": "Saa Vee",
+    "cast": "Aashika, Master Ajay, Adhesh Bala"
+  },
+  {
+    "id": "tg_4451036277_124",
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537450,
+      "nanoseconds": 421000000
+    },
+    "telegramChannelId": "4451036277",
+    "qualityBadge": "NONE",
+    "originalTitle": "Bombay Mumbai - Vada Pav",
+    "language": "Hindi",
+    "seasons": [],
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BZGZjYmMyY2UtNjU1Ni00YThhLWFmNTItM2ZhNWI1ZDA5NmZiXkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "imdbId": "tt50334891",
+    "duration": 6204,
+    "videoQualities": {
+      "1080p": "https://t.me/c/4451036277/124"
+    },
+    "rating": 8,
+    "telegramMsgId": 124,
+    "title": "Bombay Mumbai - Vada Pav",
+    "streamingUrl": "https://t.me/c/4451036277/124",
+    "trailerUrl": "",
+    "originalCategory": "Bollywood Movie",
+    "featured": true,
+    "releaseYear": 2026,
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BZGZjYmMyY2UtNjU1Ni00YThhLWFmNTItM2ZhNWI1ZDA5NmZiXkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "runtime": "01:43:24",
+    "genre": "Action",
+    "cast": "",
+    "displayCategory": "Bollywood",
+    "contentType": null,
+    "published": true,
+    "description": "",
+    "director": "",
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537450,
+      "nanoseconds": 421000000
+    }
+  },
+  {
+    "id": "tg_4451036277_125",
+    "releaseYear": 2026,
+    "videoQualities": {
+      "720p": "https://t.me/c/4451036277/125"
+    },
+    "displayCategory": "Bollywood",
+    "cast": "Owusu Ansah, Kofi Antwi, Gifty Appiah",
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BYjIwNDI2NTQtMWEwMS00ZWEwLTg5MzMtYWI5NzY5ZWZhZTk3XkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BYjIwNDI2NTQtMWEwMS00ZWEwLTg5MzMtYWI5NzY5ZWZhZTk3XkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "director": "Godwin Owusu",
+    "originalCategory": "Bollywood Movie",
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537450,
+      "nanoseconds": 575000000
+    },
+    "genre": "Comedy",
+    "language": "Hindi",
+    "published": true,
+    "title": "2026: The Movie",
+    "runtime": "01:43:24",
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537450,
+      "nanoseconds": 575000000
+    },
+    "rating": 8,
+    "duration": 6204,
+    "description": "",
+    "telegramMsgId": 125,
+    "qualityBadge": "NONE",
+    "imdbId": "tt39382635",
+    "trailerUrl": "",
+    "contentType": null,
+    "originalTitle": "2026: The Movie",
+    "seasons": [],
+    "streamingUrl": "https://t.me/c/4451036277/125",
+    "featured": true,
+    "telegramChannelId": "4451036277"
+  },
+  {
+    "id": "tg_4451036277_148",
+    "streamingUrl": "https://t.me/c/4451036277/148",
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537450,
+      "nanoseconds": 733000000
+    },
+    "videoQualities": {
+      "720p": "https://t.me/c/4451036277/147",
+      "1080p": "https://t.me/c/4451036277/148"
+    },
+    "director": "Adam Wingard",
+    "originalCategory": "Hollywood Movie",
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BYTNkNGZjOWItNTQ1Yy00ZGE4LWFhOTUtNmQyNDk1OTNkMTljXkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "trailerUrl": "",
+    "qualityBadge": "NONE",
+    "genre": "Action, Horror, Sci-Fi",
+    "releaseYear": 2026,
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BYTNkNGZjOWItNTQ1Yy00ZGE4LWFhOTUtNmQyNDk1OTNkMTljXkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "cast": "Adria Arjona, Dan Stevens, Eric Wareheim",
+    "seasons": [],
+    "originalTitle": "Onslaught",
+    "telegramChannelId": "4451036277",
+    "contentType": null,
+    "title": "Onslaught",
+    "rating": 5.4,
+    "featured": true,
+    "telegramMsgId": 148,
+    "published": true,
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537450,
+      "nanoseconds": 733000000
+    },
+    "description": "When a rogue squad of genetically engineered super soldiers break loose in the desert, a badass Army sniper must unleash hell to protect her young daughter.",
+    "language": "English",
+    "imdbId": "tt32268691",
+    "runtime": "01:32:19",
+    "displayCategory": "Hollywood",
+    "duration": 5539
+  },
+  {
+    "id": "tg_4451036277_150",
+    "telegramMsgId": 150,
+    "contentType": null,
+    "trailerUrl": "",
+    "director": "Peter Weir",
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537450,
+      "nanoseconds": 873000000
+    },
+    "telegramChannelId": "4451036277",
+    "displayCategory": "Hollywood",
+    "published": true,
+    "cast": "Russell Crowe, Paul Bettany, Billy Boyd",
+    "description": "In April 1805 during the Napoleonic Wars, H.M.S. Surprise, a British frigate, is under the command of Captain Jack Aubrey. Aubrey and the Surprise's current orders are to track and capture or destroy a French privateer named Acheron. The Acheron is currently in the Atlantic off South America headed toward the Pacific in order to extend Napoleon's reach of the wars. This task will be a difficult one as Aubrey quickly learns in an initial battle with the Acheron that it is a bigger and faster ship than the Surprise, which puts the Surprise at a disadvantage. Aubrey's single-mindedness in this seemingly impossible pursuit puts him at odds with the Surprise's doctor and naturalist, Stephen Maturin, who is also Aubrey's most trusted advisor on board and closest friend. Facing other internal obstacles which have resulted in what they consider a string of bad luck, Aubrey ultimately uses Maturin's scientific exploits to figure out a way to achieve his and the ship's seemingly impossible goal.",
+    "originalTitle": "Master and Commander: The Far Side of the World",
+    "genre": "Action, Adventure, Drama",
+    "videoQualities": {
+      "1080p": "https://t.me/c/4451036277/150",
+      "720p": "https://t.me/c/4451036277/149"
+    },
+    "runtime": "02:18:21",
+    "featured": true,
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537450,
+      "nanoseconds": 873000000
+    },
+    "qualityBadge": "NONE",
+    "originalCategory": "Hollywood Movie",
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BZDEzYmZmOTYtMzdlYS00MWNjLWE2YjEtMzkyZTMyOWZjMjkyXkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "rating": 7.5,
+    "title": "Master and Commander: The Far Side of the World",
+    "duration": 8301,
+    "imdbId": "tt0311113",
+    "language": "English, French, Portuguese",
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BZDEzYmZmOTYtMzdlYS00MWNjLWE2YjEtMzkyZTMyOWZjMjkyXkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "releaseYear": 2003,
+    "seasons": [],
+    "streamingUrl": "https://t.me/c/4451036277/150"
+  },
+  {
+    "id": "tg_4451036277_154",
+    "runtime": "01:34:37",
+    "duration": 5677,
+    "originalCategory": "Bollywood Movie",
+    "streamingUrl": "https://t.me/c/4451036277/154",
+    "language": "Hindi",
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537451,
+      "nanoseconds": 32000000
+    },
+    "published": true,
+    "releaseYear": 2024,
+    "qualityBadge": "NONE",
+    "featured": true,
+    "cast": "Elias Koteas, Briana Middleton, Justin Nurse",
+    "seasons": [],
+    "genre": "Sci-Fi, Thriller",
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BMWNkYzFmNTgtZWQwMi00YTc0LWIzYTktNzVjN2NjY2U3OWM1XkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "description": "Follows two inmates in the near future who are sentenced to a lifetime of hard labor on a distant planet. As things unravel, they become increasingly paranoid and start to lose a sense of who they are and their past lives.",
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BMWNkYzFmNTgtZWQwMi00YTc0LWIzYTktNzVjN2NjY2U3OWM1XkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "trailerUrl": "",
+    "telegramMsgId": 154,
+    "rating": 8,
+    "title": "The Silent Planet",
+    "videoQualities": {
+      "1080p": "https://t.me/c/4451036277/154"
+    },
+    "telegramChannelId": "4451036277",
+    "imdbId": "tt28239875",
+    "displayCategory": "Bollywood",
+    "director": "Jeffrey St. Jules",
+    "contentType": null,
+    "originalTitle": "The Silent Planet",
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537451,
+      "nanoseconds": 32000000
+    }
+  },
+  {
+    "id": "tg_4451036277_16",
+    "streamingUrl": "https://t.me/c/4451036277/16",
+    "contentType": null,
+    "videoQualities": {
+      "720p": "https://t.me/c/4451036277/16"
+    },
+    "telegramChannelId": "4451036277",
+    "rating": 5.8,
+    "cast": "Dhvani Bhanushali, Ravi Chauhan, Rakesh Bedi",
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537432,
+      "nanoseconds": 116000000
+    },
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BMmRlZTI2N2ItZjYyOS00NWRkLWE2ZGMtZDRhYTcwZWQwMGU0XkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "originalCategory": "Bollywood Movie",
+    "imdbId": "tt33245905",
+    "qualityBadge": "NONE",
+    "description": "A commitment-phobic woman refuses to marry the man her parents have chosen for her. Chaos ensues as she tries to escape the wedding while the groom and his family chase her down, leading to a hilarious and cringe-worthy comedy of errors.",
+    "displayCategory": "Bollywood",
+    "director": "Saurabh Dasgupta",
+    "title": "Kahan Shuru Kahan Khatam",
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BMmRlZTI2N2ItZjYyOS00NWRkLWE2ZGMtZDRhYTcwZWQwMGU0XkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "duration": 6253,
+    "seasons": [],
+    "language": "Hindi",
+    "telegramMsgId": 16,
+    "genre": "Comedy, Drama, Romance",
+    "runtime": "01:44:13",
+    "featured": true,
+    "releaseYear": 2024,
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537432,
+      "nanoseconds": 116000000
+    },
+    "trailerUrl": "",
+    "published": true,
+    "originalTitle": "Kahan Shuru Kahan Khatam"
+  },
+  {
+    "id": "tg_4451036277_39",
+    "streamingUrl": "https://t.me/c/4451036277/39",
+    "releaseYear": 2026,
+    "runtime": "01:43:24",
+    "originalTitle": "Vadala",
+    "trailerUrl": "",
+    "title": "Vadala",
+    "seasons": [],
+    "qualityBadge": "NONE",
+    "cast": "Jagapathi Babu, Hrithika Srinivas, Laya",
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BZDM3MGI5YjctZGIzMC00MWI4LWI1Y2ItYmFhN2FkZWZkMTJhXkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537432,
+      "nanoseconds": 295000000
+    },
+    "telegramMsgId": 39,
+    "published": true,
+    "director": "Vamsi Krishna Akella",
+    "displayCategory": "Bollywood",
+    "videoQualities": {
+      "720p": "https://t.me/c/4451036277/42",
+      "1080p": "https://t.me/c/4451036277/39"
+    },
+    "duration": 6204,
+    "imdbId": "tt41874413",
+    "description": "A seemingly perfect couple's life takes an unsettling turn when an unexpected presence enters their world. What begins as admiration slowly spirals into emotional chaos, blurring the lines between love, attachment, and obsession.",
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537432,
+      "nanoseconds": 295000000
+    },
+    "language": "Telugu",
+    "contentType": null,
+    "originalCategory": "Bollywood Movie",
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BZDM3MGI5YjctZGIzMC00MWI4LWI1Y2ItYmFhN2FkZWZkMTJhXkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "telegramChannelId": "4451036277",
+    "featured": true,
+    "genre": "Drama, Thriller",
+    "rating": 8
+  },
+  {
+    "id": "tg_4451036277_44",
+    "imdbId": "tt4849438",
+    "description": "Kattappa narrates the story of Amarendra Baahubali to Shivudu, who learns his lineage as the prince of Mahishmati and the son of Amarendra Baahubali. Shivudu, now Mahendra Baahubali, decides to dethrone and punish Bhallaladeva for all wrongdoings of his past with the help of Kattappa.",
+    "title": "Baahubali 2: The Conclusion",
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537432,
+      "nanoseconds": 458000000
+    },
+    "duration": 10010,
+    "telegramMsgId": 44,
+    "language": "Telugu, Tamil",
+    "featured": true,
+    "rating": 8.2,
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BNTRhYTlhZTgtYmMyYy00NWI4LTk4MzItOWM2YjBmYTg2OTI2XkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "contentType": null,
+    "originalTitle": "Baahubali 2: The Conclusion",
+    "seasons": [],
+    "telegramChannelId": "4451036277",
+    "displayCategory": "Bollywood",
+    "releaseYear": 2017,
+    "streamingUrl": "https://t.me/c/4451036277/44",
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537432,
+      "nanoseconds": 458000000
+    },
+    "videoQualities": {
+      "720p": "https://t.me/c/4451036277/44"
+    },
+    "genre": "Action, Drama",
+    "published": true,
+    "originalCategory": "Bollywood Movie",
+    "trailerUrl": "",
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BNTRhYTlhZTgtYmMyYy00NWI4LTk4MzItOWM2YjBmYTg2OTI2XkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "runtime": "02:46:50",
+    "qualityBadge": "NONE",
+    "cast": "Prabhas, Rana Daggubati, Anushka Shetty",
+    "director": "S.S. Rajamouli"
+  },
+  {
+    "id": "tg_4451036277_51",
+    "published": true,
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537432,
+      "nanoseconds": 619000000
+    },
+    "description": "When a rich spoilt brat's grandfather hires a female chauffer for him, the fun unfolds.",
+    "videoQualities": {
+      "1080p": "https://t.me/c/4451036277/51",
+      "720p": "https://t.me/c/4451036277/52"
+    },
+    "originalCategory": "Bollywood Movie",
+    "runtime": "01:35:05",
+    "featured": true,
+    "streamingUrl": "https://t.me/c/4451036277/51",
+    "telegramChannelId": "4451036277",
+    "displayCategory": "Bollywood",
+    "seasons": [],
+    "language": "Hindi",
+    "qualityBadge": "NONE",
+    "contentType": null,
+    "duration": 5705,
+    "cast": "Vickrant Mahajan, Kainaz Motivala, Prem Chopra",
+    "genre": "Comedy",
+    "director": "Vickrant Mahajan",
+    "releaseYear": 2012,
+    "title": "Challo Driver",
+    "telegramMsgId": 51,
+    "imdbId": "tt2251552",
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BMDk5MzM2M2QtZTgyMC00Zjk2LTkzZDQtNjQ3ZjQyMmJhZGZkXkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "trailerUrl": "",
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537432,
+      "nanoseconds": 619000000
+    },
+    "rating": 5.8,
+    "originalTitle": "Challo Driver",
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BMDk5MzM2M2QtZTgyMC00Zjk2LTkzZDQtNjQ3ZjQyMmJhZGZkXkEyXkFqcGc@._V1_QL90_UX1280_.jpg"
+  },
+  {
+    "id": "tg_4451036277_56",
+    "language": "Tamil",
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BMDdjMTRkNmItYTc2MS00YmZlLThlZjMtODNiNGExZGQ4YzkxXkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "qualityBadge": "NONE",
+    "contentType": null,
+    "rating": 2.9,
+    "videoQualities": {
+      "1080p": "https://t.me/c/4451036277/56",
+      "720p": "https://t.me/c/4451036277/53"
+    },
+    "duration": 8459,
+    "imdbId": "tt15478046",
+    "description": "A kindhearted-yet-fearless man, once a gangster, wants to stay away from the problems around him. But the three criminals who rule the city won't let him be the same.",
+    "trailerUrl": "",
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537432,
+      "nanoseconds": 775000000
+    },
+    "title": "Thalainagaram 2",
+    "streamingUrl": "https://t.me/c/4451036277/56",
+    "telegramChannelId": "4451036277",
+    "featured": true,
+    "telegramMsgId": 56,
+    "displayCategory": "Bollywood",
+    "runtime": "02:20:59",
+    "published": true,
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537432,
+      "nanoseconds": 775000000
+    },
+    "genre": "Action, Drama",
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BMDdjMTRkNmItYTc2MS00YmZlLThlZjMtODNiNGExZGQ4YzkxXkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "seasons": [],
+    "originalTitle": "Thalainagaram 2",
+    "director": "V.Z. Dhorai, Kowshick Saravanan",
+    "releaseYear": 2023,
+    "cast": "Sundar C., Pallak Lalwani, Thambi Ramaiah",
+    "originalCategory": "Bollywood Movie"
+  },
+  {
+    "id": "tg_4451036277_63",
+    "director": "Girish A.D.",
+    "rating": 8,
+    "telegramMsgId": 63,
+    "originalCategory": "Bollywood Movie",
+    "cast": "Mamitha Baiju, Nivin Pauly, Sangeeth Prathap",
+    "title": "Bethlehem Kudumba Unit",
+    "published": true,
+    "qualityBadge": "NONE",
+    "contentType": null,
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537432,
+      "nanoseconds": 937000000
+    },
+    "description": "Follows a couple with a significant age difference as they navigate their romantic relationship.",
+    "originalTitle": "Bethlehem Kudumba Unit",
+    "displayCategory": "Bollywood",
+    "imdbId": "tt37535100",
+    "streamingUrl": "https://t.me/c/4451036277/62",
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BYzI3MDJiZmQtNDg3ZC00Y2MwLWE5ZDMtNGRiOTA5OTQzMjQ4XkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "featured": true,
+    "trailerUrl": "",
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BYzI3MDJiZmQtNDg3ZC00Y2MwLWE5ZDMtNGRiOTA5OTQzMjQ4XkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "seasons": [],
+    "language": "Hindi, Malayalam",
+    "videoQualities": {
+      "720p": "https://t.me/c/4451036277/64",
+      "1080p": "https://t.me/c/4451036277/62"
+    },
+    "genre": "Comedy, Drama, Romance",
+    "runtime": "02:35:13",
+    "telegramChannelId": "4451036277",
+    "duration": 9313,
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537432,
+      "nanoseconds": 937000000
+    },
+    "releaseYear": 2026
+  },
+  {
+    "id": "tg_4451036277_73",
+    "contentType": null,
+    "qualityBadge": "NONE",
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BYWExY2JhYWItM2NlZS00ZjBkLWFkOTEtN2NiMTc5YjU0NzI3XkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "originalTitle": "Pooja Meri Jaan",
+    "displayCategory": "Bollywood",
+    "rating": 6.6,
+    "videoQualities": {
+      "1080p": "https://t.me/c/4451036277/73",
+      "720p": "https://t.me/c/4451036277/67"
+    },
+    "director": "Vipasha Arvind, Navjot Gulati",
+    "imdbId": "tt21378820",
+    "title": "Pooja Meri Jaan",
+    "telegramMsgId": 73,
+    "streamingUrl": "https://t.me/c/4451036277/73",
+    "telegramChannelId": "4451036277",
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537433,
+      "nanoseconds": 77000000
+    },
+    "originalCategory": "Bollywood Movie",
+    "description": "Aniket \"Anni\" Srivastava, an aspiring actor, is madly in love with his close friend Pooja Dogra. Despite his years of devotion, Pooja sees him strictly as a friend and later falls for Vikram, a suave investment banker. Devastated, Anni waits for his chance. When Pooja and Vikram split, Anni proposes again, but she refuses. Pushed to the brink, Anni threatens self-harm. Unconvinced, Pooja dismisses him",
+    "genre": "Drama, Mystery, Romance",
+    "cast": "Huma Qureshi, Mrunal Thakur, Vijay Raaz",
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BYWExY2JhYWItM2NlZS00ZjBkLWFkOTEtN2NiMTc5YjU0NzI3XkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "featured": true,
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537433,
+      "nanoseconds": 77000000
+    },
+    "runtime": "01:57:32",
+    "trailerUrl": "",
+    "published": true,
+    "releaseYear": 2026,
+    "seasons": [],
+    "duration": 7052,
+    "language": "Hindi"
+  },
+  {
+    "id": "tg_4451036277_79",
+    "originalTitle": "The End of Oak Street",
+    "videoQualities": {
+      "720p": "https://t.me/c/4451036277/76",
+      "1080p": "https://t.me/c/4451036277/79"
+    },
+    "seasons": [],
+    "title": "The End of Oak Street",
+    "contentType": null,
+    "director": "David Robert Mitchell",
+    "telegramChannelId": "4451036277",
+    "displayCategory": "Hollywood",
+    "runtime": "01:39:45",
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537433,
+      "nanoseconds": 218000000
+    },
+    "telegramMsgId": 79,
+    "description": "The Platt family bands together to navigate their new surroundings after a cosmic event transports their suburban neighborhood to someplace unknown.",
+    "published": true,
+    "featured": true,
+    "imdbId": "tt27165187",
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537433,
+      "nanoseconds": 218000000
+    },
+    "qualityBadge": "NONE",
+    "cast": "Anne Hathaway, Ewan McGregor, Maisy Stella",
+    "originalCategory": "Hollywood Movie",
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BZDQ1MDhmZWQtNjdhOS00MGE0LTkxMTItN2Q4NjIyYzUzZmRlXkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "duration": 5985,
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BZDQ1MDhmZWQtNjdhOS00MGE0LTkxMTItN2Q4NjIyYzUzZmRlXkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "language": "Hindi, English",
+    "releaseYear": 2026,
+    "genre": "Action, Adventure, Mystery",
+    "trailerUrl": "",
+    "rating": 6.5,
+    "streamingUrl": "https://t.me/c/4451036277/79"
+  },
+  {
+    "id": "tg_4451036277_87",
+    "telegramChannelId": "4451036277",
+    "releaseYear": 2026,
+    "director": "Pugazhendhi Mathimaran",
+    "rating": 8,
+    "videoQualities": {
+      "720p": "https://t.me/c/4451036277/86",
+      "1080p": "https://t.me/c/4451036277/87"
+    },
+    "cast": "Soori, Mahima Nambiar, Suhas",
+    "displayCategory": "Bollywood",
+    "trailerUrl": "",
+    "genre": "Action, Drama, Sport",
+    "runtime": "02:32:37",
+    "published": true,
+    "seasons": [],
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537433,
+      "nanoseconds": 360000000
+    },
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BYjdjYjVkY2ItOGM4Yy00OGQ3LTg3ZDAtNmYzMWZkYzg3NGZhXkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "imdbId": "tt36596965",
+    "originalCategory": "Bollywood Movie",
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537433,
+      "nanoseconds": 360000000
+    },
+    "description": "A fishing captain applies his maritime knowledge in a traditional boat race along Tamil Nadu's coast during a festival, leading a six-person team against other crews.",
+    "featured": true,
+    "telegramMsgId": 87,
+    "qualityBadge": "NONE",
+    "contentType": null,
+    "language": "Hindi, Tamil",
+    "title": "Mandaadi",
+    "streamingUrl": "https://t.me/c/4451036277/87",
+    "originalTitle": "Mandaadi",
+    "duration": 9157,
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BYjdjYjVkY2ItOGM4Yy00OGQ3LTg3ZDAtNmYzMWZkYzg3NGZhXkEyXkFqcGc@._V1_QL90_UX1080_.jpg"
+  },
+  {
+    "id": "tg_4451036277_92",
+    "duration": 8182,
+    "telegramMsgId": 92,
+    "displayCategory": "Bollywood",
+    "contentType": null,
+    "language": "Punjabi",
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537433,
+      "nanoseconds": 501000000
+    },
+    "telegramChannelId": "4451036277",
+    "rating": 8,
+    "published": true,
+    "originalTitle": "Mitti de Putt",
+    "featured": true,
+    "imdbId": "tt39120291",
+    "description": "",
+    "cast": "Dev Kharoud, Vikramjeet Virk, Pardeep Cheema",
+    "genre": "Action",
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BZDIxZTNkNmMtNGNiNC00OTRlLTk0NzgtZTM2M2YzZDNiOTUzXkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "trailerUrl": "",
+    "originalCategory": "Bollywood Movie",
+    "videoQualities": {
+      "720p": "https://t.me/c/4451036277/90",
+      "1080p": "https://t.me/c/4451036277/91"
+    },
+    "streamingUrl": "https://t.me/c/4451036277/91",
+    "seasons": [],
+    "title": "Mitti de Putt",
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BZDIxZTNkNmMtNGNiNC00OTRlLTk0NzgtZTM2M2YzZDNiOTUzXkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "runtime": "02:16:22",
+    "releaseYear": 2026,
+    "director": "R Malkana",
+    "qualityBadge": "NONE",
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537433,
+      "nanoseconds": 501000000
+    }
+  },
+  {
+    "id": "tg_4451036277_97",
+    "runtime": "02:19:42",
+    "originalCategory": "Bollywood Movie",
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537433,
+      "nanoseconds": 660000000
+    },
+    "contentType": null,
+    "published": true,
+    "displayCategory": "Bollywood",
+    "streamingUrl": "https://t.me/c/4451036277/96",
+    "title": "Almari",
+    "qualityBadge": "NONE",
+    "director": "",
+    "trailerUrl": "",
+    "seasons": [],
+    "description": "",
+    "duration": 8382,
+    "genre": "Action",
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BOTgzNTUyNTctMzJjMS00NDg1LWI2MDMtZTdkM2NlOWQ1NTdiXkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "cast": "Jyotsana Rajpurohit, Mehool Desai",
+    "language": "Hindi",
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BOTgzNTUyNTctMzJjMS00NDg1LWI2MDMtZTdkM2NlOWQ1NTdiXkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "rating": 8,
+    "telegramChannelId": "4451036277",
+    "originalTitle": "Almari",
+    "featured": true,
+    "releaseYear": 2026,
+    "imdbId": "tt34678039",
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537433,
+      "nanoseconds": 660000000
+    },
+    "videoQualities": {
+      "1080p": "https://t.me/c/4451036277/96",
+      "720p": "https://t.me/c/4451036277/94"
+    },
+    "telegramMsgId": 97
+  },
+  {
+    "id": "tg_4451036277_99",
+    "contentType": null,
+    "imdbId": "tt41973194",
+    "director": "Manoj Naiksatam",
+    "telegramChannelId": "4451036277",
+    "rating": 8,
+    "trailerUrl": "",
+    "displayCategory": "Bollywood",
+    "published": true,
+    "description": "",
+    "cast": "Narayan Jadhav, Shraddha Khanolkar, Manasi Naiksatam",
+    "genre": "Family",
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537449,
+      "nanoseconds": 489000000
+    },
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BYzlkNTQ5MTUtODg5Zi00ODI1LTk5MGUtNGJhOGU5OWI0YzFiXkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "streamingUrl": "https://t.me/c/4451036277/103",
+    "language": "Marathi",
+    "runtime": "01:45:01",
+    "originalCategory": "Bollywood Movie",
+    "title": "Gaman (Marathi)",
+    "duration": 6301,
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537433,
+      "nanoseconds": 818000000
+    },
+    "videoQualities": {
+      "1080p": "https://t.me/c/4451036277/103",
+      "720p": "https://t.me/c/4451036277/99"
+    },
+    "telegramMsgId": 99,
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BYzlkNTQ5MTUtODg5Zi00ODI1LTk5MGUtNGJhOGU5OWI0YzFiXkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "qualityBadge": "NONE",
+    "releaseYear": 2025,
+    "originalTitle": "Gaman (Marathi)",
+    "featured": true,
+    "seasons": []
+  },
+  {
+    "id": "tg_4498557265_7",
+    "telegramMsgId": 7,
+    "genre": "Drama, Family, Fantasy",
+    "imdbId": "tt0398808",
+    "qualityBadge": "NONE",
+    "contentType": null,
+    "director": "Gabor Csupo",
+    "published": true,
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795506516,
+      "nanoseconds": 159000000
+    },
+    "trailerUrl": "",
+    "streamingUrl": "https://t.me/c/4498557265/7",
+    "cast": "Josh Hutcherson, AnnaSophia Robb, Zooey Deschanel",
+    "originalTitle": "Bridge to Terabithia",
+    "viewsCount": 2,
+    "rating": 7.2,
+    "description": "Growing up in the redneck country isn't easy for shy Jess Aarons, with a father struggling to make ends meet and two arrogant bigger sisters. In class he bonds with cheeky newcomer Leslie Burke, whose writer parents moved into the neighboring house, despite her taking his only local prestige by beating him in a school race. Having wandered off into the woods after school, they invent a fantasy land called Terabithia, where they can be the superheroes of imaginary feral races. Together they also stand up against bullies, but then tragedy strikes, and Jess must adjust again.",
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BMTMzOTk1MzIyN15BMl5BanBnXkFtZTcwNTM3MjczMQ@@._V1_QL90_UX1280_.jpg",
+    "seasons": [],
+    "videoQualities": {
+      "1080p": "https://t.me/c/4498557265/7"
+    },
+    "displayCategory": "Hollywood",
+    "originalCategory": "Hollywood Movie",
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BMTMzOTk1MzIyN15BMl5BanBnXkFtZTcwNTM3MjczMQ@@._V1_QL90_UX1080_.jpg",
+    "featured": true,
+    "telegramChannelId": "4498557265",
+    "language": "English",
+    "releaseYear": 2007,
+    "title": "Bridge to Terabithia",
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795506516,
+      "nanoseconds": 159000000
+    },
+    "runtime": "96 min",
+    "duration": 5732
+  },
+  {
+    "id": "tg_4498557265_8",
+    "contentType": null,
+    "qualityBadge": "NONE",
+    "originalTitle": "Party Animals",
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BY2NiZGJlZDQtNGNkNC00NTUxLWIxNTMtM2I2Nzk3ZDMwZTM0XkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "displayCategory": "Bollywood",
+    "rating": 8,
+    "director": "Ravi Chhabriya",
+    "videoQualities": {
+      "1080p": "https://t.me/c/4498557265/8"
+    },
+    "imdbId": "tt43636043",
+    "telegramMsgId": 8,
+    "title": "Party Animals",
+    "telegramChannelId": "4498557265",
+    "streamingUrl": "https://t.me/c/4498557265/8",
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795519153,
+      "nanoseconds": 583000000
+    },
+    "originalCategory": "Bollywood Movie",
+    "description": "Childhood best friends Mann Patel and Armaan Khanna reunite in Mumbai for a night out that spirals into chaos with romantic complications, escalating fights, and every fix creating more problems.",
+    "genre": "Comedy",
+    "cast": "Saqib Ayub, Kamlesh Sawant, Brijendra Kala",
+    "viewsCount": 2,
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BY2NiZGJlZDQtNGNkNC00NTUxLWIxNTMtM2I2Nzk3ZDMwZTM0XkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "featured": true,
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795519153,
+      "nanoseconds": 583000000
+    },
+    "runtime": "02:08:05",
+    "trailerUrl": "",
+    "published": true,
+    "releaseYear": 2026,
+    "seasons": [],
+    "duration": 7685,
+    "language": "Hindi"
+  },
+  {
+    "id": "tg_series_4451036277_111",
+    "language": "Hindi",
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537764,
+      "nanoseconds": 747000000
+    },
+    "title": "Ishqa Ishqa",
+    "displayCategory": "Series",
+    "qualityBadge": "NONE",
+    "duration": 14007,
+    "seasons": [
+      {
+        "episodes": [
+          {
+            "showInNewEpisodes": false,
+            "duration": "03:53:27",
+            "episodeNumber": 1,
+            "streamUrl": "https://t.me/c/4451036277/111",
+            "title": "Episode 1",
+            "durationSec": 14007
+          }
+        ],
+        "seasonNumber": 1
+      }
+    ],
+    "contentType": null,
+    "videoQualities": {},
+    "description": "Successful writer Kabir dates Suhani, who brings peace to his life. While writing the sequel to his hit novel Ishqa Ishqa, inspired by childhood love Arohi, her return brings fresh inspiration but threatens his relationship with Suhani.",
+    "runtime": "03:53:27",
+    "telegramChannelId": "4451036277",
+    "featured": true,
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BMDk5ODRmZWYtM2YwMS00ODk3LWE1MGYtYmEzMGRkMzU5OGQ1XkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "streamingUrl": "https://t.me/c/4451036277/111",
+    "imdbId": "tt47743267",
+    "originalCategory": "Web Series",
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BMDk5ODRmZWYtM2YwMS00ODk3LWE1MGYtYmEzMGRkMzU5OGQ1XkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "originalTitle": "Ishqa Ishqa",
+    "trailerUrl": "",
+    "genre": "Romance",
+    "cast": "Helly Shah, Satyajeet Dubey, Anushka Kaushik",
+    "published": true,
+    "director": "",
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537764,
+      "nanoseconds": 747000000
+    },
+    "rating": 7.7,
+    "telegramMsgId": 111,
+    "releaseYear": 2026
+  },
+  {
+    "id": "tg_series_4451036277_117",
+    "originalTitle": "Andhvishwas",
+    "rating": 8,
+    "contentType": null,
+    "originalCategory": "Web Series",
+    "genre": "Comedy",
+    "trailerUrl": "",
+    "telegramMsgId": 117,
+    "description": "Sachin and Rishi navigate the ups and downs of living together, Sachin's superstitious beliefs like horoscope predictions, boiling milk mishaps to encounters with crossing cats.",
+    "director": "",
+    "displayCategory": "Series",
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795540417,
+      "nanoseconds": 692000000
+    },
+    "videoQualities": {},
+    "published": true,
+    "imdbId": "tt28469085",
+    "duration": 9991,
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BOWNjMGVhZGEtMDY2ZC00NWQyLTgyNzYtZTI0NmMyMjg5OTEzXkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "language": "Hindi",
+    "seasons": [
+      {
+        "seasonNumber": 1,
+        "episodes": [
+          {
+            "durationSec": 9991,
+            "duration": "02:46:31",
+            "streamUrl": "https://t.me/c/4451036277/117",
+            "showInNewEpisodes": false,
+            "title": "Episode 1",
+            "episodeNumber": 1
+          }
+        ]
+      }
+    ],
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795540417,
+      "nanoseconds": 692000000
+    },
+    "qualityBadge": "NONE",
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BOWNjMGVhZGEtMDY2ZC00NWQyLTgyNzYtZTI0NmMyMjg5OTEzXkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "featured": true,
+    "runtime": "02:46:31",
+    "releaseYear": 2023,
+    "title": "Andhvishwas",
+    "streamingUrl": "https://t.me/c/4451036277/117",
+    "cast": "Bhakti Punjani, Dev Joshi, Pratik Shukla",
+    "telegramChannelId": "4451036277"
+  },
+  {
+    "id": "tg_series_4451036277_17",
+    "director": "",
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BN2M2MTkwNTEtZTU1Mi00YmVmLTg4YjgtOTM5MTk4Y2Q5OTgwXkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "genre": "Adventure, Drama, Fantasy",
+    "runtime": "01:27:05",
+    "releaseYear": 1997,
+    "telegramMsgId": 17,
+    "displayCategory": "Series",
+    "originalTitle": "The Odyssey",
+    "trailerUrl": "",
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537434,
+      "nanoseconds": 128000000
+    },
+    "telegramChannelId": "4451036277",
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BN2M2MTkwNTEtZTU1Mi00YmVmLTg4YjgtOTM5MTk4Y2Q5OTgwXkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "seasons": [
+      {
+        "seasonNumber": 1,
+        "episodes": [
+          {
+            "episodeNumber": 1,
+            "title": "Episode 1",
+            "duration": "01:27:05",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/4451036277/17",
+            "durationSec": 5225
+          },
+          {
+            "durationSec": 5215,
+            "showInNewEpisodes": false,
+            "title": "Episode 2",
+            "streamUrl": "https://t.me/c/4451036277/18",
+            "duration": "01:26:55",
+            "episodeNumber": 2
+          },
+          {
+            "episodeNumber": 3,
+            "streamUrl": "https://t.me/c/4451036277/19",
+            "title": "Episode 3",
+            "showInNewEpisodes": false,
+            "durationSec": 5035,
+            "duration": "01:23:55"
+          },
+          {
+            "streamUrl": "https://t.me/c/4451036277/20",
+            "episodeNumber": 4,
+            "title": "Episode 4",
+            "showInNewEpisodes": false,
+            "durationSec": 5006,
+            "duration": "01:23:26"
+          },
+          {
+            "duration": "01:21:44",
+            "showInNewEpisodes": false,
+            "durationSec": 4904,
+            "title": "Episode 5",
+            "streamUrl": "https://t.me/c/4451036277/21",
+            "episodeNumber": 5
+          },
+          {
+            "durationSec": 4677,
+            "showInNewEpisodes": false,
+            "title": "Episode 6",
+            "streamUrl": "https://t.me/c/4451036277/22",
+            "episodeNumber": 6,
+            "duration": "01:17:57"
+          },
+          {
+            "streamUrl": "https://t.me/c/4451036277/23",
+            "showInNewEpisodes": false,
+            "title": "Episode 7",
+            "episodeNumber": 7,
+            "duration": "01:08:03",
+            "durationSec": 4083
+          },
+          {
+            "streamUrl": "https://t.me/c/4451036277/24",
+            "durationSec": 4225,
+            "duration": "01:10:25",
+            "episodeNumber": 8,
+            "showInNewEpisodes": false,
+            "title": "Episode 8"
+          },
+          {
+            "duration": "01:09:01",
+            "episodeNumber": 9,
+            "streamUrl": "https://t.me/c/4451036277/25",
+            "title": "Episode 9",
+            "durationSec": 4141,
+            "showInNewEpisodes": false
+          },
+          {
+            "episodeNumber": 10,
+            "title": "Episode 10",
+            "streamUrl": "https://t.me/c/4451036277/26",
+            "showInNewEpisodes": false,
+            "duration": "01:11:40",
+            "durationSec": 4300
+          },
+          {
+            "episodeNumber": 11,
+            "duration": "01:10:49",
+            "durationSec": 4249,
+            "title": "Episode 11",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/4451036277/27"
+          },
+          {
+            "durationSec": 4246,
+            "duration": "01:10:46",
+            "episodeNumber": 12,
+            "title": "Episode 12",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/4451036277/28"
+          },
+          {
+            "title": "Episode 13",
+            "streamUrl": "https://t.me/c/4451036277/29",
+            "episodeNumber": 13,
+            "durationSec": 4378,
+            "duration": "01:12:58",
+            "showInNewEpisodes": false
+          },
+          {
+            "title": "Episode 14",
+            "episodeNumber": 14,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/4451036277/30",
+            "durationSec": 4316,
+            "duration": "01:11:56"
+          },
+          {
+            "durationSec": 4486,
+            "episodeNumber": 15,
+            "showInNewEpisodes": false,
+            "title": "Episode 15",
+            "streamUrl": "https://t.me/c/4451036277/31",
+            "duration": "01:14:46"
+          },
+          {
+            "episodeNumber": 16,
+            "streamUrl": "https://t.me/c/4451036277/32",
+            "showInNewEpisodes": false,
+            "title": "Episode 16",
+            "duration": "01:12:04",
+            "durationSec": 4324
+          },
+          {
+            "durationSec": 4296,
+            "title": "Episode 17",
+            "episodeNumber": 17,
+            "duration": "01:11:36",
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/4451036277/33"
+          },
+          {
+            "title": "Episode 18",
+            "episodeNumber": 18,
+            "streamUrl": "https://t.me/c/4451036277/34",
+            "duration": "01:16:17",
+            "durationSec": 4577,
+            "showInNewEpisodes": false
+          },
+          {
+            "episodeNumber": 20,
+            "duration": "01:15:43",
+            "title": "Episode 20",
+            "showInNewEpisodes": false,
+            "durationSec": 4543,
+            "streamUrl": "https://t.me/c/4451036277/35"
+          }
+        ]
+      }
+    ],
+    "rating": 7.1,
+    "originalCategory": "Web Series",
+    "description": "The warrior King Odysseus leaves his idyllic life in the kingdom of Ithaca to fight in the Trojan War. After winning the war, he now must endure a lengthy, ten-year journey to return, and with all his wits, Odysseus must overcome deadly monsters, powerful forces of nature, seductive enchantresses, and even journey into the bowels of the Underworld.",
+    "published": true,
+    "featured": true,
+    "qualityBadge": "NONE",
+    "cast": "Armand Assante, Greta Scacchi, Geraldine Chaplin",
+    "videoQualities": {},
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537434,
+      "nanoseconds": 128000000
+    },
+    "language": "English",
+    "title": "The Odyssey",
+    "duration": 5225,
+    "contentType": null,
+    "imdbId": "tt0118414",
+    "streamingUrl": "https://t.me/c/4451036277/17"
+  },
+  {
+    "id": "tg_series_4451036277_5",
+    "title": "Brothers & Sisters",
+    "duration": 1285,
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BMTc2OTA0MjczM15BMl5BanBnXkFtZTcwNjU2MTc0MQ@@._V1_QL90_UX1280_.jpg",
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537433,
+      "nanoseconds": 973000000
+    },
+    "language": "English",
+    "streamingUrl": "https://t.me/c/4451036277/5",
+    "originalCategory": "Web Series",
+    "releaseYear": 2006,
+    "featured": true,
+    "trailerUrl": "",
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BMTc2OTA0MjczM15BMl5BanBnXkFtZTcwNjU2MTc0MQ@@._V1_QL90_UX1080_.jpg",
+    "qualityBadge": "NONE",
+    "imdbId": "tt0758737",
+    "contentType": null,
+    "telegramMsgId": 5,
+    "telegramChannelId": "4451036277",
+    "seasons": [
+      {
+        "seasonNumber": 1,
+        "episodes": [
+          {
+            "duration": "21:25",
+            "title": "Episode 77",
+            "durationSec": 1285,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/4451036277/5",
+            "episodeNumber": 77
+          },
+          {
+            "durationSec": 1366,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/4451036277/6",
+            "episodeNumber": 78,
+            "duration": "22:46",
+            "title": "Episode 78"
+          },
+          {
+            "durationSec": 1644,
+            "title": "Episode 79",
+            "duration": "27:24",
+            "episodeNumber": 79,
+            "showInNewEpisodes": false,
+            "streamUrl": "https://t.me/c/4451036277/7"
+          },
+          {
+            "durationSec": 1729,
+            "episodeNumber": 80,
+            "showInNewEpisodes": false,
+            "title": "Episode 80",
+            "streamUrl": "https://t.me/c/4451036277/8",
+            "duration": "28:49"
+          },
+          {
+            "episodeNumber": 81,
+            "showInNewEpisodes": false,
+            "title": "Episode 81",
+            "streamUrl": "https://t.me/c/4451036277/15",
+            "duration": "01:40:23",
+            "durationSec": 6023
+          }
+        ]
+      }
+    ],
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795537433,
+      "nanoseconds": 973000000
+    },
+    "runtime": "21:25",
+    "originalTitle": "Brothers & Sisters",
+    "genre": "Drama",
+    "displayCategory": "Series",
+    "published": true,
+    "videoQualities": {},
+    "cast": "Dave Annable, Calista Flockhart, Rachel Griffiths",
+    "rating": 7.5,
+    "director": "",
+    "description": "The story of the drama surrounding a family's adult siblings."
+  },
+  {
+    "id": "tg_series_4498557265_9",
+    "runtime": "21:58",
+    "imdbId": "tt14650074",
+    "trailerUrl": "",
+    "description": "It revolves around Bhuvan and his family's everyday lives, when an unexpected purchase leads to a series of events and depicts every common man's larger than life dreams.",
+    "originalTitle": "Dhindora",
+    "featured": true,
+    "posterUrl": "https://m.media-amazon.com/images/M/MV5BNDgxYzRkNGEtMzMzZi00MjgyLTk3YzQtNjcxYjJkM2I2M2Q5XkEyXkFqcGc@._V1_QL90_UX1080_.jpg",
+    "genre": "Comedy, Drama",
+    "viewsCount": 1,
+    "language": "Hindi",
+    "createdAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795532351,
+      "nanoseconds": 436000000
+    },
+    "contentType": null,
+    "seasons": [
+      {
+        "episodes": [
+          {
+            "showInNewEpisodes": false,
+            "duration": "21:58",
+            "streamUrl": "https://t.me/c/4498557265/9",
+            "durationSec": 1318,
+            "title": "Episode 1",
+            "episodeNumber": 1
+          },
+          {
+            "streamUrl": "https://t.me/c/4498557265/10",
+            "showInNewEpisodes": false,
+            "episodeNumber": 2,
+            "duration": "15:00",
+            "title": "Episode 2",
+            "durationSec": 900
+          },
+          {
+            "duration": "16:55",
+            "durationSec": 1015,
+            "streamUrl": "https://t.me/c/4498557265/11",
+            "title": "Episode 3",
+            "showInNewEpisodes": false,
+            "episodeNumber": 3
+          },
+          {
+            "showInNewEpisodes": false,
+            "durationSec": 1205,
+            "title": "Episode 4",
+            "streamUrl": "https://t.me/c/4498557265/12",
+            "episodeNumber": 4,
+            "duration": "20:05"
+          },
+          {
+            "title": "Episode 5",
+            "durationSec": 1014,
+            "episodeNumber": 5,
+            "streamUrl": "https://t.me/c/4498557265/13",
+            "duration": "16:54",
+            "showInNewEpisodes": false
+          },
+          {
+            "streamUrl": "https://t.me/c/4498557265/14",
+            "showInNewEpisodes": false,
+            "durationSec": 977,
+            "title": "Episode 6",
+            "duration": "16:17",
+            "episodeNumber": 6
+          },
+          {
+            "title": "Episode 7",
+            "durationSec": 1279,
+            "duration": "21:19",
+            "showInNewEpisodes": false,
+            "episodeNumber": 7,
+            "streamUrl": "https://t.me/c/4498557265/15"
+          },
+          {
+            "durationSec": 1054,
+            "episodeNumber": 8,
+            "showInNewEpisodes": false,
+            "duration": "17:34",
+            "streamUrl": "https://t.me/c/4498557265/16",
+            "title": "Episode 8"
+          }
+        ],
+        "seasonNumber": 1
+      }
+    ],
+    "displayCategory": "Series",
+    "duration": 1318,
+    "rating": 8.8,
+    "telegramMsgId": 9,
+    "published": true,
+    "director": "",
+    "updatedAt": {
+      "type": "firestore/timestamp/1.0",
+      "seconds": 1795533296,
+      "nanoseconds": 361000000
+    },
+    "releaseYear": 2021,
+    "videoQualities": {},
+    "streamingUrl": "https://t.me/c/4498557265/9",
+    "backdropUrl": "https://m.media-amazon.com/images/M/MV5BNDgxYzRkNGEtMzMzZi00MjgyLTk3YzQtNjcxYjJkM2I2M2Q5XkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
+    "originalCategory": "Web Series",
+    "title": "Dhindora",
+    "cast": "Bhuvan Bam, Gayatri Bhardwaj, Jeeveshu Ahluwalia",
+    "telegramChannelId": "4498557265",
+    "qualityBadge": "NONE"
+  }
+]

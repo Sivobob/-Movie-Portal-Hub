@@ -225,7 +225,25 @@ app.head('/api/stream', handleStream);
 app.use('/api/video', videoRouter);
 app.use('/api/push', pushRouter);
 app.use('/api', downloadCastRouter);
-app.use(downloadCastRouter);
+app.get('/api/movies/catalog', (_req, res) => {
+  try {
+    const candidates = [
+      path.resolve(process.cwd(), 'public/movies-seed.json'),
+      path.resolve(process.cwd(), 'dist/movies-seed.json'),
+      path.resolve(__dirname, 'public/movies-seed.json'),
+    ];
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf8');
+        res.setHeader('Content-Type', 'application/json');
+        return res.send(raw);
+      }
+    }
+    return res.json([]);
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || 'Failed to read movies catalog' });
+  }
+});
 
 // API 404 Handler (Guaranteed JSON)
 app.use('/api', (req, res) => {

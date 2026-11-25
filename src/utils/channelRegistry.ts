@@ -29,7 +29,7 @@ function loadCacheFromDisk(): Record<string, CachedChannelInfo> {
     console.warn('[ChannelRegistry] Error loading cache from disk:', err?.message || err);
   }
 
-  // Auto-seed ONLY Movie Hub Database private channel (+s2Qki5-sfnVjZTI1)
+  // Auto-seed Movie Hub Database private channel (+s2Qki5-sfnVjZTI1)
   if (!inMemoryCache['4498557265']) {
     const movieHubDbEntry: CachedChannelInfo = {
       channelId: '4498557265',

@@ -21,6 +21,7 @@ import {
   RefreshCw,
   Search,
   Sparkles,
+  Square,
   Trash2,
   UploadCloud,
   X,
@@ -89,6 +90,30 @@ interface SyncConfigState {
   autoWatchEnabled: boolean;
   autoPublishVerified: boolean;
   notifyOnNewPublish: boolean;
+  onlyValidAudioAndHd: boolean;
+}
+
+interface BulkSyncJobState {
+  status: 'idle' | 'running' | 'completed' | 'stopped' | 'quota_paused' | 'error';
+  channelRef: string;
+  channelId: string;
+  channelTitle: string;
+  onlyValidAudioAndHd: boolean;
+  startMsgId: number;
+  endMsgId: number;
+  currentMsgId: number;
+  scannedMessages: number;
+  totalVideosSeen: number;
+  publishedCount: number;
+  mergedCount: number;
+  skippedNoAudio: number;
+  skippedLowQuality: number;
+  skippedDuplicates: number;
+  skippedNonVideo: number;
+  startedAtMs: number;
+  updatedAtMs: number;
+  errorMessage: string;
+  upgradeUrl: string;
 }
 
 interface TelegramAutoMovieSyncProps {
@@ -340,6 +365,7 @@ export default function TelegramAutoMovieSync({
             autoWatchEnabled: Boolean(parsed?.autoWatchEnabled ?? true),
             autoPublishVerified: Boolean(parsed?.autoPublishVerified ?? true),
             notifyOnNewPublish: Boolean(parsed?.notifyOnNewPublish ?? true),
+            onlyValidAudioAndHd: Boolean(parsed?.onlyValidAudioAndHd ?? true),
           };
         }
       }
@@ -351,6 +377,7 @@ export default function TelegramAutoMovieSync({
       autoWatchEnabled: true,
       autoPublishVerified: true,
       notifyOnNewPublish: true,
+      onlyValidAudioAndHd: true,
     };
   });
   const [resolvedChannelTitle, setResolvedChannelTitle] = useState<string>('');
@@ -359,6 +386,10 @@ export default function TelegramAutoMovieSync({
   const [rangeStartUrl, setRangeStartUrl] = useState('');
   const [rangeEndUrl, setRangeEndUrl] = useState('');
   const [startFromMsgNum, setStartFromMsgNum] = useState('1');
+
+  // 3k+ Bulk Auto-Publish Background Job State
+  const [bulkJob, setBulkJob] = useState<BulkSyncJobState | null>(null);
+  const [startingBulkJob, setStartingBulkJob] = useState(false);
 
   // Scanning & Publishing State
   const [scanning, setScanning] = useState(false);
@@ -428,6 +459,7 @@ export default function TelegramAutoMovieSync({
               autoWatchEnabled: true,
               autoPublishVerified: true,
               notifyOnNewPublish: true,
+              onlyValidAudioAndHd: true,
             };
             await saveSyncConfig(migrated);
           } else {
@@ -450,6 +482,10 @@ export default function TelegramAutoMovieSync({
                 typeof data?.notifyOnNewPublish === 'boolean'
                   ? data.notifyOnNewPublish
                   : configRef.current.notifyOnNewPublish,
+              onlyValidAudioAndHd:
+                typeof data?.onlyValidAudioAndHd === 'boolean'
+                  ? data.onlyValidAudioAndHd
+                  : configRef.current.onlyValidAudioAndHd,
             };
             setConfig(merged);
             configRef.current = merged;
@@ -457,6 +493,14 @@ export default function TelegramAutoMovieSync({
               localStorage.setItem(LOCAL_SYNC_CONFIG_KEY, JSON.stringify(merged));
             } catch {}
           }
+        }
+      } catch {}
+
+      try {
+        const bulkResp = await authFetch('/api/telegram/bulk-sync-status');
+        const bulkJson = await bulkResp.json();
+        if (!cancelled && bulkJson?.job && bulkJson.job.status !== 'idle') {
+          setBulkJob(bulkJson.job as BulkSyncJobState);
         }
       } catch {}
 
@@ -488,6 +532,42 @@ export default function TelegramAutoMovieSync({
       cancelled = true;
     };
   }, []);
+
+  // Poll 3k+ Bulk Auto-Publish job while active
+  useEffect(() => {
+    if (!bulkJob || bulkJob.status !== 'running') return;
+    let active = true;
+    const pollId = setInterval(async () => {
+      try {
+        const resp = await authFetch('/api/telegram/bulk-sync-status');
+        const data = await resp.json();
+        if (!active || !data?.job) return;
+        const nextJob = data.job as BulkSyncJobState;
+        setBulkJob(nextJob);
+        if (nextJob.status !== 'running') {
+          clearInterval(pollId);
+          if (nextJob.publishedCount + nextJob.mergedCount > 0) {
+            await onBatchComplete().catch(() => {});
+          }
+          if (nextJob.status === 'completed') {
+            showNotification(
+              'success',
+              `🎉 3k+ Channel Publish Complete! ${nextJob.publishedCount} naye + ${nextJob.mergedCount} merged (${nextJob.skippedNoAudio} no-audio & ${nextJob.skippedLowQuality} <720p skipped).`
+            );
+          } else if (nextJob.status === 'quota_paused') {
+            showNotification(
+              'error',
+              `Firestore daily free quota full ho gayi (#${nextJob.currentMsgId} par paused). Upgrade karein ya kal yahin se resume karein.`
+            );
+          }
+        }
+      } catch {}
+    }, 2000);
+    return () => {
+      active = false;
+      clearInterval(pollId);
+    };
+  }, [bulkJob?.status]);
 
   // Helper: publish a single movie OR series/episode draft to Firestore `movies`
   const publishSingleDraftToFirestore = async (
@@ -873,6 +953,7 @@ export default function TelegramAutoMovieSync({
           mode: 'since_latest',
           channelRef: activeUrl,
           sinceMsgId: baselineMsgId,
+          onlyValidAudioAndHd: configRef.current.onlyValidAudioAndHd,
           existingUrls: Array.from(urls),
           existingImdbIds: Array.from(imdbIds),
           existingTitles,
@@ -952,8 +1033,14 @@ export default function TelegramAutoMovieSync({
         showNotification('success', `Channel "${data.channelTitle || 'Connected'}" up-to-date hai — koi nayi pending upload nahi mili.`);
       }
 
+      const skippedAudioCount = Number(data.skippedNoAudio) || 0;
+      const skippedLowQualCount = Number(data.skippedLowQuality) || 0;
+      const filterSuffix =
+        skippedAudioCount > 0 || skippedLowQualCount > 0
+          ? ` • Filtered: ${skippedAudioCount} no-audio, ${skippedLowQualCount} <720p`
+          : '';
       setLastScanStats(
-        `${data.channelTitle ? `${data.channelTitle} • ` : ''}Scanned #${scannedFrom}–#${highestMsgId} • Auto-Published: ${autoPublishedCount} • Needs Review: ${reviewQueue.length}`
+        `${data.channelTitle ? `${data.channelTitle} • ` : ''}Scanned #${scannedFrom}–#${highestMsgId} • Auto-Published: ${autoPublishedCount} • Needs Review: ${reviewQueue.length}${filterSuffix}`
       );
     } catch (err: any) {
       if (!silentAuto) {
@@ -1032,6 +1119,8 @@ export default function TelegramAutoMovieSync({
       let totalFound = 0;
       let totalAutoPublished = 0;
       let totalSkippedAlready = 0;
+      let totalSkippedNoAudio = 0;
+      let totalSkippedLowQual = 0;
       let highestSeen = config.lastSyncedMsgId;
 
       for (let cursor = startMsgNum; cursor <= endMsgNum; cursor += CHUNK_SIZE) {
@@ -1049,6 +1138,7 @@ export default function TelegramAutoMovieSync({
             channelRef: channelOrEndLink,
             startMsgId: cursor,
             endMsgId: chunkEnd,
+            onlyValidAudioAndHd: configRef.current.onlyValidAudioAndHd,
             existingUrls: Array.from(urls),
             existingImdbIds: Array.from(imdbIds),
             existingTitles,
@@ -1061,6 +1151,8 @@ export default function TelegramAutoMovieSync({
 
         if (data.channelTitle) setResolvedChannelTitle(String(data.channelTitle));
         totalSkippedAlready += Number(data.skippedAlreadyAdded) || 0;
+        totalSkippedNoAudio += Number(data.skippedNoAudio) || 0;
+        totalSkippedLowQual += Number(data.skippedLowQuality) || 0;
         highestSeen = Math.max(highestSeen, Number(data.highestMsgId) || chunkEnd);
 
         const chunkItems: AutoMovieDraft[] = Array.isArray(data.items) ? data.items : [];
@@ -1100,8 +1192,12 @@ export default function TelegramAutoMovieSync({
       }
 
       const remainingInQueue = Math.max(0, totalFound - totalAutoPublished);
+      const filterInfo =
+        totalSkippedNoAudio > 0 || totalSkippedLowQual > 0
+          ? ` • Skipped: ${totalSkippedNoAudio} no-audio, ${totalSkippedLowQual} <720p`
+          : '';
       setLastScanStats(
-        `Scanned #${startMsgNum}–#${endMsgNum} • Auto-Published: ${totalAutoPublished} • Ready in Review: ${remainingInQueue} • Already in App: ${totalSkippedAlready}`
+        `Scanned #${startMsgNum}–#${endMsgNum} • Auto-Published: ${totalAutoPublished} • Ready in Review: ${remainingInQueue} • Already in App: ${totalSkippedAlready}${filterInfo}`
       );
       showNotification(
         'success',
@@ -1116,6 +1212,69 @@ export default function TelegramAutoMovieSync({
       setScanning(false);
       setScanProgressText('');
     }
+  };
+
+  // Start / Resume 3k+ Full Channel Server-Side Auto-Publish
+  const handleStartBulkPublish = async (resumeFromId?: number) => {
+    const channelOrEndLink = (rangeEndUrl || rangeStartUrl || config.channelUrl || DEFAULT_CHANNEL_URL).trim();
+    if (!channelOrEndLink) {
+      setScanError('Pehle channel link ya kisi 1 post ka link paste karein.');
+      return;
+    }
+
+    const parsedStart = parseTelegramUrl(rangeStartUrl.trim() || channelOrEndLink);
+    const parsedEnd = parseTelegramUrl(rangeEndUrl.trim() || '');
+    const explicitStart =
+      typeof resumeFromId === 'number' && resumeFromId > 0
+        ? resumeFromId
+        : rangeStartUrl.trim() && parsedStart.messageId
+        ? parseInt(parsedStart.messageId, 10)
+        : Math.max(1, parseInt(startFromMsgNum, 10) || 1);
+    const explicitEnd = parsedEnd.messageId ? parseInt(parsedEnd.messageId, 10) : 0;
+
+    setStartingBulkJob(true);
+    setScanError('');
+    setExpanded(true);
+
+    try {
+      const resp = await authFetch('/api/telegram/bulk-sync-channel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          channelRef: channelOrEndLink,
+          startMsgId: explicitStart,
+          endMsgId: explicitEnd,
+          onlyValidAudioAndHd: configRef.current.onlyValidAudioAndHd,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data?.success) {
+        if (data?.job) setBulkJob(data.job as BulkSyncJobState);
+        throw new Error(data?.error || 'Could not start 3k+ full channel auto-publish.');
+      }
+      if (data?.job) {
+        setBulkJob(data.job as BulkSyncJobState);
+        if (data.job.channelTitle) setResolvedChannelTitle(String(data.job.channelTitle));
+      }
+      showNotification(
+        'success',
+        `🚀 3k+ Full Channel Auto-Publish shuru ho gaya (${
+          configRef.current.onlyValidAudioAndHd ? 'Only 1080p/720p + Valid Audio' : 'All qualities'
+        }).`
+      );
+    } catch (err: any) {
+      setScanError(err?.message || 'Could not start bulk channel auto-publish.');
+    } finally {
+      setStartingBulkJob(false);
+    }
+  };
+
+  const handleStopBulkPublish = async () => {
+    try {
+      const resp = await authFetch('/api/telegram/bulk-sync-stop', { method: 'POST' });
+      const data = await resp.json();
+      if (data?.job) setBulkJob(data.job as BulkSyncJobState);
+    } catch {}
   };
 
   // Inline IMDb Fixer handlers
@@ -1385,6 +1544,7 @@ export default function TelegramAutoMovieSync({
                         onClick={async () => {
                           const targetUrl = config.channelUrl.trim();
                           if (!targetUrl) return;
+                          setScanError('');
                           try {
                             const infoRes = await authFetch('/api/telegram/resolve-channel-info', {
                               method: 'POST',
@@ -1392,6 +1552,14 @@ export default function TelegramAutoMovieSync({
                               body: JSON.stringify({ channelRef: targetUrl }),
                             });
                             const infoJson = await infoRes.json();
+                            if (!infoRes.ok || !infoJson?.success) {
+                              await saveSyncConfig({ ...config, channelUrl: targetUrl });
+                              setScanError(
+                                infoJson?.error ||
+                                  'Channel saved, lekin Bot abhi isko resolve nahi kar paya. Bot ko Admin banakar 1 message bhejein ya 1 post link daalein.'
+                              );
+                              return;
+                            }
                             if (infoJson?.channelTitle) setResolvedChannelTitle(String(infoJson.channelTitle));
                             const parsed = parseTelegramUrl(targetUrl);
                             const nextId =
@@ -1451,7 +1619,7 @@ export default function TelegramAutoMovieSync({
                     </div>
                     <div>
                       <label className="block text-[11px] font-bold text-gray-300 mb-1">
-                        Channel / Latest Post Link (blank = Saved Channel use hoga)
+                        Channel / Any 1 Post Link (blank = Saved Channel)
                       </label>
                       <input
                         type="text"
@@ -1463,7 +1631,7 @@ export default function TelegramAutoMovieSync({
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-2.5">
                     {!rangeStartUrl.trim() && (
                       <div className="flex items-center gap-1.5 text-xs text-gray-300">
                         <span>Start from Post #:</span>
@@ -1478,12 +1646,29 @@ export default function TelegramAutoMovieSync({
                     )}
                     <button
                       type="button"
+                      onClick={() => handleStartBulkPublish()}
+                      disabled={
+                        startingBulkJob ||
+                        bulkJob?.status === 'running' ||
+                        (!rangeEndUrl.trim() && !rangeStartUrl.trim() && !config.channelUrl.trim())
+                      }
+                      className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black font-black text-xs px-4 py-2.5 rounded-lg flex items-center gap-2 cursor-pointer transition-all"
+                    >
+                      {startingBulkJob || bulkJob?.status === 'running' ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <UploadCloud size={14} />
+                      )}
+                      <span>Start 3k+ Full Channel Auto-Publish</span>
+                    </button>
+                    <button
+                      type="button"
                       onClick={handleScanExistingChannel}
                       disabled={scanning || (!rangeEndUrl.trim() && !config.channelUrl.trim())}
-                      className="bg-yellow-400 hover:bg-yellow-300 disabled:opacity-50 text-black font-black text-xs px-4 py-2.5 rounded-lg flex items-center gap-2 cursor-pointer transition-all"
+                      className="bg-yellow-400 hover:bg-yellow-300 disabled:opacity-50 text-black font-black text-xs px-3.5 py-2.5 rounded-lg flex items-center gap-2 cursor-pointer transition-all"
                     >
                       {scanning ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
-                      <span>Scan Channel & Match IMDb Posters</span>
+                      <span>Scan & Preview Drafts</span>
                     </button>
                   </div>
                 </div>
@@ -1495,6 +1680,20 @@ export default function TelegramAutoMovieSync({
               <h3 className="text-xs font-black uppercase tracking-wider text-yellow-400">
                 Smart Accuracy & Auto-Publish Rules
               </h3>
+
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={config.onlyValidAudioAndHd}
+                  onChange={(e) =>
+                    saveSyncConfig({ ...config, onlyValidAudioAndHd: e.target.checked })
+                  }
+                  className="mt-0.5 accent-emerald-400 w-4 h-4 rounded"
+                />
+                <span className="text-xs text-gray-200 leading-snug">
+                  <strong className="text-emerald-400">Only 1080p / 720p with Valid Audio (Skip No-Audio):</strong> Sirf wahi movies aur episodes publish honge jinme working audio track aur 1080p ya 720p quality hai (muted / no-audio / 480p / 360p skip).
+                </span>
+              </label>
 
               <label className="flex items-start gap-2.5 cursor-pointer">
                 <input
@@ -1543,6 +1742,100 @@ export default function TelegramAutoMovieSync({
               </p>
             </div>
           </div>
+
+          {/* 3k+ Bulk Channel Job Progress Card */}
+          {bulkJob && bulkJob.status !== 'idle' && (
+            <div className="bg-neutral-950 border border-emerald-700/50 rounded-xl p-4 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  {bulkJob.status === 'running' ? (
+                    <Loader2 size={15} className="text-emerald-400 animate-spin" />
+                  ) : bulkJob.status === 'completed' ? (
+                    <CheckCircle2 size={15} className="text-emerald-400" />
+                  ) : (
+                    <AlertCircle size={15} className="text-amber-400" />
+                  )}
+                  <span className="text-xs font-black text-white">
+                    3k+ Auto-Publish ({bulkJob.channelTitle || bulkJob.channelId}) —{' '}
+                    <span className="uppercase text-yellow-400">{bulkJob.status.replace('_', ' ')}</span>
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {bulkJob.status === 'running' && (
+                    <button
+                      type="button"
+                      onClick={handleStopBulkPublish}
+                      className="bg-red-600/90 hover:bg-red-500 text-white text-[11px] font-black px-3 py-1 rounded-lg flex items-center gap-1 cursor-pointer"
+                    >
+                      <Square size={10} className="fill-white" />
+                      <span>Stop</span>
+                    </button>
+                  )}
+                  {(bulkJob.status === 'stopped' || bulkJob.status === 'quota_paused') &&
+                    bulkJob.currentMsgId < bulkJob.endMsgId && (
+                      <button
+                        type="button"
+                        onClick={() => handleStartBulkPublish(bulkJob.currentMsgId)}
+                        className="bg-emerald-500 hover:bg-emerald-400 text-black text-[11px] font-black px-3 py-1 rounded-lg cursor-pointer"
+                      >
+                        Resume from #{bulkJob.currentMsgId}
+                      </button>
+                    )}
+                </div>
+              </div>
+
+              <div className="w-full h-2 bg-neutral-900 rounded-full overflow-hidden border border-neutral-800">
+                <div
+                  className="h-full bg-emerald-500 transition-all duration-300"
+                  style={{
+                    width: `${
+                      bulkJob.endMsgId > bulkJob.startMsgId
+                        ? Math.min(
+                            100,
+                            Math.round(
+                              ((bulkJob.currentMsgId - bulkJob.startMsgId + 1) /
+                                (bulkJob.endMsgId - bulkJob.startMsgId + 1)) *
+                                100
+                            )
+                          )
+                        : bulkJob.status === 'completed'
+                        ? 100
+                        : 0
+                    }%`,
+                  }}
+                />
+              </div>
+
+              <div className="flex flex-wrap gap-3 text-[11px] text-gray-300 font-mono">
+                <span>
+                  Posts: <strong className="text-white">#{bulkJob.currentMsgId}</strong> / #{bulkJob.endMsgId}
+                </span>
+                <span className="text-emerald-400 font-bold">
+                  Published: {bulkJob.publishedCount} (+{bulkJob.mergedCount} merged)
+                </span>
+                <span className="text-amber-300">Skipped No-Audio: {bulkJob.skippedNoAudio}</span>
+                <span className="text-orange-300">Skipped &lt;720p: {bulkJob.skippedLowQuality}</span>
+                <span className="text-gray-400">Duplicates: {bulkJob.skippedDuplicates}</span>
+              </div>
+
+              {bulkJob.errorMessage && (
+                <div className="text-xs text-amber-300 bg-amber-950/50 border border-amber-800/70 rounded-lg px-3 py-2 flex flex-wrap items-center justify-between gap-2">
+                  <span>{bulkJob.errorMessage}</span>
+                  {bulkJob.upgradeUrl && (
+                    <a
+                      href={bulkJob.upgradeUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-yellow-400 underline font-bold"
+                    >
+                      Open Firebase Quota Upgrade
+                    </a>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Scan Status / Progress / Errors */}
           {scanProgressText && (

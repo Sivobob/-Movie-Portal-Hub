@@ -1,7 +1,7 @@
 import { db } from '../firebase';
 import { collection, getDocs, getDocsFromServer, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { normalizeMoviePosters } from '../utils/posterUrl';
-import { checkAndHandleQuotaError } from './firestoreQuotaService';
+import { checkAndHandleQuotaError, isFirestoreWriteAllowed } from './firestoreQuotaService';
 
 export interface MovieData {
   id: string;
@@ -229,6 +229,7 @@ function notifyMoviesUpdated(movie?: MovieData): void {
 }
 
 export async function touchCatalogSyncMarker(movieId = '', action = 'update'): Promise<void> {
+  if (!isFirestoreWriteAllowed()) return;
   try {
     await setDoc(
       doc(db, 'app_config', 'catalog_sync'),
@@ -239,8 +240,8 @@ export async function touchCatalogSyncMarker(movieId = '', action = 'update'): P
       },
       { merge: true }
     );
-  } catch {
-    // Non-fatal: primary onSnapshot on movies still handles delivery
+  } catch (e) {
+    checkAndHandleQuotaError(e);
   }
 }
 

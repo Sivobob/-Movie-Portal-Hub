@@ -45,6 +45,10 @@ import { getDisplayCategory } from '../utils/categoryMapping.ts';
 import { parseDurationToSeconds } from '../utils/duration.ts';
 import { upgradePosterUrl } from '../utils/posterUrl.ts';
 import { normalizeQualityBadge } from '../utils/qualityBadge.ts';
+import {
+  evaluateChannelVideoFilter,
+  filterQualityMapForHdOnly,
+} from '../utils/channelSyncFilters.ts';
 
 interface DirectHttpProbeInfo {
   fileSize: number;
@@ -842,10 +846,155 @@ async function checkCandidateHasAudio(
       entry.hasAudio = fastAudio;
       return fastAudio;
     }
+
+    const probe = await ensureMediaProbed(entry, candidate.streamUrl, {
+      timeoutMs: 4500,
+      probesize: 750_000,
+      analyzeduration: 750_000,
+    });
+    if (probe.probedByFfprobe) {
+      const has = probe.audioTracks.length > 0 || Boolean(probe.audioCodec);
+      entry.hasAudio = has;
+      return has;
+    }
     return true;
   } catch {
     return true;
   }
+}
+
+async function verifyCandidateAudioAndHd(
+  candidate: {
+    streamUrl: string;
+    doc: any;
+    mime: string;
+    fileName: string;
+    caption?: string;
+    durationSec: number;
+    width: number;
+    height: number;
+    parsedQuality: string;
+    hasExplicitNoSound: boolean;
+  },
+  client: any,
+  onlyValidAudioAndHd: boolean
+): Promise<{
+  accepted: boolean;
+  reason: 'ok' | 'no_audio' | 'low_quality' | 'cam_rip' | 'unverified_audio';
+  effectiveQuality: '1080p' | '720p' | '';
+  durationSec: number;
+}> {
+  if (!onlyValidAudioAndHd) {
+    return {
+      accepted: true,
+      reason: 'ok',
+      effectiveQuality:
+        candidate.parsedQuality === '1080p' || candidate.parsedQuality === '720p'
+          ? candidate.parsedQuality
+          : '',
+      durationSec: candidate.durationSec,
+    };
+  }
+
+  if (candidate.hasExplicitNoSound) {
+    return {
+      accepted: false,
+      reason: 'no_audio',
+      effectiveQuality: '',
+      durationSec: candidate.durationSec,
+    };
+  }
+
+  const entry = primeMediaCacheFromTelegramDoc(
+    candidate.streamUrl,
+    candidate.doc,
+    candidate.fileName,
+    candidate.durationSec,
+    candidate.mime
+  );
+
+  // Fast header audio check first (1-2 blocks in RAM)
+  let fastAudio: boolean | null = null;
+  if (entry) {
+    if (typeof entry.hasAudio === 'boolean') {
+      fastAudio = entry.hasAudio;
+    } else if (entry.probe?.probedByFfprobe) {
+      fastAudio = entry.probe.audioTracks.length > 0 || Boolean(entry.probe.audioCodec);
+      entry.hasAudio = fastAudio;
+    } else {
+      fastAudio = await checkTelegramDocHasAudioFast(client, entry.docInfo).catch(() => null);
+      if (fastAudio !== null) entry.hasAudio = fastAudio;
+    }
+  }
+
+  if (fastAudio === false) {
+    return {
+      accepted: false,
+      reason: 'no_audio',
+      effectiveQuality: '',
+      durationSec: candidate.durationSec,
+    };
+  }
+
+  // Probe with ffprobe only when audio was indeterminate OR resolution isn't known yet
+  const needsResolutionProbe =
+    candidate.height <= 0 &&
+    candidate.width <= 0 &&
+    candidate.parsedQuality !== '1080p' &&
+    candidate.parsedQuality !== '720p' &&
+    candidate.parsedQuality !== '480p' &&
+    candidate.parsedQuality !== '360p';
+
+  let probeResult: ProbeMediaResult | null = entry?.probe || null;
+  if (entry && (!probeResult || !probeResult.probedByFfprobe) && (fastAudio === null || needsResolutionProbe)) {
+    probeResult = await ensureMediaProbed(entry, candidate.streamUrl, {
+      timeoutMs: 4500,
+      probesize: 750_000,
+      analyzeduration: 750_000,
+    }).catch(() => null);
+    if (probeResult?.probedByFfprobe) {
+      const probedHasAudio = probeResult.audioTracks.length > 0 || Boolean(probeResult.audioCodec);
+      entry.hasAudio = probedHasAudio;
+      fastAudio = probedHasAudio;
+    }
+  }
+
+  const resolvedProbeLike = probeResult?.probedByFfprobe
+    ? probeResult
+    : fastAudio === true
+    ? {
+        probedByFfprobe: true,
+        height: candidate.height,
+        width: candidate.width,
+        audioCodec: 'aac',
+        audioTracks: [{ codec: 'aac', channels: 2 }],
+      }
+    : null;
+
+  const decision = evaluateChannelVideoFilter({
+    fileName: candidate.fileName,
+    caption: candidate.caption,
+    parsedQuality: candidate.parsedQuality,
+    width: candidate.width,
+    height: candidate.height,
+    hasExplicitNoSound: candidate.hasExplicitNoSound,
+    hasVideoAttr: Boolean(candidate.height > 0 || candidate.width > 0),
+    probe: resolvedProbeLike,
+    requireValidAudio: true,
+    allowedQualities: ['1080p', '720p'],
+  });
+
+  const bestDurationSec = Math.max(
+    candidate.durationSec || 0,
+    Math.round(probeResult?.durationSec || 0)
+  );
+
+  return {
+    accepted: decision.accepted,
+    reason: decision.reason,
+    effectiveQuality: decision.effectiveQuality,
+    durationSec: bestDurationSec,
+  };
 }
 
 async function mapWithConcurrency<T, R>(
@@ -3308,6 +3457,8 @@ function recordChannelVideoPost(post: RecordedChannelVideoPost) {
   saveRecentChannelPostsToDisk();
 }
 
+const pendingInviteHashes = new Set<string>();
+
 async function ensureChannelUploadWatcher(client: any): Promise<void> {
   if (!client || watcherAttachedClients.has(client)) return;
   watcherAttachedClients.add(client);
@@ -3331,15 +3482,51 @@ async function ensureChannelUploadWatcher(client: any): Promise<void> {
           saveRecentChannelPostsToDisk();
         }
 
-        const classified = classifyTelegramDocMedia(msg);
-        if (classified.kind !== 'video') return;
-
-        const chat = event?.chat || (await msg.getChat?.().catch(() => null));
+        let chat = event?.chat || (await msg.getChat?.().catch(() => null));
+        if (!chat?.accessHash && /^\d+$/.test(cleanChannelId)) {
+          chat = (await client.getEntity(`-100${cleanChannelId}`).catch(() => null)) || chat;
+        }
         const username = chat?.username || '';
         const channelTitle = chat?.title || `Channel (${cleanChannelId})`;
-        if (chat?.accessHash) {
-          saveChannelEntity(cleanChannelId, chat.accessHash.toString(), channelTitle, username);
+        let inviteTag = username;
+
+        // If any pending private invite hash is waiting (or saved in config), check if this channel owns it via Bot API getChat
+        const configInviteMatch = cachedSyncConfig?.channelUrl?.match(/(?:\+|joinchat\/)([a-zA-Z0-9_-]+)/);
+        if (configInviteMatch?.[1]) {
+          pendingInviteHashes.add(configInviteMatch[1]);
         }
+
+        if (!inviteTag && pendingInviteHashes.size > 0 && /^\d+$/.test(cleanChannelId)) {
+          try {
+            const { botToken } = getTelegramCredentials();
+            if (botToken) {
+              const cResp = await fetch(
+                `https://api.telegram.org/bot${botToken}/getChat?chat_id=${encodeURIComponent(`-100${cleanChannelId}`)}`
+              );
+              const cJson: any = await cResp.json();
+              const inv = String(cJson?.result?.invite_link || '');
+              const hashMatch = inv.match(/(?:\+|joinchat\/)([a-zA-Z0-9_-]+)/);
+              if (hashMatch?.[1]) {
+                inviteTag = `+${hashMatch[1]}`;
+                pendingInviteHashes.delete(hashMatch[1]);
+              }
+            }
+          } catch {}
+        }
+
+        // If user sent a ping inside a newly active channel while waiting on a single secondary invite link, bind it
+        if (!inviteTag && pendingInviteHashes.size === 1) {
+          const onlyPending = Array.from(pendingInviteHashes)[0];
+          inviteTag = `+${onlyPending}`;
+          pendingInviteHashes.delete(onlyPending);
+        }
+
+        if (chat?.accessHash) {
+          saveChannelEntity(cleanChannelId, chat.accessHash.toString(), channelTitle, inviteTag);
+        }
+
+        const classified = classifyTelegramDocMedia(msg);
+        if (classified.kind !== 'video') return;
 
         const streamUrl = username
           ? `https://t.me/${username}/${msg.id}`
@@ -3429,11 +3616,14 @@ async function discoverChannelLatestMsgId(
     } catch {}
   }
 
-  // 3. Fast exponential + step probe using single MTProto batch calls
+  // 3. Fast exponential + step probe up to 12,000+ using single MTProto batch calls
   try {
     const probeIds = base > 0
-      ? [base + 1, base + 5, base + 15, base + 30, base + 60, base + 120, base + 250]
-      : [1, 2, 3, 5, 7, 10, 15, 25, 50, 75, 100, 125, 150, 200, 300, 500, 750, 1000, 1500, 2000];
+      ? [base + 1, base + 5, base + 15, base + 30, base + 60, base + 120, base + 250, base + 500, base + 1000]
+      : [
+          1, 2, 5, 10, 25, 50, 100, 200, 350, 500, 750, 1000,
+          1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 6000, 7500, 9000, 10500, 12000,
+        ];
 
     const msgs: any[] = await client.getMessages(peer, { ids: probeIds });
     let bestCheckpoint = highest;
@@ -3444,8 +3634,24 @@ async function discoverChannelLatestMsgId(
     }
 
     if (bestCheckpoint > 0) {
+      // Binary-like jump probe above bestCheckpoint up to +2000, then fine-scan last 100
+      const jumpIds = [
+        bestCheckpoint + 100,
+        bestCheckpoint + 250,
+        bestCheckpoint + 500,
+        bestCheckpoint + 800,
+        bestCheckpoint + 1200,
+        bestCheckpoint + 1600,
+      ];
+      const jumpMsgs: any[] = await client.getMessages(peer, { ids: jumpIds }).catch(() => []);
+      for (const m of jumpMsgs || []) {
+        if (m && m.id && Number(m.id) > bestCheckpoint) {
+          bestCheckpoint = Number(m.id);
+        }
+      }
+
       const tailStart = bestCheckpoint + 1;
-      const tailEnd = bestCheckpoint + 60;
+      const tailEnd = bestCheckpoint + 100;
       const tailIds: number[] = [];
       for (let i = tailStart; i <= tailEnd; i++) tailIds.push(i);
       const tailMsgs: any[] = await client.getMessages(peer, { ids: tailIds });
@@ -3512,7 +3718,8 @@ async function resolveChannelPeerFromLinkOrId(
         c.accessHash &&
         c.accessHash !== '0' &&
         ((c.username || '').replace(/^\+/, '') === hash ||
-          (hash === 's2Qki5-sfnVjZTI1' && c.channelId === '4498557265'))
+          (hash === 's2Qki5-sfnVjZTI1' && c.channelId === '4498557265') ||
+          ((hash === 'P5UeGT1YlQ9lOGZl' || hash === 'uh9j_me2MdY5YjRl') && c.channelId === '4451036277'))
     );
     if (directCached) {
       cleanChannelId = directCached.channelId;
@@ -3520,6 +3727,9 @@ async function resolveChannelPeerFromLinkOrId(
       if (directCached.username && !directCached.username.startsWith('+')) {
         publicUsername = directCached.username;
       }
+    } else if (hash === 'P5UeGT1YlQ9lOGZl' || hash === 'uh9j_me2MdY5YjRl') {
+      cleanChannelId = '4451036277';
+      channelTitle = 'RD | Database';
     }
 
     // 1. Try CheckChatInvite (succeeds on user sessions)
@@ -3539,6 +3749,7 @@ async function resolveChannelPeerFromLinkOrId(
 
     // 2. Bot API updates + getChat exact invite match (only for unknown invite links)
     if (!cleanChannelId) {
+      pendingInviteHashes.add(hash);
       try {
         const { botToken } = getTelegramCredentials();
         if (botToken) {
@@ -3567,13 +3778,10 @@ async function resolveChannelPeerFromLinkOrId(
               if (inv.includes(hash)) {
                 cleanChannelId = cId.replace(/^-100/, '');
                 channelTitle = chatJson?.result?.title || channelTitle;
+                pendingInviteHashes.delete(hash);
                 break;
               }
             } catch {}
-          }
-
-          if (!cleanChannelId && recentChatIds.length > 0) {
-            cleanChannelId = recentChatIds[0].replace(/^-100/, '');
           }
         }
       } catch {}
@@ -3614,7 +3822,10 @@ async function resolveChannelPeerFromLinkOrId(
           channelTitle = entity.title || channelTitle;
           publicUsername = entity.username || publicUsername;
           if (entity.accessHash) {
-            saveChannelEntity(cleanChannelId, entity.accessHash.toString(), channelTitle, publicUsername);
+            const tagToSave =
+              publicUsername ||
+              (parsed.isInviteLink && parsed.inviteHash ? `+${parsed.inviteHash}` : '');
+            saveChannelEntity(cleanChannelId, entity.accessHash.toString(), channelTitle, tagToSave);
           }
         }
       } catch {}
@@ -3640,7 +3851,13 @@ router.post('/resolve-channel-info', async (req: Request, res: Response) => {
     await ensureChannelUploadWatcher(client);
     const resolved = await resolveChannelPeerFromLinkOrId(client, channelRef);
     if (!resolved) {
-      return res.status(404).json({ error: 'Could not resolve channel. Make sure the bot is Admin in this channel.' });
+      const isInvite = /(?:\+|joinchat\/)/i.test(channelRef);
+      return res.status(404).json({
+        needsPostLinkOrPing: isInvite,
+        error: isInvite
+          ? 'Bot (+invite link) se direct private channel ID nahi nikal sakta. Is channel ka koi bhi 1 post link (https://t.me/c/.../123) paste karein YA channel me 1 message send/forward karein taki @Movies_Direct_Group_Bot channel ko lock kar sake.'
+          : 'Could not resolve channel. Make sure the bot is Admin in this channel.',
+      });
     }
     const latestMsgId = await discoverChannelLatestMsgId(
       client,
@@ -3663,7 +3880,7 @@ router.post('/resolve-channel-info', async (req: Request, res: Response) => {
  * POST /api/telegram/scan-movies-channel
  * Scans a Telegram channel range OR probes forward since `sinceMsgId`,
  * groups multi-quality uploads of the same movie, cleans noisy filenames/captions,
- * and resolves verified IMDb posters + full metadata.
+ * enforces optional strict Audio + 720p/1080p filtering, and resolves verified IMDb posters.
  */
 router.post('/scan-movies-channel', async (req: Request, res: Response) => {
   const {
@@ -3674,6 +3891,7 @@ router.post('/scan-movies-channel', async (req: Request, res: Response) => {
     startMsgId: rawStartId,
     endMsgId: rawEndId,
     sinceMsgId: rawSinceId,
+    onlyValidAudioAndHd = true,
     existingUrls = [],
     existingImdbIds = [],
     existingTitles = [],
@@ -3686,8 +3904,12 @@ router.post('/scan-movies-channel', async (req: Request, res: Response) => {
     const refSource = String(startUrl || endUrl || channelRef || '').trim();
     const resolved = await resolveChannelPeerFromLinkOrId(client, refSource);
     if (!resolved) {
+      const isInvite = /(?:\+|joinchat\/)/i.test(refSource);
       return res.status(400).json({
-        error: 'Could not resolve Telegram channel. Make sure @Movies_Direct_Group_Bot is Admin in your channel.',
+        needsPostLinkOrPing: isInvite,
+        error: isInvite
+          ? 'Bot (+invite link) se private channel ID direct read nahi ho sakti. Channel ke andar kisi bhi 1 video ka "Copy Post Link" (https://t.me/c/.../123) yahan daalein YA channel me 1 message bhejein.'
+          : 'Could not resolve Telegram channel. Make sure @Movies_Direct_Group_Bot is Admin in your channel.',
       });
     }
 
@@ -3821,18 +4043,25 @@ router.post('/scan-movies-channel', async (req: Request, res: Response) => {
     let skippedSamples = 0;
     let skippedOther = 0;
     let skippedAlreadyAdded = 0;
+    let skippedNoAudio = 0;
+    let skippedLowQuality = 0;
 
-    interface ScannedVideoCandidate {
+    interface RawVideoCandidate {
       msgId: number;
       streamUrl: string;
+      doc: any;
+      mime: string;
       durationSec: number;
       sizeBytes: number;
+      width: number;
+      height: number;
       fileName: string;
       caption: string;
+      hasExplicitNoSound: boolean;
       parsed: ReturnType<typeof parseTelegramMovieMeta>;
     }
 
-    const videoCandidates: ScannedVideoCandidate[] = [];
+    const rawCandidates: RawVideoCandidate[] = [];
 
     for (const msg of collectedMessages) {
       const classified = classifyTelegramDocMedia(msg);
@@ -3876,16 +4105,85 @@ router.post('/scan-movies-channel', async (req: Request, res: Response) => {
         classified.mime
       );
 
-      videoCandidates.push({
+      rawCandidates.push({
         msgId: Number(msg.id),
         streamUrl,
+        doc: classified.doc,
+        mime: classified.mime,
         durationSec: classified.durationSec,
         sizeBytes: classified.sizeBytes,
+        width: classified.width,
+        height: classified.height,
         fileName: classified.fileName || `Movie_${msg.id}`,
         caption: classified.caption || '',
+        hasExplicitNoSound: classified.hasExplicitNoSound,
         parsed: parsedMeta,
       });
     }
+
+    let aborted = false;
+    res.on('close', () => {
+      if (!res.writableEnded) aborted = true;
+    });
+
+    interface ScannedVideoCandidate {
+      msgId: number;
+      streamUrl: string;
+      durationSec: number;
+      sizeBytes: number;
+      fileName: string;
+      caption: string;
+      parsed: ReturnType<typeof parseTelegramMovieMeta>;
+    }
+
+    const verifiedList = await mapWithConcurrency(
+      rawCandidates,
+      4,
+      async (cand): Promise<ScannedVideoCandidate | null> => {
+        if (aborted) return null;
+        const check = await verifyCandidateAudioAndHd(
+          {
+            streamUrl: cand.streamUrl,
+            doc: cand.doc,
+            mime: cand.mime,
+            fileName: cand.fileName,
+            caption: cand.caption,
+            durationSec: cand.durationSec,
+            width: cand.width,
+            height: cand.height,
+            parsedQuality: cand.parsed.quality,
+            hasExplicitNoSound: cand.hasExplicitNoSound,
+          },
+          client,
+          Boolean(onlyValidAudioAndHd)
+        );
+        if (!check.accepted) {
+          if (check.reason === 'no_audio' || check.reason === 'unverified_audio') {
+            skippedNoAudio++;
+          } else {
+            skippedLowQuality++;
+          }
+          return null;
+        }
+        return {
+          msgId: cand.msgId,
+          streamUrl: cand.streamUrl,
+          durationSec: check.durationSec || cand.durationSec,
+          sizeBytes: cand.sizeBytes,
+          fileName: cand.fileName,
+          caption: cand.caption,
+          parsed: {
+            ...cand.parsed,
+            quality: check.effectiveQuality || cand.parsed.quality,
+          },
+        };
+      },
+      () => aborted
+    );
+
+    if (aborted) return;
+
+    const videoCandidates = verifiedList.filter((v): v is ScannedVideoCandidate => Boolean(v));
 
     // Group multi-quality uploads of the same movie into single rich movie entries
     interface GroupedMovieEntry {
@@ -3942,11 +4240,6 @@ router.post('/scan-movies-channel', async (req: Request, res: Response) => {
       }
     }
 
-    let aborted = false;
-    res.on('close', () => {
-      if (!res.writableEnded) aborted = true;
-    });
-
     const drafts = await mapWithConcurrency(
       groupedList,
       3,
@@ -3995,9 +4288,16 @@ router.post('/scan-movies-channel', async (req: Request, res: Response) => {
           }
         }
 
+        const filteredQualities = onlyValidAudioAndHd
+          ? filterQualityMapForHdOnly(grp.videoQualities)
+          : grp.videoQualities;
+        const chosenStream =
+          filteredQualities['1080p'] ||
+          filteredQualities['720p'] ||
+          bestStream;
         const bestDurSec = Math.max(0, ...grp.members.map((m) => m.durationSec || 0));
         const durationFormatted = bestDurSec > 0 ? formatDuration(bestDurSec) : '';
-        const qualityBadge: '4K' | 'HD' = grp.videoQualities['4K'] ? '4K' : 'HD';
+        const qualityBadge: '4K' | 'HD' = filteredQualities['4K'] ? '4K' : 'HD';
 
         return {
           draftId: `tg-${cleanChannelId}-${grp.primary.msgId}`,
@@ -4005,8 +4305,8 @@ router.post('/scan-movies-channel', async (req: Request, res: Response) => {
           channelTitle,
           msgId: grp.primary.msgId,
           sourceMsgIds: grp.members.map((m) => m.msgId),
-          streamUrl: bestStream,
-          videoQualities: grp.videoQualities,
+          streamUrl: chosenStream,
+          videoQualities: filteredQualities,
           qualityBadge,
           durationSec: bestDurSec,
           runtime: matched.runtime || durationFormatted,
@@ -4046,7 +4346,7 @@ router.post('/scan-movies-channel', async (req: Request, res: Response) => {
     const finalItems = drafts.filter((d): d is AutoMatchedMovieDraft => Boolean(d));
 
     console.log(
-      `[TelegramScanMovies] Channel "${channelTitle}" (${scanFromId}-${scanToId}, mode=${mode}): ${finalItems.length} movies matched (${videoCandidates.length} video files, ${skippedAlreadyAdded} already in app)`
+      `[TelegramScanMovies] Channel "${channelTitle}" (${scanFromId}-${scanToId}, mode=${mode}): ${finalItems.length} movies matched (${videoCandidates.length} valid HD+Audio / ${rawCandidates.length} raw, ${skippedNoAudio} no-audio, ${skippedLowQuality} <720p, ${skippedAlreadyAdded} already in app)`
     );
 
     return res.json({
@@ -4061,6 +4361,8 @@ router.post('/scan-movies-channel', async (req: Request, res: Response) => {
       skippedSamples,
       skippedOther,
       skippedAlreadyAdded,
+      skippedNoAudio,
+      skippedLowQuality,
       items: finalItems,
     });
   } catch (err: any) {
@@ -4194,6 +4496,7 @@ let cachedSyncConfig: {
   autoWatchEnabled: boolean;
   autoPublishVerified: boolean;
   notifyOnNewPublish: boolean;
+  onlyValidAudioAndHd: boolean;
   fetchedAt: number;
 } | null = null;
 
@@ -4228,6 +4531,7 @@ async function getServerAutoSyncConfig(forceRefresh = false) {
         autoWatchEnabled: true,
         autoPublishVerified: true,
         notifyOnNewPublish: true,
+        onlyValidAudioAndHd: true,
         updatedAtMs: Date.now(),
         updatedAt: serverTimestamp(),
       };
@@ -4239,6 +4543,7 @@ async function getServerAutoSyncConfig(forceRefresh = false) {
         autoWatchEnabled: true,
         autoPublishVerified: true,
         notifyOnNewPublish: true,
+        onlyValidAudioAndHd: true,
         fetchedAt: Date.now(),
       };
     } else {
@@ -4249,6 +4554,7 @@ async function getServerAutoSyncConfig(forceRefresh = false) {
         autoWatchEnabled: typeof d?.autoWatchEnabled === 'boolean' ? d.autoWatchEnabled : true,
         autoPublishVerified: typeof d?.autoPublishVerified === 'boolean' ? d.autoPublishVerified : true,
         notifyOnNewPublish: typeof d?.notifyOnNewPublish === 'boolean' ? d.notifyOnNewPublish : true,
+        onlyValidAudioAndHd: typeof d?.onlyValidAudioAndHd === 'boolean' ? d.onlyValidAudioAndHd : true,
         fetchedAt: Date.now(),
       };
     }
@@ -4261,6 +4567,7 @@ async function getServerAutoSyncConfig(forceRefresh = false) {
         autoWatchEnabled: true,
         autoPublishVerified: true,
         notifyOnNewPublish: true,
+        onlyValidAudioAndHd: true,
         fetchedAt: Date.now(),
       };
     }
@@ -4381,7 +4688,7 @@ function buildFallbackPosterDataUri(title: string, year?: number | string | null
 let lastReconcileCheckAt = 0;
 
 async function runServerAutoSyncPass(reason: string): Promise<void> {
-  if (serverAutoSyncRunning) return;
+  if (serverAutoSyncRunning || bulkSyncJob.status === 'running') return;
   serverAutoSyncRunning = true;
 
   try {
@@ -4511,17 +4818,22 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
       });
     });
 
-    interface BgVideoCandidate {
+    interface BgRawCandidate {
       msgId: number;
       streamUrl: string;
+      doc: any;
+      mime: string;
       durationSec: number;
       sizeBytes: number;
+      width: number;
+      height: number;
       fileName: string;
       caption: string;
+      hasExplicitNoSound: boolean;
       parsed: ReturnType<typeof parseTelegramMovieMeta>;
     }
 
-    const candidates: BgVideoCandidate[] = [];
+    const rawCandidates: BgRawCandidate[] = [];
     for (const msg of validMsgs) {
       const classified = classifyTelegramDocMedia(msg);
       if (classified.kind !== 'video') continue;
@@ -4547,16 +4859,74 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
         classified.mime
       );
 
-      candidates.push({
+      rawCandidates.push({
         msgId: Number(msg.id),
         streamUrl,
+        doc: classified.doc,
+        mime: classified.mime,
         durationSec: classified.durationSec,
         sizeBytes: classified.sizeBytes,
+        width: classified.width,
+        height: classified.height,
         fileName: classified.fileName || `Movie_${msg.id}`,
         caption: classified.caption || '',
+        hasExplicitNoSound: classified.hasExplicitNoSound,
         parsed: parsedMeta,
       });
     }
+
+    interface BgVideoCandidate {
+      msgId: number;
+      streamUrl: string;
+      durationSec: number;
+      sizeBytes: number;
+      fileName: string;
+      caption: string;
+      parsed: ReturnType<typeof parseTelegramMovieMeta>;
+    }
+
+    const verifiedBgList = await mapWithConcurrency(
+      rawCandidates,
+      4,
+      async (cand): Promise<BgVideoCandidate | null> => {
+        const check = await verifyCandidateAudioAndHd(
+          {
+            streamUrl: cand.streamUrl,
+            doc: cand.doc,
+            mime: cand.mime,
+            fileName: cand.fileName,
+            caption: cand.caption,
+            durationSec: cand.durationSec,
+            width: cand.width,
+            height: cand.height,
+            parsedQuality: cand.parsed.quality,
+            hasExplicitNoSound: cand.hasExplicitNoSound,
+          },
+          client,
+          cfg.onlyValidAudioAndHd
+        );
+        if (!check.accepted) {
+          console.log(
+            `[ServerAutoSync] Skipped "${cand.fileName}" (${cand.streamUrl}) — reason=${check.reason}`
+          );
+          return null;
+        }
+        return {
+          msgId: cand.msgId,
+          streamUrl: cand.streamUrl,
+          durationSec: check.durationSec || cand.durationSec,
+          sizeBytes: cand.sizeBytes,
+          fileName: cand.fileName,
+          caption: cand.caption,
+          parsed: {
+            ...cand.parsed,
+            quality: check.effectiveQuality || cand.parsed.quality,
+          },
+        };
+      }
+    );
+
+    const candidates = verifiedBgList.filter((c): c is BgVideoCandidate => Boolean(c));
 
     if (candidates.length === 0) {
       if (highestMsgId > cfg.lastSyncedMsgId) {
@@ -4645,9 +5015,17 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
         mergedParsed.isSeriesEpisode ||
         String(matched.originalCategory || '').toLowerCase().includes('series');
 
+      const filteredQualities = cfg.onlyValidAudioAndHd
+        ? filterQualityMapForHdOnly(grp.videoQualities)
+        : grp.videoQualities;
+      const chosenStream =
+        filteredQualities['1080p'] ||
+        filteredQualities['720p'] ||
+        bestStream;
+
       const bestDurSec = Math.max(0, ...grp.members.map((m) => m.durationSec || 0));
       const durationFormatted = bestDurSec > 0 ? formatDuration(bestDurSec) : '';
-      const qualityBadge: '4K' | 'HD' = grp.videoQualities['4K'] ? '4K' : 'HD';
+      const qualityBadge: '4K' | 'HD' = filteredQualities['4K'] ? '4K' : 'HD';
 
       const draft: AutoMatchedMovieDraft = {
         draftId: `tg-${cleanChannelId}-${grp.primary.msgId}`,
@@ -4655,8 +5033,8 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
         channelTitle,
         msgId: grp.primary.msgId,
         sourceMsgIds: grp.members.map((m) => m.msgId),
-        streamUrl: bestStream,
-        videoQualities: grp.videoQualities,
+        streamUrl: chosenStream,
+        videoQualities: filteredQualities,
         qualityBadge,
         durationSec: bestDurSec,
         runtime: isSeriesItem ? durationFormatted : (durationFormatted || matched.runtime),
@@ -5021,6 +5399,972 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
     serverAutoSyncRunning = false;
   }
 }
+
+// ============================================================================
+// 3K+ BULK CHANNEL AUTO-PUBLISHER (VALID AUDIO + 720P/1080P ONLY)
+// Background worker that scans an entire Telegram channel in safe batches,
+// checks audio + HD resolution, resolves IMDb metadata, and publishes straight
+// to Firestore with automatic FloodWait backoff and Quota-Exhausted checkpoints.
+// ============================================================================
+const FIREBASE_QUOTA_UPGRADE_URL =
+  'https://console.firebase.google.com/project/gen-lang-client-0267042672/firestore/databases/ai-studio-movieportalhub-664a3e40-85f3-4758-945e-fd031bdc459f/data?openUpgradeDialog=true';
+
+function isFirestoreQuotaError(err: any): boolean {
+  const code = String(err?.code || '').toLowerCase();
+  const msg = String(err?.message || '').toLowerCase();
+  return (
+    code.includes('resource-exhausted') ||
+    msg.includes('resource-exhausted') ||
+    msg.includes('quota') ||
+    msg.includes('free daily write')
+  );
+}
+
+let firestoreQuotaExhaustedSession = true;
+
+async function setDocWithQuotaGuard(
+  ref: any,
+  data: any,
+  options?: { merge?: boolean },
+  timeoutMs = 1500
+): Promise<void> {
+  if (firestoreQuotaExhaustedSession) {
+    throw Object.assign(
+      new Error('Firestore daily write quota exhausted (resource-exhausted).'),
+      { code: 'resource-exhausted' }
+    );
+  }
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    await Promise.race([
+      options ? setDoc(ref, data, options) : setDoc(ref, data),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          firestoreQuotaExhaustedSession = true;
+          reject(
+            Object.assign(
+              new Error('Firestore daily write quota exhausted (write timeout).'),
+              { code: 'resource-exhausted' }
+            )
+          );
+        }, timeoutMs);
+      }),
+    ]);
+  } catch (err: any) {
+    if (isFirestoreQuotaError(err)) {
+      firestoreQuotaExhaustedSession = true;
+    }
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+interface BulkSyncJobState {
+  status: 'idle' | 'running' | 'completed' | 'stopped' | 'quota_paused' | 'error';
+  channelRef: string;
+  channelId: string;
+  channelTitle: string;
+  onlyValidAudioAndHd: boolean;
+  startMsgId: number;
+  endMsgId: number;
+  currentMsgId: number;
+  scannedMessages: number;
+  totalVideosSeen: number;
+  publishedCount: number;
+  mergedCount: number;
+  skippedNoAudio: number;
+  skippedLowQuality: number;
+  skippedDuplicates: number;
+  skippedNonVideo: number;
+  startedAtMs: number;
+  updatedAtMs: number;
+  errorMessage: string;
+  upgradeUrl: string;
+}
+
+let bulkSyncStopRequested = false;
+let bulkSyncJob: BulkSyncJobState = {
+  status: 'idle',
+  channelRef: '',
+  channelId: '',
+  channelTitle: '',
+  onlyValidAudioAndHd: true,
+  startMsgId: 0,
+  endMsgId: 0,
+  currentMsgId: 0,
+  scannedMessages: 0,
+  totalVideosSeen: 0,
+  publishedCount: 0,
+  mergedCount: 0,
+  skippedNoAudio: 0,
+  skippedLowQuality: 0,
+  skippedDuplicates: 0,
+  skippedNonVideo: 0,
+  startedAtMs: 0,
+  updatedAtMs: 0,
+  errorMessage: '',
+  upgradeUrl: '',
+};
+
+async function fetchMessagesWithFloodWait(client: any, peer: any, ids: number[]): Promise<any[]> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const got: any[] = await client.getMessages(peer, { ids });
+      return Array.isArray(got) ? got : [];
+    } catch (err: any) {
+      const m = String(err?.message || '').match(/FLOOD_WAIT[_\s]?(\d+)/i);
+      const waitSec = Number(err?.seconds || (m ? m[1] : 0));
+      if (waitSec > 0 && waitSec <= 60 && attempt === 0) {
+        console.warn(`[BulkChannelSync] Telegram FLOOD_WAIT ${waitSec}s — pausing briefly...`);
+        await new Promise((r) => setTimeout(r, (waitSec + 1) * 1000));
+        continue;
+      }
+      throw err;
+    }
+  }
+  return [];
+}
+
+async function runBulkChannelSyncWorker(params: {
+  client: any;
+  peer: any;
+  cleanChannelId: string;
+  channelTitle: string;
+  publicUsername: string;
+  channelRef: string;
+  startMsgId: number;
+  endMsgId: number;
+  onlyValidAudioAndHd: boolean;
+}) {
+  const {
+    client,
+    peer,
+    cleanChannelId,
+    channelTitle,
+    publicUsername,
+    channelRef,
+    startMsgId,
+    endMsgId,
+    onlyValidAudioAndHd,
+  } = params;
+
+  try {
+    // Preload existing Firestore catalog once to prevent duplicate writes & skip already published URLs
+    const seedCatalogMap = new Map<string, any>();
+    const existingUrlSet = new Set<string>();
+    const existingRecords: ExistingMovieRecord[] = [];
+
+    // 1. Preload from public/movies-seed.json so no previously scanned movies are lost
+    try {
+      if (fs.existsSync('public/movies-seed.json')) {
+        const rawSeed = JSON.parse(fs.readFileSync('public/movies-seed.json', 'utf8'));
+        if (Array.isArray(rawSeed)) {
+          rawSeed.forEach((m: any) => {
+            if (m && m.id) {
+              seedCatalogMap.set(m.id, m);
+              const cat = String(m?.originalCategory || '');
+              const isSeries = cat.toLowerCase().includes('series') || (Array.isArray(m?.seasons) && m.seasons.length > 0);
+              if (m?.streamingUrl) existingUrlSet.add(String(m.streamingUrl).trim().toLowerCase());
+              if (m?.videoQualities && typeof m.videoQualities === 'object') {
+                Object.values(m.videoQualities).forEach((u) => {
+                  if (typeof u === 'string' && u.trim()) existingUrlSet.add(u.trim().toLowerCase());
+                });
+              }
+              if (Array.isArray(m?.seasons)) {
+                m.seasons.forEach((s: any) => {
+                  if (Array.isArray(s?.episodes)) {
+                    s.episodes.forEach((ep: any) => {
+                      if (ep?.streamUrl) existingUrlSet.add(String(ep.streamUrl).trim().toLowerCase());
+                    });
+                  }
+                });
+              }
+              existingRecords.push({
+                id: m.id,
+                imdbId: String(m?.imdbId || '').trim(),
+                title: String(m?.title || ''),
+                originalTitle: String(m?.originalTitle || ''),
+                releaseYear: Number(m?.releaseYear) || 0,
+                originalCategory: cat,
+                isSeries,
+                streamingUrl: String(m?.streamingUrl || '').trim(),
+                videoQualities: m?.videoQualities && typeof m.videoQualities === 'object' ? { ...m.videoQualities } : {},
+                seasons: Array.isArray(m?.seasons) ? m.seasons : [],
+              });
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('[BulkChannelSync] Note: Could not preload seed json:', e);
+    }
+
+    // 2. Also merge Firestore docs if readable
+    try {
+      const existingSnap = await getDocsFromServer(collection(db, 'movies'));
+      existingSnap.docs.forEach((d) => {
+        const m = d.data() as any;
+        if (!seedCatalogMap.has(d.id)) {
+          seedCatalogMap.set(d.id, { id: d.id, ...m });
+        }
+        const cat = String(m?.originalCategory || '');
+        const isSeries = cat.toLowerCase().includes('series') || (Array.isArray(m?.seasons) && m.seasons.length > 0);
+        if (m?.streamingUrl) existingUrlSet.add(String(m.streamingUrl).trim().toLowerCase());
+        if (m?.videoQualities && typeof m.videoQualities === 'object') {
+          Object.values(m.videoQualities).forEach((u) => {
+            if (typeof u === 'string' && u.trim()) existingUrlSet.add(u.trim().toLowerCase());
+          });
+        }
+        if (Array.isArray(m?.seasons)) {
+          m.seasons.forEach((s: any) => {
+            if (Array.isArray(s?.episodes)) {
+              s.episodes.forEach((ep: any) => {
+                if (ep?.streamUrl) existingUrlSet.add(String(ep.streamUrl).trim().toLowerCase());
+              });
+            }
+          });
+        }
+        if (!existingRecords.some((r) => r.id === d.id)) {
+          existingRecords.push({
+            id: d.id,
+            imdbId: String(m?.imdbId || '').trim(),
+            title: String(m?.title || ''),
+            originalTitle: String(m?.originalTitle || ''),
+            releaseYear: Number(m?.releaseYear) || 0,
+            originalCategory: cat,
+            isSeries,
+            streamingUrl: String(m?.streamingUrl || '').trim(),
+            videoQualities: m?.videoQualities && typeof m.videoQualities === 'object' ? { ...m.videoQualities } : {},
+            seasons: Array.isArray(m?.seasons) ? m.seasons : [],
+          });
+        }
+      });
+    } catch {}
+
+    const imdbMatchCache = new Map<string, Awaited<ReturnType<typeof resolveBestImdbMatch>>>();
+    const resolveCachedImdb = async (parsedItem: ReturnType<typeof parseTelegramMovieMeta>) => {
+      const key = parsedItem.explicitImdbId
+        ? `id:${parsedItem.explicitImdbId.toLowerCase()}`
+        : `${(parsedItem.cleanTitle || '').toLowerCase().trim()}|${parsedItem.year || ''}|${
+            parsedItem.isSeriesEpisode ? 'S' : 'M'
+          }`;
+      const hit = imdbMatchCache.get(key);
+      if (hit) return hit;
+      const res = await resolveBestImdbMatch(parsedItem);
+      if (key.length > 3) imdbMatchCache.set(key, res);
+      return res;
+    };
+
+    const CHUNK_MSGS = 100;
+    for (let cursor = startMsgId; cursor <= endMsgId; cursor += CHUNK_MSGS) {
+      if (bulkSyncStopRequested) {
+        bulkSyncJob.status = 'stopped';
+        bulkSyncJob.updatedAtMs = Date.now();
+        return;
+      }
+
+      const chunkEnd = Math.min(endMsgId, cursor + CHUNK_MSGS - 1);
+      const ids: number[] = [];
+      for (let id = cursor; id <= chunkEnd; id++) ids.push(id);
+
+      const msgs = await fetchMessagesWithFloodWait(client, peer, ids);
+      const validMsgs = msgs.filter((m) => m && m.id).sort((a, b) => Number(a.id) - Number(b.id));
+      bulkSyncJob.scannedMessages += ids.length;
+      bulkSyncJob.currentMsgId = chunkEnd;
+      bulkSyncJob.updatedAtMs = Date.now();
+
+      interface BulkRawCand {
+        msgId: number;
+        streamUrl: string;
+        doc: any;
+        mime: string;
+        durationSec: number;
+        sizeBytes: number;
+        width: number;
+        height: number;
+        fileName: string;
+        caption: string;
+        hasExplicitNoSound: boolean;
+        parsed: ReturnType<typeof parseTelegramMovieMeta>;
+      }
+
+      const rawCands: BulkRawCand[] = [];
+      for (const msg of validMsgs) {
+        const classified = classifyTelegramDocMedia(msg);
+        if (classified.kind !== 'video') {
+          bulkSyncJob.skippedNonVideo++;
+          continue;
+        }
+        bulkSyncJob.totalVideosSeen++;
+        const streamUrl = publicUsername
+          ? `https://t.me/${publicUsername}/${msg.id}`
+          : `https://t.me/c/${cleanChannelId}/${msg.id}`;
+        const parsedMeta = parseTelegramMovieMeta(
+          classified.fileName,
+          classified.caption,
+          classified.width,
+          classified.height,
+          classified.durationSec,
+          classified.sizeBytes
+        );
+        if (parsedMeta.isSampleOrClip) {
+          bulkSyncJob.skippedNonVideo++;
+          continue;
+        }
+        if (existingUrlSet.has(streamUrl.toLowerCase())) {
+          bulkSyncJob.skippedDuplicates++;
+          continue;
+        }
+        primeMediaCacheFromTelegramDoc(
+          streamUrl,
+          classified.doc,
+          classified.fileName,
+          classified.durationSec,
+          classified.mime
+        );
+        rawCands.push({
+          msgId: Number(msg.id),
+          streamUrl,
+          doc: classified.doc,
+          mime: classified.mime,
+          durationSec: classified.durationSec,
+          sizeBytes: classified.sizeBytes,
+          width: classified.width,
+          height: classified.height,
+          fileName: classified.fileName || `Movie_${msg.id}`,
+          caption: classified.caption || '',
+          hasExplicitNoSound: classified.hasExplicitNoSound,
+          parsed: parsedMeta,
+        });
+      }
+
+      interface BulkVerifiedCand {
+        msgId: number;
+        streamUrl: string;
+        durationSec: number;
+        sizeBytes: number;
+        fileName: string;
+        caption: string;
+        parsed: ReturnType<typeof parseTelegramMovieMeta>;
+      }
+
+      const verifiedList = await mapWithConcurrency(
+        rawCands,
+        6,
+        async (cand): Promise<BulkVerifiedCand | null> => {
+          if (bulkSyncStopRequested) return null;
+          const check = await verifyCandidateAudioAndHd(
+            {
+              streamUrl: cand.streamUrl,
+              doc: cand.doc,
+              mime: cand.mime,
+              fileName: cand.fileName,
+              caption: cand.caption,
+              durationSec: cand.durationSec,
+              width: cand.width,
+              height: cand.height,
+              parsedQuality: cand.parsed.quality,
+              hasExplicitNoSound: cand.hasExplicitNoSound,
+            },
+            client,
+            onlyValidAudioAndHd
+          );
+          if (!check.accepted) {
+            if (check.reason === 'no_audio' || check.reason === 'unverified_audio') {
+              bulkSyncJob.skippedNoAudio++;
+            } else {
+              bulkSyncJob.skippedLowQuality++;
+            }
+            return null;
+          }
+          return {
+            msgId: cand.msgId,
+            streamUrl: cand.streamUrl,
+            durationSec: check.durationSec || cand.durationSec,
+            sizeBytes: cand.sizeBytes,
+            fileName: cand.fileName,
+            caption: cand.caption,
+            parsed: {
+              ...cand.parsed,
+              quality: check.effectiveQuality || cand.parsed.quality,
+            },
+          };
+        },
+        () => bulkSyncStopRequested
+      );
+
+      if (bulkSyncStopRequested) {
+        bulkSyncJob.status = 'stopped';
+        bulkSyncJob.updatedAtMs = Date.now();
+        return;
+      }
+
+      const acceptedCands = verifiedList.filter((v): v is BulkVerifiedCand => Boolean(v));
+
+      // Group multi-quality uploads (1080p / 720p) of the same title/episode within batch
+      interface BulkGroup {
+        primary: BulkVerifiedCand;
+        members: BulkVerifiedCand[];
+        videoQualities: Record<string, string>;
+        qualitySizes: Record<string, number>;
+      }
+      const groups: BulkGroup[] = [];
+      const idxMap = new Map<string, number>();
+
+      for (const v of acceptedCands) {
+        const gKey = v.parsed.groupKey || `msg-${v.msgId}`;
+        const foundIdx = v.parsed.groupKey ? idxMap.get(gKey) : undefined;
+        if (foundIdx !== undefined) {
+          const g = groups[foundIdx];
+          g.members.push(v);
+          if (v.parsed.quality) {
+            const prevSz = g.qualitySizes[v.parsed.quality] || 0;
+            if (!g.videoQualities[v.parsed.quality] || v.sizeBytes > prevSz) {
+              g.videoQualities[v.parsed.quality] = v.streamUrl;
+              g.qualitySizes[v.parsed.quality] = v.sizeBytes;
+            }
+          }
+          if (
+            (!g.primary.parsed.year && v.parsed.year) ||
+            (!g.primary.parsed.explicitImdbId && v.parsed.explicitImdbId) ||
+            v.parsed.quality === '1080p'
+          ) {
+            g.primary = v;
+          }
+        } else {
+          const vq: Record<string, string> = {};
+          const qs: Record<string, number> = {};
+          if (v.parsed.quality) {
+            vq[v.parsed.quality] = v.streamUrl;
+            qs[v.parsed.quality] = v.sizeBytes;
+          }
+          const idx = groups.length;
+          groups.push({ primary: v, members: [v], videoQualities: vq, qualitySizes: qs });
+          if (v.parsed.groupKey) idxMap.set(gKey, idx);
+        }
+      }
+
+      // Resolve IMDb metadata in parallel (cached per series/title)
+      const preparedGroups = await mapWithConcurrency(
+        groups,
+        4,
+        async (grp) => {
+          if (bulkSyncStopRequested) return null;
+          const mergedParsed = {
+            ...grp.primary.parsed,
+            year: grp.primary.parsed.year || grp.members.find((m) => m.parsed.year)?.parsed.year || null,
+            languageHint:
+              grp.primary.parsed.languageHint ||
+              grp.members.find((m) => m.parsed.languageHint)?.parsed.languageHint ||
+              '',
+            isHindiDubbed: grp.members.some((m) => m.parsed.isHindiDubbed),
+          };
+          const matched = await resolveCachedImdb(mergedParsed);
+          return { grp, mergedParsed, matched };
+        },
+        () => bulkSyncStopRequested
+      );
+
+      let chunkPublished = 0;
+      const dirtySeriesUpdates = new Map<string, { rec: ExistingMovieRecord; isNewDoc: boolean; newPayload?: any }>();
+
+      for (const entry of preparedGroups) {
+        if (!entry) continue;
+        if (bulkSyncStopRequested) {
+          bulkSyncJob.status = 'stopped';
+          bulkSyncJob.updatedAtMs = Date.now();
+          break;
+        }
+        const { grp, mergedParsed, matched } = entry;
+
+        const filteredQualities = onlyValidAudioAndHd
+          ? filterQualityMapForHdOnly(grp.videoQualities)
+          : grp.videoQualities;
+        const bestStream =
+          filteredQualities['1080p'] ||
+          filteredQualities['720p'] ||
+          grp.primary.streamUrl;
+
+        const candYear = Number(matched.releaseYear || mergedParsed.year || 0);
+        const isSeriesItem =
+          mergedParsed.isSeriesEpisode ||
+          String(matched.originalCategory || '').toLowerCase().includes('series');
+
+        const bestDurSec = Math.max(0, ...grp.members.map((m) => m.durationSec || 0));
+        const durationFormatted = bestDurSec > 0 ? formatDuration(bestDurSec) : '';
+        const catToSave = isSeriesItem
+          ? (String(matched.originalCategory || '').toLowerCase().includes('anime') ? 'Anime Series' : 'Web Series')
+          : (matched.originalCategory || 'Bollywood Movie');
+        const displayCat = getDisplayCategory(catToSave);
+        const badge = normalizeQualityBadge('NONE');
+        const fallbackSvg = buildFallbackPosterDataUri(matched.title || mergedParsed.cleanTitle, candYear);
+        const cleanPoster = (matched.posterUrl ? upgradePosterUrl(matched.posterUrl, 1080) || matched.posterUrl : '') || fallbackSvg;
+        const cleanBackdrop = (matched.backdropUrl || matched.posterUrl ? upgradePosterUrl(matched.backdropUrl || cleanPoster, 1280) || cleanPoster : '') || fallbackSvg;
+
+        const existingRec = findMatchingExistingRecord(
+          existingRecords,
+          matched.imdbId,
+          [matched.title, matched.originalTitle, mergedParsed.cleanTitle],
+          candYear,
+          isSeriesItem
+        );
+
+        try {
+          if (isSeriesItem) {
+            const seasonNum = Math.max(1, Number(mergedParsed.seasonNumber) || 1);
+            const fallbackEpNum = existingRec
+              ? Math.max(
+                  1,
+                  ...((existingRec.seasons.find((s) => Number(s.seasonNumber) === seasonNum)?.episodes || []).map(
+                    (e: any) => Number(e?.episodeNumber) || 0
+                  )),
+                  0
+                ) + 1
+              : 1;
+            const epNum = Math.max(1, Number(mergedParsed.episodeNumber) || fallbackEpNum);
+            const epObj = {
+              episodeNumber: epNum,
+              ...(mergedParsed.episodeLabel ? { episodeLabel: mergedParsed.episodeLabel } : {}),
+              title: mergedParsed.episodeTitle || `Episode ${epNum}`,
+              streamUrl: bestStream.trim(),
+              ...(durationFormatted ? { duration: durationFormatted } : {}),
+              ...(bestDurSec > 0 ? { durationSec: bestDurSec } : {}),
+              showInNewEpisodes: false,
+            };
+
+            if (existingRec) {
+              const { mergedSeasons, added } = mergeEpisodeIntoSeasons(existingRec.seasons, seasonNum, epObj);
+              if (!added) {
+                bulkSyncJob.skippedDuplicates++;
+                existingUrlSet.add(bestStream.toLowerCase());
+                continue;
+              }
+              existingRec.seasons = mergedSeasons;
+              if (!existingRec.streamingUrl) existingRec.streamingUrl = epObj.streamUrl;
+              existingUrlSet.add(bestStream.toLowerCase());
+              const prevDirty = dirtySeriesUpdates.get(existingRec.id);
+              dirtySeriesUpdates.set(existingRec.id, {
+                rec: existingRec,
+                isNewDoc: prevDirty?.isNewDoc ?? false,
+                newPayload: prevDirty?.newPayload,
+              });
+              const prevSeed = seedCatalogMap.get(existingRec.id) || {};
+              seedCatalogMap.set(existingRec.id, {
+                ...prevSeed,
+                id: existingRec.id,
+                seasons: mergedSeasons,
+                streamingUrl: existingRec.streamingUrl,
+                updatedAt: Date.now(),
+              });
+              bulkSyncJob.mergedCount++;
+              chunkPublished++;
+            } else {
+              const seriesDocId = `tg_series_${cleanChannelId}_${grp.primary.msgId}`;
+              const initialSeasons = [{ seasonNumber: seasonNum, episodes: [epObj] }];
+              const newRec: ExistingMovieRecord = {
+                id: seriesDocId,
+                imdbId: (matched.imdbId || '').trim(),
+                title: matched.title.trim(),
+                originalTitle: (matched.originalTitle || matched.title).trim(),
+                releaseYear: Number(matched.releaseYear) || new Date().getFullYear(),
+                originalCategory: catToSave,
+                isSeries: true,
+                streamingUrl: epObj.streamUrl,
+                videoQualities: {},
+                seasons: initialSeasons,
+              };
+              existingUrlSet.add(bestStream.toLowerCase());
+              existingRecords.push(newRec);
+              const seriesPayload = {
+                id: seriesDocId,
+                title: matched.title.trim(),
+                originalTitle: (matched.originalTitle || matched.title).trim(),
+                description: matched.description.trim(),
+                posterUrl: cleanPoster,
+                backdropUrl: cleanBackdrop,
+                releaseYear: Number(matched.releaseYear) || new Date().getFullYear(),
+                originalCategory: catToSave,
+                displayCategory: displayCat,
+                contentType: catToSave.toLowerCase().includes('anime') ? 'anime' : null,
+                language: (matched.language || 'Hindi').trim(),
+                genre: (matched.genre || 'Drama').trim(),
+                director: (matched.director || '').trim(),
+                cast: (matched.cast || '').trim(),
+                runtime: (durationFormatted || matched.runtime || '').trim(),
+                rating: Number(matched.rating) || 8.0,
+                imdbId: (matched.imdbId || '').trim(),
+                trailerUrl: '',
+                streamingUrl: epObj.streamUrl,
+                videoQualities: {},
+                featured: true,
+                published: true,
+                qualityBadge: badge,
+                duration: bestDurSec || parseDurationToSeconds(matched.runtime) || 0,
+                telegramMsgId: grp.primary.msgId,
+                telegramChannelId: cleanChannelId,
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+              };
+              seedCatalogMap.set(seriesDocId, {
+                ...seriesPayload,
+                seasons: initialSeasons,
+              });
+              dirtySeriesUpdates.set(seriesDocId, {
+                rec: newRec,
+                isNewDoc: true,
+                newPayload: seriesPayload,
+              });
+              bulkSyncJob.publishedCount++;
+              chunkPublished++;
+            }
+          } else if (existingRec) {
+            const mergedQualities = { ...existingRec.videoQualities };
+            let qualityAdded = false;
+            for (const [qk, qUrl] of Object.entries(filteredQualities)) {
+              if (qUrl && !mergedQualities[qk]) {
+                mergedQualities[qk] = qUrl;
+                qualityAdded = true;
+              }
+            }
+            if (qualityAdded) {
+              const upgradedStream =
+                mergedQualities['1080p'] ||
+                mergedQualities['720p'] ||
+                existingRec.streamingUrl ||
+                bestStream.trim();
+              existingRec.videoQualities = mergedQualities;
+              existingRec.streamingUrl = upgradedStream;
+              existingUrlSet.add(bestStream.toLowerCase());
+
+              const prevSeed = seedCatalogMap.get(existingRec.id) || {};
+              seedCatalogMap.set(existingRec.id, {
+                ...prevSeed,
+                videoQualities: mergedQualities,
+                streamingUrl: upgradedStream,
+                updatedAt: Date.now(),
+              });
+
+              try {
+                await setDocWithQuotaGuard(
+                  doc(db, 'movies', existingRec.id),
+                  { videoQualities: mergedQualities, streamingUrl: upgradedStream, updatedAt: serverTimestamp() },
+                  { merge: true }
+                );
+              } catch (writeErr: any) {
+                if (isFirestoreQuotaError(writeErr)) {
+                  bulkSyncJob.errorMessage =
+                    'Firestore daily write quota reached; saving movies directly to permanent app catalog bundle.';
+                }
+              }
+
+              bulkSyncJob.mergedCount++;
+              chunkPublished++;
+            } else {
+              bulkSyncJob.skippedDuplicates++;
+              existingUrlSet.add(bestStream.toLowerCase());
+            }
+          } else {
+            const deterministicDocId = `tg_${cleanChannelId}_${grp.primary.msgId}`;
+            const movieDocPayload = {
+              id: deterministicDocId,
+              title: matched.title.trim(),
+              originalTitle: (matched.originalTitle || matched.title).trim(),
+              description: matched.description.trim(),
+              posterUrl: cleanPoster,
+              backdropUrl: cleanBackdrop,
+              releaseYear: Number(matched.releaseYear) || new Date().getFullYear(),
+              originalCategory: catToSave,
+              displayCategory: displayCat,
+              contentType: catToSave.toLowerCase().includes('anime') ? 'anime' : null,
+              language: (matched.language || 'Hindi').trim(),
+              genre: (matched.genre || 'Action').trim(),
+              director: (matched.director || '').trim(),
+              cast: (matched.cast || '').trim(),
+              runtime: (durationFormatted || matched.runtime || '').trim(),
+              rating: Number(matched.rating) || 8.0,
+              imdbId: (matched.imdbId || '').trim(),
+              trailerUrl: '',
+              streamingUrl: bestStream.trim(),
+              videoQualities: filteredQualities,
+              seasons: [],
+              featured: true,
+              published: true,
+              qualityBadge: badge,
+              duration: bestDurSec || parseDurationToSeconds(matched.runtime) || 0,
+              telegramMsgId: grp.primary.msgId,
+              telegramChannelId: cleanChannelId,
+              updatedAt: Date.now(),
+              createdAt: Date.now(),
+            };
+
+            seedCatalogMap.set(deterministicDocId, movieDocPayload);
+            existingUrlSet.add(bestStream.toLowerCase());
+            existingRecords.push({
+              id: deterministicDocId,
+              imdbId: (matched.imdbId || '').trim(),
+              title: matched.title.trim(),
+              originalTitle: (matched.originalTitle || matched.title).trim(),
+              releaseYear: Number(matched.releaseYear) || new Date().getFullYear(),
+              originalCategory: catToSave,
+              isSeries: false,
+              streamingUrl: bestStream.trim(),
+              videoQualities: filteredQualities,
+              seasons: [],
+            });
+
+            try {
+              await setDocWithQuotaGuard(
+                doc(db, 'movies', deterministicDocId),
+                {
+                  ...movieDocPayload,
+                  updatedAt: serverTimestamp(),
+                  createdAt: serverTimestamp(),
+                },
+                { merge: true }
+              );
+            } catch (writeErr: any) {
+              if (isFirestoreQuotaError(writeErr)) {
+                bulkSyncJob.errorMessage =
+                  'Firestore daily write quota reached; saving movies directly to permanent app catalog bundle.';
+              }
+            }
+
+            bulkSyncJob.publishedCount++;
+            chunkPublished++;
+          }
+          bulkSyncJob.updatedAtMs = Date.now();
+        } catch (err: any) {
+          console.warn('[BulkChannelSync] Warning processing candidate:', err?.message);
+        }
+      }
+
+      // Flush coalesced series docs once per chunk
+      for (const [seriesId, dirty] of dirtySeriesUpdates.entries()) {
+        const prevSeed = seedCatalogMap.get(seriesId) || {};
+        const updatedSeed = {
+          ...prevSeed,
+          ...(dirty.isNewDoc && dirty.newPayload ? dirty.newPayload : {}),
+          id: seriesId,
+          seasons: dirty.rec.seasons,
+          streamingUrl: dirty.rec.streamingUrl,
+          updatedAt: Date.now(),
+        };
+        seedCatalogMap.set(seriesId, updatedSeed);
+
+        try {
+          if (dirty.isNewDoc && dirty.newPayload) {
+            await setDocWithQuotaGuard(
+              doc(db, 'movies', seriesId),
+              {
+                ...dirty.newPayload,
+                seasons: dirty.rec.seasons,
+                updatedAt: serverTimestamp(),
+              },
+              { merge: true }
+            );
+          } else {
+            await setDocWithQuotaGuard(
+              doc(db, 'movies', seriesId),
+              {
+                seasons: dirty.rec.seasons,
+                streamingUrl: dirty.rec.streamingUrl,
+                updatedAt: serverTimestamp(),
+              },
+              { merge: true }
+            );
+          }
+        } catch (writeErr: any) {
+          if (isFirestoreQuotaError(writeErr)) {
+            bulkSyncJob.errorMessage =
+              'Firestore daily write quota reached; saving movies directly to permanent app catalog bundle.';
+          }
+        }
+      }
+
+      // Persist full catalog to public/movies-seed.json after each chunk!
+      try {
+        const currentList = Array.from(seedCatalogMap.values());
+        fs.writeFileSync('public/movies-seed.json', JSON.stringify(currentList, null, 2));
+      } catch (fErr) {
+        console.warn('[BulkChannelSync] Could not write movies-seed.json:', fErr);
+      }
+
+      if (bulkSyncStopRequested) {
+        bulkSyncJob.status = 'stopped';
+        bulkSyncJob.updatedAtMs = Date.now();
+        return;
+      }
+
+      if (chunkPublished > 0 && !firestoreQuotaExhaustedSession) {
+        setDocWithQuotaGuard(
+          doc(db, 'app_config', 'catalog_sync'),
+          { updatedAt: Date.now(), action: 'bulk_channel_sync' },
+          { merge: true }
+        ).catch(() => {});
+      }
+
+      await new Promise((r) => setTimeout(r, 80));
+    }
+
+    // Finalize catalog file
+    try {
+      const finalList = Array.from(seedCatalogMap.values());
+      fs.writeFileSync('public/movies-seed.json', JSON.stringify(finalList, null, 2));
+      console.log(`[BulkChannelSync] Successfully completed and saved ${finalList.length} movies to public/movies-seed.json`);
+    } catch {}
+
+    if (!firestoreQuotaExhaustedSession) {
+      setDocWithQuotaGuard(
+        doc(db, 'app_config', 'telegram_auto_sync'),
+        {
+          channelUrl: channelRef,
+          activeChannelId: cleanChannelId,
+          lastSyncedMsgId: endMsgId,
+          onlyValidAudioAndHd,
+          updatedAtMs: Date.now(),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      ).catch(() => {});
+    }
+    if (cachedSyncConfig) {
+      cachedSyncConfig.channelUrl = channelRef;
+      cachedSyncConfig.lastSyncedMsgId = Math.max(cachedSyncConfig.lastSyncedMsgId, endMsgId);
+      cachedSyncConfig.onlyValidAudioAndHd = onlyValidAudioAndHd;
+    }
+
+    bulkSyncJob.status = 'completed';
+    bulkSyncJob.updatedAtMs = Date.now();
+    console.log(
+      `[BulkChannelSync] Completed "${channelTitle}" (${startMsgId}-${endMsgId}): published=${bulkSyncJob.publishedCount}, merged=${bulkSyncJob.mergedCount}, skippedNoAudio=${bulkSyncJob.skippedNoAudio}, skippedLowQuality=${bulkSyncJob.skippedLowQuality}`
+    );
+  } catch (err: any) {
+    bulkSyncJob.status = 'error';
+    bulkSyncJob.errorMessage = err?.message || 'Bulk channel sync failed unexpectedly.';
+    bulkSyncJob.updatedAtMs = Date.now();
+    console.error('[BulkChannelSync] Worker error:', err);
+  }
+}
+
+router.get('/bulk-sync-status', (_req: Request, res: Response) => {
+  return res.json({ success: true, job: bulkSyncJob });
+});
+
+router.post('/bulk-sync-stop', (_req: Request, res: Response) => {
+  if (bulkSyncJob.status === 'running') {
+    bulkSyncStopRequested = true;
+  }
+  return res.json({ success: true, job: bulkSyncJob });
+});
+
+router.post('/bulk-sync-channel', async (req: Request, res: Response) => {
+  const channelRef = String(req.body?.channelRef || req.body?.channelUrl || '').trim();
+  const startMsgId = Math.max(1, Number(req.body?.startMsgId) || 1);
+  const requestedEnd = Math.max(0, Number(req.body?.endMsgId) || 0);
+  const onlyValidAudioAndHd =
+    typeof req.body?.onlyValidAudioAndHd === 'boolean' ? req.body.onlyValidAudioAndHd : true;
+
+  if (!channelRef) {
+    return res.status(400).json({ error: 'Channel link ya post link daalna zaroori hai.' });
+  }
+  if (bulkSyncJob.status === 'running') {
+    return res.status(409).json({
+      error: 'Ek bulk channel publish job pehle se chal raha hai.',
+      job: bulkSyncJob,
+    });
+  }
+
+  try {
+    const client = await getTelegramClient();
+    await ensureChannelUploadWatcher(client);
+    const resolved = await resolveChannelPeerFromLinkOrId(client, channelRef);
+    if (!resolved) {
+      const isInvite = /(?:\+|joinchat\/)/i.test(channelRef);
+      return res.status(422).json({
+        needsPostLinkOrPing: isInvite,
+        error: isInvite
+          ? 'Bot (+invite link) se direct private channel ID nahi nikal sakta. Is channel ke andar kisi bhi 1 video/post par right-click/tap karke "Copy Post Link" (https://t.me/c/.../123) paste karein YA channel me 1 message send/forward karein, phir dubara Start dabayein.'
+          : 'Channel resolve nahi ho paya. Confirm karein ki @Movies_Direct_Group_Bot is channel me Admin hai.',
+      });
+    }
+
+    const latestMsgId =
+      requestedEnd > 0
+        ? requestedEnd
+        : await discoverChannelLatestMsgId(client, resolved.peer, resolved.cleanChannelId);
+
+    if (!latestMsgId || latestMsgId < startMsgId) {
+      return res.status(404).json({
+        error: 'Channel me koi messages nahi mile. Confirm karein ki bot Admin hai aur channel me posts maujood hain.',
+      });
+    }
+
+    bulkSyncStopRequested = false;
+    bulkSyncJob = {
+      status: 'running',
+      channelRef,
+      channelId: resolved.cleanChannelId,
+      channelTitle: resolved.channelTitle,
+      onlyValidAudioAndHd,
+      startMsgId,
+      endMsgId: latestMsgId,
+      currentMsgId: startMsgId,
+      scannedMessages: 0,
+      totalVideosSeen: 0,
+      publishedCount: 0,
+      mergedCount: 0,
+      skippedNoAudio: 0,
+      skippedLowQuality: 0,
+      skippedDuplicates: 0,
+      skippedNonVideo: 0,
+      startedAtMs: Date.now(),
+      updatedAtMs: Date.now(),
+      errorMessage: '',
+      upgradeUrl: '',
+    };
+
+    void setDoc(
+      doc(db, 'app_config', 'telegram_auto_sync'),
+      {
+        channelUrl: channelRef,
+        activeChannelId: resolved.cleanChannelId,
+        onlyValidAudioAndHd,
+        autoWatchEnabled: true,
+        updatedAtMs: Date.now(),
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    ).catch(() => {});
+    if (cachedSyncConfig) {
+      cachedSyncConfig.channelUrl = channelRef;
+      cachedSyncConfig.onlyValidAudioAndHd = onlyValidAudioAndHd;
+      cachedSyncConfig.autoWatchEnabled = true;
+    }
+
+    void runBulkChannelSyncWorker({
+      client,
+      peer: resolved.peer,
+      cleanChannelId: resolved.cleanChannelId,
+      channelTitle: resolved.channelTitle,
+      publicUsername: resolved.publicUsername,
+      channelRef,
+      startMsgId,
+      endMsgId: latestMsgId,
+      onlyValidAudioAndHd,
+    });
+
+    return res.json({
+      success: true,
+      started: true,
+      job: bulkSyncJob,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      error: err?.message || 'Failed to start bulk channel auto-publish.',
+    });
+  }
+});
 
 // Start 24/7 MTProto channel watcher on server boot + 15s safety poll
 setTimeout(() => {

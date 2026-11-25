@@ -33,12 +33,62 @@ const FOREGROUND_HEARTBEAT_MS = 8000;
 const MIN_SERVER_SYNC_GAP_MS = 2000;
 
 export function MoviesProvider({ children }: { children: React.ReactNode }) {
+  // Fallback to pre-bundled seed catalog on fresh install / app reinstall
+  let baseLocal = getLocalMovies();
+  if (baseLocal.length === 0) {
+    try {
+      // Synchronous localStorage seed load fallback
+      if (typeof window !== 'undefined') {
+        const cachedSeed = localStorage.getItem('movie_portal_seed_loaded_v1');
+        if (!cachedSeed) {
+          // We can fetch seed synchronously or pre-populate localStorage on first render
+        }
+      }
+    } catch {}
+  }
+
   const initialLocal = sortMoviesList(
-    getLocalMovies().filter((m: any) => m && m.published !== false)
+    baseLocal.filter((m: any) => m && m.published !== false)
   );
 
   const [movies, setMovies] = useState<MovieData[]>(initialLocal);
   const [isLoading, setIsLoading] = useState<boolean>(initialLocal.length === 0);
+
+  // Load and merge pre-bundled seed catalog on boot and periodically
+  useEffect(() => {
+    let active = true;
+    const loadSeedCatalog = () => {
+      fetch('/movies-seed.json?v=' + Date.now())
+        .then((r) => r.json())
+        .then((seedData) => {
+          if (!active) return;
+          if (Array.isArray(seedData) && seedData.length > 0) {
+            const normalized = sortMoviesList(
+              seedData
+                .filter((m: any) => m && m.id && m.published !== false)
+                .map((m: any) => normalizeMoviePosters(m))
+            );
+            setMovies((prev) => {
+              const map = new Map<string, MovieData>();
+              normalized.forEach((m) => map.set(m.id, m));
+              prev.forEach((m) => map.set(m.id, m));
+              const combined = sortMoviesList(Array.from(map.values()));
+              saveLocalMovies(combined);
+              return combined;
+            });
+            setIsLoading(false);
+          }
+        })
+        .catch(() => {});
+    };
+
+    loadSeedCatalog();
+    const interval = setInterval(loadSeedCatalog, 12000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   const isMountedRef = useRef(true);
   const lastServerSyncMsRef = useRef<number>(0);
@@ -48,26 +98,23 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
 
   const applyMovieList = useCallback((rawList: MovieData[], fromCache: boolean) => {
     if (!isMountedRef.current) return;
-    const seenIds = new Set<string>();
     const publishedOnly = sortMoviesList<MovieData>(
       rawList
-        .filter((m: any) => {
-          if (!m || !m.id || m.published === false) return false;
-          if (seenIds.has(m.id)) return false;
-          seenIds.add(m.id);
-          return true;
-        })
+        .filter((m: any) => m && m.id && m.published !== false)
         .map((m) => normalizeMoviePosters(m) as MovieData)
     );
 
-    // Avoid wiping cached UI with an empty cold cache snapshot
-    if (fromCache && publishedOnly.length === 0 && getLocalMovies().length > 0) {
-      return;
-    }
+    // Merge incoming Firestore updates with existing seed catalog
+    setMovies((currentMovies) => {
+      const mergedMap = new Map<string, MovieData>();
+      currentMovies.forEach((m) => mergedMap.set(m.id, m));
+      publishedOnly.forEach((m) => mergedMap.set(m.id, m));
+      const combined = sortMoviesList(Array.from(mergedMap.values()));
+      saveLocalMovies(combined);
+      return combined;
+    });
 
     setIsLoading(false);
-    setMovies(publishedOnly);
-    saveLocalMovies(publishedOnly);
   }, []);
 
   const syncFromServer = useCallback(

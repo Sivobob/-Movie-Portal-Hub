@@ -16,11 +16,6 @@ export function isFirestoreWriteAllowed(): boolean {
   try {
     if (typeof window === 'undefined' || !window.localStorage) return true;
 
-    // Guard during the active exhausted quota window until next daily reset
-    if (Date.now() < KNOWN_QUOTA_RESET_UTC_MS) {
-      return false;
-    }
-
     const until = localStorage.getItem(QUOTA_EXCEEDED_KEY);
     if (!until) return true;
     const expiryTime = Number(until);
