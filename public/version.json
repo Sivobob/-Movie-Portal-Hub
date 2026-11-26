@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.289",
-  "minimumRequiredVersion": "3.5.289",
-  "latestVersionCode": 35289,
-  "minimumRequiredVersionCode": 35289,
+  "latestVersion": "3.5.290",
+  "minimumRequiredVersion": "3.5.290",
+  "latestVersionCode": 35290,
+  "minimumRequiredVersionCode": 35290,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Hub v3.5.289: Featured slide fix, instant Telegram catalog sync in Downloads, and smoother navigation.",
-  "releaseNotes": "v3.5.289: Fixed Featured slide visibility, removed accidental swipe category switching, enabled instant Telegram sync in Downloads, and fixed update loop."
+  "updateMessage": "Movie Hub v3.5.290: Watch Now ke niche Hollywood Print aur HD label add ho gaya hai.",
+  "releaseNotes": "v3.5.290: Added Hollywood Print (HDTC / CineVood / CAM) and HD labels directly below Watch Now across all movies and series."
 }

@@ -36,7 +36,7 @@ import { getDisplayCategory } from '../utils/categoryMapping';
 import { formatHumanDuration, parseDurationToSeconds } from '../utils/duration';
 import { normalizeEpisodeForSave } from '../utils/playerHelpers';
 import { upgradePosterUrl } from '../utils/posterUrl';
-import { normalizeQualityBadge } from '../utils/qualityBadge';
+import { isHollywoodPrintText, normalizeQualityBadge } from '../utils/qualityBadge';
 import { parseTelegramUrl } from '../utils/telegramParser';
 
 export interface AutoMatchCandidate {
@@ -608,11 +608,11 @@ export default function TelegramAutoMovieSync({
     const displayCat = getDisplayCategory(catToSave);
     const cleanBackdrop = upgradePosterUrl(draft.backdropUrl || cleanPoster, 1280) || cleanPoster;
     const badge = normalizeQualityBadge(
-      /cam|hdtc|predvd/i.test(draft.sourceFileName + ' ' + draft.sourceCaption)
+      isHollywoodPrintText(`${draft.sourceFileName} ${draft.sourceCaption}`)
         ? 'HDTC'
         : draft.qualityBadge === '4K'
         ? 'HD'
-        : draft.qualityBadge
+        : draft.qualityBadge || 'HD'
     );
 
     const existingMatch = findExistingMatch(

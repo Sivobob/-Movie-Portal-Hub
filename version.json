@@ -1,0 +1,11 @@
+{
+  "latestVersion": "3.5.290",
+  "minimumRequiredVersion": "3.5.290",
+  "latestVersionCode": 35290,
+  "minimumRequiredVersionCode": 35290,
+  "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
+  "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
+  "isMandatory": true,
+  "updateMessage": "Movie Hub v3.5.290: Watch Now ke niche Hollywood Print aur HD label add ho gaya hai.",
+  "releaseNotes": "v3.5.290: Added Hollywood Print (HDTC / CineVood / CAM) and HD labels directly below Watch Now across all movies and series."
+}

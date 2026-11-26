@@ -86,7 +86,12 @@ import {
   mergeImdbAndWikiResults,
   fetchWikipediaFilmDetail,
 } from '../utils/wikipediaMetadata';
-import { normalizeQualityBadge, getVisibleQualityBadge, QualityBadgeValue } from '../utils/qualityBadge';
+import {
+  normalizeQualityBadge,
+  getWatchNowQualityLabel,
+  isHollywoodPrintMovie,
+  QualityBadgeValue,
+} from '../utils/qualityBadge';
 import {
   RemoteUpdateConfig,
   DEFAULT_REMOTE_UPDATE_CONFIG,
@@ -2543,7 +2548,7 @@ export default function AdminDashboard() {
         isSeries: isSeriesItem,
         language: movie.language,
         genre: movie.genre,
-        qualityBadge: getVisibleQualityBadge(movie) || '',
+        qualityBadge: normalizeQualityBadge(movie.qualityBadge) !== 'NONE' ? normalizeQualityBadge(movie.qualityBadge) : '',
         runtime: movie.runtime,
         posterUrl: movie.posterUrl,
         backdropUrl: movie.backdropUrl || movie.posterUrl,
@@ -3898,8 +3903,8 @@ export default function AdminDashboard() {
                   <div className="grid grid-cols-3 gap-2">
                     {([
                       { value: 'HD', label: 'HD' },
-                      { value: 'HDTC', label: 'HDTC' },
-                      { value: 'NONE', label: 'No Badge' },
+                      { value: 'HDTC', label: 'Hollywood Print (HDTC)' },
+                      { value: 'NONE', label: 'Auto (HD)' },
                     ] as const).map((option) => {
                       const active = qualityBadge === option.value;
                       return (
@@ -5379,13 +5384,13 @@ export default function AdminDashboard() {
                         <div className="flex-grow min-w-0">
                           <div className="flex items-center gap-2">
                             <h3 className="font-bold text-white text-xs truncate">{movie.title}</h3>
-                            {getVisibleQualityBadge(movie) ? (
-                              <span className="bg-black border border-yellow-400/40 text-yellow-400 text-[9px] px-1.5 py-0.2 rounded font-black uppercase">
-                                {getVisibleQualityBadge(movie)}
+                            {isHollywoodPrintMovie(movie) ? (
+                              <span className="bg-amber-950/90 border border-amber-400/50 text-amber-400 text-[9px] px-1.5 py-0.2 rounded font-black uppercase">
+                                {getWatchNowQualityLabel(movie)}
                               </span>
                             ) : (
-                              <span className="bg-neutral-900 border border-neutral-700 text-gray-500 text-[9px] px-1.5 py-0.2 rounded font-semibold">
-                                No Badge
+                              <span className="bg-emerald-950/90 border border-emerald-400/40 text-emerald-400 text-[9px] px-1.5 py-0.2 rounded font-black uppercase">
+                                HD
                               </span>
                             )}
                             {movie.featured && (

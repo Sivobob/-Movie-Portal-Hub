@@ -29,6 +29,7 @@ import {
 } from '../utils/duration';
 import { resolveEpisodePlaybackDurationSec } from '../utils/playerHelpers';
 import { isEpisodeNewActive, getEpisodeDisplayLabel } from '../services/movieStorage';
+import { getWatchNowQualityLabel } from '../utils/qualityBadge';
 
 interface MovieDetailsModalProps {
   movie: any | null;
@@ -360,18 +361,14 @@ export default function MovieDetailsModal({
     );
   };
 
-  const rawBadge = String(movie.qualityBadge || '').trim();
-  const badgeText =
-    rawBadge && rawBadge.toUpperCase() !== 'NONE' ? rawBadge.toUpperCase() : '';
+  const watchNowQualityLabel = getWatchNowQualityLabel(movie);
+  const isHollywoodPrint = watchNowQualityLabel === 'Hollywood Print';
   const realYear = movie.releaseYear ? String(movie.releaseYear) : '';
   const metaLineItems = [
-    badgeText,
     realYear,
     hasRealSeasons
       ? `${seasonsList.length} Season${seasonsList.length > 1 ? 's' : ''}`
-      : !badgeText && formattedMovieDuration
-      ? formattedMovieDuration
-      : '',
+      : formattedMovieDuration || '',
   ].filter(Boolean);
 
   const languageLine =
@@ -534,6 +531,13 @@ export default function MovieDetailsModal({
                     : 'Watch Now'}
                 </span>
               </button>
+              <p
+                className={`mt-2.5 text-xs sm:text-[13px] font-extrabold uppercase tracking-[0.14em] ${
+                  isHollywoodPrint ? 'text-amber-400' : 'text-emerald-400'
+                }`}
+              >
+                {watchNowQualityLabel}
+              </p>
             </div>
 
             {genreLine && (

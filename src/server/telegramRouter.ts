@@ -44,7 +44,7 @@ import { db } from '../firebase.ts';
 import { getDisplayCategory } from '../utils/categoryMapping.ts';
 import { parseDurationToSeconds } from '../utils/duration.ts';
 import { upgradePosterUrl } from '../utils/posterUrl.ts';
-import { normalizeQualityBadge } from '../utils/qualityBadge.ts';
+import { isHollywoodPrintText, normalizeQualityBadge } from '../utils/qualityBadge.ts';
 import {
   evaluateChannelVideoFilter,
   filterQualityMapForHdOnly,
@@ -4389,7 +4389,14 @@ router.post('/scan-movies-channel', async (req: Request, res: Response) => {
           bestStream;
         const bestDurSec = Math.max(0, ...grp.members.map((m) => m.durationSec || 0));
         const durationFormatted = bestDurSec > 0 ? formatDuration(bestDurSec) : '';
-        const qualityBadge: '4K' | 'HD' = filteredQualities['4K'] ? '4K' : 'HD';
+        const hasHollywoodPrint = grp.members.some((m) =>
+          isHollywoodPrintText(`${m.fileName} ${m.caption}`)
+        );
+        const qualityBadge: '4K' | 'HD' | 'HDTC' = hasHollywoodPrint
+          ? 'HDTC'
+          : filteredQualities['4K']
+          ? '4K'
+          : 'HD';
 
         return {
           draftId: `tg-${cleanChannelId}-${grp.primary.msgId}`,
@@ -5584,7 +5591,14 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
 
       const bestDurSec = Math.max(0, ...grp.members.map((m) => m.durationSec || 0));
       const durationFormatted = bestDurSec > 0 ? formatDuration(bestDurSec) : '';
-      const qualityBadge: '4K' | 'HD' = filteredQualities['4K'] ? '4K' : 'HD';
+      const hasHollywoodPrint = grp.members.some((m) =>
+        isHollywoodPrintText(`${m.fileName} ${m.caption}`)
+      );
+      const qualityBadge: '4K' | 'HD' | 'HDTC' = hasHollywoodPrint
+        ? 'HDTC'
+        : filteredQualities['4K']
+        ? '4K'
+        : 'HD';
 
       const msgDateList = grp.members.map((m) => m.msgDateMs).filter((t) => t > 0);
       const realMsgDateMs = msgDateList.length > 0 ? Math.min(...msgDateList) : grp.primary.msgDateMs || 0;
@@ -5647,7 +5661,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
           ? (String(draft.originalCategory || '').toLowerCase().includes('anime') ? 'Anime Series' : 'Web Series')
           : (draft.originalCategory || 'Bollywood Movie');
         const displayCat = getDisplayCategory(catToSave);
-        const badge = normalizeQualityBadge('NONE');
+        const badge = normalizeQualityBadge(draft.qualityBadge) === 'HDTC' ? 'HDTC' : 'HD';
 
         if (isSeriesItem) {
           const seasonNum = Math.max(1, Number(draft.seasonNumber) || 1);
@@ -5732,7 +5746,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
                     isSeries: true,
                     language: (draft.language || 'Hindi').trim(),
                     genre: (draft.genre || 'Drama').trim(),
-                    qualityBadge: badge !== 'NONE' ? badge : '',
+                    qualityBadge: badge,
                     runtime: (draft.runtime || '').trim(),
                     posterUrl: cleanPoster,
                     backdropUrl: cleanBackdrop,
@@ -5834,7 +5848,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
                     isSeries: true,
                     language: (draft.language || 'Hindi').trim(),
                     genre: (draft.genre || 'Drama').trim(),
-                    qualityBadge: badge !== 'NONE' ? badge : '',
+                    qualityBadge: badge,
                     runtime: (draft.runtime || '').trim(),
                     posterUrl: cleanPoster,
                     backdropUrl: cleanBackdrop,
@@ -5873,11 +5887,14 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
               existingRec.streamingUrl ||
               draft.streamUrl.trim();
             const prevSeed = seedCatalogMap.get(existingRec.id) || {};
+            const upgradedBadge =
+              badge === 'HD' ? 'HD' : prevSeed.qualityBadge || badge;
             seedCatalogMap.set(existingRec.id, {
               ...prevSeed,
               id: existingRec.id,
               videoQualities: mergedQualities,
               streamingUrl: upgradedStream,
+              qualityBadge: upgradedBadge,
               updatedAt: nowMs,
             });
             await setDocWithQuotaGuard(
@@ -5885,6 +5902,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
               {
                 videoQualities: mergedQualities,
                 streamingUrl: upgradedStream,
+                qualityBadge: upgradedBadge,
                 updatedAt: serverTimestamp(),
               },
               { merge: true }
@@ -5974,7 +5992,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
               isSeries: false,
               language: (draft.language || 'Hindi').trim(),
               genre: (draft.genre || 'Action').trim(),
-              qualityBadge: badge !== 'NONE' ? badge : '',
+              qualityBadge: badge,
               runtime: (draft.runtime || '').trim(),
               posterUrl: cleanPoster,
               backdropUrl: cleanBackdrop,
@@ -6584,7 +6602,10 @@ async function runBulkChannelSyncWorker(params: {
           ? (String(matched.originalCategory || '').toLowerCase().includes('anime') ? 'Anime Series' : 'Web Series')
           : (matched.originalCategory || 'Bollywood Movie');
         const displayCat = getDisplayCategory(catToSave);
-        const badge = normalizeQualityBadge('NONE');
+        const hasHollywoodPrint = grp.members.some((m) =>
+          isHollywoodPrintText(`${m.fileName} ${m.caption}`)
+        );
+        const badge = hasHollywoodPrint ? 'HDTC' : 'HD';
         const fallbackSvg = buildFallbackPosterDataUri(matched.title || mergedParsed.cleanTitle, candYear);
         const cleanPoster = (matched.posterUrl ? upgradePosterUrl(matched.posterUrl, 1080) || matched.posterUrl : '') || fallbackSvg;
         const cleanBackdrop = (matched.backdropUrl || matched.posterUrl ? upgradePosterUrl(matched.backdropUrl || cleanPoster, 1280) || cleanPoster : '') || fallbackSvg;
@@ -6729,17 +6750,20 @@ async function runBulkChannelSyncWorker(params: {
               existingUrlSet.add(bestStream.toLowerCase());
 
               const prevSeed = seedCatalogMap.get(existingRec.id) || {};
+              const upgradedBadge =
+                badge === 'HD' ? 'HD' : prevSeed.qualityBadge || badge;
               seedCatalogMap.set(existingRec.id, {
                 ...prevSeed,
                 videoQualities: mergedQualities,
                 streamingUrl: upgradedStream,
+                qualityBadge: upgradedBadge,
                 updatedAt: Date.now(),
               });
 
               try {
                 await setDocWithQuotaGuard(
                   doc(db, 'movies', existingRec.id),
-                  { videoQualities: mergedQualities, streamingUrl: upgradedStream, updatedAt: serverTimestamp() },
+                  { videoQualities: mergedQualities, streamingUrl: upgradedStream, qualityBadge: upgradedBadge, updatedAt: serverTimestamp() },
                   { merge: true }
                 );
               } catch (writeErr: any) {
@@ -7092,6 +7116,221 @@ setTimeout(() => {
     runServerAutoSyncPass('periodic').catch(() => {});
   }, 8_000);
 }, 3000);
+
+router.post('/backfill-print-badges', async (_req: Request, res: Response) => {
+  try {
+    const client = await getTelegramClient();
+    const byId = new Map<string, any>();
+
+    try {
+      if (fs.existsSync(SEED_CATALOG_PATH)) {
+        const seedArr = JSON.parse(fs.readFileSync(SEED_CATALOG_PATH, 'utf8'));
+        if (Array.isArray(seedArr)) {
+          for (const m of seedArr) {
+            if (m && m.id) byId.set(String(m.id), m);
+          }
+        }
+      }
+    } catch {}
+
+    try {
+      const fsSnap = await Promise.race([
+        getDocsFromServer(collection(db, 'movies')),
+        new Promise<null>((r) => setTimeout(() => r(null), 12000)),
+      ]);
+      if (fsSnap) {
+        fsSnap.docs.forEach((d) => {
+          const data = d.data() as any;
+          const prev = byId.get(d.id) || {};
+          byId.set(d.id, { ...prev, ...data, id: d.id });
+        });
+      }
+    } catch {}
+
+    const allMovies = Array.from(byId.values());
+    const refsByChannel = new Map<string, Set<number>>();
+    const movieRefs = new Map<string, Array<{ channelId: string; msgId: number; url: string }>>();
+
+    const collectUrl = (movieId: string, rawUrl: any) => {
+      const url = String(rawUrl || '').trim();
+      if (!url) return;
+      const p = parseTelegramUrl(url);
+      if (!p.isValid || p.isInviteLink || !p.messageId) return;
+      const chId = String(p.rawChannelId || p.chatId || '').replace(/^-100/, '');
+      const msgId = Number(p.messageId);
+      if (!chId || !Number.isFinite(msgId) || msgId <= 0) return;
+      if (!refsByChannel.has(chId)) refsByChannel.set(chId, new Set());
+      refsByChannel.get(chId)!.add(msgId);
+      if (!movieRefs.has(movieId)) movieRefs.set(movieId, []);
+      movieRefs.get(movieId)!.push({ channelId: chId, msgId, url });
+    };
+
+    for (const m of allMovies) {
+      collectUrl(m.id, m.streamingUrl);
+      if (m.videoQualities && typeof m.videoQualities === 'object') {
+        Object.values(m.videoQualities).forEach((u) => collectUrl(m.id, u));
+      }
+      if (Array.isArray(m.seasons)) {
+        for (const s of m.seasons.slice(0, 2)) {
+          for (const ep of (s?.episodes || []).slice(0, 2)) {
+            collectUrl(m.id, ep?.streamUrl);
+            if (ep?.videoQualities && typeof ep.videoQualities === 'object') {
+              Object.values(ep.videoQualities).forEach((u) => collectUrl(m.id, u));
+            }
+          }
+        }
+      }
+    }
+
+    const msgMap = new Map<string, any>();
+    for (const [chId, idSet] of refsByChannel.entries()) {
+      const accessHash = getCachedAccessHash(chId);
+      let peer: any = null;
+      if (accessHash && /^\d+$/.test(chId)) {
+        peer = new Api.InputPeerChannel({
+          channelId: BigInt(chId) as any,
+          accessHash: BigInt(accessHash) as any,
+        });
+      } else {
+        try {
+          peer = await Promise.race([
+            client.getEntity(/^\d+$/.test(chId) ? `-100${chId}` : chId),
+            new Promise<null>((r) => setTimeout(() => r(null), 8000)),
+          ]);
+        } catch {}
+      }
+      if (!peer) continue;
+      const ids = Array.from(idSet).sort((a, b) => b - a);
+      for (let i = 0; i < ids.length; i += 100) {
+        const chunk = ids.slice(i, i + 100);
+        try {
+          const msgs = await Promise.race([
+            fetchMessagesWithFloodWait(client, peer, chunk),
+            new Promise<null>((r) => setTimeout(() => r(null), 12000)),
+          ]);
+          for (const msg of msgs || []) {
+            if (msg && (msg as any).id) {
+              msgMap.set(`${chId}:${(msg as any).id}`, msg);
+            }
+          }
+        } catch (err) {
+          console.warn(`[BackfillPrintBadges] getMessages chunk failed for ${chId}:`, err);
+        }
+      }
+    }
+
+    const nowMs = Date.now();
+    let updatedCount = 0;
+    let hollywoodPrintCount = 0;
+    let hdCount = 0;
+    const hollywoodPrintTitles: string[] = [];
+    const firestoreChanged: Array<{ id: string; badge: 'HD' | 'HDTC' }> = [];
+
+    for (const m of allMovies) {
+      const refs = movieRefs.get(m.id) || [];
+      let hasAnyStreamMsg = false;
+      let hasCleanHdStream = false;
+      let hasHollywoodPrintStream = false;
+
+      for (const ref of refs) {
+        const msg = msgMap.get(`${ref.channelId}:${ref.msgId}`);
+        if (!msg) continue;
+        hasAnyStreamMsg = true;
+        const classified = classifyTelegramDocMedia(msg);
+        const rawText = `${classified.fileName || ''} ${'caption' in classified ? classified.caption || '' : ''}`;
+        if (isHollywoodPrintText(rawText)) {
+          hasHollywoodPrintStream = true;
+        } else {
+          hasCleanHdStream = true;
+        }
+      }
+
+      const fallbackTextPrint = isHollywoodPrintText(
+        `${m.qualityBadge || ''} ${m.sourceFileName || ''} ${m.sourceCaption || ''} ${m.title || ''} ${m.description || ''}`
+      );
+
+      // If any stream is Hollywood Print / HDTC / CineVood and no clean non-print stream exists -> HDTC
+      const nextBadge: 'HD' | 'HDTC' =
+        (hasAnyStreamMsg ? hasHollywoodPrintStream && !hasCleanHdStream : false) ||
+        normalizeQualityBadge(m.qualityBadge) === 'HDTC' ||
+        fallbackTextPrint
+          ? 'HDTC'
+          : 'HD';
+
+      if (nextBadge === 'HDTC') {
+        hollywoodPrintCount++;
+        hollywoodPrintTitles.push(`${m.title} (${m.id})`);
+      } else {
+        hdCount++;
+      }
+
+      if (normalizeQualityBadge(m.qualityBadge) !== nextBadge) {
+        updatedCount++;
+        byId.set(m.id, {
+          ...m,
+          qualityBadge: nextBadge,
+          updatedAt: nowMs,
+        });
+        firestoreChanged.push({ id: m.id, badge: nextBadge });
+      }
+    }
+
+    if (updatedCount > 0) {
+      writeSeedCatalogToDisk(Array.from(byId.values()));
+    }
+
+    let firestoreUpdated = 0;
+    if (firestoreChanged.length > 0 && isServerFirestoreWriteAllowed()) {
+      for (let i = 0; i < firestoreChanged.length; i += 20) {
+        if (!isServerFirestoreWriteAllowed()) break;
+        const batch = firestoreChanged.slice(i, i + 20);
+        await Promise.all(
+          batch.map(async (item) => {
+            try {
+              await setDocWithQuotaGuard(
+                doc(db, 'movies', item.id),
+                {
+                  qualityBadge: item.badge,
+                  updatedAt: serverTimestamp(),
+                },
+                { merge: true }
+              );
+              firestoreUpdated++;
+            } catch {}
+          })
+        );
+      }
+
+      await setDocWithQuotaGuard(
+        doc(db, 'app_config', 'catalog_sync'),
+        { updatedAt: Date.now(), action: 'backfill_print_badges' },
+        { merge: true }
+      ).catch(() => {});
+    }
+
+    if (updatedCount > 0) {
+      broadcastLiveCatalogUpdate({
+        type: 'catalog_updated',
+        count: updatedCount,
+        updatedAt: Date.now(),
+        action: 'backfill_print_badges',
+      });
+    }
+
+    return res.json({
+      success: true,
+      total: allMovies.length,
+      updated: updatedCount,
+      firestoreUpdated,
+      hollywoodPrintCount,
+      hdCount,
+      hollywoodPrintTitles: hollywoodPrintTitles.slice(0, 100),
+    });
+  } catch (err: any) {
+    console.error('[BackfillPrintBadges] Error:', err);
+    return res.status(500).json({ error: err?.message || 'Backfill failed' });
+  }
+});
 
 router.get('/stream', handleStream);
 router.head('/stream', handleStream);

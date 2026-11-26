@@ -4,6 +4,7 @@ import {
   searchMetadataInternal,
 } from './metadataRouter.ts';
 import { upgradePosterUrl } from '../utils/posterUrl.ts';
+import { isHollywoodPrintText } from '../utils/qualityBadge.ts';
 
 export interface ParsedTelegramMovieMeta {
   rawFileName: string;
@@ -21,6 +22,7 @@ export interface ParsedTelegramMovieMeta {
   episodeLabel: string;
   episodeTitle: string;
   isSampleOrClip: boolean;
+  isHollywoodPrint: boolean;
 }
 
 export interface AutoMatchedCandidateSummary {
@@ -41,7 +43,7 @@ export interface AutoMatchedMovieDraft {
   sourceMsgIds: number[];
   streamUrl: string;
   videoQualities: Record<string, string>;
-  qualityBadge: '4K' | 'HD';
+  qualityBadge: '4K' | 'HD' | 'HDTC';
   durationSec: number;
   runtime: string;
   sourceFileName: string;
@@ -520,6 +522,8 @@ export function parseTelegramMovieMeta(
     ? `${normalizedGroupTitle}${fallbackYear ? `-${fallbackYear}` : ''}`
     : '';
 
+  const isHollywoodPrint = isHollywoodPrintText(`${caption || ''}\n${fileName || ''}`);
+
   return {
     rawFileName: fileName || '',
     rawCaption: caption || '',
@@ -536,6 +540,7 @@ export function parseTelegramMovieMeta(
     episodeLabel: epDetails.episodeLabel,
     episodeTitle: epDetails.episodeTitle,
     isSampleOrClip,
+    isHollywoodPrint,
   };
 }
 

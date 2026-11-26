@@ -91,9 +91,21 @@ function mergeMovieRecord(existing: MovieData | undefined, incoming: MovieData, 
     ? existing.backdropUrl
     : bestPoster;
 
+  const existingBadge = String(existing.qualityBadge || '').trim().toUpperCase();
+  const incomingBadge = String(incoming.qualityBadge || '').trim().toUpperCase();
+  const resolvedBadge =
+    incomingBadge && incomingBadge !== 'NONE'
+      ? (incomingUpdated >= existingUpdated || !existingBadge || existingBadge === 'NONE'
+          ? incoming.qualityBadge
+          : existing.qualityBadge)
+      : existingBadge && existingBadge !== 'NONE'
+      ? existing.qualityBadge
+      : base.qualityBadge;
+
   return {
     ...base,
     ...(preservedTgDate ? { telegramDateMs: preservedTgDate } : {}),
+    ...(resolvedBadge ? { qualityBadge: resolvedBadge } : {}),
     posterUrl: bestPoster,
     backdropUrl: bestBackdrop,
   };
