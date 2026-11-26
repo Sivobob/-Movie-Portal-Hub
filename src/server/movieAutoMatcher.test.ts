@@ -228,3 +228,122 @@ test('strips channel, bot, and site prefixes cleanly and detects TSRip/TELESYNC 
     true
   );
 });
+
+test('handles EP(01-16), Epi_05_08, S01E0 truncation, and series episode overlap reconciliation', async () => {
+  const { reconcileSeasonEpisodes, mergeEpisodeIntoSeasons, normalizeSeriesSeasons } = await import(
+    '../utils/seriesCompleteness.ts'
+  );
+
+  // S01E0 truncated filename must never yield Episode 0
+  const taskareeTruncated = parseTelegramMovieMeta(
+    'www.1TamilMV.DO - Taskaree - The Smugglers Web S01E0.mkv',
+    'Taskaree (2026)',
+    1280,
+    720,
+    2400
+  );
+  assert.equal(taskareeTruncated.isSeriesEpisode, true);
+  assert.equal(taskareeTruncated.seasonNumber, 1);
+  assert.equal(taskareeTruncated.episodeNumber, null);
+  assert.equal(taskareeTruncated.episodeTitle, '');
+
+  // Parenthesized EP(01-16) and underscore Epi_05_08
+  const doomCombined = parseTelegramMovieMeta(
+    'Doom at Your Service (2021) S01 EP(01-16) Hindi 720p.mkv',
+    '',
+    1280,
+    720,
+    59801
+  );
+  assert.equal(doomCombined.isSeriesEpisode, true);
+  assert.equal(doomCombined.seasonNumber, 1);
+  assert.equal(doomCombined.episodeNumber, 1);
+  assert.equal(doomCombined.episodeLabel, '1-16');
+
+  const loveEpi = parseTelegramMovieMeta(
+    'Love_Always_S01_Epi_05_08_720p.mkv',
+    '',
+    1280,
+    720
+  );
+  assert.equal(loveEpi.isSeriesEpisode, true);
+  assert.equal(loveEpi.seasonNumber, 1);
+  assert.equal(loveEpi.episodeNumber, 5);
+  assert.equal(loveEpi.episodeLabel, '5-8');
+
+  // Reconcile Where the Mask Ends (mixed 540p 1-10/11-20/21-30 vs 720p 1-8/9-16/17-23/24-30)
+  const maskEps = [
+    { episodeNumber: 1, episodeLabel: '1-10', title: 'Episodes 1-10', streamUrl: 'https://t.me/c/4451036277/3271', durationSec: 30861, quality: '540p' },
+    { episodeNumber: 9, episodeLabel: '9-16', title: 'Episodes 9-16', streamUrl: 'https://t.me/c/4451036277/3275', durationSec: 24720, quality: '720p' },
+    { episodeNumber: 11, episodeLabel: '11-20', title: 'Episodes 11-20', streamUrl: 'https://t.me/c/4451036277/3272', durationSec: 30992, quality: '540p' },
+    { episodeNumber: 17, episodeLabel: '17-23', title: 'Episodes 17-23', streamUrl: 'https://t.me/c/4451036277/3276', durationSec: 21540, quality: '720p' },
+    { episodeNumber: 21, episodeLabel: '21-30', title: 'Episodes 21-30', streamUrl: 'https://t.me/c/4451036277/3273', durationSec: 28620, quality: '540p' },
+    { episodeNumber: 24, episodeLabel: '24-30', title: 'Episodes 24-30', streamUrl: 'https://t.me/c/4451036277/3277', durationSec: 19440, quality: '720p' },
+    { episodeNumber: 1, episodeLabel: '1-8', title: 'Episodes 1-8', streamUrl: 'https://t.me/c/4451036277/3274', durationSec: 24700, quality: '720p' },
+  ];
+  const reconciledMask = reconcileSeasonEpisodes(maskEps);
+  assert.deepEqual(
+    reconciledMask.map((e: any) => e.episodeLabel),
+    ['1-8', '9-16', '17-23', '24-30']
+  );
+
+  // Duration-outlier Complete disguised as Ep 1 alongside real singles
+  const doomSeries = normalizeSeriesSeasons({
+    id: 'tg_series_4451036277_3949',
+    originalCategory: 'Web Series',
+    streamingUrl: 'https://t.me/c/4451036277/3949',
+    seasons: [
+      {
+        seasonNumber: 1,
+        episodes: [
+          { episodeNumber: 1, title: 'Episode 1', streamUrl: 'https://t.me/c/4451036277/3949', durationSec: 59801 },
+          { episodeNumber: 1, title: 'Episode 1', streamUrl: 'https://t.me/c/4451036277/3965', durationSec: 3675 },
+          { episodeNumber: 2, title: 'Episode 2', streamUrl: 'https://t.me/c/4451036277/3962', durationSec: 3680 },
+          { episodeNumber: 3, title: 'Episode 3', streamUrl: 'https://t.me/c/4451036277/3961', durationSec: 3710 },
+        ],
+      },
+    ],
+  });
+  assert.deepEqual(
+    doomSeries.seasons[0].episodes.map((e: any) => e.streamUrl),
+    [
+      'https://t.me/c/4451036277/3965',
+      'https://t.me/c/4451036277/3962',
+      'https://t.me/c/4451036277/3961',
+    ]
+  );
+  assert.equal(doomSeries.streamingUrl, 'https://t.me/c/4451036277/3965');
+
+  // Boundary touch typo on multi-episode packs (Halo: Nightfall 51-65 + 65-80) must be preserved
+  const halo = reconcileSeasonEpisodes([
+    { episodeNumber: 51, episodeLabel: '51-65', title: 'Episodes 51-65', streamUrl: 'https://t.me/c/1/51', durationSec: 9000 },
+    { episodeNumber: 65, episodeLabel: '65-80', title: 'Episodes 65-80', streamUrl: 'https://t.me/c/1/65', durationSec: 9200 },
+    { episodeNumber: 81, episodeLabel: '81-95', title: 'Episodes 81-95', streamUrl: 'https://t.me/c/1/81', durationSec: 9100 },
+  ]);
+  assert.deepEqual(
+    halo.map((e: any) => e.episodeLabel),
+    ['51-65', '65-80', '81-95']
+  );
+
+  // mergeEpisodeIntoSeasons refuses Complete pack over existing specific episodes
+  const mergedSkipComplete = mergeEpisodeIntoSeasons(
+    [
+      {
+        seasonNumber: 1,
+        episodes: [
+          { episodeNumber: 1, title: 'Episode 1', streamUrl: 'https://t.me/c/1/1' },
+          { episodeNumber: 2, title: 'Episode 2', streamUrl: 'https://t.me/c/1/2' },
+        ],
+      },
+    ],
+    1,
+    {
+      episodeNumber: 1,
+      episodeLabel: 'Complete',
+      title: 'Complete Season',
+      streamUrl: 'https://t.me/c/1/999',
+    }
+  );
+  assert.equal(mergedSkipComplete.added, false);
+  assert.equal(mergedSkipComplete.mergedSeasons[0].episodes.length, 2);
+});

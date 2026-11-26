@@ -79,7 +79,7 @@ export default function DownloadOptionsModal({
 
   const [selectedSeasonIdx, setSelectedSeasonIdx] = useState<number>(initialSeasonIndex);
   const [selectedEpisodeIdx, setSelectedEpisodeIdx] = useState<number>(initialEpisodeIndex);
-  const [selectedQualityId, setSelectedQualityId] = useState<string>('720p');
+  const [selectedQualityId, setSelectedQualityId] = useState<string>('');
   const [isStarting, setIsStarting] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
   const [startedBatchCount, setStartedBatchCount] = useState<number>(0);
@@ -96,6 +96,7 @@ export default function DownloadOptionsModal({
     const maxE = Math.max(0, eps.length - 1);
     setSelectedSeasonIdx(safeS);
     setSelectedEpisodeIdx(Math.max(0, Math.min(initialEpisodeIndex, maxE)));
+    setSelectedQualityId('');
     setHasStarted(false);
     setStartedBatchCount(0);
     setErrorMsg(null);
@@ -110,9 +111,12 @@ export default function DownloadOptionsModal({
 
   const currentSeasonNumber = Number(currentSeason?.seasonNumber || safeSeasonIdx + 1);
   const currentEpisodeNumber = Number(currentEpisode?.episodeNumber || safeEpisodeIdx + 1);
+  const currentEpDisplay = currentEpisode
+    ? getEpisodeDisplayLabel(currentEpisode, safeEpisodeIdx, true)
+    : '';
   const seasonEpisodeLabel =
     isSeries && currentEpisode
-      ? `S${String(currentSeasonNumber).padStart(2, '0')}E${String(currentEpisodeNumber).padStart(2, '0')}`
+      ? `S${String(currentSeasonNumber).padStart(2, '0')}E${currentEpDisplay}`
       : undefined;
 
   const downloadTitle = useMemo(() => {
@@ -289,8 +293,9 @@ export default function DownloadOptionsModal({
     const stillValid = qualityOptions.some((q) => q.id === selectedQualityId);
     if (!stillValid) {
       const rec =
+        qualityOptions.find((q) => q.id === '720p' && q.tier === 'original') ||
+        qualityOptions.find((q) => q.tier === 'original') ||
         qualityOptions.find((q) => q.id === '720p') ||
-        qualityOptions.find((q) => q.id === '1080p') ||
         qualityOptions[0];
       if (rec) setSelectedQualityId(rec.id);
     }
@@ -361,7 +366,7 @@ export default function DownloadOptionsModal({
     const desiredTier = activeQualityObj?.tier || '720p';
     const desiredId = activeQualityObj?.id || '720p';
 
-    const downloadable = episodes.filter((ep) => {
+    const downloadable = episodes.filter((ep, i) => {
       const url = String(
         ep?.videoQualities?.[desiredId] ||
           ep?.streamUrl ||
@@ -371,7 +376,7 @@ export default function DownloadOptionsModal({
           ''
       ).trim();
       if (!url) return false;
-      const epNum = Number(ep?.episodeNumber || 0);
+      const epNum = Number(ep?.episodeNumber || i + 1);
       const match = getDownloadMatch(movieId, url, currentSeasonNumber, epNum);
       return !match.active && !match.completed;
     });
@@ -414,7 +419,8 @@ export default function DownloadOptionsModal({
             sourceHeight: epProbed?.height || 0,
           }).find((q) => q.tier === desiredId);
 
-        const seLabel = `S${String(currentSeasonNumber).padStart(2, '0')}E${String(epNum).padStart(2, '0')}`;
+        const epDisplay = getEpisodeDisplayLabel(ep, i, true);
+        const seLabel = `S${String(currentSeasonNumber).padStart(2, '0')}E${epDisplay}`;
         const epTitle = ep?.title ? `: ${ep.title}` : '';
         await onConfirmDownload({
           movieId,

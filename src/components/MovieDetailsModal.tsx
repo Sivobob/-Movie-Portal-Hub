@@ -415,7 +415,7 @@ export default function MovieDetailsModal({
 
   const currentDownloadMatch = getDownloadMatch(
     currentMovieId,
-    primaryDownloadUrl,
+    rawStreamUrl,
     currentSeasonNumber,
     currentEpisodeNumber
   );

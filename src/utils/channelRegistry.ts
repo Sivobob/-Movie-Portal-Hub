@@ -193,13 +193,15 @@ export async function resolveTelegramMedia(
   parsed: ParsedTelegramLink,
   allowAuthRetry = true
 ): Promise<{ message: any | null; error?: string }> {
-  const messageId = parseInt(parsed.messageId);
-  const cleanId = parsed.rawChannelId ? parsed.rawChannelId.replace('-100', '') : '';
+  const messageId = parseInt(parsed.messageId, 10);
+  const rawChannelToken = parsed.rawChannelId ? parsed.rawChannelId.replace(/^-100/, '').trim() : '';
+  const isNumericChannelId = /^\d+$/.test(rawChannelToken);
+  const cleanId = isNumericChannelId ? rawChannelToken : '';
   const cachedHash = cleanId ? getCachedAccessHash(cleanId) : null;
 
   const candidatePeers: any[] = [];
 
-  // 1. If we have a cached access_hash for this channel, create an authentic InputPeerChannel
+  // 1. If we have a cached access_hash for this numeric channel ID, create an authentic InputPeerChannel
   if (cleanId && cachedHash) {
     try {
       const inputPeer = new Api.InputPeerChannel({
@@ -216,13 +218,22 @@ export async function resolveTelegramMedia(
     } catch (e) {}
   }
 
-  // 2. If it is a public channel with username
+  // 2. If it is a public channel with username (e.g. @Naruto_Shippuden_HindiiDubb)
   if (parsed.chatId && parsed.chatId.startsWith('@')) {
     try {
       const entity: any = await client.getEntity(parsed.chatId);
       if (entity) {
-        if (entity.accessHash) {
-          saveChannelEntity(entity.id.toString(), entity.accessHash.toString(), entity.title, entity.username);
+        if (entity.accessHash && entity.id) {
+          const resolvedId = entity.id.toString().replace(/^-100/, '');
+          saveChannelEntity(resolvedId, entity.accessHash.toString(), entity.title, entity.username);
+          if (/^\d+$/.test(resolvedId)) {
+            candidatePeers.push(
+              new Api.InputPeerChannel({
+                channelId: bigInt(resolvedId),
+                accessHash: bigInt(entity.accessHash.toString()),
+              })
+            );
+          }
         }
         candidatePeers.push(entity);
       }
@@ -237,7 +248,7 @@ export async function resolveTelegramMedia(
     candidatePeers.push(cleanId);
   }
 
-  // Quick entity check if needed
+  // Quick entity check if needed for numeric private channel IDs
   if (cleanId && !cachedHash) {
     try {
       const entity: any = await client.getEntity(`-100${cleanId}`);

@@ -45,6 +45,8 @@ public class ReleaseNotificationHelper {
         "https://firestore.googleapis.com/v1/projects/gen-lang-client-0267042672/databases/ai-studio-movieportalhub-664a3e40-85f3-4758-945e-fd031bdc459f/documents/admins/latest_release_notification";
 
     private static final String[] FALLBACK_BACKEND_URLS = new String[] {
+        "https://ais-pre-jledbsv5it3bzdsqu6r7up-560942295760.asia-northeast1.run.app",
+        "https://ais-dev-jledbsv5it3bzdsqu6r7up-560942295760.asia-northeast1.run.app",
         "https://ais-pre-yaniwuwl6wc7ivl5tz2bbo-755452514312.asia-northeast1.run.app",
         "https://ais-dev-yaniwuwl6wc7ivl5tz2bbo-755452514312.asia-northeast1.run.app",
         "https://movie-portalhub-1012526016635.asia-southeast1.run.app"

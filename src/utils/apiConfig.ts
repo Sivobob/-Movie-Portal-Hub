@@ -1,6 +1,6 @@
-export const CLOUD_RUN_BACKEND_URL = 'https://ais-pre-xnvcffdn7a5ydibjtjrezd-835315626292.asia-northeast1.run.app';
-export const LIVE_BACKEND_URL = 'https://ais-dev-xnvcffdn7a5ydibjtjrezd-835315626292.asia-northeast1.run.app';
-export const PRE_BACKEND_URL = 'https://ais-pre-xnvcffdn7a5ydibjtjrezd-835315626292.asia-northeast1.run.app';
+export const CLOUD_RUN_BACKEND_URL = 'https://ais-pre-jledbsv5it3bzdsqu6r7up-560942295760.asia-northeast1.run.app';
+export const LIVE_BACKEND_URL = 'https://ais-dev-jledbsv5it3bzdsqu6r7up-560942295760.asia-northeast1.run.app';
+export const PRE_BACKEND_URL = 'https://ais-pre-jledbsv5it3bzdsqu6r7up-560942295760.asia-northeast1.run.app';
 export const APP_VERSION = 'v3.5.295';
 
 const ENV_BACKEND_URL = (
@@ -321,4 +321,66 @@ export function buildApiUrl(path: string): string {
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   const base = getApiBaseUrl();
   return base ? `${base}${cleanPath}` : cleanPath;
+}
+
+/**
+ * When running on the live published HTTPS app (e.g. ais-pre-...run.app),
+ * ensure Firestore admins/backend records the live origin so already-installed
+ * Android APKs automatically pick up UI & feature updates over-the-air.
+ */
+export async function syncLiveAppOriginToFirestoreIfPublished(): Promise<void> {
+  if (typeof window === 'undefined' || isNativeAppRuntime()) return;
+  try {
+    const origin = window.location.origin.replace(/\/+$/, '');
+    const hostname = window.location.hostname.toLowerCase();
+    // Only advertise public non-dev HTTPS origins (ais-dev requires Google Auth cookies)
+    if (
+      !origin.startsWith('https://') ||
+      hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      hostname.startsWith('ais-dev-')
+    ) {
+      return;
+    }
+
+    const sessionKey = `mp_live_origin_synced_${origin}`;
+    if (sessionStorage.getItem(sessionKey) === '1') return;
+
+    const health = await checkBackendHealth(origin, 2500);
+    if (!health.ok) return;
+
+    const [{ doc, getDoc, setDoc }, { db }, quotaMod] = await Promise.all([
+      import('firebase/firestore'),
+      import('../firebase'),
+      import('../services/firestoreQuotaService'),
+    ]);
+
+    if (!quotaMod.isFirestoreWriteAllowed()) return;
+
+    const backendRef = doc(db, 'admins', 'backend');
+    const snap = await getDoc(backendRef).catch(() => null);
+    const data = snap && snap.exists() ? (snap.data() as any) : null;
+    if (data?.liveAppUrl === origin && data?.backendUrl === origin) {
+      sessionStorage.setItem(sessionKey, '1');
+      return;
+    }
+
+    const res = await quotaMod.guardedFirestoreWrite(() =>
+      setDoc(
+        backendRef,
+        {
+          liveAppUrl: origin,
+          webAppUrl: origin,
+          backendUrl: origin,
+          updatedAt: Date.now(),
+        },
+        { merge: true }
+      )
+    );
+    if (res.ok) {
+      sessionStorage.setItem(sessionKey, '1');
+    }
+  } catch {
+    // Non-critical background sync
+  }
 }

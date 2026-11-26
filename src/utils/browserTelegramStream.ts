@@ -382,8 +382,9 @@ async function resolveTelegramDocument(telegramUrl: string, allowRetry = true): 
 
   const client = await getBrowserTelegramClient();
   const messageId = parseInt(parsed.messageId, 10);
-  const cleanId = parsed.rawChannelId ? parsed.rawChannelId.replace('-100', '') : '';
-  const cachedHash = getSavedChannelHash(cleanId);
+  const rawToken = parsed.rawChannelId ? parsed.rawChannelId.replace(/^-100/, '').trim() : '';
+  const cleanId = /^\d+$/.test(rawToken) ? rawToken : '';
+  const cachedHash = cleanId ? getSavedChannelHash(cleanId) : null;
 
   const candidates: any[] = [];
   if (cleanId && cachedHash) {
@@ -427,9 +428,7 @@ async function resolveTelegramDocument(telegramUrl: string, allowRetry = true): 
   }
   if (parsed.chatId) candidates.push(parsed.chatId);
   if (cleanId) {
-    if (/^\d+$/.test(cleanId)) {
-      candidates.push(bigInt(cleanId));
-    }
+    candidates.push(bigInt(cleanId));
     const prefixed = `-100${cleanId}`;
     if (!candidates.includes(prefixed)) candidates.push(prefixed);
     if (!candidates.includes(cleanId)) candidates.push(cleanId);

@@ -1,15 +1,25 @@
 import { Capacitor } from '@capacitor/core';
 
 const DB_NAME = 'movie_portal_offline_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_VIDEOS = 'videos';
+const STORE_CHUNKS = 'video_chunks';
 
 export interface OfflineVideoRecord {
   id: string;
-  blob: Blob;
+  blob?: Blob;
   mimeType: string;
   sizeBytes: number;
   savedAt: number;
+  isChunked?: boolean;
+  chunkCount?: number;
+}
+
+interface OfflineVideoChunkRecord {
+  key: string;
+  videoId: string;
+  chunkIndex: number;
+  blob: Blob;
 }
 
 const objectUrlCache = new Map<string, string>();
@@ -28,6 +38,10 @@ function openOfflineDb(): Promise<IDBDatabase> {
         const db = request.result;
         if (!db.objectStoreNames.contains(STORE_VIDEOS)) {
           db.createObjectStore(STORE_VIDEOS, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(STORE_CHUNKS)) {
+          const chunkStore = db.createObjectStore(STORE_CHUNKS, { keyPath: 'key' });
+          chunkStore.createIndex('by_video', 'videoId', { unique: false });
         }
       };
       request.onsuccess = () => resolve(request.result);
@@ -50,6 +64,77 @@ export async function requestPersistentOfflineStorage(): Promise<void> {
       await navigator.storage.persist();
     }
   } catch {}
+}
+
+export async function clearOfflineVideoChunks(videoId: string): Promise<void> {
+  if (!videoId) return;
+  try {
+    const db = await openOfflineDb();
+    if (!db.objectStoreNames.contains(STORE_CHUNKS)) return;
+    await new Promise<void>((resolve) => {
+      const tx = db.transaction(STORE_CHUNKS, 'readwrite');
+      const store = tx.objectStore(STORE_CHUNKS);
+      const index = store.index('by_video');
+      const cursorReq = index.openKeyCursor(IDBKeyRange.only(videoId));
+      cursorReq.onsuccess = () => {
+        const cursor = cursorReq.result;
+        if (cursor) {
+          store.delete(cursor.primaryKey);
+          cursor.continue();
+        }
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+      tx.onabort = () => resolve();
+    });
+  } catch {}
+}
+
+export async function saveOfflineVideoChunk(
+  videoId: string,
+  chunkIndex: number,
+  chunkBlob: Blob
+): Promise<void> {
+  const db = await openOfflineDb();
+  const record: OfflineVideoChunkRecord = {
+    key: `${videoId}#${chunkIndex}`,
+    videoId,
+    chunkIndex,
+    blob: chunkBlob,
+  };
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_CHUNKS, 'readwrite');
+    tx.objectStore(STORE_CHUNKS).put(record);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error || new Error('Failed to save offline video chunk'));
+    tx.onabort = () => reject(tx.error || new Error('Offline video chunk save aborted'));
+  });
+}
+
+export async function finalizeOfflineChunkedVideo(
+  id: string,
+  mimeType = 'video/mp4',
+  sizeBytes: number,
+  chunkCount: number
+): Promise<void> {
+  await requestPersistentOfflineStorage();
+  const db = await openOfflineDb();
+  const record: OfflineVideoRecord = {
+    id,
+    mimeType: mimeType || 'video/mp4',
+    sizeBytes,
+    savedAt: Date.now(),
+    isChunked: true,
+    chunkCount,
+  };
+
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_VIDEOS, 'readwrite');
+    tx.objectStore(STORE_VIDEOS).put(record);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error || new Error('Failed to finalize offline video'));
+    tx.onabort = () => reject(tx.error || new Error('Offline video finalize aborted'));
+  });
 }
 
 export async function saveOfflineVideoBlob(
@@ -93,6 +178,26 @@ export async function getOfflineVideoRecord(id: string): Promise<OfflineVideoRec
   }
 }
 
+async function getOfflineVideoChunks(videoId: string): Promise<OfflineVideoChunkRecord[]> {
+  try {
+    const db = await openOfflineDb();
+    if (!db.objectStoreNames.contains(STORE_CHUNKS)) return [];
+    return await new Promise((resolve) => {
+      const tx = db.transaction(STORE_CHUNKS, 'readonly');
+      const index = tx.objectStore(STORE_CHUNKS).index('by_video');
+      const req = index.getAll(IDBKeyRange.only(videoId));
+      req.onsuccess = () => {
+        const list = Array.isArray(req.result) ? (req.result as OfflineVideoChunkRecord[]) : [];
+        list.sort((a, b) => a.chunkIndex - b.chunkIndex);
+        resolve(list);
+      };
+      req.onerror = () => resolve([]);
+    });
+  } catch {
+    return [];
+  }
+}
+
 export function checkNativeOfflineFileExists(localUri?: string): boolean {
   if (typeof window === 'undefined' || !Capacitor.isNativePlatform() || !localUri) {
     return false;
@@ -111,7 +216,9 @@ export async function hasOfflineVideo(id: string, localUri?: string): Promise<bo
     return true;
   }
   const rec = await getOfflineVideoRecord(id);
-  return Boolean(rec && rec.blob && rec.blob.size > 0);
+  if (!rec) return false;
+  if (rec.blob && rec.blob.size > 0) return true;
+  return Boolean(rec.isChunked && rec.sizeBytes > 0 && (rec.chunkCount || 0) > 0);
 }
 
 export async function getOfflineVideoPlayableUrl(
@@ -130,10 +237,27 @@ export async function getOfflineVideoPlayableUrl(
   }
 
   const rec = await getOfflineVideoRecord(id);
-  if (rec && rec.blob && rec.blob.size > 0) {
+  if (!rec) return null;
+
+  if (rec.blob && rec.blob.size > 0) {
     const blobUrl = URL.createObjectURL(rec.blob);
     objectUrlCache.set(id, blobUrl);
     return blobUrl;
+  }
+
+  if (rec.isChunked && (rec.chunkCount || 0) > 0) {
+    const chunks = await getOfflineVideoChunks(id);
+    if (chunks.length > 0) {
+      const compositeBlob = new Blob(
+        chunks.map((c) => c.blob),
+        { type: rec.mimeType || 'video/mp4' }
+      );
+      if (compositeBlob.size > 0) {
+        const blobUrl = URL.createObjectURL(compositeBlob);
+        objectUrlCache.set(id, blobUrl);
+        return blobUrl;
+      }
+    }
   }
 
   return null;
@@ -154,6 +278,8 @@ export async function deleteOfflineVideo(id: string, localUri?: string): Promise
     } catch {}
     objectUrlCache.delete(id);
   }
+
+  await clearOfflineVideoChunks(id);
 
   try {
     const db = await openOfflineDb();

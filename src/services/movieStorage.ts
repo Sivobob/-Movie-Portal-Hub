@@ -7,7 +7,7 @@ import {
   isFirestoreWriteAllowed,
 } from './firestoreQuotaService';
 import { buildApiUrl } from '../utils/apiConfig';
-import { hasPlayableContent } from '../utils/seriesCompleteness';
+import { hasPlayableContent, normalizeSeriesSeasons } from '../utils/seriesCompleteness';
 
 export interface MovieData {
   id: string;
@@ -50,6 +50,8 @@ export interface MovieData {
       episodeLabel?: string;
       title: string;
       streamUrl: string;
+      quality?: string;
+      videoQualities?: Record<string, string>;
       duration?: string;
       durationSec?: number;
       createdAt?: any;
@@ -250,8 +252,8 @@ export async function getCatalogFromIdb(): Promise<MovieData[]> {
             resolve(
               sortMoviesList(
                 val
+                  .map((m: any) => normalizeSeriesSeasons(normalizeMoviePosters(m) as MovieData))
                   .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m))
-                  .map((m: any) => normalizeMoviePosters(m))
               )
             );
           } else {
@@ -292,8 +294,8 @@ import { BUNDLED_SEED_CATALOG } from './seedCatalog';
 export async function fetchSeedCatalogJson(): Promise<MovieData[]> {
   const bundled = Array.isArray(BUNDLED_SEED_CATALOG)
     ? BUNDLED_SEED_CATALOG
+        .map((m: any) => normalizeSeriesSeasons(normalizeMoviePosters(m) as MovieData))
         .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m))
-        .map((m: any) => normalizeMoviePosters(m) as MovieData)
     : [];
 
   try {
@@ -314,8 +316,8 @@ export async function fetchSeedCatalogJson(): Promise<MovieData[]> {
         const data = await resp.json();
         if (Array.isArray(data) && data.length > 0) {
           return data
-            .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m))
-            .map((m: any) => normalizeMoviePosters(m) as MovieData);
+            .map((m: any) => normalizeSeriesSeasons(normalizeMoviePosters(m) as MovieData))
+            .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m));
         }
       } catch {}
     }
@@ -336,7 +338,7 @@ export async function fetchMergedMoviesCatalog(): Promise<MovieData[]> {
           snapshot = await getDocs(collection(db, COLLECTION_NAME));
         }
         return snapshot.docs.map(
-          (d) => normalizeMoviePosters({ id: d.id, ...d.data() } as MovieData) as MovieData
+          (d) => normalizeSeriesSeasons(normalizeMoviePosters({ id: d.id, ...d.data() } as MovieData) as MovieData)
         );
       } catch {
         return [] as MovieData[];
@@ -367,7 +369,7 @@ export async function fetchMoviesFromFirestore(): Promise<MovieData[]> {
       snapshot = await getDocs(collection(db, COLLECTION_NAME));
     }
     const rawMovies: MovieData[] = snapshot.docs
-      .map((d) => normalizeMoviePosters({ id: d.id, ...d.data() } as MovieData) as MovieData)
+      .map((d) => normalizeSeriesSeasons(normalizeMoviePosters({ id: d.id, ...d.data() } as MovieData) as MovieData))
       .filter((m) => m.published !== false && hasPlayableContent(m));
     const movies = sortMoviesList<MovieData>(rawMovies);
     saveLocalMovies(movies);
@@ -408,7 +410,7 @@ export async function touchCatalogSyncMarker(movieId = '', action = 'update'): P
 }
 
 export async function saveMovieToFirestore(movie: MovieData): Promise<void> {
-  const normalized = normalizeMoviePosters(movie);
+  const normalized = normalizeSeriesSeasons(normalizeMoviePosters(movie) as MovieData);
   try {
     if (isFirestoreWriteAllowed()) {
       const res = await guardedFirestoreWrite(() =>
@@ -457,8 +459,8 @@ export function getLocalMovies(): MovieData[] {
   try {
     const seedItems = Array.isArray(BUNDLED_SEED_CATALOG)
       ? BUNDLED_SEED_CATALOG
+          .map((m: any) => normalizeSeriesSeasons(normalizeMoviePosters(m) as MovieData))
           .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m))
-          .map((m: any) => normalizeMoviePosters(m) as MovieData)
       : [];
 
     if (typeof window === 'undefined') return seedItems;
@@ -470,8 +472,8 @@ export function getLocalMovies(): MovieData[] {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length >= 100) {
           cached = parsed
-            .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m))
-            .map((m: any) => normalizeMoviePosters(m) as MovieData);
+            .map((m: any) => normalizeSeriesSeasons(normalizeMoviePosters(m) as MovieData))
+            .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m));
         }
       } catch {}
     }

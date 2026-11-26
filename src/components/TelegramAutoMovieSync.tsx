@@ -43,6 +43,10 @@ import {
   isHollywoodPrintText,
   normalizeQualityBadge,
 } from '../utils/qualityBadge';
+import {
+  mergeEpisodeIntoSeasons,
+  normalizeSeriesSeasons,
+} from '../utils/seriesCompleteness';
 import { parseTelegramUrl } from '../utils/telegramParser';
 
 export interface AutoMatchCandidate {
@@ -296,6 +300,8 @@ function mergeEpisodeIntoClientSeasons(
     episodeLabel?: string;
     title: string;
     streamUrl: string;
+    quality?: string;
+    videoQualities?: Record<string, string>;
     duration?: string;
     durationSec?: number;
     showInNewEpisodes: boolean;
@@ -305,54 +311,12 @@ function mergeEpisodeIntoClientSeasons(
   },
   replaceExistingEpisode = false
 ): { mergedSeasons: any[]; added: boolean } {
-  const cloned = Array.isArray(existingSeasons)
-    ? existingSeasons.map((s) => ({
-        seasonNumber: Number(s?.seasonNumber) || 1,
-        episodes: Array.isArray(s?.episodes) ? [...s.episodes] : [],
-      }))
-    : [];
-
-  let targetSeason = cloned.find((s) => s.seasonNumber === seasonNum);
-  if (!targetSeason) {
-    targetSeason = { seasonNumber: seasonNum, episodes: [] };
-    cloned.push(targetSeason);
-  }
-
-  const cleanStream = newEpisode.streamUrl.trim().toLowerCase();
-  if (
-    targetSeason.episodes.some(
-      (ep) => String(ep?.streamUrl || '').trim().toLowerCase() === cleanStream
-    )
-  ) {
-    return { mergedSeasons: cloned, added: false };
-  }
-
-  const sameIdx = targetSeason.episodes.findIndex(
-    (ep) => Number(ep?.episodeNumber) === newEpisode.episodeNumber && String(ep?.streamUrl || '').trim() !== ''
+  return mergeEpisodeIntoSeasons(
+    existingSeasons || [],
+    seasonNum,
+    newEpisode,
+    replaceExistingEpisode
   );
-  if (sameIdx >= 0) {
-    if (replaceExistingEpisode) {
-      targetSeason.episodes[sameIdx] = newEpisode;
-      targetSeason.episodes.sort((a, b) => (Number(a?.episodeNumber) || 0) - (Number(b?.episodeNumber) || 0));
-      cloned.sort((a, b) => a.seasonNumber - b.seasonNumber);
-      return { mergedSeasons: cloned, added: true };
-    }
-    return { mergedSeasons: cloned, added: false };
-  }
-
-  const emptyIdx = targetSeason.episodes.findIndex(
-    (ep) => Number(ep?.episodeNumber) === newEpisode.episodeNumber && !String(ep?.streamUrl || '').trim()
-  );
-  if (emptyIdx >= 0) {
-    targetSeason.episodes[emptyIdx] = newEpisode;
-  } else {
-    targetSeason.episodes.push(newEpisode);
-  }
-
-  targetSeason.episodes.sort((a, b) => (Number(a?.episodeNumber) || 0) - (Number(b?.episodeNumber) || 0));
-  cloned.sort((a, b) => a.seasonNumber - b.seasonNumber);
-
-  return { mergedSeasons: cloned, added: true };
 }
 
 export default function TelegramAutoMovieSync({
@@ -658,23 +622,30 @@ export default function TelegramAutoMovieSync({
 
     if (isSeries) {
       const seasonNum = Math.max(1, Number(draft.seasonNumber) || 1);
-      const fallbackEpNum = existingMatch
-        ? Math.max(
-            1,
-            ...(((Array.isArray(existingMatch.seasons)
-              ? existingMatch.seasons.find((s: any) => Number(s?.seasonNumber) === seasonNum)?.episodes
-              : []) || []
-            ).map((e: any) => Number(e?.episodeNumber) || 0)),
-            0
-          ) + 1
-        : 1;
-      const epNum = Math.max(1, Number(draft.episodeNumber) || fallbackEpNum);
-      const epTitle = draft.episodeTitle || `Episode ${epNum}`;
+      const rawEpNum = Number(draft.episodeNumber);
+      const isCompletePackByDur =
+        (!Number.isFinite(rawEpNum) || rawEpNum <= 0) &&
+        draft.durationSec >= 5400 &&
+        /\b(?:s\d{1,2}|season|session|complete|combined|full)\b/i.test(
+          `${draft.sourceFileName} ${draft.sourceCaption}`
+        );
+
+      if (!Number.isFinite(rawEpNum) || rawEpNum <= 0) {
+        if (!isCompletePackByDur) {
+          return { published: false, skippedDuplicate: true };
+        }
+      }
+
+      const resolvedEpLabel = isCompletePackByDur ? 'Complete' : draft.episodeLabel;
+      const epNum = isCompletePackByDur ? 1 : Math.floor(rawEpNum);
+      const epTitle = isCompletePackByDur
+        ? 'Complete Season'
+        : draft.episodeTitle || `Episode ${epNum}`;
       const epDurationFormatted = draft.durationSec > 0 ? formatHumanDuration(null, draft.durationSec) || '' : '';
       const epObj = normalizeEpisodeForSave(
         {
           episodeNumber: epNum,
-          episodeLabel: draft.episodeLabel,
+          episodeLabel: resolvedEpLabel,
           title: epTitle,
           streamUrl: draft.streamUrl.trim(),
           videoQualities: {},
@@ -701,9 +672,12 @@ export default function TelegramAutoMovieSync({
         if (!added) {
           return { published: false, skippedDuplicate: true };
         }
-        const nextStream = replaceExistingEp
-          ? epObj.streamUrl
-          : existingMatch.streamingUrl || epObj.streamUrl;
+        const normalizedSeries = normalizeSeriesSeasons({
+          ...existingMatch,
+          seasons: mergedSeasons,
+          streamingUrl: replaceExistingEp ? epObj.streamUrl : existingMatch.streamingUrl,
+        });
+        const nextStream = normalizedSeries.streamingUrl || epObj.streamUrl;
         const nextSeriesBadge =
           badge === 'HD' ? 'HD' : (existingMatch as any).qualityBadge || badge;
         if (isFirestoreWriteAllowed()) {

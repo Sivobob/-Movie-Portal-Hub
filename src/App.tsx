@@ -13,7 +13,7 @@ import UpdateNotification from './components/UpdateNotification';
 import { ShieldCheck, ArrowLeft } from 'lucide-react';
 import { registerActiveDeviceInstall } from './services/appStatsService';
 import { CURRENT_VERSION_NAME } from './services/appUpdateConfig';
-import { ensureAndroidStreamBridge } from './utils/apiConfig';
+import { ensureAndroidStreamBridge, syncLiveAppOriginToFirestoreIfPublished } from './utils/apiConfig';
 import AndroidBottomNav from './components/AndroidBottomNav';
 import ReleaseNotificationBridge from './components/ReleaseNotificationBridge';
 import DownloadNotificationBar from './components/DownloadNotificationBar';
@@ -158,6 +158,8 @@ export default function App() {
       } catch (e) {
         console.warn('StatusBar configuration notice:', e);
       }
+    } else {
+      syncLiveAppOriginToFirestoreIfPublished().catch(() => {});
     }
   }, []);
 

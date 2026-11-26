@@ -89,18 +89,25 @@ export default function HomePage() {
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const [categoryVisibleCount, setCategoryVisibleCount] = useState<number>(60);
 
-  // Helper: Strictly verify 2026 release year for Featured and Latest sections
+  // Helper: Strictly verify 2026 release year for Featured slide
   const is2026Release = (m: any): boolean => {
     if (!m) return false;
     const ry = m.releaseYear ?? m.year ?? m.releaseDate;
-    if (typeof ry === 'number') {
+    if (typeof ry === 'number' && Number.isFinite(ry) && ry > 0) {
       return ry === 2026;
     }
     if (typeof ry === 'string') {
       const trimmed = ry.trim();
-      if (trimmed === '2026') return true;
-      if (/\b2026\b/.test(trimmed)) return true;
-      if (parseInt(trimmed, 10) === 2026) return true;
+      if (trimmed) {
+        const yearMatches = trimmed.match(/\b(19\d\d|20\d\d)\b/g);
+        if (yearMatches && yearMatches.length > 0) {
+          return yearMatches.includes('2026');
+        }
+        const parsed = parseInt(trimmed, 10);
+        if (Number.isFinite(parsed) && parsed > 1900) {
+          return parsed === 2026;
+        }
+      }
     }
     if (m.title && /\b2026\b/.test(String(m.title))) return true;
     return false;
@@ -109,14 +116,15 @@ export default function HomePage() {
   const featuredMovies = useMemo(() => {
     const FORTY_EIGHT_HOURS_MS = 48 * 60 * 60 * 1000;
 
-    // Recently added titles (uploaded in last 48 hours) or verified 2026 releases
-    const brandNewRecent = movies
+    // Only 2026 releases stay in the featured slide, and auto-expire from the slide after 2 days (48 hours)
+    const brandNew2026 = movies
       .filter((m: any) => {
         if (!m || m.published === false) return false;
+        if (!is2026Release(m)) return false;
         const t = getTimestampMs(m.telegramDateMs) || getTimestampMs(m.createdAt) || 0;
-        if (t <= 0) return is2026Release(m);
+        if (t <= 0) return false;
         const ageMs = nowMs - t;
-        return (ageMs >= -60_000 && ageMs < FORTY_EIGHT_HOURS_MS) || is2026Release(m);
+        return ageMs >= -60_000 && ageMs < FORTY_EIGHT_HOURS_MS;
       })
       .sort((a: any, b: any) => {
         const aTime = getTimestampMs(a.telegramDateMs) || getTimestampMs(a.createdAt) || 0;
@@ -124,10 +132,7 @@ export default function HomePage() {
         return bTime - aTime;
       });
 
-    if (brandNewRecent.length > 0) {
-      return brandNewRecent.slice(0, 6);
-    }
-    return movies.slice(0, 6);
+    return brandNew2026.slice(0, 6);
   }, [movies, nowMs]);
 
   const categoryRef = useRef(category);
@@ -892,9 +897,7 @@ export default function HomePage() {
                 </div>
               </div>
             </>
-          ) : (
-            renderFolderTabRow(false)
-          )}
+          ) : null}
 
           {/* NEW EPISODES (Auto-expires from Home after 24h) */}
           {newEpisodes24h.length > 0 && (

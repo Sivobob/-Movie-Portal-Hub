@@ -60,7 +60,13 @@ import {
   isServerFirestoreWriteAllowed,
   markServerFirestoreQuotaExhausted,
 } from './firestoreQuotaFlag.ts';
-import { isSeriesComplete } from '../utils/seriesCompleteness.ts';
+import {
+  isCompleteSeasonPackEpisode,
+  isSeriesComplete,
+  mergeEpisodeIntoSeasons,
+  normalizeSeriesSeasons,
+  reconcileSeasonEpisodes,
+} from '../utils/seriesCompleteness.ts';
 
 const TVMAZE_EP_COUNT_CACHE = new Map<string, { counts: Record<number, number> | null; expiresAt: number }>();
 
@@ -1617,17 +1623,21 @@ router.post('/filter-urls', async (req: Request, res: Response) => {
         } catch {}
       }
       if (!peer) {
-        const cleanId = channelKey.replace('-100', '');
-        const cachedHash = getCachedAccessHash(cleanId);
-        if (cachedHash && cachedHash !== '0') {
-          const bigInt = (await import('big-integer')).default;
-          peer = new Api.InputPeerChannel({ channelId: bigInt(cleanId), accessHash: bigInt(cachedHash) });
-        } else {
-          try {
-            peer = await client.getEntity(`-100${cleanId}`);
-          } catch {}
+        const cleanId = channelKey.replace(/^-100/, '').trim();
+        if (/^\d+$/.test(cleanId)) {
+          const cachedHash = getCachedAccessHash(cleanId);
+          if (cachedHash && cachedHash !== '0') {
+            const bigInt = (await import('big-integer')).default;
+            peer = new Api.InputPeerChannel({ channelId: bigInt(cleanId), accessHash: bigInt(cachedHash) });
+          } else {
+            try {
+              peer = await client.getEntity(`-100${cleanId}`);
+            } catch {}
+          }
+          if (!peer) peer = `-100${cleanId}`;
+        } else if (sample.chatId) {
+          peer = sample.chatId;
         }
-        if (!peer) peer = `-100${cleanId}`;
       }
 
       const BATCH_SIZE = 100;
@@ -2485,6 +2495,10 @@ function pipeFfmpegMp4Stream(opts: {
     }
   };
 
+  req.setTimeout?.(0);
+  res.setTimeout?.(0);
+
+  const startupTimeoutMs = isDownload ? 60000 : 30000;
   const startupTimer = setTimeout(() => {
     if (!headersCommitted && !procClosed) {
       console.warn(`[FFmpeg ${modeLabel}] Startup timeout before first output byte`);
@@ -2493,7 +2507,7 @@ function pipeFfmpegMp4Stream(opts: {
         res.status(504).json({ error: 'Stream transcode startup timed out' });
       }
     }
-  }, 25000);
+  }, startupTimeoutMs);
 
   ffProc.stdout.on('data', (chunk: Buffer) => {
     if (clientClosed || res.writableEnded) return;
@@ -5297,72 +5311,7 @@ function buildEffectiveQualityGroup<T extends { streamUrl: string; sizeBytes: nu
   };
 }
 
-function mergeEpisodeIntoSeasons(
-  existingSeasons: Array<{ seasonNumber: number; episodes: any[] }>,
-  seasonNum: number,
-  newEpisode: {
-    episodeNumber: number;
-    episodeLabel?: string;
-    title: string;
-    streamUrl: string;
-    duration?: string;
-    durationSec?: number;
-    showInNewEpisodes: boolean;
-    newEpisodeEnabledAt?: number;
-    createdAt?: number;
-    addedAt?: number;
-  },
-  replaceExistingEpisode = false
-): { mergedSeasons: Array<{ seasonNumber: number; episodes: any[] }>; added: boolean } {
-  const cloned = Array.isArray(existingSeasons)
-    ? existingSeasons.map((s) => ({
-        seasonNumber: Number(s?.seasonNumber) || 1,
-        episodes: Array.isArray(s?.episodes) ? [...s.episodes] : [],
-      }))
-    : [];
-
-  let targetSeason = cloned.find((s) => s.seasonNumber === seasonNum);
-  if (!targetSeason) {
-    targetSeason = { seasonNumber: seasonNum, episodes: [] };
-    cloned.push(targetSeason);
-  }
-
-  const cleanStream = newEpisode.streamUrl.trim().toLowerCase();
-  const alreadyByUrl = targetSeason.episodes.some(
-    (ep) => String(ep?.streamUrl || '').trim().toLowerCase() === cleanStream
-  );
-  if (alreadyByUrl) {
-    return { mergedSeasons: cloned, added: false };
-  }
-
-  const sameEpIdx = targetSeason.episodes.findIndex(
-    (ep) => Number(ep?.episodeNumber) === newEpisode.episodeNumber && String(ep?.streamUrl || '').trim() !== ''
-  );
-  if (sameEpIdx >= 0) {
-    if (replaceExistingEpisode) {
-      targetSeason.episodes[sameEpIdx] = newEpisode;
-      targetSeason.episodes.sort((a, b) => (Number(a?.episodeNumber) || 0) - (Number(b?.episodeNumber) || 0));
-      cloned.sort((a, b) => a.seasonNumber - b.seasonNumber);
-      return { mergedSeasons: cloned, added: true };
-    }
-    // Episode number already exists with a stream; don't overwrite unless replacing Holl Print
-    return { mergedSeasons: cloned, added: false };
-  }
-
-  const emptyEpIdx = targetSeason.episodes.findIndex(
-    (ep) => Number(ep?.episodeNumber) === newEpisode.episodeNumber && !String(ep?.streamUrl || '').trim()
-  );
-  if (emptyEpIdx >= 0) {
-    targetSeason.episodes[emptyEpIdx] = newEpisode;
-  } else {
-    targetSeason.episodes.push(newEpisode);
-  }
-
-  targetSeason.episodes.sort((a, b) => (Number(a?.episodeNumber) || 0) - (Number(b?.episodeNumber) || 0));
-  cloned.sort((a, b) => a.seasonNumber - b.seasonNumber);
-
-  return { mergedSeasons: cloned, added: true };
-}
+// Episode season merging and overlap reconciliation are imported from ../utils/seriesCompleteness.ts
 
 function buildFallbackPosterDataUri(title: string, year?: number | string | null): string {
   const safeTitle = String(title || 'Movie Hub')
@@ -5858,22 +5807,41 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
 
         if (isSeriesItem) {
           const seasonNum = Math.max(1, Number(draft.seasonNumber) || 1);
-          const fallbackEpNum = existingRec
-            ? Math.max(
-                1,
-                ...((existingRec.seasons.find((s) => Number(s.seasonNumber) === seasonNum)?.episodes || []).map(
-                  (e: any) => Number(e?.episodeNumber) || 0
-                )),
-                0
-              ) + 1
-            : 1;
-          const epNum = Math.max(1, Number(draft.episodeNumber) || fallbackEpNum);
-          const epTitle = draft.episodeTitle || `Episode ${epNum}`;
+          const rawEpNum = Number(draft.episodeNumber);
+          const isCompletePackByDur =
+            (!Number.isFinite(rawEpNum) || rawEpNum <= 0) &&
+            bestDurSec >= 5400 &&
+            /\b(?:s\d{1,2}|season|session|complete|combined|full)\b/i.test(
+              `${draft.sourceFileName} ${draft.sourceCaption}`
+            );
+
+          if (!Number.isFinite(rawEpNum) || rawEpNum <= 0) {
+            if (!isCompletePackByDur) {
+              existingUrlSet.add(draft.streamUrl.toLowerCase());
+              continue;
+            }
+          }
+
+          const resolvedEpLabel = isCompletePackByDur ? 'Complete' : draft.episodeLabel;
+          const epNum = isCompletePackByDur ? 1 : Math.floor(rawEpNum);
+          const epTitle = isCompletePackByDur
+            ? 'Complete Season'
+            : draft.episodeTitle || `Episode ${epNum}`;
+          const epQuality =
+            mergedParsed.quality ||
+            (filteredQualities['1080p']
+              ? '1080p'
+              : filteredQualities['720p']
+              ? '720p'
+              : filteredQualities['480p']
+              ? '480p'
+              : '');
           const epObj = {
             episodeNumber: epNum,
-            ...(draft.episodeLabel ? { episodeLabel: draft.episodeLabel } : {}),
+            ...(resolvedEpLabel ? { episodeLabel: resolvedEpLabel } : {}),
             title: epTitle,
             streamUrl: draft.streamUrl.trim(),
+            ...(epQuality ? { quality: epQuality } : {}),
             ...(durationFormatted ? { duration: durationFormatted } : {}),
             ...(bestDurSec > 0 ? { durationSec: bestDurSec } : {}),
             showInNewEpisodes: false,
@@ -5901,15 +5869,16 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
               existingUrlSet.add(draft.streamUrl.toLowerCase());
               continue;
             }
-            const seriesReadyToPublish = isSeriesComplete(
-              { originalCategory: catToSave, seasons: mergedSeasons },
-              expectedCounts
-            );
+            const seriesReadyToPublish = true;
             const wasPublished = existingRec.published !== false;
-            const nextPublished = wasPublished || seriesReadyToPublish;
-            const nextStream = replaceExistingEp
-              ? epObj.streamUrl
-              : existingRec.streamingUrl || epObj.streamUrl;
+            const nextPublished = true;
+            const normalizedExisting = normalizeSeriesSeasons({
+              ...existingRec,
+              originalCategory: catToSave,
+              seasons: mergedSeasons,
+              streamingUrl: replaceExistingEp ? epObj.streamUrl : existingRec.streamingUrl,
+            });
+            const nextStream = normalizedExisting.streamingUrl || epObj.streamUrl;
             const nextSeriesBadge = badge === 'HD' ? 'HD' : existingRec.qualityBadge || badge;
             const prevSeed = seedCatalogMap.get(existingRec.id) || {};
             const prevPoster = String(prevSeed.posterUrl || existingRec.posterUrl || '');
@@ -5999,10 +5968,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
           } else {
             const seriesDocId = `tg_series_${cleanChannelId}_${draft.msgId}`;
             const initialSeasons = [{ seasonNumber: seasonNum, episodes: [epObj] }];
-            const seriesReadyToPublish = isSeriesComplete(
-              { originalCategory: catToSave, seasons: initialSeasons },
-              expectedCounts
-            );
+            const seriesReadyToPublish = true;
             const seriesBase = {
               id: seriesDocId,
               title: draft.title.trim(),
@@ -6997,21 +6963,42 @@ async function runBulkChannelSyncWorker(params: {
         try {
           if (isSeriesItem) {
             const seasonNum = Math.max(1, Number(mergedParsed.seasonNumber) || 1);
-            const fallbackEpNum = existingRec
-              ? Math.max(
-                  1,
-                  ...((existingRec.seasons.find((s) => Number(s.seasonNumber) === seasonNum)?.episodes || []).map(
-                    (e: any) => Number(e?.episodeNumber) || 0
-                  )),
-                  0
-                ) + 1
-              : 1;
-            const epNum = Math.max(1, Number(mergedParsed.episodeNumber) || fallbackEpNum);
+            const rawEpNum = Number(mergedParsed.episodeNumber);
+            const isCompletePackByDur =
+              (!Number.isFinite(rawEpNum) || rawEpNum <= 0) &&
+              bestDurSec >= 5400 &&
+              /\b(?:s\d{1,2}|season|session|complete|combined|full)\b/i.test(
+                `${effectivePrimary.fileName} ${mergedParsed.rawCaption}`
+              );
+
+            if (!Number.isFinite(rawEpNum) || rawEpNum <= 0) {
+              if (!isCompletePackByDur) {
+                bulkSyncJob.skippedDuplicates++;
+                existingUrlSet.add(bestStream.toLowerCase());
+                continue;
+              }
+            }
+
+            const resolvedEpLabel = isCompletePackByDur ? 'Complete' : mergedParsed.episodeLabel;
+            const epNum = isCompletePackByDur ? 1 : Math.floor(rawEpNum);
+            const epTitle = isCompletePackByDur
+              ? 'Complete Season'
+              : mergedParsed.episodeTitle || `Episode ${epNum}`;
+            const epQuality =
+              mergedParsed.quality ||
+              (filteredQualities['1080p']
+                ? '1080p'
+                : filteredQualities['720p']
+                ? '720p'
+                : filteredQualities['480p']
+                ? '480p'
+                : '');
             const epObj = {
               episodeNumber: epNum,
-              ...(mergedParsed.episodeLabel ? { episodeLabel: mergedParsed.episodeLabel } : {}),
-              title: mergedParsed.episodeTitle || `Episode ${epNum}`,
+              ...(resolvedEpLabel ? { episodeLabel: resolvedEpLabel } : {}),
+              title: epTitle,
               streamUrl: bestStream.trim(),
+              ...(epQuality ? { quality: epQuality } : {}),
               ...(durationFormatted ? { duration: durationFormatted } : {}),
               ...(bestDurSec > 0 ? { durationSec: bestDurSec } : {}),
               showInNewEpisodes: false,
@@ -7025,18 +7012,37 @@ async function runBulkChannelSyncWorker(params: {
                 continue;
               }
               const replaceExistingEp = seriesUpgrade === 'replace_holl_print_with_hd';
-              const { mergedSeasons, added } = mergeEpisodeIntoSeasons(
-                existingRec.seasons,
-                seasonNum,
-                epObj,
-                replaceExistingEp
-              );
-              if (!added) {
+              const targetSeasons = Array.isArray(existingRec.seasons)
+                ? existingRec.seasons.map((s) => ({
+                    ...s,
+                    seasonNumber: Number(s?.seasonNumber) || 1,
+                    episodes: Array.isArray(s?.episodes) ? [...s.episodes] : [],
+                  }))
+                : [];
+              let tSeason = targetSeasons.find((s) => s.seasonNumber === seasonNum);
+              if (!tSeason) {
+                tSeason = { seasonNumber: seasonNum, episodes: [] };
+                targetSeasons.push(tSeason);
+              }
+              const cleanUrlLower = epObj.streamUrl.toLowerCase();
+              if (tSeason.episodes.some((e: any) => String(e?.streamUrl || '').trim().toLowerCase() === cleanUrlLower)) {
                 bulkSyncJob.skippedDuplicates++;
-                existingUrlSet.add(bestStream.toLowerCase());
+                existingUrlSet.add(cleanUrlLower);
                 continue;
               }
-              existingRec.seasons = mergedSeasons;
+              if (isCompleteSeasonPackEpisode(epObj) && tSeason.episodes.length >= 2) {
+                bulkSyncJob.skippedDuplicates++;
+                existingUrlSet.add(cleanUrlLower);
+                continue;
+              }
+              if (replaceExistingEp) {
+                tSeason.episodes = tSeason.episodes.filter(
+                  (e: any) => Number(e?.episodeNumber) !== epObj.episodeNumber
+                );
+              }
+              // Append to chunk seasons so all multi-pack qualities in this chunk are reconciled together at flush time
+              tSeason.episodes.push(epObj);
+              existingRec.seasons = targetSeasons;
               if (replaceExistingEp || !existingRec.streamingUrl) {
                 existingRec.streamingUrl = epObj.streamUrl;
               }
@@ -7070,7 +7076,7 @@ async function runBulkChannelSyncWorker(params: {
               seedCatalogMap.set(existingRec.id, {
                 ...prevSeed,
                 id: existingRec.id,
-                seasons: mergedSeasons,
+                seasons: targetSeasons,
                 streamingUrl: existingRec.streamingUrl,
                 qualityBadge: nextSeriesBadge,
                 ...seriesPosterPatch,
@@ -7368,16 +7374,33 @@ async function runBulkChannelSyncWorker(params: {
         }
       }
 
-      // Flush coalesced series docs once per chunk (only publish complete series)
+      // Flush coalesced series docs once per chunk (reconcile overlaps/packs and only publish complete series)
       for (const [seriesId, dirty] of dirtySeriesUpdates.entries()) {
+        dirty.rec.seasons = (dirty.rec.seasons || [])
+          .map((s: any, idx: number) => ({
+            ...s,
+            seasonNumber: Number(s?.seasonNumber) || idx + 1,
+            episodes: reconcileSeasonEpisodes(Array.isArray(s?.episodes) ? s.episodes : []),
+          }))
+          .sort((a: any, b: any) => a.seasonNumber - b.seasonNumber);
+
+        const validEpUrls = new Set<string>();
+        for (const s of dirty.rec.seasons) {
+          for (const ep of s.episodes) {
+            const u = String(ep?.streamUrl || '').trim();
+            if (u) validEpUrls.add(u);
+          }
+        }
+        const firstEpUrl = String(dirty.rec.seasons[0]?.episodes?.[0]?.streamUrl || '').trim();
+        if (firstEpUrl && (!dirty.rec.streamingUrl || !validEpUrls.has(dirty.rec.streamingUrl))) {
+          dirty.rec.streamingUrl = firstEpUrl;
+        }
+
         const expectedCounts = dirty.rec.imdbId
           ? await fetchExpectedSeasonEpisodeCounts(dirty.rec.imdbId)
           : null;
-        const seriesReadyToPublish = isSeriesComplete(
-          { originalCategory: dirty.rec.originalCategory, seasons: dirty.rec.seasons },
-          expectedCounts
-        );
-        dirty.rec.published = seriesReadyToPublish;
+        const seriesReadyToPublish = true;
+        dirty.rec.published = true;
 
         const prevSeed = seedCatalogMap.get(seriesId) || {};
         const resolvedSeriesBadge = dirty.rec.qualityBadge || prevSeed.qualityBadge || 'HD';

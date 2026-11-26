@@ -503,17 +503,18 @@
     "description": "Tak Dong Kyung lives a fairly ordinary life until she stumbles into an unexpected fate and ends up signing a hundred-day contract with Myul Mang, risking her everything.",
     "rating": 7.8,
     "createdAt": 1795694053485,
-    "streamingUrl": "https://t.me/c/4451036277/3949",
+    "streamingUrl": "https://t.me/c/4451036277/3965",
     "seasons": [
       {
+        "seasonNumber": 1,
         "episodes": [
           {
             "episodeNumber": 1,
-            "duration": "16:36:41",
-            "showInNewEpisodes": false,
             "title": "Episode 1",
-            "streamUrl": "https://t.me/c/4451036277/3949",
-            "durationSec": 59801
+            "streamUrl": "https://t.me/c/4451036277/3965",
+            "duration": "01:01:15",
+            "durationSec": 3675,
+            "showInNewEpisodes": false
           },
           {
             "showInNewEpisodes": false,
@@ -635,8 +636,7 @@
             "episodeNumber": 16,
             "durationSec": 3900
           }
-        ],
-        "seasonNumber": 1
+        ]
       }
     ],
     "published": true,
@@ -686,194 +686,28 @@
         "episodes": [
           {
             "episodeNumber": 1,
-            "streamUrl": "https://t.me/c/4451036277/3919",
-            "episodeLabel": "Complete",
-            "durationSec": 19263,
-            "duration": "05:21:03",
-            "showInNewEpisodes": false,
-            "title": "Complete Season"
+            "episodeLabel": "1-4",
+            "title": "Episodes 1-4",
+            "streamUrl": "https://t.me/c/4451036277/3921",
+            "duration": "02:57:08",
+            "durationSec": 10628,
+            "quality": "720p",
+            "showInNewEpisodes": false
           },
           {
-            "title": "Episodes 5-7",
-            "episodeLabel": "5-7",
-            "showInNewEpisodes": false,
-            "durationSec": 8637,
             "episodeNumber": 5,
+            "episodeLabel": "5-7",
+            "title": "Episodes 5-7",
+            "streamUrl": "https://t.me/c/4451036277/3922",
             "duration": "02:23:57",
-            "streamUrl": "https://t.me/c/4451036277/3922"
-          },
-          {
-            "duration": "58:44",
-            "episodeNumber": 6,
-            "streamUrl": "https://t.me/c/4451036277/3925",
-            "durationSec": 3524,
-            "title": "Episode 0",
+            "durationSec": 8637,
+            "quality": "720p",
             "showInNewEpisodes": false
-          },
-          {
-            "showInNewEpisodes": false,
-            "streamUrl": "https://t.me/c/4451036277/3946",
-            "title": "Episode 7",
-            "duration": "58:26",
-            "durationSec": 3506,
-            "episodeNumber": 7
-          },
-          {
-            "durationSec": 3524,
-            "streamUrl": "https://t.me/c/4451036277/3928",
-            "showInNewEpisodes": false,
-            "title": "Episode 0",
-            "duration": "58:44",
-            "episodeNumber": 8
-          },
-          {
-            "showInNewEpisodes": false,
-            "streamUrl": "https://t.me/c/4451036277/3929",
-            "duration": "58:44",
-            "episodeNumber": 9,
-            "title": "Episode 0",
-            "durationSec": 3524
-          },
-          {
-            "title": "Episode 0",
-            "streamUrl": "https://t.me/c/4451036277/3924",
-            "episodeNumber": 10,
-            "duration": "58:44",
-            "durationSec": 3524,
-            "showInNewEpisodes": false
-          },
-          {
-            "showInNewEpisodes": false,
-            "durationSec": 3524,
-            "duration": "58:44",
-            "episodeNumber": 11,
-            "streamUrl": "https://t.me/c/4451036277/3926",
-            "title": "Episode 0"
-          },
-          {
-            "title": "Episode 0",
-            "episodeNumber": 12,
-            "streamUrl": "https://t.me/c/4451036277/3923",
-            "durationSec": 3524,
-            "showInNewEpisodes": false,
-            "duration": "58:44"
-          },
-          {
-            "showInNewEpisodes": false,
-            "duration": "58:44",
-            "title": "Episode 0",
-            "episodeNumber": 13,
-            "streamUrl": "https://t.me/c/4451036277/3927",
-            "durationSec": 3524
-          },
-          {
-            "durationSec": 3524,
-            "duration": "58:44",
-            "streamUrl": "https://t.me/c/4451036277/3933",
-            "showInNewEpisodes": false,
-            "episodeNumber": 14,
-            "title": "Episode 0"
-          },
-          {
-            "showInNewEpisodes": false,
-            "durationSec": 3524,
-            "duration": "58:44",
-            "streamUrl": "https://t.me/c/4451036277/3930",
-            "episodeNumber": 15,
-            "title": "Episode 0"
-          },
-          {
-            "duration": "58:44",
-            "title": "Episode 0",
-            "durationSec": 3524,
-            "episodeNumber": 16,
-            "streamUrl": "https://t.me/c/4451036277/3936",
-            "showInNewEpisodes": false
-          },
-          {
-            "streamUrl": "https://t.me/c/4451036277/3935",
-            "title": "Episode 0",
-            "duration": "58:44",
-            "showInNewEpisodes": false,
-            "episodeNumber": 17,
-            "durationSec": 3524
-          },
-          {
-            "showInNewEpisodes": false,
-            "title": "Episode 0",
-            "durationSec": 3524,
-            "duration": "58:44",
-            "episodeNumber": 18,
-            "streamUrl": "https://t.me/c/4451036277/3931"
-          },
-          {
-            "showInNewEpisodes": false,
-            "streamUrl": "https://t.me/c/4451036277/3934",
-            "durationSec": 3524,
-            "episodeNumber": 19,
-            "duration": "58:44",
-            "title": "Episode 0"
-          },
-          {
-            "streamUrl": "https://t.me/c/4451036277/3932",
-            "duration": "58:44",
-            "title": "Episode 0",
-            "durationSec": 3524,
-            "episodeNumber": 20,
-            "showInNewEpisodes": false
-          },
-          {
-            "streamUrl": "https://t.me/c/4451036277/3937",
-            "showInNewEpisodes": false,
-            "duration": "58:44",
-            "durationSec": 3524,
-            "title": "Episode 0",
-            "episodeNumber": 21
-          },
-          {
-            "showInNewEpisodes": false,
-            "duration": "51:26",
-            "streamUrl": "https://t.me/c/4451036277/3941",
-            "title": "Episode 0",
-            "durationSec": 3086,
-            "episodeNumber": 22
-          },
-          {
-            "showInNewEpisodes": false,
-            "duration": "45:07",
-            "durationSec": 2707,
-            "streamUrl": "https://t.me/c/4451036277/3943",
-            "title": "Episode 0",
-            "episodeNumber": 23
-          },
-          {
-            "streamUrl": "https://t.me/c/4451036277/3940",
-            "durationSec": 2620,
-            "showInNewEpisodes": false,
-            "duration": "43:40",
-            "title": "Episode 0",
-            "episodeNumber": 24
-          },
-          {
-            "durationSec": 2620,
-            "title": "Episode 0",
-            "duration": "43:40",
-            "streamUrl": "https://t.me/c/4451036277/3939",
-            "showInNewEpisodes": false,
-            "episodeNumber": 25
-          },
-          {
-            "showInNewEpisodes": false,
-            "title": "Episode 0",
-            "streamUrl": "https://t.me/c/4451036277/3938",
-            "duration": "42:26",
-            "durationSec": 2546,
-            "episodeNumber": 26
           }
         ]
       }
     ],
-    "streamingUrl": "https://t.me/c/4451036277/3919",
+    "streamingUrl": "https://t.me/c/4451036277/3921",
     "telegramMsgId": 3919,
     "backdropUrl": "https://m.media-amazon.com/images/M/MV5BM2U3MTI4ZDUtMjhhZC00YzRiLWJlNDktZWYzNjFkM2RhMjdmXkEyXkFqcGc@._V1_QL90_UX1280_.jpg",
     "rating": 7.1,
@@ -1709,14 +1543,6 @@
             "title": "Episodes 5-8",
             "duration": "01:44:14",
             "streamUrl": "https://t.me/c/4451036277/3851"
-          },
-          {
-            "title": "Episode 6",
-            "showInNewEpisodes": false,
-            "durationSec": 12580,
-            "episodeNumber": 6,
-            "duration": "03:29:40",
-            "streamUrl": "https://t.me/c/4451036277/3862"
           }
         ],
         "seasonNumber": 1
@@ -2939,14 +2765,6 @@
             "title": "Episode 8",
             "streamUrl": "https://t.me/c/4451036277/3618",
             "duration": "01:01:04"
-          },
-          {
-            "title": "Episode 9",
-            "duration": "07:34:10",
-            "streamUrl": "https://t.me/c/4451036277/3627",
-            "durationSec": 27250,
-            "showInNewEpisodes": false,
-            "episodeNumber": 9
           }
         ],
         "seasonNumber": 1
@@ -3490,14 +3308,6 @@
             "streamUrl": "https://t.me/c/4451036277/8",
             "title": "Episode 80",
             "durationSec": 1729
-          },
-          {
-            "streamUrl": "https://t.me/c/4451036277/15",
-            "duration": "01:40:23",
-            "showInNewEpisodes": false,
-            "episodeNumber": 81,
-            "durationSec": 6023,
-            "title": "Episode 81"
           }
         ],
         "seasonNumber": 1
@@ -4785,7 +4595,7 @@
     "rating": 7.6,
     "imdbId": "tt42576855",
     "trailerUrl": "",
-    "streamingUrl": "https://t.me/c/4451036277/3271",
+    "streamingUrl": "https://t.me/c/4451036277/3274",
     "videoQualities": {},
     "featured": true,
     "published": true,
@@ -4805,11 +4615,12 @@
         "episodes": [
           {
             "episodeNumber": 1,
-            "episodeLabel": "1-10",
-            "title": "Episodes 1-10",
-            "streamUrl": "https://t.me/c/4451036277/3271",
-            "duration": "08:34:47",
-            "durationSec": 30887,
+            "episodeLabel": "1-8",
+            "title": "Episodes 1-8",
+            "streamUrl": "https://t.me/c/4451036277/3274",
+            "duration": "06:53:38",
+            "durationSec": 24818,
+            "quality": "720p",
             "showInNewEpisodes": false
           },
           {
@@ -4819,15 +4630,7 @@
             "streamUrl": "https://t.me/c/4451036277/3275",
             "duration": "06:52:06",
             "durationSec": 24726,
-            "showInNewEpisodes": false
-          },
-          {
-            "episodeNumber": 11,
-            "episodeLabel": "11-20",
-            "title": "Episodes 11-20",
-            "streamUrl": "https://t.me/c/4451036277/3272",
-            "duration": "08:36:47",
-            "durationSec": 31007,
+            "quality": "720p",
             "showInNewEpisodes": false
           },
           {
@@ -4837,15 +4640,7 @@
             "streamUrl": "https://t.me/c/4451036277/3276",
             "duration": "05:59:17",
             "durationSec": 21557,
-            "showInNewEpisodes": false
-          },
-          {
-            "episodeNumber": 21,
-            "episodeLabel": "21-30",
-            "title": "Episodes 21-30",
-            "streamUrl": "https://t.me/c/4451036277/3273",
-            "duration": "07:57:37",
-            "durationSec": 28657,
+            "quality": "720p",
             "showInNewEpisodes": false
           },
           {
@@ -4855,6 +4650,7 @@
             "streamUrl": "https://t.me/c/4451036277/3277",
             "duration": "05:24:09",
             "durationSec": 19449,
+            "quality": "720p",
             "showInNewEpisodes": false
           }
         ]
@@ -5856,7 +5652,7 @@
     "rating": 8,
     "imdbId": "tt39943756",
     "trailerUrl": "",
-    "streamingUrl": "https://t.me/c/4451036277/3157",
+    "streamingUrl": "https://t.me/c/4451036277/3202",
     "videoQualities": {},
     "featured": true,
     "published": true,
@@ -5877,9 +5673,10 @@
           {
             "episodeNumber": 1,
             "title": "Episode 1",
-            "streamUrl": "https://t.me/c/4451036277/3157",
-            "duration": "04:00:35",
-            "durationSec": 14435,
+            "streamUrl": "https://t.me/c/4451036277/3202",
+            "duration": "46:03",
+            "durationSec": 2763,
+            "quality": "1080p",
             "showInNewEpisodes": false
           },
           {
@@ -5888,6 +5685,7 @@
             "streamUrl": "https://t.me/c/4451036277/3203",
             "duration": "42:45",
             "durationSec": 2565,
+            "quality": "1080p",
             "showInNewEpisodes": false
           },
           {
@@ -5896,15 +5694,16 @@
             "streamUrl": "https://t.me/c/4451036277/3204",
             "duration": "43:13",
             "durationSec": 2593,
+            "quality": "1080p",
             "showInNewEpisodes": false
           },
           {
             "episodeNumber": 4,
-            "episodeLabel": "4-6",
-            "title": "Episodes 4-6",
-            "streamUrl": "https://t.me/c/4451036277/3159",
-            "duration": "01:48:34",
-            "durationSec": 6514,
+            "title": "Episode 4",
+            "streamUrl": "https://t.me/c/4451036277/3205",
+            "duration": "38:30",
+            "durationSec": 2310,
+            "quality": "1080p",
             "showInNewEpisodes": false
           },
           {
@@ -5913,6 +5712,7 @@
             "streamUrl": "https://t.me/c/4451036277/3206",
             "duration": "28:30",
             "durationSec": 1710,
+            "quality": "1080p",
             "showInNewEpisodes": false
           },
           {
@@ -5921,14 +5721,7 @@
             "streamUrl": "https://t.me/c/4451036277/3207",
             "duration": "41:34",
             "durationSec": 2494,
-            "showInNewEpisodes": false
-          },
-          {
-            "episodeNumber": 7,
-            "title": "Episode 7",
-            "streamUrl": "https://t.me/c/4451036277/3161",
-            "duration": "04:00:35",
-            "durationSec": 14435,
+            "quality": "1080p",
             "showInNewEpisodes": false
           }
         ]
@@ -5955,7 +5748,7 @@
     "rating": 8,
     "imdbId": "tt38828946",
     "trailerUrl": "",
-    "streamingUrl": "https://t.me/c/4451036277/3149",
+    "streamingUrl": "https://t.me/c/4451036277/3154",
     "videoQualities": {},
     "featured": true,
     "published": true,
@@ -6374,7 +6167,7 @@
     "rating": 7.5,
     "imdbId": "tt49791829",
     "trailerUrl": "",
-    "streamingUrl": "https://t.me/c/4451036277/2998",
+    "streamingUrl": "https://t.me/c/4451036277/3081",
     "videoQualities": {},
     "featured": true,
     "published": true,
@@ -6395,65 +6188,19 @@
           {
             "episodeNumber": 1,
             "title": "Episode 1",
-            "streamUrl": "https://t.me/c/4451036277/2998",
-            "duration": "02:22:10",
-            "durationSec": 8530,
-            "showInNewEpisodes": false
-          },
-          {
-            "episodeNumber": 1,
-            "title": "Episode 1",
-            "streamUrl": "https://t.me/c/4451036277/3000",
-            "duration": "02:22:14",
-            "durationSec": 8534,
+            "streamUrl": "https://t.me/c/4451036277/3081",
+            "duration": "25:21",
+            "durationSec": 1521,
+            "quality": "1080p",
             "showInNewEpisodes": false
           },
           {
             "episodeNumber": 2,
             "title": "Episode 2",
-            "streamUrl": "https://t.me/c/4451036277/3003",
-            "duration": "02:22:14",
-            "durationSec": 8534,
-            "showInNewEpisodes": false
-          },
-          {
-            "episodeNumber": 3,
-            "title": "Episode 3",
-            "streamUrl": "https://t.me/c/4451036277/3038",
-            "duration": "26:50",
-            "durationSec": 1610,
-            "showInNewEpisodes": false
-          },
-          {
-            "episodeNumber": 4,
-            "title": "Episode 4",
-            "streamUrl": "https://t.me/c/4451036277/3084",
-            "duration": "19:37",
-            "durationSec": 1177,
-            "showInNewEpisodes": false
-          },
-          {
-            "episodeNumber": 5,
-            "title": "Episode 5",
-            "streamUrl": "https://t.me/c/4451036277/3040",
-            "duration": "23:57",
-            "durationSec": 1437,
-            "showInNewEpisodes": false
-          },
-          {
-            "episodeNumber": 6,
-            "title": "Episode 6",
-            "streamUrl": "https://t.me/c/4451036277/3041",
-            "duration": "24:27",
-            "durationSec": 1467,
-            "showInNewEpisodes": false
-          },
-          {
-            "episodeNumber": 1,
-            "title": "Episode 1",
-            "streamUrl": "https://t.me/c/4451036277/3056",
-            "duration": "02:22:14",
-            "durationSec": 8534,
+            "streamUrl": "https://t.me/c/4451036277/3082",
+            "duration": "22:02",
+            "durationSec": 1322,
+            "quality": "1080p",
             "showInNewEpisodes": false
           },
           {
@@ -6462,6 +6209,16 @@
             "streamUrl": "https://t.me/c/4451036277/3083",
             "duration": "26:50",
             "durationSec": 1610,
+            "quality": "1080p",
+            "showInNewEpisodes": false
+          },
+          {
+            "episodeNumber": 4,
+            "title": "Episode 4",
+            "streamUrl": "https://t.me/c/4451036277/3084",
+            "duration": "19:37",
+            "durationSec": 1177,
+            "quality": "1080p",
             "showInNewEpisodes": false
           },
           {
@@ -6470,6 +6227,7 @@
             "streamUrl": "https://t.me/c/4451036277/3085",
             "duration": "23:57",
             "durationSec": 1437,
+            "quality": "1080p",
             "showInNewEpisodes": false
           },
           {
@@ -6478,6 +6236,7 @@
             "streamUrl": "https://t.me/c/4451036277/3086",
             "duration": "24:27",
             "durationSec": 1467,
+            "quality": "1080p",
             "showInNewEpisodes": false
           }
         ]
@@ -8402,14 +8161,6 @@
             "duration": "38:07",
             "durationSec": 2287,
             "showInNewEpisodes": false
-          },
-          {
-            "episodeNumber": 15,
-            "title": "Episode 15",
-            "streamUrl": "https://t.me/c/4451036277/2731",
-            "duration": "08:56:47",
-            "durationSec": 32207,
-            "showInNewEpisodes": false
           }
         ]
       }
@@ -8507,14 +8258,6 @@
             "streamUrl": "https://t.me/c/4451036277/2688",
             "duration": "38:55",
             "durationSec": 2335,
-            "showInNewEpisodes": false
-          },
-          {
-            "episodeNumber": 8,
-            "title": "Episode 8",
-            "streamUrl": "https://t.me/c/4451036277/2690",
-            "duration": "04:33:34",
-            "durationSec": 16414,
             "showInNewEpisodes": false
           }
         ]
@@ -9325,14 +9068,6 @@
             "duration": "33:28",
             "durationSec": 2008,
             "showInNewEpisodes": false
-          },
-          {
-            "episodeNumber": 5,
-            "title": "Episode 5",
-            "streamUrl": "https://t.me/c/4451036277/2552",
-            "duration": "02:14:08",
-            "durationSec": 8048,
-            "showInNewEpisodes": false
           }
         ]
       }
@@ -9829,22 +9564,6 @@
             "duration": "35:34",
             "durationSec": 2134,
             "showInNewEpisodes": false
-          },
-          {
-            "episodeNumber": 9,
-            "title": "Episode 9",
-            "streamUrl": "https://t.me/c/4451036277/2421",
-            "duration": "04:39:29",
-            "durationSec": 16769,
-            "showInNewEpisodes": false
-          },
-          {
-            "episodeNumber": 10,
-            "title": "Episode 10",
-            "streamUrl": "https://t.me/c/4451036277/2800",
-            "duration": "04:39:29",
-            "durationSec": 16769,
-            "showInNewEpisodes": false
           }
         ]
       }
@@ -10206,22 +9925,6 @@
             "streamUrl": "https://t.me/c/4451036277/2356",
             "duration": "39:35",
             "durationSec": 2375,
-            "showInNewEpisodes": false
-          },
-          {
-            "episodeNumber": 6,
-            "title": "Episode 6",
-            "streamUrl": "https://t.me/c/4451036277/2363",
-            "duration": "03:04:53",
-            "durationSec": 11093,
-            "showInNewEpisodes": false
-          },
-          {
-            "episodeNumber": 7,
-            "title": "Episode 7",
-            "streamUrl": "https://t.me/c/4451036277/2734",
-            "duration": "03:04:03",
-            "durationSec": 11043,
             "showInNewEpisodes": false
           }
         ]
@@ -11028,7 +10731,7 @@
     "rating": 7.6,
     "imdbId": "tt28132016",
     "trailerUrl": "",
-    "streamingUrl": "https://t.me/c/4451036277/1939",
+    "streamingUrl": "https://t.me/c/4451036277/1941",
     "videoQualities": {},
     "featured": true,
     "published": true,
@@ -11048,11 +10751,12 @@
         "episodes": [
           {
             "episodeNumber": 1,
-            "episodeLabel": "1-20",
-            "title": "Episodes 1-20",
-            "streamUrl": "https://t.me/c/4451036277/1939",
-            "duration": "14:22:43",
-            "durationSec": 51763,
+            "episodeLabel": "1-10",
+            "title": "Episodes 1-10",
+            "streamUrl": "https://t.me/c/4451036277/1941",
+            "duration": "07:11:19",
+            "durationSec": 25879,
+            "quality": "720p",
             "showInNewEpisodes": false
           },
           {
@@ -11062,15 +10766,17 @@
             "streamUrl": "https://t.me/c/4451036277/1942",
             "duration": "07:11:23",
             "durationSec": 25883,
+            "quality": "720p",
             "showInNewEpisodes": false
           },
           {
             "episodeNumber": 21,
-            "episodeLabel": "21-40",
-            "title": "Episodes 21-40",
-            "streamUrl": "https://t.me/c/4451036277/1940",
-            "duration": "14:25:58",
-            "durationSec": 51958,
+            "episodeLabel": "21-30",
+            "title": "Episodes 21-30",
+            "streamUrl": "https://t.me/c/4451036277/1943",
+            "duration": "07:09:01",
+            "durationSec": 25741,
+            "quality": "720p",
             "showInNewEpisodes": false
           },
           {
@@ -11080,6 +10786,7 @@
             "streamUrl": "https://t.me/c/4451036277/1944",
             "duration": "07:16:56",
             "durationSec": 26216,
+            "quality": "720p",
             "showInNewEpisodes": false
           }
         ]
@@ -11134,39 +10841,12 @@
             "showInNewEpisodes": false
           },
           {
-            "episodeNumber": 5,
-            "episodeLabel": "5-8",
-            "title": "Episodes 5-8",
-            "streamUrl": "https://t.me/c/4451036277/1933",
-            "duration": "04:42:22",
-            "durationSec": 16942,
-            "showInNewEpisodes": false
-          },
-          {
-            "episodeNumber": 9,
-            "episodeLabel": "9-16",
-            "title": "Episodes 9-16",
-            "streamUrl": "https://t.me/c/4451036277/1931",
-            "duration": "09:48:25",
-            "durationSec": 35305,
-            "showInNewEpisodes": false
-          },
-          {
             "episodeNumber": 10,
             "episodeLabel": "10-16",
             "title": "Episodes 10-16",
             "streamUrl": "https://t.me/c/4451036277/1929",
             "duration": "08:36:49",
             "durationSec": 31009,
-            "showInNewEpisodes": false
-          },
-          {
-            "episodeNumber": 13,
-            "episodeLabel": "13-16",
-            "title": "Episodes 13-16",
-            "streamUrl": "https://t.me/c/4451036277/1935",
-            "duration": "05:02:16",
-            "durationSec": 18136,
             "showInNewEpisodes": false
           }
         ]
@@ -11230,7 +10910,7 @@
     "rating": 8,
     "imdbId": "tt49522873",
     "trailerUrl": "",
-    "streamingUrl": "https://t.me/c/4451036277/1757",
+    "streamingUrl": "https://t.me/c/4451036277/1759",
     "videoQualities": {},
     "featured": true,
     "published": true,
@@ -11250,11 +10930,12 @@
         "episodes": [
           {
             "episodeNumber": 1,
-            "episodeLabel": "1-8",
-            "title": "Episodes 1-8",
-            "streamUrl": "https://t.me/c/4451036277/1757",
-            "duration": "03:36:52",
-            "durationSec": 13012,
+            "episodeLabel": "1-6",
+            "title": "Episodes 1-6",
+            "streamUrl": "https://t.me/c/4451036277/1759",
+            "duration": "02:43:00",
+            "durationSec": 9780,
+            "quality": "1080p",
             "showInNewEpisodes": false
           },
           {
@@ -11264,15 +10945,7 @@
             "streamUrl": "https://t.me/c/4451036277/1760",
             "duration": "02:09:48",
             "durationSec": 7788,
-            "showInNewEpisodes": false
-          },
-          {
-            "episodeNumber": 9,
-            "episodeLabel": "9-15",
-            "title": "Episodes 9-15",
-            "streamUrl": "https://t.me/c/4451036277/1758",
-            "duration": "03:02:10",
-            "durationSec": 10930,
+            "quality": "1080p",
             "showInNewEpisodes": false
           },
           {
@@ -11282,6 +10955,7 @@
             "streamUrl": "https://t.me/c/4451036277/1761",
             "duration": "01:46:13",
             "durationSec": 6373,
+            "quality": "1080p",
             "showInNewEpisodes": false
           }
         ]
@@ -14284,14 +13958,6 @@
             "duration": "24:05",
             "durationSec": 1445,
             "showInNewEpisodes": false
-          },
-          {
-            "episodeNumber": 5,
-            "title": "Episode 5",
-            "streamUrl": "https://t.me/c/4451036277/1151",
-            "duration": "01:45:41",
-            "durationSec": 6341,
-            "showInNewEpisodes": false
           }
         ]
       }
@@ -14774,30 +14440,12 @@
             "showInNewEpisodes": false
           },
           {
-            "episodeNumber": 3,
-            "episodeLabel": "3-5",
-            "title": "Episodes 3-5",
-            "streamUrl": "https://t.me/c/4451036277/1018",
-            "duration": "01:29:54",
-            "durationSec": 5394,
-            "showInNewEpisodes": false
-          },
-          {
             "episodeNumber": 5,
             "episodeLabel": "5-8",
             "title": "Episodes 5-8",
             "streamUrl": "https://t.me/c/4451036277/1040",
             "duration": "02:04:56",
             "durationSec": 7496,
-            "showInNewEpisodes": false
-          },
-          {
-            "episodeNumber": 6,
-            "episodeLabel": "6-8",
-            "title": "Episodes 6-8",
-            "streamUrl": "https://t.me/c/4451036277/1019",
-            "duration": "01:38:36",
-            "durationSec": 5916,
             "showInNewEpisodes": false
           }
         ]
@@ -15910,22 +15558,6 @@
             "streamUrl": "https://t.me/c/4451036277/752",
             "duration": "46:05",
             "durationSec": 2765,
-            "showInNewEpisodes": false
-          },
-          {
-            "episodeNumber": 11,
-            "title": "Episode 11",
-            "streamUrl": "https://t.me/c/4451036277/775",
-            "duration": "07:53:24",
-            "durationSec": 28404,
-            "showInNewEpisodes": false
-          },
-          {
-            "episodeNumber": 12,
-            "title": "Episode 12",
-            "streamUrl": "https://t.me/c/4451036277/1947",
-            "duration": "07:53:25",
-            "durationSec": 28405,
             "showInNewEpisodes": false
           }
         ]
@@ -17543,14 +17175,6 @@
             "duration": "06:05:44",
             "durationSec": 21944,
             "showInNewEpisodes": false
-          },
-          {
-            "episodeNumber": 17,
-            "title": "Episode 17",
-            "streamUrl": "https://t.me/c/4451036277/2025",
-            "duration": "12:56:23",
-            "durationSec": 46583,
-            "showInNewEpisodes": false
           }
         ]
       }
@@ -18418,7 +18042,7 @@
     "rating": 6.6,
     "imdbId": "tt35934755",
     "trailerUrl": "",
-    "streamingUrl": "https://t.me/c/4451036277/196",
+    "streamingUrl": "https://t.me/c/4451036277/189",
     "videoQualities": {},
     "featured": true,
     "published": true,
@@ -18439,9 +18063,10 @@
           {
             "episodeNumber": 1,
             "title": "Episode 1",
-            "streamUrl": "https://t.me/c/4451036277/196",
-            "duration": "04:04:10",
-            "durationSec": 14650,
+            "streamUrl": "https://t.me/c/4451036277/189",
+            "duration": "47:35",
+            "durationSec": 2855,
+            "quality": "1080p",
             "showInNewEpisodes": false
           },
           {
@@ -18450,6 +18075,7 @@
             "streamUrl": "https://t.me/c/4451036277/190",
             "duration": "37:03",
             "durationSec": 2223,
+            "quality": "1080p",
             "showInNewEpisodes": false
           },
           {
@@ -18458,15 +18084,16 @@
             "streamUrl": "https://t.me/c/4451036277/191",
             "duration": "40:19",
             "durationSec": 2419,
+            "quality": "1080p",
             "showInNewEpisodes": false
           },
           {
             "episodeNumber": 4,
-            "episodeLabel": "4-6",
-            "title": "Episodes 4-6",
-            "streamUrl": "https://t.me/c/4451036277/169",
-            "duration": "01:59:12",
-            "durationSec": 7152,
+            "title": "Episode 4",
+            "streamUrl": "https://t.me/c/4451036277/192",
+            "duration": "39:48",
+            "durationSec": 2388,
+            "quality": "1080p",
             "showInNewEpisodes": false
           },
           {
@@ -18475,6 +18102,7 @@
             "streamUrl": "https://t.me/c/4451036277/193",
             "duration": "41:36",
             "durationSec": 2496,
+            "quality": "1080p",
             "showInNewEpisodes": false
           },
           {
@@ -18483,14 +18111,7 @@
             "streamUrl": "https://t.me/c/4451036277/194",
             "duration": "37:46",
             "durationSec": 2266,
-            "showInNewEpisodes": false
-          },
-          {
-            "episodeNumber": 7,
-            "title": "Episode 7",
-            "streamUrl": "https://t.me/c/4451036277/683",
-            "duration": "04:04:09",
-            "durationSec": 14649,
+            "quality": "1080p",
             "showInNewEpisodes": false
           }
         ]

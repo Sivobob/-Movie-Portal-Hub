@@ -78,10 +78,10 @@ const RELEASE_CUTOFF_RE =
   /\b(?:480p|720p|1080p|2160p|360p|4k|uhd|fhd|hdrip|hd[\s._-]*cam|hdcam|hdts(?:[\s._-]*rip)?|hdtc(?:[\s._-]*rip)?|ts[\s._-]*rip|tsrip|tc[\s._-]*rip|tcrip|v\d+[\s._-]*hdtc|tc|hq[\s._-]*rip|hqrip|prehd|pre[\s._-]*hd|s[\s._-]*print|sprint|1xbet|telesync|telecine|predvd|camrip|cam|dvdscr|dvdrip|holl[\s._-]*print(?:ed)?|hollywood[\s._-]*print(?:ed)?|hall[\s._-]*print|cinevood|cinevoo|cinewood|cinvood|ds4k|chaupal|moviezpaid|missproviderbot|providerbotz?|ipapkornbot\d*|skymovies?hd|skymovi|hsubs?|web[\s._-]*dl|webdl|web[\s._-]*rip|webrip|bluray|bdrip|brrip|x264|x265|h[\s._-]*264|h[\s._-]*265|hevc|avc|av1|10bit|8bit|hi10p|aac|aac2|aac5|ac3|eac3|dd5[\s._-]*1|ddp5[\s._-]*1|dd2[\s._-]*0|dts|atmos|truehd|esub|esubs|msub|msubs|hc[\s._-]*sub|hc[\s._-]*esub|dual[\s._-]*audio|multi[\s._-]*audio|full[\s._-]+(?:hindi|dubbed|hd|movie)|hindi[\s._-]*dubbed|org[\s._-]*hindi|original[\s._-]*hindi|uncut|unrated|extended|remastered|imax|nf|amzn|dsnp|kone|hotstar|zee5|jiocinema|sonyliv|mxplayer|voot|moviesmod|vegamovies|filmyzilla|filmy4wap|hdhub4u|katmoviehd|mkvcinemas|bolly4u|bollyflix|dotmovies|hdmovie2|movies4u|pagalworld|worldfree4u|khatrimaza|yify|rarbg|psa|flux|ntb|evo|syncopy|watch[\s._-]+online|free[\s._-]+download|download[\s._-]+now)\b/i;
 
 const SERIES_EP_RE =
-  /(?:^|[\s._\-\[(])(?:S\d{1,2}[\s._-]*E\d{1,4}|S\d{1,2}|Season[\s._-]*\d{1,2}(?:[\s._-]*(?:Ep|Episode)[\s._-]*\d{1,4})?|Episodes?[\s._-]*['’`,]*\s*[:\-–—=|]?\s*\d{1,4}|Ep\.?[\s._-]*\d{1,4}|E0*\d{1,3}(?:[\s._-]*[-–—][\s._-]*E?0*\d{1,3})?|\d{1,2}x\d{1,4})(?:$|[\s._\-\]])|(?<=\S[\s._\-|(\[])Session[\s._-]*\d{1,2}(?:$|[\s._\-\]|)])/i;
+  /(?:^|[\s._\-\[(])(?:S\d{1,2}[\s._-]*E\d{1,4}|S\d{1,2}|Season[\s._-]*\d{1,2}(?:[\s._-]*(?:Ep|Episode)[\s._-]*\d{1,4})?|Episodes?[\s._-]*['’`,]*\s*[:\-–—=|]?\s*\d{1,4}|Epi?(?:sodes?)?\.?[\s._(-]*\d{1,4}|E0*\d{1,3}(?:[\s._-]*[-–—][\s._-]*E?0*\d{1,3})?|\d{1,2}x\d{1,4})(?:$|[\s._\-\])])|(?<=\S[\s._\-|(\[])Session[\s._-]*\d{1,2}(?:$|[\s._\-\]|)])/i;
 
 const SERIES_CUTOFF_RE =
-  /(?:^|[\s._\-\[(])(?:S0?\d{1,2}[\s._-]*E0?\d{1,4}|S0?\d{1,2}|(?:Season|Session)[\s._-]*\d{1,2}|Episodes?[\s._-]*\d{1,4}|Ep\.?[\s._-]*\d{1,4}|E0*\d{1,3}(?:[\s._-]*[-–—][\s._-]*E?0*\d{1,3})?|\d{1,2}x\d{1,4})\b/i;
+  /(?:^|[\s._\-\[(])(?:S0?\d{1,2}[\s._-]*E0?\d{1,4}|S0?\d{1,2}|(?:Season|Session)[\s._-]*\d{1,2}|Episodes?[\s._-]*\d{1,4}|Epi?(?:sodes?)?\.?[\s._(-]*\d{1,4}|E0*\d{1,3}(?:[\s._-]*[-–—][\s._-]*E?0*\d{1,3})?|\d{1,2}x\d{1,4})\b/i;
 
 const PROMO_LINE_RE =
   /(?:join\s+@|join\s+our|join\s+channel|channel\s*[:\-–—]|powered\s+by|uploaded\s+by|upload\s+by|shared\s+by|share\s*&|subscribe|t\.me\/|https?:\/\/|download\s+link|request\s+here|feedback|backup\s+channel|follow\s+us|telegram\.me|watch\s+online|click\s+here|more\s+movies|visit\s+our|copyright|dmca|disclaimer)/i;
@@ -258,27 +258,50 @@ function parseSeriesSeasonEpisode(rawText: string): {
   let episodeNumber: number | null = null;
   let episodeLabel = '';
 
-  const seRange = norm.match(/\bS0*(\d{1,2})\s*[-–—]?\s*E0*(\d{1,4})\s*(?:[-–—]|\s+(?=E?0*\d{1,2}\b))\s*E?0*(\d{1,4})\b/i);
+  const seRangeMatch = norm.match(/\bS0*(\d{1,2})\s*[-–—]?\s*E0*(\d{1,4})\s*(?:[-–—]|\s+(?=E?0*\d{1,2}\b))\s*E?0*(\d{1,4})\b/i);
+  const validSeRange =
+    seRangeMatch &&
+    parseInt(seRangeMatch[2], 10) > 0 &&
+    parseInt(seRangeMatch[3], 10) > parseInt(seRangeMatch[2], 10) &&
+    parseInt(seRangeMatch[3], 10) - parseInt(seRangeMatch[2], 10) <= 50 &&
+    parseInt(seRangeMatch[3], 10) < 1000
+      ? seRangeMatch
+      : null;
   const seSingle = norm.match(/\bS0*(\d{1,2})\s*[-–—]?\s*E0*(\d{1,4})\b/i);
   const xMatch = norm.match(/\b0*(\d{1,2})x0*(\d{1,4})\b/i);
   const seasonWord = norm.match(/\b(?:(?:Season|Session)\s*['’`,]*\s*[:\-–—=|]?\s*|S\s*(?=\d))0*(\d{1,2})\b/i);
-  const epRange = norm.match(/\b(?:Episodes?|Eps?)\s*['’`,]*\s*[:\-–—=|]?\s*0*(\d{1,4})\s*(?:-|–|—|to)\s*0*(\d{1,4})\b/i);
-  const epWord = norm.match(/\b(?:Episodes?|Eps?)\s*['’`,]*\s*[:\-–—=|]?\s*0*(\d{1,4})\b/i);
-  const standaloneEpRange = norm.match(/(?:^|[\s\-\[(])E0*(\d{1,3})\s*(?:[-–—]|\s+(?=E?0*\d{1,2}\b))\s*E?0*(\d{1,3})(?:$|[\s\-\])])/i);
-  const standaloneEpSingle = norm.match(/(?:^|[\s\-\[(])E0*(\d{1,3})(?:$|[\s\-\])])/i);
+  const epRangeMatch = norm.match(/\b(?:Episodes?|Epi|Eps?)\s*['’`,]*\s*[:\-–—=|]?\s*\(?\s*0*(\d{1,4})\s*(?:-|–|—|\bto\b|\s+(?=0*\d{1,3}\b))\s*0*(\d{1,4})\s*\)?/i);
+  const validEpRange =
+    epRangeMatch &&
+    parseInt(epRangeMatch[1], 10) > 0 &&
+    parseInt(epRangeMatch[2], 10) > parseInt(epRangeMatch[1], 10) &&
+    parseInt(epRangeMatch[2], 10) - parseInt(epRangeMatch[1], 10) <= 150 &&
+    parseInt(epRangeMatch[2], 10) < 1000
+      ? epRangeMatch
+      : null;
+  const epWord = norm.match(/\b(?:Episodes?|Epi|Eps?)\s*['’`,]*\s*[:\-–—=|]?\s*\(?\s*0*(\d{1,4})\s*\)?/i);
+  const standaloneEpRangeMatch = norm.match(/(?:^|[\s\-\[(])E0*(\d{1,3})\s*(?:[-–—]|\s+(?=E?0*\d{1,2}\b))\s*E?0*(\d{1,3})(?:$|[\s\-\]])/i);
+  const validStandaloneEpRange =
+    standaloneEpRangeMatch &&
+    parseInt(standaloneEpRangeMatch[1], 10) > 0 &&
+    parseInt(standaloneEpRangeMatch[2], 10) > parseInt(standaloneEpRangeMatch[1], 10) &&
+    parseInt(standaloneEpRangeMatch[2], 10) - parseInt(standaloneEpRangeMatch[1], 10) <= 50
+      ? standaloneEpRangeMatch
+      : null;
+  const standaloneEpSingle = norm.match(/(?:^|[\s\-\[(])E0*(\d{1,3})(?:$|[\s\-\]])/i);
 
-  if (seRange && parseInt(seRange[3], 10) > parseInt(seRange[2], 10) && parseInt(seRange[3], 10) - parseInt(seRange[2], 10) <= 50 && parseInt(seRange[3], 10) < 1000) {
-    seasonNumber = parseInt(seRange[1], 10);
+  if (validSeRange) {
+    seasonNumber = parseInt(validSeRange[1], 10);
     hasExplicitSeason = true;
-    const eStart = parseInt(seRange[2], 10);
-    const eEnd = parseInt(seRange[3], 10);
+    const eStart = parseInt(validSeRange[2], 10);
+    const eEnd = parseInt(validSeRange[3], 10);
     episodeNumber = eStart;
     if (eEnd > eStart) episodeLabel = `${eStart}-${eEnd}`;
-  } else if (seSingle) {
+  } else if (seSingle && parseInt(seSingle[2], 10) > 0) {
     seasonNumber = parseInt(seSingle[1], 10);
     hasExplicitSeason = true;
     episodeNumber = parseInt(seSingle[2], 10);
-  } else if (xMatch) {
+  } else if (xMatch && parseInt(xMatch[2], 10) > 0) {
     seasonNumber = parseInt(xMatch[1], 10);
     hasExplicitSeason = true;
     episodeNumber = parseInt(xMatch[2], 10);
@@ -286,29 +309,42 @@ function parseSeriesSeasonEpisode(rawText: string): {
     if (seasonWord) {
       seasonNumber = parseInt(seasonWord[1], 10);
       hasExplicitSeason = true;
+    } else if (seSingle) {
+      // S01E0 truncated tag still conveys explicit Season number without creating Episode 0
+      seasonNumber = parseInt(seSingle[1], 10);
+      hasExplicitSeason = true;
     }
-    if (epRange) {
-      const eStart = parseInt(epRange[1], 10);
-      const eEnd = parseInt(epRange[2], 10);
+    if (validEpRange) {
+      const eStart = parseInt(validEpRange[1], 10);
+      const eEnd = parseInt(validEpRange[2], 10);
       episodeNumber = eStart;
       if (eEnd > eStart) episodeLabel = `${eStart}-${eEnd}`;
-    } else if (epWord) {
+    } else if (epWord && parseInt(epWord[1], 10) > 0) {
       episodeNumber = parseInt(epWord[1], 10);
-    } else if (standaloneEpRange && parseInt(standaloneEpRange[2], 10) > parseInt(standaloneEpRange[1], 10) && parseInt(standaloneEpRange[2], 10) - parseInt(standaloneEpRange[1], 10) <= 50) {
-      const eStart = parseInt(standaloneEpRange[1], 10);
-      const eEnd = parseInt(standaloneEpRange[2], 10);
+    } else if (validStandaloneEpRange) {
+      const eStart = parseInt(validStandaloneEpRange[1], 10);
+      const eEnd = parseInt(validStandaloneEpRange[2], 10);
       episodeNumber = eStart;
       if (eEnd > eStart) episodeLabel = `${eStart}-${eEnd}`;
-    } else if (standaloneEpSingle) {
+    } else if (standaloneEpSingle && parseInt(standaloneEpSingle[1], 10) > 0) {
       episodeNumber = parseInt(standaloneEpSingle[1], 10);
     }
+  }
+
+  if (episodeNumber !== null && episodeNumber <= 0) {
+    episodeNumber = null;
+    episodeLabel = '';
   }
 
   if (episodeNumber !== null && seasonNumber === null) {
     seasonNumber = 1;
   }
 
-  if (seasonNumber !== null && episodeNumber === null && /\b(?:complete|combined|full\s+season)\b/i.test(norm)) {
+  if (
+    seasonNumber !== null &&
+    episodeNumber === null &&
+    /\b(?:complete|combined|all[\s._-]*episodes?|full[\s._-]*season)\b/i.test(norm)
+  ) {
     episodeNumber = 1;
     episodeLabel = 'Complete';
   }
@@ -558,12 +594,12 @@ export function parseTelegramMovieMeta(
   const capEp = captionSeriesText ? parseSeriesSeasonEpisode(captionSeriesText) : null;
   const fileEp = fileName ? parseSeriesSeasonEpisode(fileName) : null;
 
-  const finalEpisodeNumber =
+  let finalEpisodeNumber =
     capEp && capEp.episodeNumber !== null
       ? capEp.episodeNumber
       : fileEp?.episodeNumber ?? null;
 
-  const finalEpisodeLabel =
+  let finalEpisodeLabel =
     capEp && capEp.episodeLabel
       ? capEp.episodeLabel
       : capEp && capEp.episodeNumber !== null
@@ -586,6 +622,18 @@ export function parseTelegramMovieMeta(
     finalSeasonNumber = null;
   } else if (finalEpisodeNumber !== null && finalSeasonNumber === null) {
     finalSeasonNumber = 1;
+  }
+
+  // Fallback for bare season packs (e.g. "Akka.2026.S01.720p.mkv" >= 90 min, or S01 COMBINED)
+  if (
+    finalIsSeries &&
+    finalEpisodeNumber === null &&
+    (durationSec >= 5400 ||
+      /\b(?:complete|combined|all[\s._-]*episodes?|full[\s._-]*season)\b/i.test(seriesDetectionText))
+  ) {
+    finalEpisodeNumber = 1;
+    finalEpisodeLabel = 'Complete';
+    if (finalSeasonNumber === null) finalSeasonNumber = 1;
   }
 
   const finalEpisodeTitle =

@@ -428,47 +428,51 @@ downloadCastRouter.get('/cast/proxy', (req: Request, res: Response) => {
 });
 
 // Route 3: Direct Download Endpoint with Attachment Content-Disposition
-// Forces browsers and Android devices to save directly into user's Downloads folder
-downloadCastRouter.get('/download/file', (req: Request, res: Response) => {
-  const targetUrlStr = req.query.url as string;
-  const rawFilename = (req.query.filename as string) || 'Movie_Portal_Video.mp4';
-  const safeFilename = rawFilename.replace(/[^a-zA-Z0-9._-]/g, '_');
-
-  if (!targetUrlStr) {
-    res.status(400).json({ error: 'Missing target download url parameter' });
-    return;
-  }
-
-  // Handle local proxy stream or external URL
+// Follows redirects server-side so browser fetch() / Android Downloader avoid cross-origin redirect failures
+function proxyDownloadFile(
+  targetUrlStr: string,
+  req: Request,
+  res: Response,
+  safeFilename: string,
+  redirectsLeft = 8
+) {
   let fullUrl = targetUrlStr;
   if (targetUrlStr.startsWith('/')) {
-    const host = req.headers.host || 'localhost:3000';
-    const protocol = req.protocol || 'http';
-    fullUrl = `${protocol}://${host}${targetUrlStr}`;
+    const port = process.env.INTERNAL_APP_PORT || process.env.PORT || '3000';
+    fullUrl = `http://127.0.0.1:${port}${targetUrlStr}`;
   }
 
   try {
     const parsed = new URL(fullUrl);
     const client = parsed.protocol === 'https:' ? https : http;
+    const method = req.method === 'HEAD' ? 'HEAD' : 'GET';
 
     const requestHeaders: Record<string, string> = {
-      'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+      'User-Agent':
+        req.headers['user-agent'] ||
+        'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
       'Accept': '*/*',
     };
     if (req.headers.range) {
       requestHeaders['Range'] = req.headers.range as string;
     }
 
-    const downloadReq = client.get(
+    const downloadReq = client.request(
       fullUrl,
-      { headers: requestHeaders },
+      { method, headers: requestHeaders },
       (downloadRes) => {
-        // If redirect, follow redirect once
         if (
-          (downloadRes.statusCode === 301 || downloadRes.statusCode === 302 || downloadRes.statusCode === 307) &&
+          redirectsLeft > 0 &&
+          (downloadRes.statusCode === 301 ||
+            downloadRes.statusCode === 302 ||
+            downloadRes.statusCode === 303 ||
+            downloadRes.statusCode === 307 ||
+            downloadRes.statusCode === 308) &&
           downloadRes.headers.location
         ) {
-          res.redirect(downloadRes.headers.location);
+          downloadRes.resume();
+          const redirectedUrl = new URL(downloadRes.headers.location, fullUrl).toString();
+          proxyDownloadFile(redirectedUrl, req, res, safeFilename, redirectsLeft - 1);
           return;
         }
 
@@ -478,7 +482,7 @@ downloadCastRouter.get('/download/file', (req: Request, res: Response) => {
           'Content-Disposition': `attachment; filename="${safeFilename}"`,
           'Accept-Ranges': downloadRes.headers['accept-ranges'] || 'bytes',
           'Access-Control-Allow-Origin': '*',
-          'Access-Control-Expose-Headers': 'Content-Length, Content-Disposition, Content-Range',
+          'Access-Control-Expose-Headers': 'Content-Length, Content-Disposition, Content-Range, Accept-Ranges, Content-Type',
         };
 
         if (downloadRes.headers['content-length']) {
@@ -489,6 +493,11 @@ downloadCastRouter.get('/download/file', (req: Request, res: Response) => {
         }
 
         res.writeHead(statusCode, responseHeaders);
+        if (method === 'HEAD') {
+          downloadRes.resume();
+          res.end();
+          return;
+        }
         downloadRes.pipe(res);
       }
     );
@@ -496,19 +505,51 @@ downloadCastRouter.get('/download/file', (req: Request, res: Response) => {
     downloadReq.on('error', (err) => {
       console.error('[Download Stream Proxy Error]', err.message);
       if (!res.headersSent) {
-        res.status(500).json({ error: 'Failed to stream download file' });
+        res.status(502).json({ error: 'Failed to stream download file' });
       }
     });
 
     req.on('close', () => {
       downloadReq.destroy();
     });
+    downloadReq.end();
   } catch (err: any) {
     console.error('[Download Proxy Invalid URL]', err?.message);
     if (!res.headersSent) {
       res.status(400).json({ error: 'Invalid download media URL' });
     }
   }
+}
+
+downloadCastRouter.options('/download/file', (_req: Request, res: Response) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Range');
+  res.status(204).end();
+});
+
+downloadCastRouter.head('/download/file', (req: Request, res: Response) => {
+  const targetUrlStr = req.query.url as string;
+  const rawFilename = (req.query.filename as string) || 'Movie_Portal_Video.mp4';
+  const safeFilename = rawFilename.replace(/[^a-zA-Z0-9._-]/g, '_');
+  if (!targetUrlStr) {
+    res.status(400).json({ error: 'Missing target download url parameter' });
+    return;
+  }
+  proxyDownloadFile(targetUrlStr, req, res, safeFilename);
+});
+
+downloadCastRouter.get('/download/file', (req: Request, res: Response) => {
+  const targetUrlStr = req.query.url as string;
+  const rawFilename = (req.query.filename as string) || 'Movie_Portal_Video.mp4';
+  const safeFilename = rawFilename.replace(/[^a-zA-Z0-9._-]/g, '_');
+
+  if (!targetUrlStr) {
+    res.status(400).json({ error: 'Missing target download url parameter' });
+    return;
+  }
+
+  proxyDownloadFile(targetUrlStr, req, res, safeFilename);
 });
 
 function toMillisSafe(val: any): number {

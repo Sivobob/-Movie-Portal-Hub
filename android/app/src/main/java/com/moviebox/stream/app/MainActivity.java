@@ -151,6 +151,8 @@ public class MainActivity extends BridgeActivity {
     private static final String FIRESTORE_BACKEND_DOC_URL =
         "https://firestore.googleapis.com/v1/projects/gen-lang-client-0267042672/databases/ai-studio-movieportalhub-664a3e40-85f3-4758-945e-fd031bdc459f/documents/admins/backend";
     private static final String[] LIVE_WEB_CANDIDATES = new String[] {
+        "https://ais-pre-jledbsv5it3bzdsqu6r7up-560942295760.asia-northeast1.run.app",
+        "https://ais-dev-jledbsv5it3bzdsqu6r7up-560942295760.asia-northeast1.run.app",
         "https://ais-pre-e2ezio27fl3yrqw6mye2bv-338461367324.asia-northeast1.run.app",
         "https://ais-dev-e2ezio27fl3yrqw6mye2bv-338461367324.asia-northeast1.run.app",
         "https://ais-pre-xnvcffdn7a5ydibjtjrezd-835315626292.asia-northeast1.run.app",
@@ -2636,7 +2638,11 @@ public class MainActivity extends BridgeActivity {
                             throw new IOException("Stream source failed");
                         }
                         activeUrl = task.fallbackUrl;
-                        existingOffset = task.partFile.exists() ? task.partFile.length() : 0L;
+                        // Fallback URL can be raw original instead of transcoded stream, so restart byte stream cleanly
+                        if (task.partFile.exists()) {
+                            task.partFile.delete();
+                        }
+                        existingOffset = 0L;
                     }
 
                     try {
@@ -2645,10 +2651,10 @@ public class MainActivity extends BridgeActivity {
                             URL urlObj = new URL(currentUrl);
                             conn = (HttpURLConnection) urlObj.openConnection();
                             conn.setInstanceFollowRedirects(false);
-                            conn.setConnectTimeout(25000);
-                            conn.setReadTimeout(60000);
+                            conn.setConnectTimeout(30000);
+                            conn.setReadTimeout(120000);
                             conn.setRequestMethod("GET");
-                            conn.setRequestProperty("User-Agent", "MovieHub/3.5.237 AndroidDownloader");
+                            conn.setRequestProperty("User-Agent", "MovieHub/3.5.295 AndroidDownloader");
                             conn.setRequestProperty("Accept-Encoding", "identity");
                             if (existingOffset > 0L && task.totalBytes > existingOffset) {
                                 conn.setRequestProperty("Range", "bytes=" + existingOffset + "-" + (task.totalBytes - 1L));
@@ -2678,6 +2684,14 @@ public class MainActivity extends BridgeActivity {
                         }
 
                         if (conn == null) throw new IOException("Connection failed");
+
+                        String respContentType = conn.getContentType();
+                        if (respContentType != null) {
+                            String lowerCt = respContentType.toLowerCase();
+                            if (lowerCt.contains("text/html") || lowerCt.contains("application/json")) {
+                                throw new IOException("Invalid media response (" + respContentType + ")");
+                            }
+                        }
 
                         int respCode = conn.getResponseCode();
                         boolean appendMode = (respCode == 206 && existingOffset > 0L);

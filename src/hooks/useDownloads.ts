@@ -8,9 +8,12 @@ import {
   probeWorkingBackendUrl,
 } from '../utils/apiConfig';
 import {
+  clearOfflineVideoChunks,
   deleteOfflineVideo,
+  finalizeOfflineChunkedVideo,
   formatBytesLabel,
-  saveOfflineVideoBlob,
+  requestPersistentOfflineStorage,
+  saveOfflineVideoChunk,
 } from '../services/offlineStorage';
 import { QualitySizeEstimate, VideoQualityTier } from '../utils/videoQuality';
 
@@ -240,18 +243,100 @@ interface PendingTaskMeta {
 
 const pendingTaskMetaMap = new Map<string, PendingTaskMeta>();
 
-// Web active streaming runners (for real Pause/Resume/Cancel with chunk accumulation)
+// Web active streaming runners (for real Pause/Resume/Cancel with progressive IndexedDB chunks)
+const RANGE_CHUNK_BYTES = 8 * 1024 * 1024; // 8 MB slices
+const MAX_CHUNK_ATTEMPTS = 5;
+const MAX_CONCURRENT_WEB_DOWNLOADS = 2;
+
 interface WebRunner {
-  chunks: Uint8Array[];
+  pendingParts: Uint8Array[];
+  pendingBytes: number;
+  chunkIndex: number;
   receivedBytes: number;
   totalBytes: number;
   mimeType: string;
+  supportsRange: boolean | null;
+  usingFallback: boolean;
   paused: boolean;
   cancelled: boolean;
   controller: AbortController | null;
 }
 
 const webRunners = new Map<string, WebRunner>();
+const activeWebTaskIds = new Set<string>();
+const queuedWebTaskIds: string[] = [];
+
+function removeFromWebQueue(taskId: string) {
+  const idx = queuedWebTaskIds.indexOf(taskId);
+  if (idx >= 0) {
+    queuedWebTaskIds.splice(idx, 1);
+  }
+}
+
+function pumpWebDownloadQueue() {
+  while (activeWebTaskIds.size < MAX_CONCURRENT_WEB_DOWNLOADS && queuedWebTaskIds.length > 0) {
+    const nextId = queuedWebTaskIds.shift()!;
+    const runner = webRunners.get(nextId);
+    const meta = pendingTaskMetaMap.get(nextId);
+    if (!runner || !meta || runner.cancelled || runner.paused) continue;
+    activeWebTaskIds.add(nextId);
+    updateActiveTask(nextId, {
+      status: 'downloading',
+      speed: 'Connecting...',
+      eta: 'Starting...',
+    });
+    runWebDownload(nextId, runner.usingFallback).finally(() => {
+      activeWebTaskIds.delete(nextId);
+      pumpWebDownloadQueue();
+    });
+  }
+}
+
+function enqueueWebDownload(taskId: string) {
+  const runner = webRunners.get(taskId);
+  if (!runner || runner.cancelled || runner.paused) return;
+  if (activeWebTaskIds.has(taskId)) return;
+  if (activeWebTaskIds.size < MAX_CONCURRENT_WEB_DOWNLOADS) {
+    removeFromWebQueue(taskId);
+    activeWebTaskIds.add(taskId);
+    runWebDownload(taskId, runner.usingFallback).finally(() => {
+      activeWebTaskIds.delete(taskId);
+      pumpWebDownloadQueue();
+    });
+  } else {
+    if (!queuedWebTaskIds.includes(taskId)) {
+      queuedWebTaskIds.push(taskId);
+    }
+    updateActiveTask(taskId, {
+      status: 'downloading',
+      speed: 'Queued...',
+      eta: 'Waiting slot...',
+    });
+  }
+}
+
+async function flushRunnerPendingToDb(taskId: string, runner: WebRunner): Promise<void> {
+  if (runner.pendingBytes <= 0 || runner.pendingParts.length === 0) return;
+  const blob = new Blob(runner.pendingParts as unknown as BlobPart[], {
+    type: runner.mimeType || 'video/mp4',
+  });
+  runner.pendingParts = [];
+  runner.pendingBytes = 0;
+  if (blob.size > 0) {
+    const idx = runner.chunkIndex;
+    runner.chunkIndex += 1;
+    await saveOfflineVideoChunk(taskId, idx, blob);
+  }
+}
+
+async function resetRunnerStorage(taskId: string, runner: WebRunner): Promise<void> {
+  runner.pendingParts = [];
+  runner.pendingBytes = 0;
+  runner.chunkIndex = 0;
+  runner.receivedBytes = 0;
+  runner.supportsRange = null;
+  await clearOfflineVideoChunks(taskId);
+}
 
 async function fetchDownloadStreamInfo(
   infoUrl: string
@@ -263,7 +348,7 @@ async function fetchDownloadStreamInfo(
 } | null> {
   try {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 6500);
+    const timer = setTimeout(() => ctrl.abort(), 15000);
     const infoRes = await fetch(infoUrl, { cache: 'no-store', signal: ctrl.signal }).finally(() =>
       clearTimeout(timer)
     );
@@ -401,145 +486,85 @@ async function resolveDownloadUrls(
   };
 }
 
-async function runWebDownload(taskId: string, retryWithFallback = false) {
-  const meta = pendingTaskMetaMap.get(taskId);
-  const runner = webRunners.get(taskId);
-  if (!meta || !runner || runner.cancelled || runner.paused) return;
+function failWebDownload(taskId: string, meta: PendingTaskMeta, message: string) {
+  updateActiveTask(taskId, {
+    status: 'error',
+    speed: '0 KB/s',
+    eta: 'Failed',
+    errorMessage: message,
+  });
+  setGlobalNotification(`Download failed: ${meta.baseTitle}`);
+  pushBrowserSystemNotification(taskId, 'Download Failed', meta.baseTitle, true);
+}
 
-  const targetUrl =
-    retryWithFallback && meta.fallbackFetchUrl ? meta.fallbackFetchUrl : meta.primaryFetchUrl;
-
-  const controller = new AbortController();
-  runner.controller = controller;
-
-  const headers: Record<string, string> = {};
-  if (runner.receivedBytes > 0 && runner.totalBytes > runner.receivedBytes) {
-    headers['Range'] = `bytes=${runner.receivedBytes}-${runner.totalBytes - 1}`;
-  }
-
-  let response: Response;
-  try {
-    response = await fetch(targetUrl, {
-      method: 'GET',
-      headers,
-      signal: controller.signal,
-    });
-  } catch (err: any) {
-    if (runner.cancelled || runner.paused || err?.name === 'AbortError') {
-      return;
-    }
-    // Retry via backend proxy if direct third-party URL fails CORS on browser
-    if (!retryWithFallback && meta.fallbackFetchUrl && meta.fallbackFetchUrl !== targetUrl) {
-      return runWebDownload(taskId, true);
-    }
-    updateActiveTask(taskId, {
-      status: 'error',
-      speed: '0 KB/s',
-      eta: 'Failed',
-      errorMessage: err?.message || 'Network download failed',
-    });
-    setGlobalNotification(`Download failed: ${meta.baseTitle}`);
-    pushBrowserSystemNotification(taskId, 'Download Failed', meta.baseTitle, true);
-    return;
-  }
-
-  if (!response.ok) {
-    if (!retryWithFallback && meta.fallbackFetchUrl && meta.fallbackFetchUrl !== targetUrl) {
-      return runWebDownload(taskId, true);
-    }
-    updateActiveTask(taskId, {
-      status: 'error',
-      speed: '0 KB/s',
-      eta: 'Failed',
-      errorMessage: `Server returned HTTP ${response.status}`,
-    });
-    setGlobalNotification(`Download failed (${response.status}): ${meta.baseTitle}`);
-    return;
-  }
-
-  // If we asked for a Range resume but server responded with 200 full stream, restart cleanly from 0
-  if (response.status === 200 && runner.receivedBytes > 0) {
-    runner.chunks = [];
-    runner.receivedBytes = 0;
-  }
-
-  const contentType = response.headers.get('content-type') || '';
-  if (contentType.toLowerCase().includes('text/html') || contentType.toLowerCase().includes('application/json')) {
-    updateActiveTask(taskId, {
-      status: 'error',
-      speed: '0 KB/s',
-      eta: 'Failed',
-      errorMessage: 'Stream link did not return a playable video file.',
-    });
-    setGlobalNotification(`Unable to download "${meta.baseTitle}": invalid video source`);
-    return;
-  }
-  if (contentType) {
-    runner.mimeType = contentType.split(';')[0].trim() || 'video/mp4';
-  }
-
-  const contentRangeHeader = response.headers.get('content-range');
-  const contentLenHeader = response.headers.get('content-length');
-  if (contentRangeHeader) {
-    const match = contentRangeHeader.match(/\/(\d+)/);
-    if (match && Number(match[1]) > 0) {
-      runner.totalBytes = Number(match[1]);
-    }
-  } else if (contentLenHeader && Number(contentLenHeader) > 0) {
-    runner.totalBytes = runner.receivedBytes + Number(contentLenHeader);
-  } else if (!runner.totalBytes && meta.estimatedTotalBytes > 0) {
-    runner.totalBytes = meta.estimatedTotalBytes;
-  }
-
+async function consumeResponseIntoRunner(
+  taskId: string,
+  meta: PendingTaskMeta,
+  runner: WebRunner,
+  response: Response,
+  speedState: { startMs: number; bytes: number; lastUiMs: number; bps: number }
+): Promise<'ok' | 'paused' | 'cancelled'> {
   if (!response.body) {
-    // Fallback if stream reader unsupported
     const blob = await response.blob();
-    if (runner.cancelled) return;
-    await finalizeWebDownload(taskId, meta, blob);
-    return;
+    if (runner.cancelled) return 'cancelled';
+    if (runner.paused) return 'paused';
+    if (blob.size > 0) {
+      const idx = runner.chunkIndex;
+      runner.chunkIndex += 1;
+      await saveOfflineVideoChunk(taskId, idx, blob);
+      runner.receivedBytes += blob.size;
+    }
+    return 'ok';
   }
 
   const reader = response.body.getReader();
-  let speedSampleStartMs = Date.now();
-  let speedSampleBytes = 0;
-  let lastUiUpdateMs = 0;
-  let currentBytesPerSec = 0;
-
   try {
     while (true) {
-      if (runner.cancelled || runner.paused) {
+      if (runner.cancelled) {
         try {
           await reader.cancel();
         } catch {}
-        return;
+        return 'cancelled';
+      }
+      if (runner.paused) {
+        try {
+          await reader.cancel();
+        } catch {}
+        await flushRunnerPendingToDb(taskId, runner);
+        return 'paused';
       }
 
       const { done, value } = await reader.read();
       if (done) break;
       if (value && value.byteLength > 0) {
-        runner.chunks.push(value);
+        runner.pendingParts.push(value);
+        runner.pendingBytes += value.byteLength;
         runner.receivedBytes += value.byteLength;
-        speedSampleBytes += value.byteLength;
+        speedState.bytes += value.byteLength;
 
-        const now = Date.now();
-        const elapsedMs = now - speedSampleStartMs;
-        if (elapsedMs >= 500) {
-          currentBytesPerSec = (speedSampleBytes * 1000) / elapsedMs;
-          speedSampleStartMs = now;
-          speedSampleBytes = 0;
+        if (runner.pendingBytes >= RANGE_CHUNK_BYTES) {
+          await flushRunnerPendingToDb(taskId, runner);
         }
 
-        if (now - lastUiUpdateMs >= 250) {
-          lastUiUpdateMs = now;
+        const now = Date.now();
+        const elapsedMs = now - speedState.startMs;
+        if (elapsedMs >= 500) {
+          speedState.bps = (speedState.bytes * 1000) / elapsedMs;
+          speedState.startMs = now;
+          speedState.bytes = 0;
+        }
+
+        if (now - speedState.lastUiMs >= 250) {
+          speedState.lastUiMs = now;
           const totalForPct = Math.max(runner.totalBytes, runner.receivedBytes);
           const pct =
             runner.totalBytes > 0
               ? Math.min(99, Math.max(1, Math.round((runner.receivedBytes / runner.totalBytes) * 100)))
               : Math.min(95, Math.max(2, Math.round(runner.receivedBytes / (8 * 1024 * 1024))));
-          const speedLabel = formatSpeed(currentBytesPerSec);
+          const speedLabel = formatSpeed(speedState.bps);
           const etaLabel =
             runner.totalBytes > 0
-              ? formatEta(Math.max(0, runner.totalBytes - runner.receivedBytes), currentBytesPerSec)
+              ? formatEta(Math.max(0, runner.totalBytes - runner.receivedBytes), speedState.bps)
               : 'Downloading...';
 
           updateActiveTask(taskId, {
@@ -559,31 +584,274 @@ async function runWebDownload(taskId: string, retryWithFallback = false) {
         }
       }
     }
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {}
+  }
+
+  if (runner.cancelled) return 'cancelled';
+  if (runner.paused) {
+    await flushRunnerPendingToDb(taskId, runner);
+    return 'paused';
+  }
+  return 'ok';
+}
+
+async function fetchWithRangeSlice(
+  url: string,
+  startByte: number,
+  endByte: number | null,
+  runner: WebRunner
+): Promise<Response> {
+  const controller = new AbortController();
+  runner.controller = controller;
+  const headers: Record<string, string> = {};
+  if (endByte !== null && endByte >= startByte) {
+    headers['Range'] = `bytes=${startByte}-${endByte}`;
+  } else {
+    headers['Range'] = `bytes=${startByte}-${startByte + RANGE_CHUNK_BYTES - 1}`;
+  }
+  return fetch(url, {
+    method: 'GET',
+    headers,
+    signal: controller.signal,
+  });
+}
+
+async function runWebDownload(taskId: string, useFallback = false) {
+  const meta = pendingTaskMetaMap.get(taskId);
+  const runner = webRunners.get(taskId);
+  if (!meta || !runner || runner.cancelled || runner.paused) return;
+
+  await requestPersistentOfflineStorage().catch(() => {});
+
+  runner.usingFallback = useFallback;
+  const targetUrl =
+    useFallback && meta.fallbackFetchUrl ? meta.fallbackFetchUrl : meta.primaryFetchUrl;
+
+  const canSwitchToFallback =
+    !useFallback && Boolean(meta.fallbackFetchUrl && meta.fallbackFetchUrl !== targetUrl);
+
+  const switchToFallbackOrFail = async (reason: string) => {
+    if (runner.cancelled || runner.paused) return;
+    if (canSwitchToFallback) {
+      await resetRunnerStorage(taskId, runner);
+      updateActiveTask(taskId, {
+        progress: 0,
+        receivedBytes: 0,
+        speed: 'Switching source...',
+        eta: 'Starting...',
+      });
+      return runWebDownload(taskId, true);
+    }
+    failWebDownload(taskId, meta, reason);
+  };
+
+  const speedState = {
+    startMs: Date.now(),
+    bytes: 0,
+    lastUiMs: 0,
+    bps: 0,
+  };
+
+  let initialRes: Response | null = null;
+  let lastAttemptErr = '';
+
+  // Attempt initial / resume request with transient retry support
+  for (let attempt = 1; attempt <= MAX_CHUNK_ATTEMPTS; attempt++) {
+    if (runner.cancelled || runner.paused) return;
+    try {
+      const startOffset = runner.receivedBytes;
+      const endOffset =
+        runner.totalBytes > startOffset
+          ? Math.min(startOffset + RANGE_CHUNK_BYTES - 1, runner.totalBytes - 1)
+          : startOffset + RANGE_CHUNK_BYTES - 1;
+      const res = await fetchWithRangeSlice(targetUrl, startOffset, endOffset, runner);
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      if (!res.ok) {
+        lastAttemptErr = `Server returned HTTP ${res.status}`;
+        if (res.status >= 500 && attempt < MAX_CHUNK_ATTEMPTS) {
+          await new Promise((r) => setTimeout(r, Math.min(6000, 1000 * attempt)));
+          continue;
+        }
+        initialRes = null;
+        break;
+      }
+      if (ct.includes('text/html') || ct.includes('application/json')) {
+        lastAttemptErr = 'Stream link did not return a playable video file.';
+        initialRes = null;
+        break;
+      }
+      initialRes = res;
+      break;
+    } catch (err: any) {
+      if (runner.cancelled || runner.paused || err?.name === 'AbortError') return;
+      lastAttemptErr = err?.message || 'Network download failed';
+      if (attempt < MAX_CHUNK_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, Math.min(6000, 1000 * attempt)));
+        continue;
+      }
+    }
+  }
+
+  if (!initialRes) {
+    return switchToFallbackOrFail(lastAttemptErr || 'Download connection failed');
+  }
+
+  const contentType = initialRes.headers.get('content-type') || '';
+  if (contentType) {
+    runner.mimeType = contentType.split(';')[0].trim() || 'video/mp4';
+  }
+
+  const contentRangeHeader = initialRes.headers.get('content-range');
+  const contentLenHeader = initialRes.headers.get('content-length');
+  const exactContentLength = contentLenHeader && Number(contentLenHeader) > 0 ? Number(contentLenHeader) : 0;
+  let sliceTotalBytes = 0;
+
+  if (initialRes.status === 206 && contentRangeHeader) {
+    const match = contentRangeHeader.match(/bytes\s+\d+-\d+\/(\d+)/i);
+    if (match && Number(match[1]) > 0) {
+      sliceTotalBytes = Number(match[1]);
+      runner.totalBytes = sliceTotalBytes;
+      runner.supportsRange = true;
+    }
+  } else {
+    runner.supportsRange = false;
+    // Server ignored Range and sent 200 full file -> reset partial offsets cleanly
+    if (initialRes.status === 200 && (runner.receivedBytes > 0 || runner.chunkIndex > 0)) {
+      await resetRunnerStorage(taskId, runner);
+    }
+    if (exactContentLength > 0) {
+      runner.totalBytes = exactContentLength;
+    } else if (!runner.totalBytes && meta.estimatedTotalBytes > 0) {
+      runner.totalBytes = meta.estimatedTotalBytes;
+    }
+  }
+
+  try {
+    // Consume the initial response (either the first 8MB Range slice, or full 200 stream)
+    const firstOutcome = await consumeResponseIntoRunner(taskId, meta, runner, initialRes, speedState);
+    if (firstOutcome !== 'ok') return;
+
+    // Guard against premature EOF on non-Range 200 streams (exact Content-Length mismatch or early remux/transcode cutoff)
+    if (!runner.supportsRange) {
+      if (exactContentLength > 0 && runner.receivedBytes < exactContentLength * 0.98) {
+        return switchToFallbackOrFail('Download stream ended before receiving the full file.');
+      }
+      const isNonTranscodedRemux =
+        targetUrl.includes('download=1') && !targetUrl.includes('transcode=1');
+      if (
+        isNonTranscodedRemux &&
+        meta.estimatedTotalBytes > 10 * 1024 * 1024 &&
+        runner.receivedBytes < meta.estimatedTotalBytes * 0.85
+      ) {
+        return switchToFallbackOrFail('Remux stream stopped early before completion.');
+      }
+      if (
+        !exactContentLength &&
+        meta.estimatedTotalBytes > 20 * 1024 * 1024 &&
+        runner.receivedBytes < meta.estimatedTotalBytes * 0.15
+      ) {
+        return switchToFallbackOrFail('Video transcode stopped unexpectedly early.');
+      }
+    }
+
+    // If Range-supported, download remaining 8MB slices sequentially with per-chunk retry
+    if (runner.supportsRange && runner.totalBytes > 0) {
+      while (runner.receivedBytes < runner.totalBytes) {
+        if (runner.cancelled || runner.paused) {
+          if (runner.paused) await flushRunnerPendingToDb(taskId, runner);
+          return;
+        }
+
+        const sliceStart = runner.receivedBytes;
+        const sliceEnd = Math.min(sliceStart + RANGE_CHUNK_BYTES - 1, runner.totalBytes - 1);
+        let chunkRes: Response | null = null;
+        let chunkErr = '';
+
+        for (let attempt = 1; attempt <= MAX_CHUNK_ATTEMPTS; attempt++) {
+          if (runner.cancelled || runner.paused) {
+            if (runner.paused) await flushRunnerPendingToDb(taskId, runner);
+            return;
+          }
+          try {
+            const res = await fetchWithRangeSlice(targetUrl, sliceStart, sliceEnd, runner);
+            const ct = (res.headers.get('content-type') || '').toLowerCase();
+            if (!res.ok) {
+              chunkErr = `Server returned HTTP ${res.status}`;
+              if (res.status >= 500 && attempt < MAX_CHUNK_ATTEMPTS) {
+                await new Promise((r) => setTimeout(r, Math.min(8000, 1200 * attempt)));
+                continue;
+              }
+              chunkRes = null;
+              break;
+            }
+            if (ct.includes('text/html') || ct.includes('application/json')) {
+              chunkErr = 'Stream link returned an invalid response mid-download.';
+              chunkRes = null;
+              break;
+            }
+            if (res.status === 200) {
+              // Unexpected full 200 instead of 206 -> bail out to fallback or error
+              chunkErr = 'Server stopped supporting partial range resume';
+              chunkRes = null;
+              break;
+            }
+            chunkRes = res;
+            break;
+          } catch (err: any) {
+            if (runner.cancelled || runner.paused || err?.name === 'AbortError') return;
+            chunkErr = err?.message || 'Chunk transfer failed';
+            if (attempt < MAX_CHUNK_ATTEMPTS) {
+              await new Promise((r) => setTimeout(r, Math.min(8000, 1200 * attempt)));
+            }
+          }
+        }
+
+        if (!chunkRes) {
+          return switchToFallbackOrFail(chunkErr || 'Download interrupted');
+        }
+
+        // Consume this 8MB slice, retrying the chunk cleanly if stream drops mid-slice
+        const beforeSliceBytes = runner.receivedBytes;
+        const beforeSlicePartsLen = runner.pendingParts.length;
+        const beforeSlicePendingBytes = runner.pendingBytes;
+        const beforeSliceChunkIdx = runner.chunkIndex;
+
+        try {
+          const outcome = await consumeResponseIntoRunner(taskId, meta, runner, chunkRes, speedState);
+          if (outcome !== 'ok') return;
+        } catch (readErr: any) {
+          if (runner.cancelled || runner.paused || readErr?.name === 'AbortError') return;
+          // Revert any buffered unread slice bytes beyond last flushed chunkIndex
+          if (runner.chunkIndex === beforeSliceChunkIdx) {
+            runner.pendingParts.length = beforeSlicePartsLen;
+            runner.pendingBytes = beforeSlicePendingBytes;
+            runner.receivedBytes = beforeSliceBytes;
+          }
+          // Retry this slice cleanly on next loop iteration (Wait 1.5s)
+          await new Promise((r) => setTimeout(r, 1500));
+          continue;
+        }
+      }
+    }
 
     if (runner.cancelled || runner.paused) return;
-
-    const finalBlob = new Blob(runner.chunks as unknown as BlobPart[], {
-      type: runner.mimeType || 'video/mp4',
-    });
-    runner.chunks = [];
-    await finalizeWebDownload(taskId, meta, finalBlob);
+    await flushRunnerPendingToDb(taskId, runner);
+    await finalizeWebDownload(taskId, meta, runner);
   } catch (err: any) {
     if (runner.cancelled || runner.paused || err?.name === 'AbortError') {
       return;
     }
-    updateActiveTask(taskId, {
-      status: 'error',
-      speed: '0 KB/s',
-      eta: 'Interrupted',
-      errorMessage: err?.message || 'Download stream interrupted',
-    });
-    setGlobalNotification(`Download interrupted: ${meta.baseTitle}`);
-    pushBrowserSystemNotification(taskId, 'Download Interrupted', meta.baseTitle, true);
+    return switchToFallbackOrFail(err?.message || 'Download stream interrupted');
   }
 }
 
-async function finalizeWebDownload(taskId: string, meta: PendingTaskMeta, blob: Blob) {
-  if (blob.size <= 0) {
+async function finalizeWebDownload(taskId: string, meta: PendingTaskMeta, runner: WebRunner) {
+  const totalBytes = runner.receivedBytes;
+  if (totalBytes <= 0 || runner.chunkIndex <= 0) {
+    await clearOfflineVideoChunks(taskId);
     updateActiveTask(taskId, {
       status: 'error',
       speed: '0 KB/s',
@@ -594,7 +862,12 @@ async function finalizeWebDownload(taskId: string, meta: PendingTaskMeta, blob: 
   }
 
   try {
-    await saveOfflineVideoBlob(taskId, blob, blob.type || 'video/mp4');
+    await finalizeOfflineChunkedVideo(
+      taskId,
+      runner.mimeType || 'video/mp4',
+      totalBytes,
+      runner.chunkIndex
+    );
   } catch (err: any) {
     updateActiveTask(taskId, {
       status: 'error',
@@ -605,11 +878,11 @@ async function finalizeWebDownload(taskId: string, meta: PendingTaskMeta, blob: 
     return;
   }
 
-  const sizeLabel = formatBytesLabel(blob.size);
+  const sizeLabel = formatBytesLabel(totalBytes);
   updateActiveTask(taskId, {
     progress: 100,
-    receivedBytes: blob.size,
-    totalBytes: blob.size,
+    receivedBytes: totalBytes,
+    totalBytes,
     status: 'completed',
     speed: 'Saved Offline',
     eta: '0s',
@@ -625,7 +898,7 @@ async function finalizeWebDownload(taskId: string, meta: PendingTaskMeta, blob: 
     originalCategory: meta.originalCategory,
     downloadedAt: Date.now(),
     fileSize: sizeLabel,
-    sizeBytes: blob.size,
+    sizeBytes: totalBytes,
     videoUrl: meta.videoUrl,
     quality: meta.quality,
     seasonNumber: meta.seasonNumber,
@@ -793,6 +1066,15 @@ export async function startGlobalDownload(params: StartDownloadParams): Promise<
     return existingActive.id;
   }
 
+  // Remove any stale errored active task for this same item before starting fresh
+  const staleErrored = storeState.activeDownloads.filter(
+    (d) =>
+      d.status === 'error' &&
+      ((movieId && d.movieId === movieId && d.seasonNumber === seasonNumber && d.episodeNumber === episodeNumber) ||
+        d.videoUrl === cleanUrl)
+  );
+  staleErrored.forEach((d) => cancelActiveDownloadTask(d.id));
+
   const downloadId = `dl_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const isNative = Capacitor.isNativePlatform();
 
@@ -836,6 +1118,9 @@ export async function startGlobalDownload(params: StartDownloadParams): Promise<
   setGlobalNotification(`Starting download: "${displayTitle}"`);
 
   const resolved = await resolveDownloadUrls(cleanUrl, estimatedSizeMb, qualityTier);
+  if (!storeState.activeDownloads.some((d) => d.id === downloadId)) {
+    return downloadId;
+  }
   const estTotal = resolved.estimatedTotalBytes || initialEstBytes;
 
   const meta: PendingTaskMeta = {
@@ -872,15 +1157,19 @@ export async function startGlobalDownload(params: StartDownloadParams): Promise<
   }
 
   webRunners.set(downloadId, {
-    chunks: [],
+    pendingParts: [],
+    pendingBytes: 0,
+    chunkIndex: 0,
     receivedBytes: 0,
     totalBytes: estTotal,
     mimeType: 'video/mp4',
+    supportsRange: null,
+    usingFallback: false,
     paused: false,
     cancelled: false,
     controller: null,
   });
-  runWebDownload(downloadId, false);
+  enqueueWebDownload(downloadId);
   return downloadId;
 }
 
@@ -892,15 +1181,19 @@ export async function removeCompletedDownload(id: string): Promise<void> {
 }
 
 export function cancelActiveDownloadTask(id: string): void {
+  removeFromWebQueue(id);
+  activeWebTaskIds.delete(id);
   const runner = webRunners.get(id);
   if (runner) {
     runner.cancelled = true;
     try {
       runner.controller?.abort();
     } catch {}
-    runner.chunks = [];
+    runner.pendingParts = [];
+    runner.pendingBytes = 0;
     webRunners.delete(id);
   }
+  clearOfflineVideoChunks(id).catch(() => {});
   if (Capacitor.isNativePlatform()) {
     try {
       (window as any).AndroidPlayerBridge?.cancelOfflineVideoDownload?.(id);
@@ -908,9 +1201,12 @@ export function cancelActiveDownloadTask(id: string): void {
   }
   pendingTaskMetaMap.delete(id);
   removeActiveTask(id);
+  pumpWebDownloadQueue();
 }
 
 export function pauseActiveDownloadTask(id: string): void {
+  removeFromWebQueue(id);
+  activeWebTaskIds.delete(id);
   const runner = webRunners.get(id);
   if (runner) {
     runner.paused = true;
@@ -924,14 +1220,20 @@ export function pauseActiveDownloadTask(id: string): void {
     } catch {}
   }
   updateActiveTask(id, { status: 'paused', speed: 'Paused', eta: 'Paused' });
+  pumpWebDownloadQueue();
 }
 
 export function resumeActiveDownloadTask(id: string): void {
   const runner = webRunners.get(id);
   if (runner) {
     runner.paused = false;
-    updateActiveTask(id, { status: 'downloading', speed: 'Resuming...', eta: 'Calculating...' });
-    runWebDownload(id, false);
+    updateActiveTask(id, {
+      status: 'downloading',
+      errorMessage: undefined,
+      speed: 'Resuming...',
+      eta: 'Calculating...',
+    });
+    enqueueWebDownload(id);
     return;
   }
   if (Capacitor.isNativePlatform()) {
@@ -939,18 +1241,23 @@ export function resumeActiveDownloadTask(id: string): void {
       (window as any).AndroidPlayerBridge?.resumeOfflineVideoDownload?.(id);
       ensureNativeDownloadPolling();
     } catch {}
-    updateActiveTask(id, { status: 'downloading', speed: 'Resuming...', eta: 'Calculating...' });
+    updateActiveTask(id, { status: 'downloading', errorMessage: undefined, speed: 'Resuming...', eta: 'Calculating...' });
     return;
   }
-  // If retry from error without runner, re-create runner from existing active task
+  // If retry from error without runner, re-create runner from existing active task cleanly
   const task = storeState.activeDownloads.find((d) => d.id === id);
   const meta = pendingTaskMetaMap.get(id);
   if (task && meta) {
+    clearOfflineVideoChunks(id).catch(() => {});
     webRunners.set(id, {
-      chunks: [],
+      pendingParts: [],
+      pendingBytes: 0,
+      chunkIndex: 0,
       receivedBytes: 0,
       totalBytes: meta.estimatedTotalBytes,
       mimeType: 'video/mp4',
+      supportsRange: null,
+      usingFallback: false,
       paused: false,
       cancelled: false,
       controller: null,
@@ -963,7 +1270,7 @@ export function resumeActiveDownloadTask(id: string): void {
       speed: 'Retrying...',
       eta: 'Starting...',
     });
-    runWebDownload(id, false);
+    enqueueWebDownload(id);
   }
 }
 

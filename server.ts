@@ -22,7 +22,7 @@ import {
   getServerFirestoreQuotaStatus,
   markServerFirestoreQuotaExhausted,
 } from './src/server/firestoreQuotaFlag.ts';
-import { hasPlayableContent } from './src/utils/seriesCompleteness.ts';
+import { hasPlayableContent, normalizeSeriesSeasons } from './src/utils/seriesCompleteness.ts';
 
 function checkBinaryAvailable(bin: string): boolean {
   try {
@@ -78,10 +78,13 @@ app.use((req, res, next) => {
   next();
 });
 
-// Ensure API routes (except /api/stream, /api/telegram/hls, and /api/ios-profile) default to JSON
+// Ensure API routes (except media/download binary streams) default to JSON
 app.use('/api', (req, res, next) => {
   if (
     !req.path.startsWith('/stream') &&
+    !req.path.startsWith('/download/file') &&
+    !req.path.startsWith('/cast/proxy') &&
+    !req.path.startsWith('/telegram/stream') &&
     !req.path.startsWith('/telegram/hls') &&
     !req.path.startsWith('/telegram/live-events') &&
     !req.path.startsWith('/telegram/subtitles.vtt') &&
@@ -265,6 +268,7 @@ app.get('/api/movies/catalog', (_req, res) => {
         const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
         const filtered = Array.isArray(parsed)
           ? parsed
+              .map((m: any) => normalizeSeriesSeasons(m))
               .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m))
               .map((m: any) =>
                 Number(m.releaseYear) > currentYear ? { ...m, releaseYear: currentYear } : m
