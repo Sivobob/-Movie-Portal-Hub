@@ -1,7 +1,7 @@
 export const CLOUD_RUN_BACKEND_URL = 'https://ais-pre-xnvcffdn7a5ydibjtjrezd-835315626292.asia-northeast1.run.app';
 export const LIVE_BACKEND_URL = 'https://ais-dev-xnvcffdn7a5ydibjtjrezd-835315626292.asia-northeast1.run.app';
 export const PRE_BACKEND_URL = 'https://ais-pre-xnvcffdn7a5ydibjtjrezd-835315626292.asia-northeast1.run.app';
-export const APP_VERSION = 'v3.5.285';
+export const APP_VERSION = 'v3.5.294';
 
 const ENV_BACKEND_URL = (
   (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_BASE_URL) ||
@@ -242,7 +242,7 @@ export async function probeWorkingBackendUrl(force = false): Promise<string | nu
 
     const checkResults = new Map<string, HealthCheckResult & { candidate: string }>();
     const probeCandidate = async (candidate: string) => {
-      const res = await checkBackendHealth(candidate, 1800);
+      const res = await checkBackendHealth(candidate, 1200);
       const entry = { candidate, ...res };
       checkResults.set(candidate, entry);
       return entry;

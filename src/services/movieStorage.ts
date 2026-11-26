@@ -32,6 +32,8 @@ export interface MovieData {
   featured?: boolean;
   published: boolean;
   qualityBadge?: 'HD' | 'HDTC' | 'NONE' | string;
+  sourceFileName?: string;
+  sourceCaption?: string;
   duration?: number;
   telegramMsgId?: number;
   telegramChannelId?: string;

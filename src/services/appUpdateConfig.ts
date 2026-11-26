@@ -14,8 +14,8 @@ import { guardedFirestoreWrite, isFirestoreWriteAllowed } from './firestoreQuota
 export const APP_UPDATE_COLLECTION = 'admins';
 export const APP_UPDATE_DOC_ID = 'android_update';
 
-export const CURRENT_VERSION_NAME = '3.5.292';
-export const CURRENT_VERSION_CODE = 35292;
+export const CURRENT_VERSION_NAME = '3.5.294';
+export const CURRENT_VERSION_CODE = 35294;
 
 export const OFFICIAL_APK_DIRECT_URL =
   'https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk';
@@ -29,7 +29,7 @@ export function resolveApkDownloadUrl(rawUrl?: string | null): string {
 }
 
 export const DEFAULT_UPDATE_MESSAGE =
-  'A new version of Movie Hub is available. Please update the app to continue watching movies and series.';
+  'New Movie Hub v3.5.294 update: Android app playback loading issue fixed and Godzilla Minus Zero / Holl Print quality labels updated.';
 
 const GITHUB_VERSION_JSON_URL =
   'https://raw.githubusercontent.com/Sivobob/-Movie-Portal-Hub/main/public/version.json';
@@ -39,6 +39,7 @@ export interface RemoteUpdateConfig {
   minimumRequiredVersion: string;
   latestVersionCode: number;
   minimumRequiredVersionCode?: number;
+  isMandatory?: boolean;
   apkDownloadUrl: string;
   updateMessage: string;
   updatedAt?: any;
@@ -206,6 +207,7 @@ export function normalizeRemoteUpdateConfig(raw: any): RemoteUpdateConfig {
     minimumRequiredVersion,
     latestVersionCode,
     minimumRequiredVersionCode: minimumRequiredVersionCode > 1 ? minimumRequiredVersionCode : undefined,
+    isMandatory,
     apkDownloadUrl: resolveApkDownloadUrl(apkDownloadUrl),
     updateMessage: String(raw?.updateMessage || raw?.releaseNotes || DEFAULT_UPDATE_MESSAGE).trim() || DEFAULT_UPDATE_MESSAGE,
     updatedAt: raw?.updatedAt,
@@ -262,6 +264,7 @@ export async function fetchRemoteUpdateConfig(): Promise<RemoteUpdateConfig | nu
             minimumRequiredVersion: f.minimumRequiredVersion?.stringValue,
             latestVersionCode: f.latestVersionCode?.integerValue ? Number(f.latestVersionCode.integerValue) : undefined,
             minimumRequiredVersionCode: f.minimumRequiredVersionCode?.integerValue ? Number(f.minimumRequiredVersionCode.integerValue) : undefined,
+            isMandatory: typeof f.isMandatory?.booleanValue === 'boolean' ? f.isMandatory.booleanValue : undefined,
             apkDownloadUrl: f.apkDownloadUrl?.stringValue,
             updateMessage: f.updateMessage?.stringValue,
           });
@@ -339,6 +342,7 @@ export async function saveRemoteUpdateConfig(
     minimumRequiredVersion: normalized.minimumRequiredVersion,
     latestVersionCode: normalized.latestVersionCode,
     minimumRequiredVersionCode: normalized.minimumRequiredVersionCode || normalized.latestVersionCode,
+    isMandatory: normalized.isMandatory ?? true,
     apkDownloadUrl: normalized.apkDownloadUrl,
     updateMessage: normalized.updateMessage,
     updatedAt: serverTimestamp(),

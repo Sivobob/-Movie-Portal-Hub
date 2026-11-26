@@ -661,7 +661,7 @@ public class MainActivity extends BridgeActivity {
                 return pInfo.versionName.trim();
             }
         } catch (Exception ignored) {}
-        return "3.5.285";
+        return "3.5.294";
     }
 
     private int compareVersionStrings(String verA, String verB) {
@@ -694,7 +694,7 @@ public class MainActivity extends BridgeActivity {
             conn.setReadTimeout(timeoutMs);
             conn.setRequestProperty("Cache-Control", "no-store, no-cache");
             conn.setRequestProperty("Pragma", "no-cache");
-            conn.setRequestProperty("User-Agent", "MovieHub-Android-LiveSync/3.5.285");
+            conn.setRequestProperty("User-Agent", "MovieHub-Android-LiveSync/3.5.294");
             int code = conn.getResponseCode();
             if (code < 200 || code >= 300) return null;
             try (InputStream is = conn.getInputStream();
@@ -2292,7 +2292,7 @@ public class MainActivity extends BridgeActivity {
             conn.setConnectTimeout(30000);
             conn.setReadTimeout(60000);
             conn.setRequestMethod("GET");
-            conn.setRequestProperty("User-Agent", "MoviePortal-AndroidUpdater/3.5.285");
+            conn.setRequestProperty("User-Agent", "MoviePortal-AndroidUpdater/3.5.294");
             conn.setRequestProperty("Accept", "application/vnd.android.package-archive,application/octet-stream,*/*");
             conn.setRequestProperty("Accept-Encoding", "identity");
             conn.setRequestProperty("Cache-Control", "no-cache");
@@ -3335,11 +3335,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.292");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.294");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.292\",\"versionCode\":35292}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.294\",\"versionCode\":35294}";
             }
         }
 

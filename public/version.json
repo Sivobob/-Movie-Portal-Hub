@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.292",
-  "minimumRequiredVersion": "3.5.292",
-  "latestVersionCode": 35292,
-  "minimumRequiredVersionCode": 35292,
+  "latestVersion": "3.5.294",
+  "minimumRequiredVersion": "3.5.294",
+  "latestVersionCode": 35294,
+  "minimumRequiredVersionCode": 35294,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Hub v3.5.292: Watch Now ke niche Holl Print aur HD label update ho gaya hai, aur HD upload par purani Holl Print movie in-place replace ho jayegi.",
-  "releaseNotes": "v3.5.292: Updated print label to 'Holl Print' and enabled seamless in-place replacement of Holl Print with HD quality upon Telegram upload."
+  "updateMessage": "Movie Hub v3.5.294: Android app loading issue fixed (movies & series ab turant chalengi) aur Godzilla Minus Zero jaise releases par sahi Holl Print label update ho gaya hai.",
+  "releaseNotes": "v3.5.294: Fixed Android APK Telegram WebSocket domain routing & channel hashes to eliminate endless Loading..., and updated Holl Print detection & catalog badges."
 }

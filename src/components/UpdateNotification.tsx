@@ -49,7 +49,8 @@ export default function UpdateNotification() {
     }
 
     const dismissedVer = typeof window !== 'undefined' ? localStorage.getItem('mp_dismissed_update_version') : null;
-    const isDismissed = Boolean(dismissedVer && cfg.latestVersion && dismissedVer === cfg.latestVersion);
+    const isMandatoryUpdate = Boolean(cfg.isMandatory) || Boolean(cfg.minimumRequiredVersion && cfg.minimumRequiredVersion !== '1.0.0');
+    const isDismissed = !isMandatoryUpdate && Boolean(dismissedVer && cfg.latestVersion && dismissedVer === cfg.latestVersion);
     const needed = !isDismissed && isAppUpdateRequired(inst, cfg);
     setUpdateRequired(needed);
     if (typeof window !== 'undefined') {
@@ -171,8 +172,9 @@ export default function UpdateNotification() {
   if (!isNative || !updateRequired || !remoteConfig) {
     return null;
   }
+  const isMandatoryUpdate = Boolean(remoteConfig.isMandatory) || Boolean(remoteConfig.minimumRequiredVersion && remoteConfig.minimumRequiredVersion !== '1.0.0');
   const dismissedVer = typeof window !== 'undefined' ? localStorage.getItem('mp_dismissed_update_version') : null;
-  if (dismissedVer && remoteConfig && dismissedVer === remoteConfig.latestVersion) {
+  if (!isMandatoryUpdate && dismissedVer && remoteConfig && dismissedVer === remoteConfig.latestVersion) {
     return null;
   }
 
@@ -336,7 +338,7 @@ export default function UpdateNotification() {
             <span>Download via Browser / Chrome</span>
           </button>
 
-          {!isDownloading && (
+          {!isDownloading && !isMandatoryUpdate && (
             <button
               type="button"
               onClick={() => {

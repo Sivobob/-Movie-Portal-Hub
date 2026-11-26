@@ -8,8 +8,14 @@ import {
   normalizeQualityBadge,
 } from './qualityBadge';
 
-test('isHollywoodPrintText detects HDTC, CineVood, CAM, PreDVD, and Holl/Hollywood Print', () => {
+test('isHollywoodPrintText detects HDTC, TC, HQ-Rip, 1XBET, Line, CineVood, CAM, PreDVD, and Holl Print', () => {
   assert.equal(isHollywoodPrintText('Ramayana_2026_1080p_HDTC_Hindi.mkv'), true);
+  assert.equal(isHollywoodPrintText('Godzilla.Minus.Zero.2026.1080p.HEVC.TC.HIN.ENG.SUB.1XBET.mkv'), true);
+  assert.equal(isHollywoodPrintText('Godzilla.Minus.Zero.2026.720p.TC.HIN.ENG.SUB.1XBET.mkv'), true);
+  assert.equal(isHollywoodPrintText('Godzilla Minus Zero (2026) Japanese (Line) HDTC 480p x26.mkv'), true);
+  assert.equal(isHollywoodPrintText('Movie.2026.1080p.HQ-Rip.V2-HDTC.Hindi-LiNE.mkv'), true);
+  assert.equal(isHollywoodPrintText('Movie.2026.720p.PreHD.Hindi.mkv'), true);
+  assert.equal(isHollywoodPrintText('Movie.2026.720p.TS.Hindi.mkv'), true);
   assert.equal(isHollywoodPrintText('Dhurandhar_2026_CineVood_1080p.mkv'), true);
   assert.equal(isHollywoodPrintText('Movie.2026.Cinvood.Hindi.mp4'), true);
   assert.equal(isHollywoodPrintText('Action.2026.Hollywood.Print.720p.mkv'), true);
@@ -21,6 +27,8 @@ test('isHollywoodPrintText detects HDTC, CineVood, CAM, PreDVD, and Holl/Hollywo
   assert.equal(isHollywoodPrintText('Inception.2010.1080p.WEB-DL.Hindi.mkv'), false);
   assert.equal(isHollywoodPrintText('Cameo.2026.1080p.BluRay.mkv'), false);
   assert.equal(isHollywoodPrintText('Scam.1992.S01E01.1080p.mkv'), false);
+  assert.equal(isHollywoodPrintText('Walk.the.Line.2005.1080p.BluRay.mkv'), false);
+  assert.equal(isHollywoodPrintText('Love.Between.Lines.2026.1080p.WEB-DL.ts'), false);
 });
 
 test('getWatchNowQualityLabel returns Holl Print vs HD', () => {

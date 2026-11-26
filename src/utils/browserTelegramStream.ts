@@ -9,11 +9,14 @@ import { inspectMediaHeaderBytes, LocalHeaderProbeResult } from './mediaHeaderPa
 const TG_API_ID = 31425129;
 const TG_API_HASH = 'd1069176c0bd22479ffed449cb9b3d2a';
 const TG_BOT_TOKEN = '8993099137:AAH5ppM00ckVZvMek7fv623fbeYty3qgsxM';
-const SESSION_STORAGE_KEY = 'tg_browser_bot_session_v1';
+const SESSION_STORAGE_KEY = 'tg_browser_bot_session_v2';
+const LEGACY_SESSION_STORAGE_KEY = 'tg_browser_bot_session_v1';
 const CHANNEL_HASH_STORAGE_KEY = 'tg_known_channel_hashes_v1';
 
 // Known channel access hashes (same registry used by backend)
 const KNOWN_ACCESS_HASHES: Record<string, string> = {
+  '4451036277': '-4249150958547605887',
+  '3432917101': '-4482230480674919611',
   '4498557265': '113338100892344891',
 };
 
@@ -124,7 +127,10 @@ function saveChannelHash(cleanId: string, accessHash: string) {
 
 function getSavedBrowserSession(): string {
   try {
-    return (localStorage.getItem(SESSION_STORAGE_KEY) || '').trim();
+    const v2 = (localStorage.getItem(SESSION_STORAGE_KEY) || '').trim();
+    if (v2) return v2;
+    const v1 = (localStorage.getItem(LEGACY_SESSION_STORAGE_KEY) || '').trim();
+    return v1;
   } catch {
     return '';
   }
@@ -134,6 +140,7 @@ function saveBrowserSession(sess: string) {
   try {
     if (sess && sess.length > 10) {
       localStorage.setItem(SESSION_STORAGE_KEY, sess);
+      localStorage.removeItem(LEGACY_SESSION_STORAGE_KEY);
     }
   } catch {}
 }
@@ -141,6 +148,7 @@ function saveBrowserSession(sess: string) {
 function clearSavedBrowserSession() {
   try {
     localStorage.removeItem(SESSION_STORAGE_KEY);
+    localStorage.removeItem(LEGACY_SESSION_STORAGE_KEY);
   } catch {}
 }
 
@@ -170,12 +178,49 @@ export async function resetBrowserTelegramClient(opts?: { clearSession?: boolean
   return resettingPromise;
 }
 
+const DC_WEB_DOMAINS: Record<number, string> = {
+  1: 'pluto.web.telegram.org',
+  2: 'venus.web.telegram.org',
+  3: 'aurora.web.telegram.org',
+  4: 'vesta.web.telegram.org',
+  5: 'flora.web.telegram.org',
+};
+
 const BROWSER_TELEGRAM_DCS: Array<{ id: number; ip: string; port: number }> = [
-  { id: 5, ip: '91.108.56.130', port: 443 },
-  { id: 2, ip: '149.154.167.51', port: 443 },
-  { id: 1, ip: '149.154.175.53', port: 443 },
-  { id: 4, ip: '149.154.167.91', port: 443 },
+  { id: 5, ip: 'flora.web.telegram.org', port: 443 },
+  { id: 4, ip: 'vesta.web.telegram.org', port: 443 },
+  { id: 2, ip: 'venus.web.telegram.org', port: 443 },
+  { id: 1, ip: 'pluto.web.telegram.org', port: 443 },
+  { id: 3, ip: 'aurora.web.telegram.org', port: 443 },
 ];
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    promise.finally(() => {
+      if (timer !== undefined) clearTimeout(timer);
+    }),
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`TIMEOUT: ${label}`)), ms);
+    }),
+  ]);
+}
+
+function buildSanitizedSavedSession(rawSession: string): StringSession | null {
+  if (!rawSession) return null;
+  try {
+    const sess = new StringSession(rawSession);
+    const dcId = Number(sess.dcId || 5);
+    const webDomain = DC_WEB_DOMAINS[dcId] || 'flora.web.telegram.org';
+    const addr = String(sess.serverAddress || '').trim().toLowerCase();
+    if (!addr.endsWith('.web.telegram.org') || Number(sess.port) !== 443) {
+      sess.setDC(dcId, webDomain, 443);
+    }
+    return sess;
+  } catch {
+    return null;
+  }
+}
 
 export async function getBrowserTelegramClient(forceReconnect = false): Promise<TelegramClient> {
   if (forceReconnect) {
@@ -203,20 +248,22 @@ export async function getBrowserTelegramClient(forceReconnect = false): Promise<
 
   connectPromise = (async () => {
     const saved = getSavedBrowserSession();
-    if (saved) {
+    const savedSess = buildSanitizedSavedSession(saved);
+    if (savedSess) {
       try {
-        const client = new TelegramClient(new StringSession(saved), TG_API_ID, TG_API_HASH, {
-          connectionRetries: 10,
-          requestRetries: 5,
-          retryDelay: 2500,
+        const client = new TelegramClient(savedSess, TG_API_ID, TG_API_HASH, {
+          connectionRetries: 3,
+          requestRetries: 4,
+          retryDelay: 800,
           autoReconnect: true,
           useWSS: true,
           floodSleepThreshold: 60,
           maxConcurrentDownloads: 8,
           baseLogger: new Logger(LogLevel.ERROR),
         });
-        await client.connect();
+        await withTimeout(client.connect(), 9000, 'saved session connect');
         if (client.connected) {
+          saveBrowserSession(client.session.save() as unknown as string);
           browserClient = client;
           ensureKeepaliveLoop();
           return client;
@@ -234,9 +281,9 @@ export async function getBrowserTelegramClient(forceReconnect = false): Promise<
       const sess = new StringSession('');
       sess.setDC(dc.id, dc.ip, dc.port);
       const freshClient = new TelegramClient(sess, TG_API_ID, TG_API_HASH, {
-        connectionRetries: 6,
+        connectionRetries: 2,
         requestRetries: 3,
-        retryDelay: 1800,
+        retryDelay: 600,
         autoReconnect: true,
         useWSS: true,
         floodSleepThreshold: 60,
@@ -244,7 +291,11 @@ export async function getBrowserTelegramClient(forceReconnect = false): Promise<
         baseLogger: new Logger(LogLevel.ERROR),
       });
       try {
-        await freshClient.start({ botAuthToken: TG_BOT_TOKEN });
+        await withTimeout(
+          freshClient.start({ botAuthToken: TG_BOT_TOKEN }),
+          10000,
+          `fresh WSS start DC${dc.id}`
+        );
         const exported = freshClient.session.save() as unknown as string;
         saveBrowserSession(exported);
         browserClient = freshClient;
@@ -272,14 +323,18 @@ async function getBrowserDcSenderSafe(client: TelegramClient, dcId: number | und
   const numericDc = typeof dcId === 'number' && Number.isFinite(dcId) ? dcId : undefined;
   if (numericDc !== undefined) {
     const cached = dcSenders.get(numericDc);
-    if (cached) return cached;
+    if (cached && cached._disconnected !== true) return cached;
+    if (cached) dcSenders.delete(numericDc);
   }
   const key = numericDc !== undefined ? String(numericDc) : 'default';
   const existing = dcSenderPromises.get(key);
   if (existing) return existing;
 
-  const p = client
-    .getSender(numericDc as any)
+  const p = withTimeout(
+    client.getSender(numericDc as any),
+    10000,
+    `getSender DC${numericDc ?? 'main'}`
+  )
     .then((sender) => {
       if (numericDc !== undefined && sender) {
         dcSenders.set(numericDc, sender);
