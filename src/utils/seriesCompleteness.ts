@@ -28,6 +28,18 @@ export function isMovieRecordSeries(movie: any): boolean {
   return false;
 }
 
+export function isCompleteSeasonPackEpisode(ep: any): boolean {
+  if (!ep || !String(ep.streamUrl || '').trim()) return false;
+  const label = String(ep.episodeLabel || '').trim().toLowerCase();
+  const title = String(ep.title || '').trim().toLowerCase();
+  return (
+    label === 'complete' ||
+    label === 'combined' ||
+    label === 'full' ||
+    /\b(?:complete|combined|full)\s*(?:season|pack)?\b/i.test(title)
+  );
+}
+
 export function getSeasonCoveredEpisodes(season: any): Set<number> {
   const covered = new Set<number>();
   if (!season || !Array.isArray(season.episodes)) return covered;
@@ -71,6 +83,13 @@ export function isSeriesComplete(
 
   for (const season of sortedSeasons) {
     const sNum = Number(season?.seasonNumber) || 0;
+    const hasCompletePack =
+      Array.isArray(season?.episodes) &&
+      season.episodes.some((ep: any) => isCompleteSeasonPackEpisode(ep));
+    if (hasCompletePack) {
+      continue;
+    }
+
     const covered = getSeasonCoveredEpisodes(season);
     if (covered.size === 0) return false;
 

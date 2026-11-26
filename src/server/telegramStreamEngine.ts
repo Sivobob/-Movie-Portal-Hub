@@ -836,8 +836,17 @@ export async function checkTelegramDocHasAudioFast(
       const headRes = checkMp4MoovHasAudio(firstBlock);
       if (headRes !== null) return headRes;
 
-      // moov is likely at the end of the file — fetch last block
       if (docInfo.fileSize > BLOCK_SIZE) {
+        try {
+          const secondBlock = await fetchBlock(client, docInfo.document, 1);
+          if (secondBlock && secondBlock.length > 0) {
+            const combinedHead = Buffer.concat([firstBlock, secondBlock]);
+            const head2Res = checkMp4MoovHasAudio(combinedHead);
+            if (head2Res !== null) return head2Res;
+          }
+        } catch {}
+
+        // moov is likely at the end of the file — fetch last block
         const lastBlockIdx = Math.floor((docInfo.fileSize - 1) / BLOCK_SIZE);
         const lastBlock = await fetchBlock(client, docInfo.document, lastBlockIdx);
         const tailRes = checkMp4MoovHasAudio(lastBlock);

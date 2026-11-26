@@ -546,7 +546,7 @@ router.get('/detail', async (req: Request, res: Response) => {
   return res.status(result.httpStatus || 404).json({ error: result.error || 'Metadata details not found.' });
 });
 
-const ALLOWED_POSTER_HOST_RE = /(?:^|\.)(media-amazon\.com|media-imdb\.com|images-amazon\.com|upload\.wikimedia\.org|image\.tmdb\.org|images\.unsplash\.com)$/i;
+const ALLOWED_POSTER_HOST_RE = /(?:^|\.)(media-amazon\.com|media-imdb\.com|images-amazon\.com|upload\.wikimedia\.org|image\.tmdb\.org|images\.unsplash\.com|static\.toiimg\.com|mzstatic\.com)$/i;
 const posterProxyCache = new Map<string, { contentType: string; data: Buffer; storedAt: number }>();
 const POSTER_PROXY_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_POSTER_PROXY_ENTRIES = 250;

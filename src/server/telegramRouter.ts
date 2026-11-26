@@ -669,9 +669,9 @@ function parseEpisodeIdentity(caption: string, fileName: string): { key: string 
   }
 
   const capEpMatch =
-    normCap.match(/e[pr]isode\s*[:\-]?\s*0*(\d{1,4})(?=$|[^0-9])/i) ||
-    normCap.match(/episode\s*[:\-]?\s*0*(\d{1,4})(?=$|[^0-9])/i);
-  const capSeasonMatch = normCap.match(/season\s*[:\-]?\s*0*(\d{1,2})(?=$|[^0-9])/i);
+    normCap.match(/e[pr]isodes?\s*['’`,]*\s*[:\-]?\s*0*(\d{1,4})(?=$|[^0-9])/i) ||
+    normCap.match(/episodes?\s*['’`,]*\s*[:\-]?\s*0*(\d{1,4})(?=$|[^0-9])/i);
+  const capSeasonMatch = normCap.match(/(?:season|session)\s*['’`,]*\s*[:\-]?\s*0*(\d{1,2})(?=$|[^0-9])/i);
 
   if (capEpMatch) {
     epNum = parseInt(capEpMatch[1], 10);
@@ -1014,10 +1014,18 @@ async function verifyCandidateAudioAndHd(
   let probeResult: ProbeMediaResult | null = entry?.probe || null;
   if (entry && (!probeResult || !probeResult.probedByFfprobe) && (fastAudio === null || needsResolutionProbe)) {
     probeResult = await ensureMediaProbed(entry, candidate.streamUrl, {
-      timeoutMs: 8000,
+      timeoutMs: 15000,
       probesize: 1_500_000,
       analyzeduration: 1_500_000,
     }).catch(() => null);
+    if (!probeResult?.probedByFfprobe) {
+      probeResult = await ensureMediaProbed(entry, candidate.streamUrl, {
+        timeoutMs: 20000,
+        probesize: 2_500_000,
+        analyzeduration: 2_000_000,
+        forceRetry: true,
+      }).catch(() => null);
+    }
     if (probeResult?.probedByFfprobe) {
       const probedHasAudio = probeResult.audioTracks.length > 0 || Boolean(probeResult.audioCodec && probeResult.audioCodec !== 'none');
       entry.hasAudio = probedHasAudio;
@@ -2026,11 +2034,11 @@ async function resolveAndCacheDocument(
 async function ensureMediaProbed(
   entry: CachedMediaEntry,
   telegramUrl: string,
-  probeOptions?: { timeoutMs?: number; probesize?: number; analyzeduration?: number }
+  probeOptions?: { timeoutMs?: number; probesize?: number; analyzeduration?: number; forceRetry?: boolean }
 ): Promise<ProbeMediaResult> {
   if (entry.probe) {
     if (entry.probe.probedByFfprobe) return entry.probe;
-    if (entry.probeFallbackAt && Date.now() - entry.probeFallbackAt < 15_000) {
+    if (!probeOptions?.forceRetry && entry.probeFallbackAt && Date.now() - entry.probeFallbackAt < 15_000) {
       return entry.probe;
     }
   }
@@ -3717,7 +3725,10 @@ async function discoverChannelLatestMsgId(
   // 3. Fast exponential + step probe up to 12,000+ using single MTProto batch calls
   try {
     const probeIds = base > 0
-      ? [base + 1, base + 5, base + 15, base + 30, base + 60, base + 120, base + 250, base + 500, base + 1000]
+      ? [
+          base + 1, base + 2, base + 3, base + 4, base + 5, base + 6, base + 7, base + 8, base + 9, base + 10,
+          base + 15, base + 20, base + 30, base + 45, base + 60, base + 100, base + 150, base + 250, base + 500, base + 1000
+        ]
       : [
           1, 2, 5, 10, 25, 50, 100, 200, 350, 500, 750, 1000,
           1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 6000, 7500, 9000, 10500, 12000,
@@ -4260,7 +4271,7 @@ router.post('/scan-movies-channel', async (req: Request, res: Response) => {
 
     const verifiedList = await mapWithConcurrency(
       rawCandidates,
-      4,
+      2,
       async (cand): Promise<ScannedVideoCandidate | null> => {
         if (aborted) return null;
         const check = await verifyCandidateAudioAndHd(
@@ -4525,9 +4536,16 @@ function normalizeDupTitleKey(title: string): string {
     .toLowerCase()
     .replace(/\((?:tv\s*series|film|movie|series|\d{4})\)/gi, '')
     .replace(
-      /\b(?:hdtc|hdts|hdcam|camrip|predvd|dvdscr|telesync|telecine|cinevood|cinevoo|cinewood|cinvood|holl[\s._-]*print(?:ed)?|hollywood[\s._-]*print(?:ed)?|hall[\s._-]*print)\b/gi,
+      /\b(?:hdtc|hdts|tsrip|tcrip|hdcam|camrip|predvd|dvdscr|telesync|telecine|cinevood|cinevoo|cinewood|cinvood|holl[\s._-]*print(?:ed)?|hollywood[\s._-]*print(?:ed)?|hall[\s._-]*print)\b/gi,
       ''
     )
+    .replace(/\bviii\b/g, '8')
+    .replace(/\bvii\b/g, '7')
+    .replace(/\bvi\b/g, '6')
+    .replace(/\biv\b/g, '4')
+    .replace(/\biii\b/g, '3')
+    .replace(/\bii\b/g, '2')
+    .replace(/\bix\b/g, '9')
     .replace(/&/g, 'and')
     .replace(/[^a-z0-9]+/g, '');
 }
@@ -4644,9 +4662,18 @@ function writeSeedCatalogToDisk(items: any[]) {
     fs.writeFileSync(SEED_CATALOG_PATH, payload);
   } catch {}
   try {
-    if (fs.existsSync(path.dirname(DIST_SEED_CATALOG_PATH))) {
-      fs.writeFileSync(DIST_SEED_CATALOG_PATH, payload);
+    const distDir = path.dirname(DIST_SEED_CATALOG_PATH);
+    if (!fs.existsSync(distDir)) {
+      fs.mkdirSync(distDir, { recursive: true });
     }
+    fs.writeFileSync(DIST_SEED_CATALOG_PATH, payload);
+  } catch {}
+  try {
+    const tsPath = path.resolve(process.cwd(), 'src/services/seedCatalog.ts');
+    fs.writeFileSync(
+      tsPath,
+      `import type { MovieData } from './movieStorage';\n\nexport const BUNDLED_SEED_CATALOG: MovieData[] = ${payload};\n`
+    );
   } catch {}
 }
 
@@ -5119,9 +5146,33 @@ interface ExistingMovieRecord {
   isSeries: boolean;
   published?: boolean;
   qualityBadge?: string;
+  sourceFileName?: string;
+  sourceCaption?: string;
+  posterUrl?: string;
   streamingUrl: string;
   videoQualities: Record<string, string>;
   seasons: Array<{ seasonNumber: number; episodes: any[] }>;
+}
+
+function levenshteinDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  let prev = new Array<number>(n + 1);
+  let curr = new Array<number>(n + 1);
+  for (let j = 0; j <= n; j++) prev[j] = j;
+  for (let i = 1; i <= m; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+    }
+    const tmp = prev;
+    prev = curr;
+    curr = tmp;
+  }
+  return prev[n];
 }
 
 function findMatchingExistingRecord(
@@ -5137,10 +5188,12 @@ function findMatchingExistingRecord(
     if (byImdb) return byImdb;
   }
 
-  const candKeys = titles.map((t) => normalizeDupTitleKey(t || '')).filter((k) => k.length >= 2);
+  const candKeys = Array.from(
+    new Set(titles.map((t) => normalizeDupTitleKey(t || '')).filter((k) => k.length >= 2))
+  );
   for (const r of records) {
     const rKeys = [normalizeDupTitleKey(r.title), normalizeDupTitleKey(r.originalTitle)].filter((k) => k.length >= 2);
-    const isExistingPrint = normalizeQualityBadge(r.qualityBadge) === 'HDTC';
+    const isExistingPrint = isHollywoodPrintMovie(r);
     for (const ck of candKeys) {
       for (const rk of rKeys) {
         if (ck !== rk) continue;
@@ -5149,7 +5202,99 @@ function findMatchingExistingRecord(
       }
     }
   }
+
+  // Fallback fuzzy match for minor transliteration spelling differences (e.g. "Ishan De Lekhe" vs "Ishqan De Lekhe")
+  for (const r of records) {
+    if (Boolean(r.isSeries) !== Boolean(isSeries)) continue;
+    const isExistingPrint = isHollywoodPrintMovie(r);
+    if (!isSeries) {
+      if (!year || !r.releaseYear) continue;
+      if (Math.abs(year - r.releaseYear) > (isExistingPrint ? 2 : 1)) continue;
+    }
+    const rKeys = [normalizeDupTitleKey(r.title), normalizeDupTitleKey(r.originalTitle)].filter((k) => k.length >= 6);
+    for (const ck of candKeys) {
+      if (ck.length < 6) continue;
+      const ckTrailingDigit = ck.match(/\d+$/)?.[0] || '';
+      for (const rk of rKeys) {
+        const rkTrailingDigit = rk.match(/\d+$/)?.[0] || '';
+        if (ckTrailingDigit !== rkTrailingDigit) continue;
+        if (ck[0] !== rk[0]) continue;
+        if (Math.abs(ck.length - rk.length) > 2) continue;
+        const maxDist = Math.max(1, Math.floor(Math.min(ck.length, rk.length) * 0.16));
+        if (levenshteinDistance(ck, rk) <= maxDist) {
+          return r;
+        }
+      }
+    }
+  }
   return null;
+}
+
+function buildEffectiveQualityGroup<T extends { streamUrl: string; sizeBytes: number; durationSec: number; fileName: string; caption: string; msgDateMs: number; msgId: number; parsed: ReturnType<typeof parseTelegramMovieMeta> }>(
+  members: T[],
+  fallbackPrimary: T,
+  onlyValidAudioAndHd: boolean
+): {
+  effectivePrimary: T;
+  effectiveMembers: T[];
+  filteredQualities: Record<string, string>;
+  bestStream: string;
+  hasHollywoodPrint: boolean;
+  qualityBadge: '4K' | 'HD' | 'HDTC';
+  bestDurSec: number;
+  realMsgDateMs: number;
+} {
+  const cleanMembers = members.filter((m) => !isHollywoodPrintText(`${m.fileName} ${m.caption}`));
+  const effectiveMembers = cleanMembers.length > 0 ? cleanMembers : members;
+  const vq: Record<string, string> = {};
+  const qs: Record<string, number> = {};
+  let effectivePrimary = effectiveMembers[0] || fallbackPrimary;
+
+  for (const m of effectiveMembers) {
+    if (m.parsed.quality) {
+      const prevSz = qs[m.parsed.quality] || 0;
+      if (!vq[m.parsed.quality] || m.sizeBytes > prevSz) {
+        vq[m.parsed.quality] = m.streamUrl;
+        qs[m.parsed.quality] = m.sizeBytes;
+      }
+    }
+    if (
+      (!effectivePrimary.parsed.year && m.parsed.year) ||
+      (!effectivePrimary.parsed.explicitImdbId && m.parsed.explicitImdbId) ||
+      m.parsed.quality === '1080p'
+    ) {
+      effectivePrimary = m;
+    }
+  }
+
+  const filteredQualities = onlyValidAudioAndHd ? filterQualityMapForHdOnly(vq) : vq;
+  const bestStream =
+    filteredQualities['1080p'] ||
+    filteredQualities['4K'] ||
+    filteredQualities['720p'] ||
+    filteredQualities['480p'] ||
+    filteredQualities['360p'] ||
+    effectivePrimary.streamUrl;
+  const hasHollywoodPrint = cleanMembers.length === 0;
+  const qualityBadge: '4K' | 'HD' | 'HDTC' = hasHollywoodPrint
+    ? 'HDTC'
+    : filteredQualities['4K']
+    ? '4K'
+    : 'HD';
+  const bestDurSec = Math.max(0, ...effectiveMembers.map((m) => m.durationSec || 0));
+  const msgDateList = effectiveMembers.map((m) => m.msgDateMs).filter((t) => t > 0);
+  const realMsgDateMs = msgDateList.length > 0 ? Math.min(...msgDateList) : effectivePrimary.msgDateMs || 0;
+
+  return {
+    effectivePrimary,
+    effectiveMembers,
+    filteredQualities,
+    bestStream,
+    hasHollywoodPrint,
+    qualityBadge,
+    bestDurSec,
+    realMsgDateMs,
+  };
 }
 
 function mergeEpisodeIntoSeasons(
@@ -5230,6 +5375,7 @@ function buildFallbackPosterDataUri(title: string, year?: number | string | null
 }
 
 let lastReconcileCheckAt = 0;
+let lastBotUpdateId = 0;
 
 async function runServerAutoSyncPass(reason: string): Promise<void> {
   if (serverAutoSyncRunning || bulkSyncJob.status === 'running') return;
@@ -5255,9 +5401,15 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
       const { botToken } = getTelegramCredentials();
       if (botToken && /^\d+$/.test(cleanChannelId)) {
         const targetChatId = `-100${cleanChannelId}`;
-        const updResp = await fetch(`https://api.telegram.org/bot${botToken}/getUpdates?limit=30`);
+        const updUrl = lastBotUpdateId > 0
+          ? `https://api.telegram.org/bot${botToken}/getUpdates?offset=${lastBotUpdateId + 1}&limit=50&allowed_updates=%5B%22channel_post%22,%22edited_channel_post%22,%22message%22%5D`
+          : `https://api.telegram.org/bot${botToken}/getUpdates?limit=50&allowed_updates=%5B%22channel_post%22,%22edited_channel_post%22,%22message%22%5D`;
+        const updResp = await fetch(updUrl);
         const updJson: any = await updResp.json();
         for (const u of updJson?.result || []) {
+          if (u?.update_id && Number(u.update_id) > lastBotUpdateId) {
+            lastBotUpdateId = Number(u.update_id);
+          }
           const src = u?.channel_post || u?.edited_channel_post;
           if (src && String(src?.chat?.id || '') === targetChatId) {
             const mid = Number(src.message_id || 0);
@@ -5287,17 +5439,14 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
       baseline = Math.max(baseline, knownMax - 25);
     }
 
-    // Fast lightweight probe: check messages after `baseline` + priority NewMessage IDs + latest channel tail
+    // Fast lightweight probe: check up to 60 messages after baseline + priority NewMessage IDs
     const probeSet = new Set<number>(priorityIds);
     const probeStart = Math.max(baseline, knownMax > baseline + 25 ? knownMax - 25 : baseline);
-    for (let id = probeStart + 1; id <= probeStart + 25; id++) probeSet.add(id);
+    for (let id = probeStart + 1; id <= probeStart + 60; id++) probeSet.add(id);
     const probeIds = Array.from(probeSet).sort((a, b) => a - b);
-    const [probedMsgs, latestTailMsgs] = await Promise.all([
-      probeIds.length > 0 ? client.getMessages(peer, { ids: probeIds }).catch(() => []) : Promise.resolve([]),
-      client.getMessages(peer, { limit: 15 }).catch(() => []),
-    ]);
+    const probedMsgs: any[] = probeIds.length > 0 ? await client.getMessages(peer, { ids: probeIds }).catch(() => []) : [];
     const validMsgMap = new Map<number, any>();
-    for (const m of [...(probedMsgs || []), ...(latestTailMsgs || [])]) {
+    for (const m of probedMsgs || []) {
       if (m && m.id) validMsgMap.set(Number(m.id), m);
     }
 
@@ -5373,8 +5522,17 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
     const existingRecords: ExistingMovieRecord[] = [];
     const registerExistingDoc = (id: string, m: any) => {
       if (!id || !m) return;
-      if (!seedCatalogMap.has(id)) {
+      const existing = seedCatalogMap.get(id);
+      if (!existing) {
         seedCatalogMap.set(id, { id, ...m });
+      } else {
+        const existingPoster = String(existing.posterUrl || '');
+        const incomingPoster = String(m.posterUrl || '');
+        const existingIsSvg = !existingPoster || existingPoster.startsWith('data:image/svg+xml');
+        const incomingIsReal = Boolean(incomingPoster && !incomingPoster.startsWith('data:image/svg+xml'));
+        if (existingIsSvg && incomingIsReal) {
+          seedCatalogMap.set(id, { ...existing, ...m, id });
+        }
       }
       const cat = String(m?.originalCategory || '');
       const isSeries = cat.toLowerCase().includes('series') || (Array.isArray(m?.seasons) && m.seasons.length > 0);
@@ -5404,7 +5562,10 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
           originalCategory: cat,
           isSeries,
           published: m?.published !== false,
-          qualityBadge: normBadge !== 'NONE' ? normBadge : isHollywoodPrintMovie(m) ? 'HDTC' : 'HD',
+          qualityBadge: isHollywoodPrintMovie(m) ? 'HDTC' : normBadge !== 'NONE' ? normBadge : 'HD',
+          sourceFileName: String(m?.sourceFileName || ''),
+          sourceCaption: String(m?.sourceCaption || ''),
+          posterUrl: String(m?.posterUrl || ''),
           streamingUrl: String(m?.streamingUrl || '').trim(),
           videoQualities: m?.videoQualities && typeof m.videoQualities === 'object' ? { ...m.videoQualities } : {},
           seasons: Array.isArray(m?.seasons) ? m.seasons : [],
@@ -5500,7 +5661,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
 
     const verifiedBgList = await mapWithConcurrency(
       rawCandidates,
-      4,
+      2,
       async (cand): Promise<BgVideoCandidate | null> => {
         const check = await verifyCandidateAudioAndHd(
           {
@@ -5607,22 +5768,24 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
     const queuedForReview: AutoMatchedMovieDraft[] = [];
 
     for (const grp of groups) {
-      const bestStream =
-        grp.videoQualities['1080p'] ||
-        grp.videoQualities['720p'] ||
-        grp.videoQualities['480p'] ||
-        grp.videoQualities['4K'] ||
-        grp.videoQualities['360p'] ||
-        grp.primary.streamUrl;
+      const {
+        effectivePrimary,
+        effectiveMembers,
+        filteredQualities,
+        bestStream,
+        qualityBadge,
+        bestDurSec,
+        realMsgDateMs,
+      } = buildEffectiveQualityGroup(grp.members, grp.primary, cfg.onlyValidAudioAndHd);
 
       const mergedParsed = {
-        ...grp.primary.parsed,
-        year: grp.primary.parsed.year || grp.members.find((m) => m.parsed.year)?.parsed.year || null,
+        ...effectivePrimary.parsed,
+        year: effectivePrimary.parsed.year || effectiveMembers.find((m) => m.parsed.year)?.parsed.year || null,
         languageHint:
-          grp.primary.parsed.languageHint ||
-          grp.members.find((m) => m.parsed.languageHint)?.parsed.languageHint ||
+          effectivePrimary.parsed.languageHint ||
+          effectiveMembers.find((m) => m.parsed.languageHint)?.parsed.languageHint ||
           '',
-        isHindiDubbed: grp.members.some((m) => m.parsed.isHindiDubbed),
+        isHindiDubbed: effectiveMembers.some((m) => m.parsed.isHindiDubbed),
       };
 
       const matched = await resolveBestImdbMatch(mergedParsed);
@@ -5631,41 +5794,21 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
         mergedParsed.isSeriesEpisode ||
         String(matched.originalCategory || '').toLowerCase().includes('series');
 
-      const filteredQualities = cfg.onlyValidAudioAndHd
-        ? filterQualityMapForHdOnly(grp.videoQualities)
-        : grp.videoQualities;
-      const chosenStream =
-        filteredQualities['1080p'] ||
-        filteredQualities['720p'] ||
-        bestStream;
-
-      const bestDurSec = Math.max(0, ...grp.members.map((m) => m.durationSec || 0));
       const durationFormatted = bestDurSec > 0 ? formatDuration(bestDurSec) : '';
-      const hasHollywoodPrint = grp.members.some((m) =>
-        isHollywoodPrintText(`${m.fileName} ${m.caption}`)
-      );
-      const qualityBadge: '4K' | 'HD' | 'HDTC' = hasHollywoodPrint
-        ? 'HDTC'
-        : filteredQualities['4K']
-        ? '4K'
-        : 'HD';
-
-      const msgDateList = grp.members.map((m) => m.msgDateMs).filter((t) => t > 0);
-      const realMsgDateMs = msgDateList.length > 0 ? Math.min(...msgDateList) : grp.primary.msgDateMs || 0;
 
       const draft: AutoMatchedMovieDraft = {
-        draftId: `tg-${cleanChannelId}-${grp.primary.msgId}`,
+        draftId: `tg-${cleanChannelId}-${effectivePrimary.msgId}`,
         channelId: cleanChannelId,
         channelTitle,
-        msgId: grp.primary.msgId,
+        msgId: effectivePrimary.msgId,
         msgDateMs: realMsgDateMs > 0 ? realMsgDateMs : undefined,
         sourceMsgIds: grp.members.map((m) => m.msgId),
-        streamUrl: chosenStream,
+        streamUrl: bestStream,
         videoQualities: filteredQualities,
         qualityBadge,
         durationSec: bestDurSec,
         runtime: isSeriesItem ? durationFormatted : (durationFormatted || matched.runtime),
-        sourceFileName: grp.primary.fileName,
+        sourceFileName: effectivePrimary.fileName,
         sourceCaption: `${mergedParsed.cleanTitle}${mergedParsed.year ? ` (${mergedParsed.year})` : ''}`,
         parsedTitle: mergedParsed.cleanTitle,
         parsedYear: mergedParsed.year,
@@ -5763,20 +5906,36 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
               expectedCounts
             );
             const wasPublished = existingRec.published !== false;
+            const nextPublished = wasPublished || seriesReadyToPublish;
             const nextStream = replaceExistingEp
               ? epObj.streamUrl
               : existingRec.streamingUrl || epObj.streamUrl;
             const nextSeriesBadge = badge === 'HD' ? 'HD' : existingRec.qualityBadge || badge;
             const prevSeed = seedCatalogMap.get(existingRec.id) || {};
+            const prevPoster = String(prevSeed.posterUrl || existingRec.posterUrl || '');
+            const existingHasSvgPoster = !prevPoster || prevPoster.startsWith('data:image/svg+xml');
+            const incomingHasRealPoster = Boolean(cleanPoster && !cleanPoster.startsWith('data:image/svg+xml'));
+            const seriesPosterPatch: Record<string, any> =
+              existingHasSvgPoster && incomingHasRealPoster
+                ? {
+                    posterUrl: cleanPoster,
+                    backdropUrl: cleanBackdrop,
+                    ...(!existingRec.imdbId && seriesImdbId ? { imdbId: seriesImdbId } : {}),
+                    ...(draft.description ? { description: draft.description.trim() } : {}),
+                    ...(draft.director ? { director: draft.director.trim() } : {}),
+                    ...(draft.cast ? { cast: draft.cast.trim() } : {}),
+                  }
+                : {};
             seedCatalogMap.set(existingRec.id, {
               ...prevSeed,
               id: existingRec.id,
               seasons: mergedSeasons,
               streamingUrl: nextStream,
               qualityBadge: nextSeriesBadge,
-              published: seriesReadyToPublish,
+              published: nextPublished,
               releaseYear: clampReleaseYear(prevSeed.releaseYear || draft.releaseYear),
-              ...(seriesReadyToPublish && !wasPublished ? { createdAt: nowMs } : {}),
+              ...seriesPosterPatch,
+              ...(nextPublished && !wasPublished ? { createdAt: nowMs } : {}),
               updatedAt: nowMs,
             });
             await setDocWithQuotaGuard(
@@ -5785,7 +5944,9 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
                 seasons: mergedSeasons,
                 streamingUrl: nextStream,
                 qualityBadge: nextSeriesBadge,
-                published: seriesReadyToPublish,
+                published: nextPublished,
+                ...seriesPosterPatch,
+                ...(nextPublished && !wasPublished ? { createdAt: nowMs } : {}),
                 updatedAt: serverTimestamp(),
               },
               { merge: true }
@@ -5793,14 +5954,15 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
             existingRec.seasons = mergedSeasons;
             existingRec.streamingUrl = nextStream;
             existingRec.qualityBadge = nextSeriesBadge;
-            existingRec.published = seriesReadyToPublish;
-            existingUrlSet.add(draft.streamUrl.toLowerCase());
+            existingRec.published = nextPublished;
+            if (seriesPosterPatch.posterUrl) existingRec.posterUrl = seriesPosterPatch.posterUrl;
+            grp.members.forEach((m) => existingUrlSet.add(m.streamUrl.toLowerCase()));
             catalogDirty = true;
 
-            if (seriesReadyToPublish) {
+            if (nextPublished) {
               publishedCount++;
               console.log(
-                `[ServerAutoSync] Added ${draft.title} S${seasonNum}E${epNum} -> movies/${existingRec.id} (complete & published)`
+                `[ServerAutoSync] Added ${draft.title} S${seasonNum}E${epNum} -> movies/${existingRec.id} (${seriesReadyToPublish ? 'complete & published' : 'season update on published series'})`
               );
 
               if (cfg.notifyOnNewPublish && publishedCount <= 3) {
@@ -5883,7 +6045,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
               },
               { merge: true }
             ).catch(() => {});
-            existingUrlSet.add(draft.streamUrl.toLowerCase());
+            grp.members.forEach((m) => existingUrlSet.add(m.streamUrl.toLowerCase()));
             existingRecords.push({
               id: seriesDocId,
               imdbId: seriesImdbId,
@@ -5894,6 +6056,9 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
               isSeries: true,
               published: seriesReadyToPublish,
               qualityBadge: badge,
+              sourceFileName: draft.sourceFileName || '',
+              sourceCaption: draft.sourceCaption || '',
+              posterUrl: cleanPoster,
               streamingUrl: epObj.streamUrl,
               videoQualities: {},
               seasons: initialSeasons,
@@ -5942,21 +6107,41 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
         if (existingRec) {
           const upgradeDecision = getQualityUpgradeDecision(existingRec, badge);
           if (upgradeDecision === 'skip_holl_print_on_hd') {
-            existingUrlSet.add(draft.streamUrl.toLowerCase());
+            grp.members.forEach((m) => existingUrlSet.add(m.streamUrl.toLowerCase()));
             continue;
           }
 
           const incomingCleanQualities = Object.fromEntries(
             Object.entries(draft.videoQualities || {}).filter(([, u]) => Boolean(String(u || '').trim()))
           );
+          const prevSeed = seedCatalogMap.get(existingRec.id) || {};
+          const prevPoster = String(prevSeed.posterUrl || existingRec.posterUrl || '');
+          const existingHasSvgPoster = !prevPoster || prevPoster.startsWith('data:image/svg+xml');
+          const incomingHasRealPoster = Boolean(cleanPoster && !cleanPoster.startsWith('data:image/svg+xml'));
+          const posterBackfillPatch: Record<string, any> =
+            existingHasSvgPoster && incomingHasRealPoster
+              ? {
+                  posterUrl: cleanPoster,
+                  backdropUrl: cleanBackdrop,
+                  ...(draft.title ? { title: draft.title.trim(), originalTitle: (draft.originalTitle || draft.title).trim() } : {}),
+                  ...(draft.description ? { description: draft.description.trim() } : {}),
+                  ...(draft.genre ? { genre: draft.genre.trim() } : {}),
+                  ...(draft.director ? { director: draft.director.trim() } : {}),
+                  ...(draft.cast ? { cast: draft.cast.trim() } : {}),
+                  ...(draft.language ? { language: draft.language.trim() } : {}),
+                  ...(!existingRec.imdbId && draft.imdbId ? { imdbId: draft.imdbId.trim() } : {}),
+                }
+              : !existingRec.imdbId && draft.imdbId
+              ? { imdbId: draft.imdbId.trim() }
+              : {};
 
           if (upgradeDecision === 'replace_holl_print_with_hd') {
             const replacedStream =
               incomingCleanQualities['1080p'] ||
               incomingCleanQualities['4K'] ||
               incomingCleanQualities['720p'] ||
+              incomingCleanQualities['480p'] ||
               draft.streamUrl.trim();
-            const prevSeed = seedCatalogMap.get(existingRec.id) || {};
             const nextRuntime = (draft.runtime || prevSeed.runtime || '').trim();
             const nextDuration =
               bestDurSec || parseDurationToSeconds(nextRuntime) || prevSeed.duration || 0;
@@ -5969,10 +6154,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
               telegramMsgId: draft.msgId,
               ...(nextRuntime ? { runtime: nextRuntime } : {}),
               ...(nextDuration > 0 ? { duration: nextDuration } : {}),
-              ...(!existingRec.imdbId && draft.imdbId ? { imdbId: draft.imdbId.trim() } : {}),
-              ...(String(prevSeed.posterUrl || '').startsWith('data:image/svg+xml') && cleanPoster
-                ? { posterUrl: cleanPoster, backdropUrl: cleanBackdrop }
-                : {}),
+              ...posterBackfillPatch,
               updatedAt: nowMs,
             };
             seedCatalogMap.set(existingRec.id, {
@@ -5987,7 +6169,11 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
             existingRec.videoQualities = incomingCleanQualities;
             existingRec.streamingUrl = replacedStream;
             existingRec.qualityBadge = 'HD';
-            existingUrlSet.add(draft.streamUrl.toLowerCase());
+            existingRec.sourceFileName = draft.sourceFileName || '';
+            existingRec.sourceCaption = draft.sourceCaption || '';
+            if (posterBackfillPatch.posterUrl) existingRec.posterUrl = posterBackfillPatch.posterUrl;
+            if (posterBackfillPatch.imdbId) existingRec.imdbId = posterBackfillPatch.imdbId;
+            grp.members.forEach((m) => existingUrlSet.add(m.streamUrl.toLowerCase()));
             catalogDirty = true;
             publishedCount++;
             console.log(
@@ -6004,42 +6190,48 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
               qualityAdded = true;
             }
           }
-          if (qualityAdded) {
+          const needsPosterBackfill = Object.keys(posterBackfillPatch).length > 0;
+          if (qualityAdded || needsPosterBackfill) {
             const upgradedStream =
               mergedQualities['1080p'] ||
               mergedQualities['4K'] ||
               existingRec.streamingUrl ||
               draft.streamUrl.trim();
-            const prevSeed = seedCatalogMap.get(existingRec.id) || {};
             const upgradedBadge =
               badge === 'HD' ? 'HD' : prevSeed.qualityBadge || badge;
+            const mergePayload = {
+              ...(qualityAdded ? { videoQualities: mergedQualities, streamingUrl: upgradedStream, qualityBadge: upgradedBadge } : {}),
+              ...posterBackfillPatch,
+              updatedAt: nowMs,
+            };
             seedCatalogMap.set(existingRec.id, {
               ...prevSeed,
               id: existingRec.id,
-              videoQualities: mergedQualities,
-              streamingUrl: upgradedStream,
-              qualityBadge: upgradedBadge,
-              updatedAt: nowMs,
+              ...mergePayload,
             });
             await setDocWithQuotaGuard(
               doc(db, 'movies', existingRec.id),
               {
-                videoQualities: mergedQualities,
-                streamingUrl: upgradedStream,
-                qualityBadge: upgradedBadge,
+                ...mergePayload,
                 updatedAt: serverTimestamp(),
               },
               { merge: true }
             ).catch(() => {});
-            existingRec.videoQualities = mergedQualities;
-            existingRec.streamingUrl = upgradedStream;
-            existingRec.qualityBadge = upgradedBadge;
-            existingUrlSet.add(draft.streamUrl.toLowerCase());
+            if (qualityAdded) {
+              existingRec.videoQualities = mergedQualities;
+              existingRec.streamingUrl = upgradedStream;
+              existingRec.qualityBadge = upgradedBadge;
+            }
+            if (posterBackfillPatch.posterUrl) existingRec.posterUrl = posterBackfillPatch.posterUrl;
+            if (posterBackfillPatch.imdbId) existingRec.imdbId = posterBackfillPatch.imdbId;
+            grp.members.forEach((m) => existingUrlSet.add(m.streamUrl.toLowerCase()));
             catalogDirty = true;
             publishedCount++;
             console.log(
-              `[ServerAutoSync] Merged new quality for "${existingRec.title}" -> movies/${existingRec.id}`
+              `[ServerAutoSync] ${qualityAdded ? 'Merged new quality' : 'Backfilled poster/IMDb'} for "${existingRec.title}" -> movies/${existingRec.id}`
             );
+          } else {
+            grp.members.forEach((m) => existingUrlSet.add(m.streamUrl.toLowerCase()));
           }
           continue;
         }
@@ -6070,6 +6262,8 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
           featured: true,
           published: true,
           qualityBadge: badge,
+          sourceFileName: draft.sourceFileName || '',
+          sourceCaption: draft.sourceCaption || '',
           duration: draft.durationSec || parseDurationToSeconds(draft.runtime) || 0,
           telegramMsgId: draft.msgId,
           telegramChannelId: cleanChannelId,
@@ -6088,7 +6282,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
           { merge: true }
         ).catch(() => {});
 
-        existingUrlSet.add(draft.streamUrl.toLowerCase());
+        grp.members.forEach((m) => existingUrlSet.add(m.streamUrl.toLowerCase()));
         existingRecords.push({
           id: deterministicDocId,
           imdbId: (draft.imdbId || '').trim(),
@@ -6099,6 +6293,9 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
           isSeries: false,
           published: true,
           qualityBadge: badge,
+          sourceFileName: draft.sourceFileName || '',
+          sourceCaption: draft.sourceCaption || '',
+          posterUrl: cleanPoster,
           streamingUrl: draft.streamUrl.trim(),
           videoQualities: draft.videoQualities || {},
           seasons: [],
@@ -6151,12 +6348,9 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
     if (publishedCount > 0 || catalogDirty) {
       const updatedList = Array.from(seedCatalogMap.values());
       writeSeedCatalogToDisk(updatedList);
-    }
-
-    if (publishedCount > 0) {
       broadcastLiveCatalogUpdate({
         type: 'catalog_updated',
-        count: publishedCount,
+        count: publishedCount || 1,
         updatedAt: Date.now(),
         action: 'auto_publish',
       });
@@ -6212,7 +6406,7 @@ async function setDocWithQuotaGuard(
   ref: any,
   data: any,
   options?: { merge?: boolean },
-  timeoutMs = 4500
+  timeoutMs = 8000
 ): Promise<void> {
   if (!isServerFirestoreWriteAllowed()) {
     throw Object.assign(
@@ -6226,11 +6420,10 @@ async function setDocWithQuotaGuard(
       options ? setDoc(ref, data, options) : setDoc(ref, data),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
-          markServerFirestoreQuotaExhausted('write-timeout');
           reject(
             Object.assign(
-              new Error('Firestore daily write quota exhausted (write timeout).'),
-              { code: 'resource-exhausted' }
+              new Error('Firestore write timed out.'),
+              { code: 'deadline-exceeded' }
             )
           );
         }, timeoutMs);
@@ -6249,7 +6442,7 @@ async function setDocWithQuotaGuard(
 async function updateDocWithQuotaGuard(
   ref: any,
   data: any,
-  timeoutMs = 4500
+  timeoutMs = 8000
 ): Promise<void> {
   if (!isServerFirestoreWriteAllowed()) {
     throw Object.assign(
@@ -6269,11 +6462,10 @@ async function updateDocWithQuotaGuard(
       }),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
-          markServerFirestoreQuotaExhausted('write-timeout');
           reject(
             Object.assign(
-              new Error('Firestore daily write quota exhausted (write timeout).'),
-              { code: 'resource-exhausted' }
+              new Error('Firestore write timed out.'),
+              { code: 'deadline-exceeded' }
             )
           );
         }, timeoutMs);
@@ -6418,7 +6610,10 @@ async function runBulkChannelSyncWorker(params: {
                 releaseYear: Number(m?.releaseYear) || 0,
                 originalCategory: cat,
                 isSeries,
-                qualityBadge: normSeedBadge !== 'NONE' ? normSeedBadge : isHollywoodPrintMovie(m) ? 'HDTC' : 'HD',
+                qualityBadge: isHollywoodPrintMovie(m) ? 'HDTC' : normSeedBadge !== 'NONE' ? normSeedBadge : 'HD',
+                sourceFileName: String(m?.sourceFileName || ''),
+                sourceCaption: String(m?.sourceCaption || ''),
+                posterUrl: String(m?.posterUrl || ''),
                 streamingUrl: String(m?.streamingUrl || '').trim(),
                 videoQualities: m?.videoQualities && typeof m.videoQualities === 'object' ? { ...m.videoQualities } : {},
                 seasons: Array.isArray(m?.seasons) ? m.seasons : [],
@@ -6436,8 +6631,15 @@ async function runBulkChannelSyncWorker(params: {
       const existingSnap = await getDocsFromServer(collection(db, 'movies'));
       existingSnap.docs.forEach((d) => {
         const m = d.data() as any;
-        if (!seedCatalogMap.has(d.id)) {
+        const existingSeed = seedCatalogMap.get(d.id);
+        if (!existingSeed) {
           seedCatalogMap.set(d.id, { id: d.id, ...m });
+        } else {
+          const existingPoster = String(existingSeed.posterUrl || '');
+          const incomingPoster = String(m?.posterUrl || '');
+          if ((!existingPoster || existingPoster.startsWith('data:image/svg+xml')) && incomingPoster && !incomingPoster.startsWith('data:image/svg+xml')) {
+            seedCatalogMap.set(d.id, { ...existingSeed, ...m, id: d.id });
+          }
         }
         const cat = String(m?.originalCategory || '');
         const isSeries = cat.toLowerCase().includes('series') || (Array.isArray(m?.seasons) && m.seasons.length > 0);
@@ -6466,7 +6668,10 @@ async function runBulkChannelSyncWorker(params: {
             releaseYear: Number(m?.releaseYear) || 0,
             originalCategory: cat,
             isSeries,
-            qualityBadge: normFsBadge !== 'NONE' ? normFsBadge : isHollywoodPrintMovie(m) ? 'HDTC' : 'HD',
+            qualityBadge: isHollywoodPrintMovie(m) ? 'HDTC' : normFsBadge !== 'NONE' ? normFsBadge : 'HD',
+            sourceFileName: String(m?.sourceFileName || ''),
+            sourceCaption: String(m?.sourceCaption || ''),
+            posterUrl: String(m?.posterUrl || ''),
             streamingUrl: String(m?.streamingUrl || '').trim(),
             videoQualities: m?.videoQualities && typeof m.videoQualities === 'object' ? { ...m.videoQualities } : {},
             seasons: Array.isArray(m?.seasons) ? m.seasons : [],
@@ -6757,29 +6962,26 @@ async function runBulkChannelSyncWorker(params: {
         }
         const { grp, mergedParsed, matched } = entry;
 
-        const filteredQualities = onlyValidAudioAndHd
-          ? filterQualityMapForHdOnly(grp.videoQualities)
-          : grp.videoQualities;
-        const bestStream =
-          filteredQualities['1080p'] ||
-          filteredQualities['720p'] ||
-          grp.primary.streamUrl;
+        const {
+          effectivePrimary,
+          filteredQualities,
+          bestStream,
+          qualityBadge,
+          bestDurSec,
+          realMsgDateMs,
+        } = buildEffectiveQualityGroup(grp.members, grp.primary, onlyValidAudioAndHd);
 
         const candYear = Number(matched.releaseYear || mergedParsed.year || 0);
         const isSeriesItem =
           mergedParsed.isSeriesEpisode ||
           String(matched.originalCategory || '').toLowerCase().includes('series');
 
-        const bestDurSec = Math.max(0, ...grp.members.map((m) => m.durationSec || 0));
         const durationFormatted = bestDurSec > 0 ? formatDuration(bestDurSec) : '';
         const catToSave = isSeriesItem
           ? (String(matched.originalCategory || '').toLowerCase().includes('anime') ? 'Anime Series' : 'Web Series')
           : (matched.originalCategory || 'Bollywood Movie');
         const displayCat = getDisplayCategory(catToSave);
-        const hasHollywoodPrint = grp.members.some((m) =>
-          isHollywoodPrintText(`${m.fileName} ${m.caption}`)
-        );
-        const badge = hasHollywoodPrint ? 'HDTC' : 'HD';
+        const badge: 'HD' | 'HDTC' = qualityBadge === 'HDTC' ? 'HDTC' : 'HD';
         const fallbackSvg = buildFallbackPosterDataUri(matched.title || mergedParsed.cleanTitle, candYear);
         const cleanPoster = (matched.posterUrl ? upgradePosterUrl(matched.posterUrl, 1080) || matched.posterUrl : '') || fallbackSvg;
         const cleanBackdrop = (matched.backdropUrl || matched.posterUrl ? upgradePosterUrl(matched.backdropUrl || cleanPoster, 1280) || cleanPoster : '') || fallbackSvg;
@@ -6848,18 +7050,36 @@ async function runBulkChannelSyncWorker(params: {
                 newPayload: prevDirty?.newPayload,
               });
               const prevSeed = seedCatalogMap.get(existingRec.id) || {};
+              const prevPoster = String(prevSeed.posterUrl || existingRec.posterUrl || '');
+              const existingHasSvgPoster = !prevPoster || prevPoster.startsWith('data:image/svg+xml');
+              const incomingHasRealPoster = Boolean(cleanPoster && !cleanPoster.startsWith('data:image/svg+xml'));
+              const seriesPosterPatch: Record<string, any> =
+                existingHasSvgPoster && incomingHasRealPoster
+                  ? {
+                      posterUrl: cleanPoster,
+                      backdropUrl: cleanBackdrop,
+                      ...(!existingRec.imdbId && matched.imdbId ? { imdbId: matched.imdbId.trim() } : {}),
+                      ...(matched.description ? { description: matched.description.trim() } : {}),
+                      ...(matched.director ? { director: matched.director.trim() } : {}),
+                      ...(matched.cast ? { cast: matched.cast.trim() } : {}),
+                    }
+                  : {};
+              if (seriesPosterPatch.posterUrl) existingRec.posterUrl = seriesPosterPatch.posterUrl;
+              if (seriesPosterPatch.imdbId) existingRec.imdbId = seriesPosterPatch.imdbId;
+              grp.members.forEach((m) => existingUrlSet.add(m.streamUrl.toLowerCase()));
               seedCatalogMap.set(existingRec.id, {
                 ...prevSeed,
                 id: existingRec.id,
                 seasons: mergedSeasons,
                 streamingUrl: existingRec.streamingUrl,
                 qualityBadge: nextSeriesBadge,
+                ...seriesPosterPatch,
                 updatedAt: Date.now(),
               });
               bulkSyncJob.mergedCount++;
               chunkPublished++;
             } else {
-              const seriesDocId = `tg_series_${cleanChannelId}_${grp.primary.msgId}`;
+              const seriesDocId = `tg_series_${cleanChannelId}_${effectivePrimary.msgId}`;
               const initialSeasons = [{ seasonNumber: seasonNum, episodes: [epObj] }];
               const newRec: ExistingMovieRecord = {
                 id: seriesDocId,
@@ -6870,15 +7090,16 @@ async function runBulkChannelSyncWorker(params: {
                 originalCategory: catToSave,
                 isSeries: true,
                 qualityBadge: badge,
+                sourceFileName: effectivePrimary.fileName || '',
+                sourceCaption: `${mergedParsed.cleanTitle}${mergedParsed.year ? ` (${mergedParsed.year})` : ''}`,
+                posterUrl: cleanPoster,
                 streamingUrl: epObj.streamUrl,
                 videoQualities: {},
                 seasons: initialSeasons,
               };
-              existingUrlSet.add(bestStream.toLowerCase());
+              grp.members.forEach((m) => existingUrlSet.add(m.streamUrl.toLowerCase()));
               existingRecords.push(newRec);
-              const bulkMsgDates = grp.members.map((m) => m.msgDateMs).filter((t) => t > 0);
-              const realBulkDateMs =
-                (bulkMsgDates.length > 0 ? Math.min(...bulkMsgDates) : grp.primary.msgDateMs) || Date.now();
+              const realBulkDateMs = realMsgDateMs || Date.now();
               const seriesPayload = {
                 id: seriesDocId,
                 title: matched.title.trim(),
@@ -6904,7 +7125,7 @@ async function runBulkChannelSyncWorker(params: {
                 published: true,
                 qualityBadge: badge,
                 duration: bestDurSec || parseDurationToSeconds(matched.runtime) || 0,
-                telegramMsgId: grp.primary.msgId,
+                telegramMsgId: effectivePrimary.msgId,
                 telegramChannelId: cleanChannelId,
                 telegramDateMs: realBulkDateMs,
                 createdAt: realBulkDateMs,
@@ -6926,21 +7147,41 @@ async function runBulkChannelSyncWorker(params: {
             const upgradeDecision = getQualityUpgradeDecision(existingRec, badge);
             if (upgradeDecision === 'skip_holl_print_on_hd') {
               bulkSyncJob.skippedDuplicates++;
-              existingUrlSet.add(bestStream.toLowerCase());
+              grp.members.forEach((m) => existingUrlSet.add(m.streamUrl.toLowerCase()));
               continue;
             }
 
             const incomingCleanQualities = Object.fromEntries(
               Object.entries(filteredQualities || {}).filter(([, u]) => Boolean(String(u || '').trim()))
             );
+            const prevSeed = seedCatalogMap.get(existingRec.id) || {};
+            const prevPoster = String(prevSeed.posterUrl || existingRec.posterUrl || '');
+            const existingHasSvgPoster = !prevPoster || prevPoster.startsWith('data:image/svg+xml');
+            const incomingHasRealPoster = Boolean(cleanPoster && !cleanPoster.startsWith('data:image/svg+xml'));
+            const bulkPosterBackfill: Record<string, any> =
+              existingHasSvgPoster && incomingHasRealPoster
+                ? {
+                    posterUrl: cleanPoster,
+                    backdropUrl: cleanBackdrop,
+                    ...(matched.title ? { title: matched.title.trim(), originalTitle: (matched.originalTitle || matched.title).trim() } : {}),
+                    ...(matched.description ? { description: matched.description.trim() } : {}),
+                    ...(matched.genre ? { genre: matched.genre.trim() } : {}),
+                    ...(matched.director ? { director: matched.director.trim() } : {}),
+                    ...(matched.cast ? { cast: matched.cast.trim() } : {}),
+                    ...(matched.language ? { language: matched.language.trim() } : {}),
+                    ...(!existingRec.imdbId && matched.imdbId ? { imdbId: matched.imdbId.trim() } : {}),
+                  }
+                : !existingRec.imdbId && matched.imdbId
+                ? { imdbId: matched.imdbId.trim() }
+                : {};
 
             if (upgradeDecision === 'replace_holl_print_with_hd') {
               const replacedStream =
                 incomingCleanQualities['1080p'] ||
                 incomingCleanQualities['4K'] ||
                 incomingCleanQualities['720p'] ||
+                incomingCleanQualities['480p'] ||
                 bestStream.trim();
-              const prevSeed = seedCatalogMap.get(existingRec.id) || {};
               const nextRuntime = (durationFormatted || matched.runtime || prevSeed.runtime || '').trim();
               const nextDuration =
                 bestDurSec || parseDurationToSeconds(nextRuntime) || prevSeed.duration || 0;
@@ -6948,22 +7189,23 @@ async function runBulkChannelSyncWorker(params: {
                 videoQualities: incomingCleanQualities,
                 streamingUrl: replacedStream,
                 qualityBadge: 'HD',
-                sourceFileName: grp.primary.fileName || '',
+                sourceFileName: effectivePrimary.fileName || '',
                 sourceCaption: `${mergedParsed.cleanTitle}${mergedParsed.year ? ` (${mergedParsed.year})` : ''}`,
-                telegramMsgId: grp.primary.msgId,
+                telegramMsgId: effectivePrimary.msgId,
                 ...(nextRuntime ? { runtime: nextRuntime } : {}),
                 ...(nextDuration > 0 ? { duration: nextDuration } : {}),
-                ...(!existingRec.imdbId && matched.imdbId ? { imdbId: matched.imdbId.trim() } : {}),
-                ...(String(prevSeed.posterUrl || '').startsWith('data:image/svg+xml') && cleanPoster
-                  ? { posterUrl: cleanPoster, backdropUrl: cleanBackdrop }
-                  : {}),
+                ...bulkPosterBackfill,
                 updatedAt: Date.now(),
               };
 
               existingRec.videoQualities = incomingCleanQualities;
               existingRec.streamingUrl = replacedStream;
               existingRec.qualityBadge = 'HD';
-              existingUrlSet.add(bestStream.toLowerCase());
+              existingRec.sourceFileName = effectivePrimary.fileName || '';
+              existingRec.sourceCaption = replacePayload.sourceCaption;
+              if (bulkPosterBackfill.posterUrl) existingRec.posterUrl = bulkPosterBackfill.posterUrl;
+              if (bulkPosterBackfill.imdbId) existingRec.imdbId = bulkPosterBackfill.imdbId;
+              grp.members.forEach((m) => existingUrlSet.add(m.streamUrl.toLowerCase()));
 
               seedCatalogMap.set(existingRec.id, {
                 ...prevSeed,
@@ -6995,32 +7237,38 @@ async function runBulkChannelSyncWorker(params: {
                 qualityAdded = true;
               }
             }
-            if (qualityAdded) {
+            const needsBulkPosterBackfill = Object.keys(bulkPosterBackfill).length > 0;
+            if (qualityAdded || needsBulkPosterBackfill) {
               const upgradedStream =
                 mergedQualities['1080p'] ||
-                mergedQualities['720p'] ||
+                mergedQualities['4K'] ||
                 existingRec.streamingUrl ||
                 bestStream.trim();
-              existingRec.videoQualities = mergedQualities;
-              existingRec.streamingUrl = upgradedStream;
-              existingUrlSet.add(bestStream.toLowerCase());
+              if (qualityAdded) {
+                existingRec.videoQualities = mergedQualities;
+                existingRec.streamingUrl = upgradedStream;
+              }
+              grp.members.forEach((m) => existingUrlSet.add(m.streamUrl.toLowerCase()));
 
-              const prevSeed = seedCatalogMap.get(existingRec.id) || {};
               const upgradedBadge =
                 badge === 'HD' ? 'HD' : prevSeed.qualityBadge || badge;
-              existingRec.qualityBadge = upgradedBadge;
+              if (qualityAdded) existingRec.qualityBadge = upgradedBadge;
+              if (bulkPosterBackfill.posterUrl) existingRec.posterUrl = bulkPosterBackfill.posterUrl;
+              if (bulkPosterBackfill.imdbId) existingRec.imdbId = bulkPosterBackfill.imdbId;
+              const bulkMergePayload = {
+                ...(qualityAdded ? { videoQualities: mergedQualities, streamingUrl: upgradedStream, qualityBadge: upgradedBadge } : {}),
+                ...bulkPosterBackfill,
+                updatedAt: Date.now(),
+              };
               seedCatalogMap.set(existingRec.id, {
                 ...prevSeed,
-                videoQualities: mergedQualities,
-                streamingUrl: upgradedStream,
-                qualityBadge: upgradedBadge,
-                updatedAt: Date.now(),
+                ...bulkMergePayload,
               });
 
               try {
                 await setDocWithQuotaGuard(
                   doc(db, 'movies', existingRec.id),
-                  { videoQualities: mergedQualities, streamingUrl: upgradedStream, qualityBadge: upgradedBadge, updatedAt: serverTimestamp() },
+                  { ...bulkMergePayload, updatedAt: serverTimestamp() },
                   { merge: true }
                 );
               } catch (writeErr: any) {
@@ -7034,13 +7282,12 @@ async function runBulkChannelSyncWorker(params: {
               chunkPublished++;
             } else {
               bulkSyncJob.skippedDuplicates++;
-              existingUrlSet.add(bestStream.toLowerCase());
+              grp.members.forEach((m) => existingUrlSet.add(m.streamUrl.toLowerCase()));
             }
           } else {
-            const bulkMovieMsgDates = grp.members.map((m) => m.msgDateMs).filter((t) => t > 0);
-            const realMovieDateMs =
-              (bulkMovieMsgDates.length > 0 ? Math.min(...bulkMovieMsgDates) : grp.primary.msgDateMs) || Date.now();
-            const deterministicDocId = `tg_${cleanChannelId}_${grp.primary.msgId}`;
+            const realMovieDateMs = realMsgDateMs || Date.now();
+            const deterministicDocId = `tg_${cleanChannelId}_${effectivePrimary.msgId}`;
+            const sourceCaptionVal = `${mergedParsed.cleanTitle}${mergedParsed.year ? ` (${mergedParsed.year})` : ''}`;
             const movieDocPayload = {
               id: deterministicDocId,
               title: matched.title.trim(),
@@ -7066,8 +7313,10 @@ async function runBulkChannelSyncWorker(params: {
               featured: true,
               published: true,
               qualityBadge: badge,
+              sourceFileName: effectivePrimary.fileName || '',
+              sourceCaption: sourceCaptionVal,
               duration: bestDurSec || parseDurationToSeconds(matched.runtime) || 0,
-              telegramMsgId: grp.primary.msgId,
+              telegramMsgId: effectivePrimary.msgId,
               telegramChannelId: cleanChannelId,
               telegramDateMs: realMovieDateMs,
               updatedAt: Date.now(),
@@ -7075,7 +7324,7 @@ async function runBulkChannelSyncWorker(params: {
             };
 
             seedCatalogMap.set(deterministicDocId, movieDocPayload);
-            existingUrlSet.add(bestStream.toLowerCase());
+            grp.members.forEach((m) => existingUrlSet.add(m.streamUrl.toLowerCase()));
             existingRecords.push({
               id: deterministicDocId,
               imdbId: (matched.imdbId || '').trim(),
@@ -7085,6 +7334,9 @@ async function runBulkChannelSyncWorker(params: {
               originalCategory: catToSave,
               isSeries: false,
               qualityBadge: badge,
+              sourceFileName: effectivePrimary.fileName || '',
+              sourceCaption: sourceCaptionVal,
+              posterUrl: cleanPoster,
               streamingUrl: bestStream.trim(),
               videoQualities: filteredQualities,
               seasons: [],

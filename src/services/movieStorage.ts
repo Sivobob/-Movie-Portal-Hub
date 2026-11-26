@@ -201,11 +201,11 @@ export function getNewEpisodesWithin24h(
 
 export function sortMoviesList<T extends Partial<MovieData>>(list: T[]): T[] {
   return [...list].sort((a, b) => {
+    const aTime = getTimestampMs(a.telegramDateMs) || getTimestampMs(a.createdAt) || getTimestampMs(a.updatedAt) || 0;
+    const bTime = getTimestampMs(b.telegramDateMs) || getTimestampMs(b.createdAt) || getTimestampMs(b.updatedAt) || 0;
+    if (bTime !== aTime) return bTime - aTime;
     const yearDiff = (Number(b.releaseYear) || 0) - (Number(a.releaseYear) || 0);
     if (yearDiff !== 0) return yearDiff;
-    const aTime = getTimestampMs(a.telegramDateMs) || getTimestampMs(a.createdAt) || getTimestampMs(a.updatedAt);
-    const bTime = getTimestampMs(b.telegramDateMs) || getTimestampMs(b.createdAt) || getTimestampMs(b.updatedAt);
-    if (bTime !== aTime) return bTime - aTime;
     return String(a.title || '').localeCompare(String(b.title || ''));
   });
 }

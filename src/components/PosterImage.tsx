@@ -19,7 +19,7 @@ interface PosterImageProps {
   compactFallback?: boolean;
 }
 
-const ALLOWED_PROXY_HOST_RE = /^https?:\/\/([^/]*\.)?(media-amazon\.com|media-imdb\.com|images-amazon\.com|upload\.wikimedia\.org|image\.tmdb\.org|images\.unsplash\.com)\//i;
+const ALLOWED_PROXY_HOST_RE = /^https?:\/\/([^/]*\.)?(media-amazon\.com|media-imdb\.com|images-amazon\.com|upload\.wikimedia\.org|image\.tmdb\.org|images\.unsplash\.com|static\.toiimg\.com|mzstatic\.com)\//i;
 
 export default function PosterImage({
   posterUrl,

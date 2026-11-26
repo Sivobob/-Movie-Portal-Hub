@@ -109,16 +109,14 @@ export default function HomePage() {
   const featuredMovies = useMemo(() => {
     const FORTY_EIGHT_HOURS_MS = 48 * 60 * 60 * 1000;
 
-    // Strictly ONLY 2026 releases uploaded within the last 2 days (48 hours);
-    // once >48h pass they automatically leave the Featured Slide while remaining in the app.
-    const brandNew2026 = movies
+    // Recently added titles (uploaded in last 48 hours) or verified 2026 releases
+    const brandNewRecent = movies
       .filter((m: any) => {
         if (!m || m.published === false) return false;
-        if (!is2026Release(m)) return false;
         const t = getTimestampMs(m.telegramDateMs) || getTimestampMs(m.createdAt) || 0;
-        if (t <= 0) return false;
+        if (t <= 0) return is2026Release(m);
         const ageMs = nowMs - t;
-        return ageMs >= -60_000 && ageMs < FORTY_EIGHT_HOURS_MS;
+        return (ageMs >= -60_000 && ageMs < FORTY_EIGHT_HOURS_MS) || is2026Release(m);
       })
       .sort((a: any, b: any) => {
         const aTime = getTimestampMs(a.telegramDateMs) || getTimestampMs(a.createdAt) || 0;
@@ -126,10 +124,10 @@ export default function HomePage() {
         return bTime - aTime;
       });
 
-    if (brandNew2026.length > 0) {
-      return brandNew2026.slice(0, 5);
+    if (brandNewRecent.length > 0) {
+      return brandNewRecent.slice(0, 6);
     }
-    return movies.slice(0, 5);
+    return movies.slice(0, 6);
   }, [movies, nowMs]);
 
   const categoryRef = useRef(category);
@@ -654,8 +652,8 @@ export default function HomePage() {
   }, [movies, nowMs]);
 
   const latestMoviesAndSeries = useMemo(() => {
-    // Strictly ONLY movies and web series released in 2026
-    return movies.filter((m: any) => is2026Release(m)).slice(0, 20);
+    // Show newly uploaded / added movies and web series first (top of sorted catalog)
+    return movies.slice(0, 25);
   }, [movies]);
 
   // Dynamic Genre filtering helpers

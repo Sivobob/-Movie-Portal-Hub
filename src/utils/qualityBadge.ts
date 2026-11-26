@@ -1,7 +1,7 @@
 export type QualityBadgeValue = 'HD' | 'HDTC' | 'NONE';
 
 export const HOLLYWOOD_PRINT_RE =
-  /(?:^|[^a-z0-9])(?:v\d+[\s._-]*)?(?:hdtc|hd[\s._-]*tc|tc|hdts|hd[\s._-]*ts|ts|hdcam|hd[\s._-]*cam|camrip|cam[\s._-]*rip|cam|predvd|pre[\s._-]*dvd|prehd|pre[\s._-]*hd|dvdscr|dvd[\s._-]*scr|telesync|telecine|hq[\s._-]*rip|hqrip|s[\s._-]*print|sprint|1xbet|cinevood|cinevoo|cinewood|cinvood|holl[\s._-]*print(?:ed)?|hollywood[\s._-]*print(?:ed)?|hall[\s._-]*print)(?=$|[^a-z0-9])|(?:[\[(]line[\])]|(?:^|[^a-z0-9])line[\s._-]*(?:audio|dub|rip)(?=$|[^a-z0-9])|(?:480p|720p|1080p|2160p|hevc|x264|x265|hdtc|hdts|tc|cam|rip|hindi|eng(?:lish)?|japanese|jap|sub)[\s._-]+line(?=$|[^a-z0-9]))/i;
+  /(?:^|[^a-z0-9])(?:v\d+[\s._-]*)?(?:hdtc(?:[\s._-]*rip)?|hd[\s._-]*tc|tcrip|tc[\s._-]*rip|tc|hdts(?:[\s._-]*rip)?|hd[\s._-]*ts|tsrip|ts[\s._-]*rip|ts|hdcam|hd[\s._-]*cam|camrip|cam[\s._-]*rip|cam|predvd|pre[\s._-]*dvd|prehd|pre[\s._-]*hd|pre[\s._-]*ts|dvdscr|dvd[\s._-]*scr|telesync|telecine|hq[\s._-]*rip|hqrip|s[\s._-]*print|sprint|1xbet|cinevood|cinevoo|cinewood|cinvood|holl[\s._-]*print(?:ed)?|hollywood[\s._-]*print(?:ed)?|hall[\s._-]*print|hall[\s._-]*cam|theatre[\s._-]*print|theater[\s._-]*print)(?=$|[^a-z0-9])|(?:[\[(]line[\])]|(?:^|[^a-z0-9])line[\s._-]*(?:audio|dub|rip)(?=$|[^a-z0-9])|(?:480p|720p|1080p|2160p|hevc|x264|x265|hdtc|hdts|tsrip|tc|cam|rip|hindi|eng(?:lish)?|japanese|jap|sub)[\s._-]+line(?=$|[^a-z0-9]))/i;
 
 export function isHollywoodPrintText(text?: unknown): boolean {
   const s = String(text || '')
@@ -44,14 +44,14 @@ export function isHollywoodPrintMovie(
   if (!movie) return false;
   const normBadge = normalizeQualityBadge(movie.qualityBadge);
   if (normBadge === 'HDTC') return true;
-  if (normBadge === 'HD') return false;
   if (normalizeQualityBadge(movie.printType) === 'HDTC') return true;
+  const sourceText = [movie.sourceFileName, movie.sourceCaption].filter(Boolean).join(' ');
+  if (sourceText && isHollywoodPrintText(sourceText)) return true;
+  if (normBadge === 'HD') return false;
   return isHollywoodPrintText(
     [
       movie.qualityBadge,
       movie.printType,
-      movie.sourceFileName,
-      movie.sourceCaption,
       movie.title,
       movie.originalTitle,
       movie.description,
