@@ -126,7 +126,10 @@ export default function HomePage() {
         return bTime - aTime;
       });
 
-    return brandNew2026.slice(0, 5);
+    if (brandNew2026.length > 0) {
+      return brandNew2026.slice(0, 5);
+    }
+    return movies.slice(0, 5);
   }, [movies, nowMs]);
 
   const categoryRef = useRef(category);
@@ -385,83 +388,21 @@ export default function HomePage() {
     []
   );
 
-  const navigateCategoryBySwipe = (direction: 'left' | 'right') => {
-    const currentIdx = folderTabs.findIndex((t) => t.value === category);
-    const activeIdx = currentIdx >= 0 ? currentIdx : 0;
-    if (direction === 'left') {
-      const nextIdx = (activeIdx + 1) % folderTabs.length;
-      setCategory(folderTabs[nextIdx].value, true);
-    } else {
-      const prevIdx = (activeIdx - 1 + folderTabs.length) % folderTabs.length;
-      setCategory(folderTabs[prevIdx].value, true);
-    }
-  };
-
-  const pageTouchStartRef = useRef<{ x: number; y: number; time: number; insideHScroll: boolean } | null>(null);
-
-  const handlePageTouchStart = (e: React.TouchEvent) => {
-    if (selectedMovie || playingMovie) return;
-    const touch = e.touches[0];
-    if (!touch) return;
-    const target = e.target as HTMLElement | null;
-    const insideHScroll = Boolean(target?.closest?.('.overflow-x-auto, [data-no-swipe]'));
-    pageTouchStartRef.current = {
-      x: touch.clientX,
-      y: touch.clientY,
-      time: Date.now(),
-      insideHScroll,
-    };
-  };
-
-  const handlePageTouchEnd = (e: React.TouchEvent) => {
-    if (!pageTouchStartRef.current) return;
-    const start = pageTouchStartRef.current;
-    pageTouchStartRef.current = null;
-    if (selectedMovie || playingMovie) return;
-
-    const touch = e.changedTouches[0];
-    if (!touch) return;
-    const diffX = touch.clientX - start.x;
-    const diffY = touch.clientY - start.y;
-    const absX = Math.abs(diffX);
-    const absY = Math.abs(diffY);
-    const elapsed = Date.now() - start.time;
-
-    if (absX >= 45 && absX > absY * 1.35 && elapsed < 650) {
-      if (start.insideHScroll && absX < 90) return;
-      if (diffX < 0) {
-        navigateCategoryBySwipe('left');
-      } else {
-        navigateCategoryBySwipe('right');
-      }
-    }
-  };
-
   const handleManualSwipe = (direction: 'left' | 'right') => {
-    if (featuredMovies.length <= 1) {
-      navigateCategoryBySwipe(direction);
-      return;
-    }
+    if (featuredMovies.length <= 1) return;
     handleInteractionStart();
     if (direction === 'left') {
-      if (activeSlideIndex === featuredMovies.length - 1) {
-        navigateCategoryBySwipe('left');
-      } else {
-        setSlideDirection(1);
-        setActiveSlideIndex((prev) => (prev + 1) % featuredMovies.length);
-      }
+      setSlideDirection(1);
+      setActiveSlideIndex((prev) => (prev + 1) % featuredMovies.length);
     } else {
-      if (activeSlideIndex === 0) {
-        navigateCategoryBySwipe('right');
-      } else {
-        setSlideDirection(-1);
-        setActiveSlideIndex((prev) => (prev - 1 + featuredMovies.length) % featuredMovies.length);
-      }
+      setSlideDirection(-1);
+      setActiveSlideIndex((prev) => (prev - 1 + featuredMovies.length) % featuredMovies.length);
     }
     handleInteractionEnd();
   };
 
   const handleTouchStart = (e: React.TouchEvent | React.MouseEvent) => {
+    e.stopPropagation();
     const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
     const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
     touchStartPosRef.current = { x: clientX, y: clientY, time: Date.now() };
@@ -471,6 +412,7 @@ export default function HomePage() {
   };
 
   const handleTouchMove = (e: React.TouchEvent | React.MouseEvent) => {
+    e.stopPropagation();
     if (!touchStartPosRef.current) return;
     const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
     const clientY = 'touches' in e ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
@@ -483,6 +425,7 @@ export default function HomePage() {
   };
 
   const handleTouchEnd = (e: React.TouchEvent | React.MouseEvent) => {
+    e.stopPropagation();
     if (touchStartPosRef.current) {
       const clientX =
         'changedTouches' in e ? e.changedTouches[0].clientX : (e as React.MouseEvent).clientX;
@@ -786,8 +729,6 @@ export default function HomePage() {
   return (
     <div
       className="relative flex-1 w-full max-w-full bg-black text-white flex flex-col select-none touch-pan-y pt-0 pb-[calc(5.75rem+env(safe-area-inset-bottom))]"
-      onTouchStart={handlePageTouchStart}
-      onTouchEnd={handlePageTouchEnd}
     >
 
       {toastMessage && (

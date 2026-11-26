@@ -14,8 +14,8 @@ import { guardedFirestoreWrite, isFirestoreWriteAllowed } from './firestoreQuota
 export const APP_UPDATE_COLLECTION = 'admins';
 export const APP_UPDATE_DOC_ID = 'android_update';
 
-export const CURRENT_VERSION_NAME = '3.5.285';
-export const CURRENT_VERSION_CODE = 35285;
+export const CURRENT_VERSION_NAME = '3.5.289';
+export const CURRENT_VERSION_CODE = 35289;
 
 export const OFFICIAL_APK_DIRECT_URL =
   'https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk';
@@ -157,20 +157,24 @@ export function isAppUpdateRequired(
     return false;
   }
 
+  // If installed version is >= latest version, NEVER require update!
+  if (latestVer && installed.versionName) {
+    if (compareVersions(installed.versionName, latestVer) >= 0) {
+      return false;
+    }
+  }
+  if (latestCode > 0 && installed.versionCode > 0) {
+    if (installed.versionCode >= latestCode) {
+      return false;
+    }
+  }
+
   // Check minimum required version
   if (minVersion && minVersion !== '1.0.0' && installed.versionName) {
     if (compareVersions(installed.versionName, minVersion) < 0) return true;
   }
   if (minCode > 1 && installed.versionCode > 0) {
     if (installed.versionCode < minCode) return true;
-  }
-
-  // Check latest version (if a newer release is published, show update prompt)
-  if (latestVer && installed.versionName) {
-    if (compareVersions(installed.versionName, latestVer) < 0) return true;
-  }
-  if (latestCode > 0 && installed.versionCode > 0) {
-    if (installed.versionCode < latestCode) return true;
   }
 
   return false;

@@ -34,6 +34,38 @@ jobs:
           rm -f package-lock.json
           npm install --legacy-peer-deps
 
+      - name: Sync Release Version
+        run: |
+          node -e '
+            const fs = require("fs");
+            const runNum = Math.max(289, Number(process.env.GITHUB_RUN_NUMBER || 289));
+            const verName = `3.5.${runNum}`;
+            const verCode = 35000 + runNum;
+
+            const cfgPath = "src/services/appUpdateConfig.ts";
+            let cfg = fs.readFileSync(cfgPath, "utf8");
+            cfg = cfg.replace(/CURRENT_VERSION_NAME\s*=\s*\x27[^\x27]+\x27/, `CURRENT_VERSION_NAME = \x27${verName}\x27`);
+            cfg = cfg.replace(/CURRENT_VERSION_CODE\s*=\s*\d+/, `CURRENT_VERSION_CODE = ${verCode}`);
+            fs.writeFileSync(cfgPath, cfg);
+
+            const gradlePath = "android/app/build.gradle";
+            let gradle = fs.readFileSync(gradlePath, "utf8");
+            gradle = gradle.replace(/versionCode\s+\d+/, `versionCode ${verCode}`);
+            gradle = gradle.replace(/versionName\s+"[^"]+"/, `versionName "${verName}"`);
+            fs.writeFileSync(gradlePath, gradle);
+
+            const verJsonPath = "public/version.json";
+            if (fs.existsSync(verJsonPath)) {
+              const vj = JSON.parse(fs.readFileSync(verJsonPath, "utf8"));
+              vj.latestVersion = verName;
+              vj.minimumRequiredVersion = verName;
+              vj.latestVersionCode = verCode;
+              vj.minimumRequiredVersionCode = verCode;
+              fs.writeFileSync(verJsonPath, JSON.stringify(vj, null, 2) + "\n");
+            }
+            console.log(`Synced release version to ${verName} (${verCode})`);
+          '
+
       - name: Build web app
         env:
           VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || secrets.VITE_API_BASE_URL || '' }}

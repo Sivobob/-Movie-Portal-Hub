@@ -145,6 +145,8 @@ public class MainActivity extends BridgeActivity {
     private static final String FIRESTORE_BACKEND_DOC_URL =
         "https://firestore.googleapis.com/v1/projects/gen-lang-client-0267042672/databases/ai-studio-movieportalhub-664a3e40-85f3-4758-945e-fd031bdc459f/documents/admins/backend";
     private static final String[] LIVE_WEB_CANDIDATES = new String[] {
+        "https://ais-pre-e2ezio27fl3yrqw6mye2bv-338461367324.asia-northeast1.run.app",
+        "https://ais-dev-e2ezio27fl3yrqw6mye2bv-338461367324.asia-northeast1.run.app",
         "https://ais-pre-xnvcffdn7a5ydibjtjrezd-835315626292.asia-northeast1.run.app",
         "https://ais-dev-xnvcffdn7a5ydibjtjrezd-835315626292.asia-northeast1.run.app",
         "https://ais-pre-yaniwuwl6wc7ivl5tz2bbo-755452514312.asia-northeast1.run.app"
@@ -3333,11 +3335,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.285");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.289");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.285\",\"versionCode\":35285}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.289\",\"versionCode\":35289}";
             }
         }
 

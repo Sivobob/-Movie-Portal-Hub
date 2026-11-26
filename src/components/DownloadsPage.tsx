@@ -7,8 +7,8 @@ import DownloadsView from './DownloadsView';
 import MovieDetailsModal from './MovieDetailsModal';
 import VideoPlayerModal from './VideoPlayerModal';
 import { useAuth } from '../context/AuthContext';
+import { useMovies } from '../context/MoviesContext';
 import {
-  fetchMoviesFromFirestore,
   getLocalMovies,
   sortMoviesList,
   getEpisodeDisplayLabel,
@@ -36,6 +36,7 @@ interface LocalPickedVideo {
 export default function DownloadsPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { movies: rawMovies } = useMovies();
   const {
     downloads,
     activeDownloads,
@@ -47,9 +48,6 @@ export default function DownloadsPage() {
 
   const [activeTab, setActiveTab] = useState<DownloadTab>('moviebox');
   const [storageLabel, setStorageLabel] = useState<string>('');
-  const [allMovies, setAllMovies] = useState<any[]>(() =>
-    sortMoviesList(getLocalMovies().filter((m: any) => m.published !== false))
-  );
   const [familyMode, setFamilyMode] = useState<boolean>(() => getAppPreferences().familyMode);
   const [forYouOffset, setForYouOffset] = useState<number>(0);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
@@ -61,6 +59,11 @@ export default function DownloadsPage() {
   const [playingMovie, setPlayingMovie] = useState<any | null>(null);
   const [activeSeasonIndex, setActiveSeasonIndex] = useState<number>(0);
   const [offlineAlert, setOfflineAlert] = useState<string | null>(null);
+
+  const allMovies = useMemo(
+    () => (familyMode ? rawMovies.filter((m) => !isMatureContent(m)) : rawMovies),
+    [rawMovies, familyMode]
+  );
 
   const selectedMovieRef = useRef(selectedMovie);
   const playingMovieRef = useRef(playingMovie);
@@ -124,17 +127,9 @@ export default function DownloadsPage() {
     };
   }, [downloads]);
 
-  // Load live catalog from Firestore & user's My List
+  // Load user's My List
   useEffect(() => {
     let mounted = true;
-    fetchMoviesFromFirestore()
-      .then((list) => {
-        if (mounted && Array.isArray(list) && list.length > 0) {
-          setAllMovies(sortMoviesList(list.filter((m: any) => m.published !== false)));
-        }
-      })
-      .catch(() => {});
-
     const uid = user?.uid || 'guest_user';
     fetchMyList(uid)
       .then((items) => {
@@ -402,12 +397,6 @@ export default function DownloadsPage() {
 
   const handleRefreshContent = async () => {
     setIsRefreshing(true);
-    try {
-      const fresh = await fetchMoviesFromFirestore();
-      if (Array.isArray(fresh) && fresh.length > 0) {
-        setAllMovies(sortMoviesList(fresh.filter((m: any) => m.published !== false)));
-      }
-    } catch {}
     setForYouOffset((prev) => (filteredPool.length > 0 ? (prev + 3) % filteredPool.length : 0));
     setTimeout(() => setIsRefreshing(false), 350);
   };

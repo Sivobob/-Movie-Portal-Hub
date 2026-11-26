@@ -96,10 +96,18 @@ app.use('/api', (req, res, next) => {
 app.get('/api/health', (req, res) => {
   const creds = getTelegramCredentials();
   const telegramConfigured = Boolean(creds.apiId && creds.apiHash && (creds.botToken || creds.sessionStr));
+  let appVersion = '3.5.289';
+  try {
+    const vPath = path.resolve(__dirname, 'public/version.json');
+    if (fs.existsSync(vPath)) {
+      const vj = JSON.parse(fs.readFileSync(vPath, 'utf8'));
+      if (vj?.latestVersion) appVersion = String(vj.latestVersion);
+    }
+  } catch {}
   res.json({
     status: 'ok',
     time: new Date().toISOString(),
-    version: '3.5.285',
+    version: appVersion,
     ffmpegAvailable: FFMPEG_AVAILABLE,
     ffprobeAvailable: FFPROBE_AVAILABLE,
     telegramConfigured,

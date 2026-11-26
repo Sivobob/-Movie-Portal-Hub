@@ -48,7 +48,9 @@ export default function UpdateNotification() {
       return;
     }
 
-    const needed = isAppUpdateRequired(inst, cfg);
+    const dismissedVer = typeof window !== 'undefined' ? localStorage.getItem('mp_dismissed_update_version') : null;
+    const isDismissed = Boolean(dismissedVer && cfg.latestVersion && dismissedVer === cfg.latestVersion);
+    const needed = !isDismissed && isAppUpdateRequired(inst, cfg);
     setUpdateRequired(needed);
     if (typeof window !== 'undefined') {
       (window as any).__MOVIE_PORTAL_MANDATORY_UPDATE__ = needed;
@@ -167,6 +169,10 @@ export default function UpdateNotification() {
   }, [isNative, updateRequired]);
 
   if (!isNative || !updateRequired || !remoteConfig) {
+    return null;
+  }
+  const dismissedVer = typeof window !== 'undefined' ? localStorage.getItem('mp_dismissed_update_version') : null;
+  if (dismissedVer && remoteConfig && dismissedVer === remoteConfig.latestVersion) {
     return null;
   }
 
@@ -333,7 +339,18 @@ export default function UpdateNotification() {
           {!isDownloading && (
             <button
               type="button"
-              onClick={() => setUpdateRequired(false)}
+              onClick={() => {
+                if (remoteConfig?.latestVersion) {
+                  localStorage.setItem('mp_dismissed_update_version', remoteConfig.latestVersion);
+                }
+                setUpdateRequired(false);
+                if (typeof window !== 'undefined') {
+                  (window as any).__MOVIE_PORTAL_MANDATORY_UPDATE__ = false;
+                  try {
+                    (window as any).AndroidPlayerBridge?.setMandatoryUpdateRequired?.(false);
+                  } catch {}
+                }
+              }}
               className="w-full bg-transparent hover:bg-neutral-800 text-gray-400 hover:text-white font-medium text-[11px] py-2 px-4 rounded-xl cursor-pointer transition-colors"
             >
               <span>Continue Using App (Remind Later)</span>
