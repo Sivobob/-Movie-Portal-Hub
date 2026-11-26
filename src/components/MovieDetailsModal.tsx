@@ -362,7 +362,7 @@ export default function MovieDetailsModal({
   };
 
   const watchNowQualityLabel = getWatchNowQualityLabel(movie);
-  const isHollywoodPrint = watchNowQualityLabel === 'Hollywood Print';
+  const isHollywoodPrint = watchNowQualityLabel === 'Holl Print';
   const realYear = movie.releaseYear ? String(movie.releaseYear) : '';
   const metaLineItems = [
     realYear,

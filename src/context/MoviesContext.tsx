@@ -64,7 +64,13 @@ function mergeMovieRecord(existing: MovieData | undefined, incoming: MovieData, 
 
   const incomingHasAuthenticSeedDate = incomingTgDate > 0 && existingTgDate <= 0;
 
-  const base = preferIncoming
+  const existingBadge = String(existing.qualityBadge || '').trim().toUpperCase();
+  const incomingBadge = String(incoming.qualityBadge || '').trim().toUpperCase();
+  const incomingUpgradedFromPrint = existingBadge === 'HDTC' && incomingBadge === 'HD';
+
+  const base = incomingUpgradedFromPrint
+    ? incoming
+    : preferIncoming
     ? existingUpdated > incomingUpdated &&
       !incomingHasMoreContent &&
       !incomingHasAuthenticSeedDate &&
@@ -91,16 +97,15 @@ function mergeMovieRecord(existing: MovieData | undefined, incoming: MovieData, 
     ? existing.backdropUrl
     : bestPoster;
 
-  const existingBadge = String(existing.qualityBadge || '').trim().toUpperCase();
-  const incomingBadge = String(incoming.qualityBadge || '').trim().toUpperCase();
-  const resolvedBadge =
-    incomingBadge && incomingBadge !== 'NONE'
-      ? (incomingUpdated >= existingUpdated || !existingBadge || existingBadge === 'NONE'
-          ? incoming.qualityBadge
-          : existing.qualityBadge)
-      : existingBadge && existingBadge !== 'NONE'
-      ? existing.qualityBadge
-      : base.qualityBadge;
+  const resolvedBadge = incomingUpgradedFromPrint
+    ? incoming.qualityBadge
+    : incomingBadge && incomingBadge !== 'NONE'
+    ? (incomingUpdated >= existingUpdated || !existingBadge || existingBadge === 'NONE'
+        ? incoming.qualityBadge
+        : existing.qualityBadge)
+    : existingBadge && existingBadge !== 'NONE'
+    ? existing.qualityBadge
+    : base.qualityBadge;
 
   return {
     ...base,

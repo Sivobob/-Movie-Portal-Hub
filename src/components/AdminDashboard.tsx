@@ -2742,6 +2742,68 @@ export default function AdminDashboard() {
         return;
       }
 
+      // If a Holl Print version of this movie already exists and admin is saving an HD version, upgrade the existing record in-place instead of creating a duplicate!
+      const existingHollPrintMatch = movies.find(
+        (m) =>
+          ((imdbId.trim() && m.imdbId && m.imdbId.toLowerCase() === imdbId.trim().toLowerCase()) ||
+            (m.title && m.title.trim().toLowerCase() === title.trim().toLowerCase())) &&
+          isHollywoodPrintMovie(m) &&
+          qualityBadge !== 'HDTC'
+      );
+
+      if (existingHollPrintMatch) {
+        const wRes = isFirestoreWriteAllowed()
+          ? await guardedFirestoreWrite(() =>
+              updateDoc(
+                doc(db, 'movies', existingHollPrintMatch.id),
+                {
+                  ...moviePayload,
+                  qualityBadge: 'HD',
+                  updatedAt: serverTimestamp(),
+                }
+              )
+            )
+          : { ok: false, quotaExhausted: true, error: undefined };
+
+        const updatedLocal = {
+          ...existingHollPrintMatch,
+          ...moviePayload,
+          qualityBadge: 'HD',
+          id: existingHollPrintMatch.id,
+          updatedAt: Date.now(),
+        } as MovieData;
+        saveMovieLocally(updatedLocal);
+        broadcastMoviesUpdated(existingHollPrintMatch.id, 'edit');
+        setMovies((prev) => prev.map((m) => (m.id === existingHollPrintMatch.id ? updatedLocal : m)));
+
+        if (!asDraft && notifyOnUpdate) {
+          await publishReleaseAnnouncement({
+            movieId: existingHollPrintMatch.id,
+            title: moviePayload.title,
+            releaseYear: moviePayload.releaseYear,
+            originalCategory: moviePayload.originalCategory,
+            isSeries,
+            language: moviePayload.language,
+            genre: moviePayload.genre,
+            qualityBadge: 'HD',
+            runtime: moviePayload.runtime,
+            posterUrl: moviePayload.posterUrl,
+            backdropUrl: moviePayload.backdropUrl,
+            customMessage: 'HD PRINT UPGRADED • Stream in full HD quality now!',
+          });
+        }
+
+        showNotification(
+          'success',
+          wRes.ok
+            ? `🎉 "${moviePayload.title}" Holl Print se HD me upgrade ho gayi (koi duplicate nahi bana)!`
+            : `✅ Upgraded "${moviePayload.title}" locally to HD.`
+        );
+        resetMovieForm();
+        await fetchMovies();
+        return;
+      }
+
       let newDocId = `local-${Date.now()}`;
       const addRes = isFirestoreWriteAllowed()
         ? await guardedFirestoreWrite(() =>
@@ -3903,7 +3965,7 @@ export default function AdminDashboard() {
                   <div className="grid grid-cols-3 gap-2">
                     {([
                       { value: 'HD', label: 'HD' },
-                      { value: 'HDTC', label: 'Hollywood Print (HDTC)' },
+                      { value: 'HDTC', label: 'Holl Print (HDTC)' },
                       { value: 'NONE', label: 'Auto (HD)' },
                     ] as const).map((option) => {
                       const active = qualityBadge === option.value;

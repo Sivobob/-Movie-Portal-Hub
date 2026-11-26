@@ -6,6 +6,7 @@ import {
   getDocFromServer,
   serverTimestamp,
   setDoc,
+  updateDoc,
 } from 'firebase/firestore';
 import {
   AlertCircle,
@@ -36,7 +37,12 @@ import { getDisplayCategory } from '../utils/categoryMapping';
 import { formatHumanDuration, parseDurationToSeconds } from '../utils/duration';
 import { normalizeEpisodeForSave } from '../utils/playerHelpers';
 import { upgradePosterUrl } from '../utils/posterUrl';
-import { isHollywoodPrintText, normalizeQualityBadge } from '../utils/qualityBadge';
+import {
+  getQualityUpgradeDecision,
+  isHollywoodPrintMovie,
+  isHollywoodPrintText,
+  normalizeQualityBadge,
+} from '../utils/qualityBadge';
 import { parseTelegramUrl } from '../utils/telegramParser';
 
 export interface AutoMatchCandidate {
@@ -160,6 +166,10 @@ function normalizeDupTitle(title: string): string {
   return String(title || '')
     .toLowerCase()
     .replace(/\((?:tv\s*series|film|movie|series|\d{4})\)/gi, '')
+    .replace(
+      /\b(?:hdtc|hdts|hdcam|camrip|predvd|dvdscr|telesync|telecine|cinevood|cinevoo|cinewood|cinvood|holl[\s._-]*print(?:ed)?|hollywood[\s._-]*print(?:ed)?|hall[\s._-]*print)\b/gi,
+      ''
+    )
     .replace(/&/g, 'and')
     .replace(/[^a-z0-9]+/g, '');
 }
@@ -174,7 +184,7 @@ function buildFallbackPosterDataUri(title: string, year?: number): string {
 function collectExistingUrlsAndImdb(movies: MovieData[]): {
   urls: Set<string>;
   imdbIds: Set<string>;
-  existingTitles: Array<{ title: string; originalTitle: string; releaseYear: number; category: string }>;
+  existingTitles: Array<{ title: string; originalTitle: string; releaseYear: number; category: string; qualityBadge?: string }>;
   isTitleDuplicate: (titles: Array<string | undefined>, releaseYear?: number, category?: string) => boolean;
   findExistingMatch: (
     imdbId: string | undefined,
@@ -185,8 +195,8 @@ function collectExistingUrlsAndImdb(movies: MovieData[]): {
 } {
   const urls = new Set<string>();
   const imdbIds = new Set<string>();
-  const existingTitles: Array<{ title: string; originalTitle: string; releaseYear: number; category: string }> = [];
-  const entries: Array<{ movie: MovieData; k1: string; k2: string; year: number; isSeries: boolean }> = [];
+  const existingTitles: Array<{ title: string; originalTitle: string; releaseYear: number; category: string; qualityBadge?: string }> = [];
+  const entries: Array<{ movie: MovieData; k1: string; k2: string; year: number; isSeries: boolean; isHollPrint: boolean }> = [];
 
   for (const m of movies) {
     if (m.imdbId) imdbIds.add(String(m.imdbId).trim().toLowerCase());
@@ -210,11 +220,14 @@ function collectExistingUrlsAndImdb(movies: MovieData[]): {
     }
     const cat = String(m.originalCategory || '');
     const mIsSeries = cat.toLowerCase().includes('series') || (Array.isArray(m.seasons) && m.seasons.length > 0);
+    const badge = normalizeQualityBadge((m as any)?.qualityBadge);
+    const isHollPrint = isHollywoodPrintMovie(m as any);
     existingTitles.push({
       title: String(m.title || ''),
       originalTitle: String((m as any).originalTitle || ''),
       releaseYear: Number(m.releaseYear) || 0,
       category: cat,
+      qualityBadge: badge !== 'NONE' ? badge : isHollPrint ? 'HDTC' : 'HD',
     });
     entries.push({
       movie: m,
@@ -222,6 +235,7 @@ function collectExistingUrlsAndImdb(movies: MovieData[]): {
       k2: normalizeDupTitle(String((m as any).originalTitle || '')),
       year: Number(m.releaseYear) || 0,
       isSeries: mIsSeries,
+      isHollPrint,
     });
   }
 
@@ -235,7 +249,7 @@ function collectExistingUrlsAndImdb(movies: MovieData[]): {
           if (ck !== ek) continue;
           if (ex.isSeries || candSeries) return true;
           if (!releaseYear || !ex.year) return true;
-          if (Math.abs(releaseYear - ex.year) <= 1) return true;
+          if (Math.abs(releaseYear - ex.year) <= (ex.isHollPrint ? 2 : 1)) return true;
         }
       }
     }
@@ -262,7 +276,9 @@ function collectExistingUrlsAndImdb(movies: MovieData[]): {
         for (const ek of eKeys) {
           if (ck !== ek) continue;
           if (ex.isSeries || isSeries) return ex.movie;
-          if (!releaseYear || !ex.year || Math.abs(releaseYear - ex.year) <= 1) return ex.movie;
+          if (!releaseYear || !ex.year || Math.abs(releaseYear - ex.year) <= (ex.isHollPrint ? 2 : 1)) {
+            return ex.movie;
+          }
         }
       }
     }
@@ -286,7 +302,8 @@ function mergeEpisodeIntoClientSeasons(
     newEpisodeEnabledAt?: number;
     createdAt?: number;
     addedAt?: number;
-  }
+  },
+  replaceExistingEpisode = false
 ): { mergedSeasons: any[]; added: boolean } {
   const cloned = Array.isArray(existingSeasons)
     ? existingSeasons.map((s) => ({
@@ -314,6 +331,12 @@ function mergeEpisodeIntoClientSeasons(
     (ep) => Number(ep?.episodeNumber) === newEpisode.episodeNumber && String(ep?.streamUrl || '').trim() !== ''
   );
   if (sameIdx >= 0) {
+    if (replaceExistingEpisode) {
+      targetSeason.episodes[sameIdx] = newEpisode;
+      targetSeason.episodes.sort((a, b) => (Number(a?.episodeNumber) || 0) - (Number(b?.episodeNumber) || 0));
+      cloned.sort((a, b) => a.seasonNumber - b.seasonNumber);
+      return { mergedSeasons: cloned, added: true };
+    }
     return { mergedSeasons: cloned, added: false };
   }
 
@@ -516,16 +539,25 @@ export default function TelegramAutoMovieSync({
         const pendResp = await authFetch('/api/telegram/pending-review-drafts');
         const pendJson = await pendResp.json();
         if (!cancelled && Array.isArray(pendJson?.drafts) && pendJson.drafts.length > 0) {
-          const { urls, imdbIds, isTitleDuplicate } = collectExistingUrlsAndImdb(existingMoviesRef.current);
+          const { urls, findExistingMatch } = collectExistingUrlsAndImdb(existingMoviesRef.current);
           const fresh = (pendJson.drafts as AutoMovieDraft[]).filter((d) => {
             if (d.streamUrl && urls.has(d.streamUrl.trim().toLowerCase())) return false;
             const isSeriesItem =
               d.isSeriesEpisode || String(d.originalCategory || '').toLowerCase().includes('series');
             if (isSeriesItem) return true;
-            return (
-              (!d.imdbId || !imdbIds.has(d.imdbId.trim().toLowerCase())) &&
-              !isTitleDuplicate([d.title, d.originalTitle, d.parsedTitle], d.releaseYear, d.originalCategory)
+            const matchedExisting = findExistingMatch(
+              d.imdbId,
+              [d.title, d.originalTitle, d.parsedTitle],
+              d.releaseYear,
+              false
             );
+            if (!matchedExisting) return true;
+            const dBadge = normalizeQualityBadge(
+              isHollywoodPrintText(`${d.sourceFileName} ${d.sourceCaption}`)
+                ? 'HDTC'
+                : d.qualityBadge || 'HD'
+            );
+            return getQualityUpgradeDecision(matchedExisting as any, dBadge) === 'replace_holl_print_with_hd';
           });
           if (fresh.length > 0) {
             setDrafts((prev) => {
@@ -655,15 +687,25 @@ export default function TelegramAutoMovieSync({
       );
 
       if (existingMatch && existingMatch.id) {
+        const seriesUpgrade = getQualityUpgradeDecision(existingMatch as any, badge);
+        if (seriesUpgrade === 'skip_holl_print_on_hd') {
+          return { published: false, skippedDuplicate: true };
+        }
+        const replaceExistingEp = seriesUpgrade === 'replace_holl_print_with_hd';
         const { mergedSeasons, added } = mergeEpisodeIntoClientSeasons(
           existingMatch.seasons || [],
           seasonNum,
-          epObj
+          epObj,
+          replaceExistingEp
         );
         if (!added) {
           return { published: false, skippedDuplicate: true };
         }
-        const nextStream = existingMatch.streamingUrl || epObj.streamUrl;
+        const nextStream = replaceExistingEp
+          ? epObj.streamUrl
+          : existingMatch.streamingUrl || epObj.streamUrl;
+        const nextSeriesBadge =
+          badge === 'HD' ? 'HD' : (existingMatch as any).qualityBadge || badge;
         if (isFirestoreWriteAllowed()) {
           const wRes = await guardedFirestoreWrite(() =>
             setDoc(
@@ -671,6 +713,7 @@ export default function TelegramAutoMovieSync({
               {
                 seasons: mergedSeasons,
                 streamingUrl: nextStream,
+                qualityBadge: nextSeriesBadge,
                 updatedAt: serverTimestamp(),
               },
               { merge: true }
@@ -684,6 +727,7 @@ export default function TelegramAutoMovieSync({
           ...existingMatch,
           seasons: mergedSeasons,
           streamingUrl: nextStream,
+          qualityBadge: nextSeriesBadge,
           updatedAt: nowMs,
         };
         existingMoviesRef.current = existingMoviesRef.current.map((m) =>
@@ -708,7 +752,7 @@ export default function TelegramAutoMovieSync({
             isSeries: true,
             language: existingMatch.language || draft.language,
             genre: existingMatch.genre || draft.genre,
-            qualityBadge: badge !== 'NONE' ? badge : '',
+            qualityBadge: nextSeriesBadge !== 'NONE' ? nextSeriesBadge : '',
             runtime: draft.runtime,
             posterUrl: existingMatch.posterUrl || cleanPoster,
             backdropUrl: existingMatch.backdropUrl || cleanBackdrop,
@@ -811,13 +855,73 @@ export default function TelegramAutoMovieSync({
       return { published: true };
     }
 
-    // Single Movie: merge newly uploaded quality tiers if already in Firestore
+    // Single Movie: replace Holl Print with HD OR merge newly uploaded quality tiers without duplicating
     if (existingMatch && existingMatch.id) {
+      const upgradeDecision = getQualityUpgradeDecision(existingMatch as any, badge);
+      if (upgradeDecision === 'skip_holl_print_on_hd') {
+        return { published: false, skippedDuplicate: true };
+      }
+
+      const incomingCleanQualities = Object.fromEntries(
+        Object.entries(draft.videoQualities || {}).filter(([, u]) => Boolean(String(u || '').trim()))
+      );
+
+      if (upgradeDecision === 'replace_holl_print_with_hd') {
+        const replacedStream =
+          incomingCleanQualities['1080p'] ||
+          incomingCleanQualities['4K'] ||
+          incomingCleanQualities['720p'] ||
+          draft.streamUrl.trim();
+        const nextRuntime = (draft.runtime || existingMatch.runtime || '').trim();
+        const nextDuration = draft.durationSec || parseDurationToSeconds(nextRuntime) || existingMatch.duration || 0;
+        const replaceFields: any = {
+          videoQualities: incomingCleanQualities,
+          streamingUrl: replacedStream,
+          qualityBadge: 'HD',
+          sourceFileName: draft.sourceFileName || '',
+          sourceCaption: draft.sourceCaption || '',
+          telegramMsgId: draft.msgId,
+          ...(nextRuntime ? { runtime: nextRuntime } : {}),
+          ...(nextDuration > 0 ? { duration: nextDuration } : {}),
+          ...(!existingMatch.imdbId && draft.imdbId ? { imdbId: draft.imdbId.trim() } : {}),
+          ...(String(existingMatch.posterUrl || '').startsWith('data:image/svg+xml') && cleanPoster
+            ? { posterUrl: cleanPoster, backdropUrl: cleanBackdrop }
+            : {}),
+          updatedAt: serverTimestamp(),
+        };
+        if (isFirestoreWriteAllowed()) {
+          const wRes = await guardedFirestoreWrite(() =>
+            updateDoc(doc(db, 'movies', existingMatch.id), replaceFields)
+          );
+          if (!wRes.ok && !wRes.quotaExhausted && wRes.error) {
+            throw wRes.error;
+          }
+        }
+        const updatedMovie = {
+          ...existingMatch,
+          ...replaceFields,
+          updatedAt: nowMs,
+        } as MovieData;
+        existingMoviesRef.current = existingMoviesRef.current.map((m) =>
+          m.id === existingMatch.id ? updatedMovie : m
+        );
+        saveMovieLocally(updatedMovie);
+        touchCatalogSyncMarker();
+        onMoviePublished(updatedMovie);
+        broadcastMoviesUpdated(existingMatch.id, 'edit');
+        authFetch('/api/telegram/dismiss-review-draft', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ draftId: draft.draftId }),
+        }).catch(() => {});
+        return { published: true };
+      }
+
       const mergedQualities: Record<string, string> = {
         ...((existingMatch as any).videoQualities || {}),
       };
       let qualityAdded = false;
-      for (const [qk, qUrl] of Object.entries(draft.videoQualities || {})) {
+      for (const [qk, qUrl] of Object.entries(incomingCleanQualities)) {
         if (qUrl && !mergedQualities[qk]) {
           mergedQualities[qk] = qUrl;
           qualityAdded = true;
@@ -831,6 +935,7 @@ export default function TelegramAutoMovieSync({
         mergedQualities['4K'] ||
         existingMatch.streamingUrl ||
         draft.streamUrl.trim();
+      const nextBadge = badge === 'HD' ? 'HD' : (existingMatch as any).qualityBadge || badge;
       if (isFirestoreWriteAllowed()) {
         const wRes = await guardedFirestoreWrite(() =>
           setDoc(
@@ -838,6 +943,7 @@ export default function TelegramAutoMovieSync({
             {
               videoQualities: mergedQualities,
               streamingUrl: upgradedStream,
+              qualityBadge: nextBadge,
               updatedAt: serverTimestamp(),
             },
             { merge: true }
@@ -851,6 +957,7 @@ export default function TelegramAutoMovieSync({
         ...existingMatch,
         videoQualities: mergedQualities,
         streamingUrl: upgradedStream,
+        qualityBadge: nextBadge,
         updatedAt: nowMs,
       } as MovieData;
       existingMoviesRef.current = existingMoviesRef.current.map((m) =>
