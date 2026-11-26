@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.294",
-  "minimumRequiredVersion": "3.5.294",
-  "latestVersionCode": 35294,
-  "minimumRequiredVersionCode": 35294,
+  "latestVersion": "3.5.295",
+  "minimumRequiredVersion": "3.5.295",
+  "latestVersionCode": 35295,
+  "minimumRequiredVersionCode": 35295,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Hub v3.5.294: Android app loading issue fixed (movies & series ab turant chalengi) aur Godzilla Minus Zero jaise releases par sahi Holl Print label update ho gaya hai.",
-  "releaseNotes": "v3.5.294: Fixed Android APK Telegram WebSocket domain routing & channel hashes to eliminate endless Loading..., and updated Holl Print detection & catalog badges."
+  "updateMessage": "Movie Hub v3.5.295: Android App mein sabhi movies & series ki sound (AC3/EAC3/DTS/TrueHD/Opus/AAC) aur loading problem fix ho gayi hai, aur Holl Print labels updated hain.",
+  "releaseNotes": "v3.5.295: Added built-in Media3 FFmpeg audio decoder + AudioAttributes media focus in Android APK so every movie & series plays with full sound, plus fast playback loading and Holl Print label fixes."
 }

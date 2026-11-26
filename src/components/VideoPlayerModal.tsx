@@ -1041,10 +1041,12 @@ export default function VideoPlayerModal({
         const deviceSupportsVp9 = caps.supportsVp9 !== false;
         const deviceSupportsAv1 = Boolean(caps.supportsAv1);
 
-        const ac3Unsupported = aCodec === 'ac3' && caps.supportsAc3 === false;
-        const eac3Unsupported = (aCodec === 'eac3' || aCodec === 'ec-3') && caps.supportsEac3 === false;
-        const dtsUnsupported = aCodec.includes('dts') && caps.supportsDts === false;
+        const hasFfmpegAudio = Boolean(caps.hasFfmpegAudioDecoder);
+        const ac3Unsupported = !hasFfmpegAudio && aCodec === 'ac3' && caps.supportsAc3 === false;
+        const eac3Unsupported = !hasFfmpegAudio && (aCodec === 'eac3' || aCodec === 'ec-3') && caps.supportsEac3 === false;
+        const dtsUnsupported = !hasFfmpegAudio && aCodec.includes('dts') && caps.supportsDts === false;
         const genericUnsupportedAudio =
+          !hasFfmpegAudio &&
           Boolean(info?.hasUnsupportedAudio) &&
           caps.supportsAc3 === false &&
           caps.supportsEac3 === false &&
@@ -1619,6 +1621,7 @@ export default function VideoPlayerModal({
 
     let lastAudioJson = '';
     let lastSubJson = '';
+    let exoAudioAutoMatched = false;
     let endedHandled = false;
     let escalated = false;
 
@@ -1941,7 +1944,26 @@ export default function VideoPlayerModal({
             lastAudioJson = sig;
             setRealAudioTracks(cleanAudio);
             const activeTrk = cleanAudio.find((t) => t.selected) || cleanAudio[0];
-            if (activeTrk?.label) setSelectedAudio(activeTrk.label);
+            if (!exoAudioAutoMatched && cleanAudio.length > 1) {
+              exoAudioAutoMatched = true;
+              const prefLang = verifiedLanguageRef.current.toLowerCase();
+              const preferredTrk = cleanAudio.find(
+                (t) =>
+                  String(t.lang || '').toLowerCase().includes(prefLang) ||
+                  String(t.label || '').toLowerCase().includes(prefLang)
+              );
+              if (preferredTrk && !preferredTrk.selected && typeof preferredTrk.id === 'string') {
+                try {
+                  bridge.exoSelectAudioTrack?.(preferredTrk.id);
+                  setSelectedAudio(preferredTrk.label);
+                } catch {}
+              } else if (activeTrk?.label) {
+                setSelectedAudio(activeTrk.label);
+              }
+            } else {
+              exoAudioAutoMatched = true;
+              if (activeTrk?.label) setSelectedAudio(activeTrk.label);
+            }
           }
         }
 

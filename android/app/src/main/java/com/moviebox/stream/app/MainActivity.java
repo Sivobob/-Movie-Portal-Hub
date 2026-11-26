@@ -59,6 +59,7 @@ import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
 import androidx.media3.common.Format;
 import androidx.media3.common.MediaItem;
@@ -72,11 +73,16 @@ import androidx.media3.common.text.Cue;
 import androidx.media3.common.text.CueGroup;
 import androidx.media3.datasource.DefaultDataSource;
 import androidx.media3.datasource.DefaultHttpDataSource;
+import androidx.media3.decoder.ffmpeg.FfmpegAudioRenderer;
+import androidx.media3.decoder.ffmpeg.FfmpegLibrary;
 import androidx.media3.exoplayer.DecoderCounters;
 import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.Renderer;
 import androidx.media3.exoplayer.analytics.AnalyticsListener;
+import androidx.media3.exoplayer.audio.AudioRendererEventListener;
+import androidx.media3.exoplayer.audio.AudioSink;
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy;
@@ -661,7 +667,7 @@ public class MainActivity extends BridgeActivity {
                 return pInfo.versionName.trim();
             }
         } catch (Exception ignored) {}
-        return "3.5.294";
+        return "3.5.295";
     }
 
     private int compareVersionStrings(String verA, String verB) {
@@ -694,7 +700,7 @@ public class MainActivity extends BridgeActivity {
             conn.setReadTimeout(timeoutMs);
             conn.setRequestProperty("Cache-Control", "no-store, no-cache");
             conn.setRequestProperty("Pragma", "no-cache");
-            conn.setRequestProperty("User-Agent", "MovieHub-Android-LiveSync/3.5.294");
+            conn.setRequestProperty("User-Agent", "MovieHub-Android-LiveSync/3.5.295");
             int code = conn.getResponseCode();
             if (code < 200 || code >= 300) return null;
             try (InputStream is = conn.getInputStream();
@@ -1298,8 +1304,36 @@ public class MainActivity extends BridgeActivity {
             )
             .build();
 
-        DefaultRenderersFactory renderersFactory = new DefaultRenderersFactory(this)
-            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
+        DefaultRenderersFactory renderersFactory = new DefaultRenderersFactory(this) {
+            @Override
+            protected void buildAudioRenderers(
+                Context context,
+                int extensionRendererMode,
+                MediaCodecSelector mediaCodecSelector,
+                boolean enableDecoderFallback,
+                AudioSink audioSink,
+                Handler eventHandler,
+                AudioRendererEventListener eventListener,
+                ArrayList<Renderer> out
+            ) {
+                try {
+                    if (FfmpegLibrary.isAvailable()) {
+                        out.add(new FfmpegAudioRenderer(eventHandler, eventListener, audioSink));
+                    }
+                } catch (Throwable ignored) {}
+                super.buildAudioRenderers(
+                    context,
+                    DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF,
+                    mediaCodecSelector,
+                    enableDecoderFallback,
+                    audioSink,
+                    eventHandler,
+                    eventListener,
+                    out
+                );
+            }
+        }
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             .setEnableDecoderFallback(true);
 
         if (preferSoftware) {
@@ -1326,15 +1360,23 @@ public class MainActivity extends BridgeActivity {
 
         DefaultDataSource.Factory dataSourceFactory = new DefaultDataSource.Factory(this, httpFactory);
 
+        AudioAttributes mediaAudioAttributes = new AudioAttributes.Builder()
+            .setUsage(C.USAGE_MEDIA)
+            .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+            .build();
+
         exoPlayer = new ExoPlayer.Builder(this, renderersFactory)
             .setMediaSourceFactory(
                 new DefaultMediaSourceFactory(this)
                     .setDataSourceFactory(dataSourceFactory)
                     .setLoadErrorHandlingPolicy(new DefaultLoadErrorHandlingPolicy(4))
             )
+            .setAudioAttributes(mediaAudioAttributes, true)
+            .setHandleAudioBecomingNoisy(true)
             .setLoadControl(loadControl)
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build();
+        exoPlayer.setVolume(1.0f);
 
         exoPlayer.addAnalyticsListener(new AnalyticsListener() {
             @Override
@@ -1594,9 +1636,12 @@ public class MainActivity extends BridgeActivity {
             ensureExoPlayer(preferSoftware);
             if (exoPlayer != null) {
                 try {
+                    exoPlayer.setVolume(1.0f);
                     exoPlayer.setTrackSelectionParameters(
                         exoPlayer.getTrackSelectionParameters()
                             .buildUpon()
+                            .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+                            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
                             .clearOverridesOfType(C.TRACK_TYPE_TEXT)
                             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
                             .build()
@@ -1615,10 +1660,12 @@ public class MainActivity extends BridgeActivity {
                         if (exoTextureView != null) exoPlayer.setVideoTextureView(exoTextureView);
                     }
 
-                    // Disable text subtitles by default until user selects one
+                    // Ensure audio tracks are enabled and subtitles stay disabled by default until user selects one
+                    exoPlayer.setVolume(1.0f);
                     exoPlayer.setTrackSelectionParameters(
                         exoPlayer.getTrackSelectionParameters()
                             .buildUpon()
+                            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
                             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
                             .build()
                     );
@@ -2292,7 +2339,7 @@ public class MainActivity extends BridgeActivity {
             conn.setConnectTimeout(30000);
             conn.setReadTimeout(60000);
             conn.setRequestMethod("GET");
-            conn.setRequestProperty("User-Agent", "MoviePortal-AndroidUpdater/3.5.294");
+            conn.setRequestProperty("User-Agent", "MoviePortal-AndroidUpdater/3.5.295");
             conn.setRequestProperty("Accept", "application/vnd.android.package-archive,application/octet-stream,*/*");
             conn.setRequestProperty("Accept-Encoding", "identity");
             conn.setRequestProperty("Cache-Control", "no-cache");
@@ -3335,11 +3382,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.294");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.295");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.294\",\"versionCode\":35294}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.295\",\"versionCode\":35295}";
             }
         }
 
@@ -3665,6 +3712,12 @@ public class MainActivity extends BridgeActivity {
                     }
                 }
 
+                boolean hasFfmpegAudio = false;
+                try {
+                    hasFfmpegAudio = FfmpegLibrary.isAvailable();
+                } catch (Throwable ignored) {}
+
+                json.put("hasFfmpegAudioDecoder", hasFfmpegAudio);
                 json.put("supportsAvc", supportsAvc);
                 json.put("hasHardwareAvc", hasHardwareAvc);
                 json.put("maxAvcWidth", maxAvcWidth);
@@ -3680,19 +3733,20 @@ public class MainActivity extends BridgeActivity {
                 json.put("hasSoftwareHevc", hasSoftwareHevc);
                 json.put("maxHevcWidth", maxHevcWidth);
                 json.put("maxHevcHeight", maxHevcHeight);
-                json.put("supportsAac", supportsAac);
-                json.put("supportsMp3", supportsMp3);
-                json.put("supportsAc3", supportsAc3);
-                json.put("supportsEac3", supportsEac3);
-                json.put("supportsDts", supportsDts);
-                json.put("supportsOpus", supportsOpus);
-                json.put("supportsVorbis", supportsVorbis);
-                json.put("supportsFlac", supportsFlac);
+                json.put("supportsAac", supportsAac || hasFfmpegAudio);
+                json.put("supportsMp3", supportsMp3 || hasFfmpegAudio);
+                json.put("supportsAc3", supportsAc3 || hasFfmpegAudio);
+                json.put("supportsEac3", supportsEac3 || hasFfmpegAudio);
+                json.put("supportsDts", supportsDts || hasFfmpegAudio);
+                json.put("supportsTrueHd", hasFfmpegAudio);
+                json.put("supportsOpus", supportsOpus || hasFfmpegAudio);
+                json.put("supportsVorbis", supportsVorbis || hasFfmpegAudio);
+                json.put("supportsFlac", supportsFlac || hasFfmpegAudio);
                 json.put("hardwareHevcDecoders", hardwareDecoders);
                 json.put("softwareHevcDecoders", softwareDecoders);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"sdkInt\":" + Build.VERSION.SDK_INT + ",\"supportsAvc\":true,\"hasHardwareAvc\":true,\"supportsHevc\":false,\"supportsHevc10Bit\":false,\"supportsAac\":true}";
+                return "{\"sdkInt\":" + Build.VERSION.SDK_INT + ",\"hasFfmpegAudioDecoder\":true,\"supportsAvc\":true,\"hasHardwareAvc\":true,\"supportsHevc\":false,\"supportsHevc10Bit\":false,\"supportsAac\":true,\"supportsAc3\":true,\"supportsEac3\":true,\"supportsDts\":true}";
             }
         }
 
