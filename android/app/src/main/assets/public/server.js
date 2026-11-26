@@ -3027,8 +3027,56 @@ async function checkTelegramDocHasAudioFast(client2, docInfo) {
   }
 }
 
+// src/utils/qualityBadge.ts
+var HOLLYWOOD_PRINT_RE = /(?:^|[^a-z0-9])(?:hdtc|hd[\s._-]*tc|hdts|hd[\s._-]*ts|hdcam|hd[\s._-]*cam|camrip|cam[\s._-]*rip|cam|predvd|pre[\s._-]*dvd|dvdscr|telesync|telecine|cinevood|cinevoo|cinewood|cinvood|holl[\s._-]*print(?:ed)?|hollywood[\s._-]*print(?:ed)?|hall[\s._-]*print)(?=$|[^a-z0-9])/i;
+function isHollywoodPrintText(text) {
+  const s = String(text || "").trim();
+  if (!s) return false;
+  return HOLLYWOOD_PRINT_RE.test(s);
+}
+function normalizeQualityBadge(value) {
+  const raw = String(value || "").trim().toUpperCase();
+  if (!raw || raw === "NONE" || raw === "NO BADGE") return "NONE";
+  if (raw === "HDTC" || raw === "HOLL PRINT" || raw === "HOLL_PRINT" || raw === "HOLLYWOOD PRINT" || raw === "HOLLYWOOD_PRINT" || isHollywoodPrintText(raw)) {
+    return "HDTC";
+  }
+  if (raw === "HD" || raw === "4K" || raw === "FHD" || raw === "UHD") {
+    return "HD";
+  }
+  return "NONE";
+}
+function isHollywoodPrintMovie(movie) {
+  if (!movie) return false;
+  const normBadge = normalizeQualityBadge(movie.qualityBadge);
+  if (normBadge === "HDTC") return true;
+  if (normBadge === "HD") return false;
+  if (normalizeQualityBadge(movie.printType) === "HDTC") return true;
+  return isHollywoodPrintText(
+    [
+      movie.qualityBadge,
+      movie.printType,
+      movie.sourceFileName,
+      movie.sourceCaption,
+      movie.title,
+      movie.originalTitle,
+      movie.description
+    ].filter(Boolean).join(" ")
+  );
+}
+function getQualityUpgradeDecision(existingMovie, incomingBadge) {
+  const existingIsPrint = isHollywoodPrintMovie(existingMovie);
+  const incomingIsPrint = incomingBadge === "HDTC";
+  if (existingIsPrint && !incomingIsPrint) {
+    return "replace_holl_print_with_hd";
+  }
+  if (!existingIsPrint && incomingIsPrint) {
+    return "skip_holl_print_on_hd";
+  }
+  return "merge_same_tier";
+}
+
 // src/server/movieAutoMatcher.ts
-var RELEASE_CUTOFF_RE = /\b(?:480p|720p|1080p|2160p|360p|4k|uhd|fhd|hdrip|hd[\s._-]*cam|hdcam|hdts|hdtc|predvd|camrip|dvdscr|dvdrip|web[\s._-]*dl|webdl|web[\s._-]*rip|webrip|bluray|bdrip|brrip|x264|x265|h[\s._-]*264|h[\s._-]*265|hevc|avc|10bit|8bit|hi10p|aac|aac2|aac5|ac3|eac3|dd5[\s._-]*1|ddp5[\s._-]*1|dd2[\s._-]*0|dts|atmos|truehd|esub|esubs|msub|msubs|hc[\s._-]*sub|hc[\s._-]*esub|dual[\s._-]*audio|multi[\s._-]*audio|full[\s._-]+(?:hindi|dubbed|hd|movie)|hindi[\s._-]*dubbed|org[\s._-]*hindi|original[\s._-]*hindi|uncut|unrated|extended|remastered|imax|nf|amzn|dsnp|kone|hotstar|zee5|jiocinema|sonyliv|mxplayer|voot|moviesmod|vegamovies|filmyzilla|filmy4wap|hdhub4u|katmoviehd|skymovieshd|mkvcinemas|bolly4u|bollyflix|dotmovies|hdmovie2|cinevoo|movies4u|pagalworld|worldfree4u|khatrimaza|yify|rarbg|psa|flux|ntb|evo|syncopy|watch[\s._-]+online|free[\s._-]+download|download[\s._-]+now)\b/i;
+var RELEASE_CUTOFF_RE = /\b(?:480p|720p|1080p|2160p|360p|4k|uhd|fhd|hdrip|hd[\s._-]*cam|hdcam|hdts|hdtc|telesync|telecine|predvd|camrip|cam|dvdscr|dvdrip|holl[\s._-]*print(?:ed)?|hollywood[\s._-]*print(?:ed)?|hall[\s._-]*print|cinevood|cinevoo|cinewood|cinvood|web[\s._-]*dl|webdl|web[\s._-]*rip|webrip|bluray|bdrip|brrip|x264|x265|h[\s._-]*264|h[\s._-]*265|hevc|avc|10bit|8bit|hi10p|aac|aac2|aac5|ac3|eac3|dd5[\s._-]*1|ddp5[\s._-]*1|dd2[\s._-]*0|dts|atmos|truehd|esub|esubs|msub|msubs|hc[\s._-]*sub|hc[\s._-]*esub|dual[\s._-]*audio|multi[\s._-]*audio|full[\s._-]+(?:hindi|dubbed|hd|movie)|hindi[\s._-]*dubbed|org[\s._-]*hindi|original[\s._-]*hindi|uncut|unrated|extended|remastered|imax|nf|amzn|dsnp|kone|hotstar|zee5|jiocinema|sonyliv|mxplayer|voot|moviesmod|vegamovies|filmyzilla|filmy4wap|hdhub4u|katmoviehd|skymovieshd|mkvcinemas|bolly4u|bollyflix|dotmovies|hdmovie2|movies4u|pagalworld|worldfree4u|khatrimaza|yify|rarbg|psa|flux|ntb|evo|syncopy|watch[\s._-]+online|free[\s._-]+download|download[\s._-]+now)\b/i;
 var SERIES_EP_RE = /(?:^|[\s._\-\[(])(?:S\d{1,2}[\s._-]*E\d{1,4}|S\d{1,2}|Season[\s._-]*\d{1,2}(?:[\s._-]*(?:Ep|Episode)[\s._-]*\d{1,4})?|Episode[\s._-]*\d{1,4}|Ep\.?[\s._-]*\d{1,4}|E0*\d{1,3}(?:[\s._-]*[-–—][\s._-]*E?0*\d{1,3})?|\d{1,2}x\d{1,4})(?:$|[\s._\-\])])/i;
 var SERIES_CUTOFF_RE = /(?:^|[\s._\-\[(])(?:S0?\d{1,2}[\s._-]*E0?\d{1,4}|S0?\d{1,2}|Season[\s._-]*\d{1,2}|Episode[\s._-]*\d{1,4}|Ep\.?[\s._-]*\d{1,4}|E0*\d{1,3}(?:[\s._-]*[-–—][\s._-]*E?0*\d{1,3})?|\d{1,2}x\d{1,4})\b/i;
 var PROMO_LINE_RE = /(?:join\s+@|join\s+our|join\s+channel|channel\s*[:\-–—]|powered\s+by|uploaded\s+by|upload\s+by|shared\s+by|share\s*&|subscribe|t\.me\/|https?:\/\/|download\s+link|request\s+here|feedback|backup\s+channel|follow\s+us|telegram\.me|watch\s+online|click\s+here|more\s+movies|visit\s+our|copyright|dmca|disclaimer)/i;
@@ -3313,6 +3361,8 @@ function parseTelegramMovieMeta(fileName, caption, width = 0, height = 0, durati
   const cleanTitle = best.title || stripFileExtension(fileName || "").replace(/[._-]+/g, " ").trim();
   const normalizedGroupTitle = normalizeTitleKey2(cleanTitle).replace(/\s+/g, "");
   const groupKey = finalIsSeries && normalizedGroupTitle ? `${normalizedGroupTitle}-s${epDetails.seasonNumber || 1}-e${epDetails.episodeNumber || 0}${epDetails.episodeLabel ? `-${epDetails.episodeLabel}` : ""}` : explicitImdbId ? `imdb-${explicitImdbId}` : normalizedGroupTitle ? `${normalizedGroupTitle}${fallbackYear ? `-${fallbackYear}` : ""}` : "";
+  const isHollywoodPrint = isHollywoodPrintText(`${caption || ""}
+${fileName || ""}`);
   return {
     rawFileName: fileName || "",
     rawCaption: caption || "",
@@ -3328,7 +3378,8 @@ function parseTelegramMovieMeta(fileName, caption, width = 0, height = 0, durati
     episodeNumber: epDetails.episodeNumber,
     episodeLabel: epDetails.episodeLabel,
     episodeTitle: epDetails.episodeTitle,
-    isSampleOrClip
+    isSampleOrClip,
+    isHollywoodPrint
   };
 }
 function getTitleSimilarityScore(candidateTitle, queryTitle) {
@@ -3573,7 +3624,8 @@ import {
   getDocFromServer as getDocFromServer2,
   getDocsFromServer,
   serverTimestamp,
-  setDoc
+  setDoc,
+  updateDoc
 } from "firebase/firestore";
 
 // src/utils/categoryMapping.ts
@@ -3642,11 +3694,6 @@ function parseDurationToSeconds(input) {
   return 0;
 }
 var STREAM_INFO_CACHE_TTL_MS = 10 * 60 * 1e3;
-
-// src/utils/qualityBadge.ts
-function normalizeQualityBadge(_value) {
-  return "NONE";
-}
 
 // src/utils/channelSyncFilters.ts
 var CAM_RIP_RE = /\b(?:camrip|hd[\s._-]*cam|hdcam|hdts|hdtc|predvd|telesync|telecine|dvdscr)\b/i;
@@ -7328,6 +7375,28 @@ router2.post("/scan-movies-channel", async (req, res) => {
       (Array.isArray(existingImdbIds) ? existingImdbIds : []).map((id) => String(id || "").trim().toLowerCase()).filter(Boolean)
     );
     const existingTitleList = (Array.isArray(existingTitles) ? existingTitles : []).map((t) => buildExistingTitleDupEntry(t?.title, t?.originalTitle, t?.releaseYear, t?.category)).filter((e) => e.normTitle.length >= 2);
+    const existingHollPrintTitleList = (Array.isArray(existingTitles) ? existingTitles : []).filter((t) => normalizeQualityBadge(t?.qualityBadge) === "HDTC").map((t) => buildExistingTitleDupEntry(t?.title, t?.originalTitle, t?.releaseYear, t?.category)).filter((e) => e.normTitle.length >= 2);
+    const existingHollPrintImdbSet = /* @__PURE__ */ new Set();
+    try {
+      if (fs4.existsSync(SEED_CATALOG_PATH)) {
+        const rawSeed = JSON.parse(fs4.readFileSync(SEED_CATALOG_PATH, "utf8"));
+        if (Array.isArray(rawSeed)) {
+          for (const sm of rawSeed) {
+            if (isHollywoodPrintMovie(sm)) {
+              if (sm?.imdbId) existingHollPrintImdbSet.add(String(sm.imdbId).trim().toLowerCase());
+              const entry = buildExistingTitleDupEntry(
+                sm?.title,
+                sm?.originalTitle,
+                sm?.releaseYear,
+                sm?.originalCategory
+              );
+              if (entry.normTitle.length >= 2) existingHollPrintTitleList.push(entry);
+            }
+          }
+        }
+      }
+    } catch {
+    }
     const collectedMessages = [];
     let scanFromId = 0;
     let scanToId = 0;
@@ -7577,26 +7646,35 @@ router2.post("/scan-movies-channel", async (req, res) => {
         };
         const matched = await resolveBestImdbMatch(mergedParsed);
         const isSeriesItem = mergedParsed.isSeriesEpisode || String(matched.originalCategory || "").toLowerCase().includes("series");
-        if (!isSeriesItem) {
-          if (matched.imdbId && existingImdbSet.has(matched.imdbId.toLowerCase())) {
-            skippedAlreadyAdded++;
-            return null;
-          }
-          if (isDuplicateByTitleAndYear(
-            existingTitleList,
-            [matched.title, matched.originalTitle, mergedParsed.cleanTitle],
-            matched.releaseYear || mergedParsed.year || 0,
-            false
-          )) {
-            skippedAlreadyAdded++;
-            return null;
-          }
-        }
         const filteredQualities = onlyValidAudioAndHd ? filterQualityMapForHdOnly(grp.videoQualities) : grp.videoQualities;
         const chosenStream = filteredQualities["1080p"] || filteredQualities["720p"] || bestStream;
         const bestDurSec = Math.max(0, ...grp.members.map((m) => m.durationSec || 0));
         const durationFormatted = bestDurSec > 0 ? formatDuration(bestDurSec) : "";
-        const qualityBadge = filteredQualities["4K"] ? "4K" : "HD";
+        const hasHollywoodPrint = grp.members.some(
+          (m) => isHollywoodPrintText(`${m.fileName} ${m.caption}`)
+        );
+        const qualityBadge = hasHollywoodPrint ? "HDTC" : filteredQualities["4K"] ? "4K" : "HD";
+        if (!isSeriesItem) {
+          const matchedExistingImdb = Boolean(matched.imdbId && existingImdbSet.has(matched.imdbId.toLowerCase()));
+          const matchedExistingTitle = isDuplicateByTitleAndYear(
+            existingTitleList,
+            [matched.title, matched.originalTitle, mergedParsed.cleanTitle],
+            matched.releaseYear || mergedParsed.year || 0,
+            false
+          );
+          if (matchedExistingImdb || matchedExistingTitle) {
+            const existingIsHollPrint = matched.imdbId && existingHollPrintImdbSet.has(matched.imdbId.toLowerCase()) || isDuplicateByTitleAndYear(
+              existingHollPrintTitleList,
+              [matched.title, matched.originalTitle, mergedParsed.cleanTitle],
+              matched.releaseYear || mergedParsed.year || 0,
+              false
+            );
+            if (hasHollywoodPrint || !existingIsHollPrint) {
+              skippedAlreadyAdded++;
+              return null;
+            }
+          }
+        }
         return {
           draftId: `tg-${cleanChannelId}-${grp.primary.msgId}`,
           channelId: cleanChannelId,
@@ -7667,7 +7745,10 @@ router2.post("/scan-movies-channel", async (req, res) => {
   }
 });
 function normalizeDupTitleKey(title) {
-  return String(title || "").toLowerCase().replace(/\((?:tv\s*series|film|movie|series|\d{4})\)/gi, "").replace(/&/g, "and").replace(/[^a-z0-9]+/g, "");
+  return String(title || "").toLowerCase().replace(/\((?:tv\s*series|film|movie|series|\d{4})\)/gi, "").replace(
+    /\b(?:hdtc|hdts|hdcam|camrip|predvd|dvdscr|telesync|telecine|cinevood|cinevoo|cinewood|cinvood|holl[\s._-]*print(?:ed)?|hollywood[\s._-]*print(?:ed)?|hall[\s._-]*print)\b/gi,
+    ""
+  ).replace(/&/g, "and").replace(/[^a-z0-9]+/g, "");
 }
 function buildExistingTitleDupEntry(title, origTitle, releaseYear, category) {
   const catLower = String(category || "").toLowerCase();
@@ -8169,17 +8250,18 @@ function findMatchingExistingRecord(records, imdbId, titles, year, isSeries) {
   const candKeys = titles.map((t) => normalizeDupTitleKey(t || "")).filter((k) => k.length >= 2);
   for (const r of records) {
     const rKeys = [normalizeDupTitleKey(r.title), normalizeDupTitleKey(r.originalTitle)].filter((k) => k.length >= 2);
+    const isExistingPrint = normalizeQualityBadge(r.qualityBadge) === "HDTC";
     for (const ck of candKeys) {
       for (const rk of rKeys) {
         if (ck !== rk) continue;
         if (isSeries || r.isSeries) return r;
-        if (!year || !r.releaseYear || Math.abs(year - r.releaseYear) <= 1) return r;
+        if (!year || !r.releaseYear || Math.abs(year - r.releaseYear) <= (isExistingPrint ? 2 : 1)) return r;
       }
     }
   }
   return null;
 }
-function mergeEpisodeIntoSeasons(existingSeasons, seasonNum, newEpisode) {
+function mergeEpisodeIntoSeasons(existingSeasons, seasonNum, newEpisode, replaceExistingEpisode = false) {
   const cloned = Array.isArray(existingSeasons) ? existingSeasons.map((s) => ({
     seasonNumber: Number(s?.seasonNumber) || 1,
     episodes: Array.isArray(s?.episodes) ? [...s.episodes] : []
@@ -8200,6 +8282,12 @@ function mergeEpisodeIntoSeasons(existingSeasons, seasonNum, newEpisode) {
     (ep) => Number(ep?.episodeNumber) === newEpisode.episodeNumber && String(ep?.streamUrl || "").trim() !== ""
   );
   if (sameEpIdx >= 0) {
+    if (replaceExistingEpisode) {
+      targetSeason.episodes[sameEpIdx] = newEpisode;
+      targetSeason.episodes.sort((a, b) => (Number(a?.episodeNumber) || 0) - (Number(b?.episodeNumber) || 0));
+      cloned.sort((a, b) => a.seasonNumber - b.seasonNumber);
+      return { mergedSeasons: cloned, added: true };
+    }
     return { mergedSeasons: cloned, added: false };
   }
   const emptyEpIdx = targetSeason.episodes.findIndex(
@@ -8360,6 +8448,7 @@ async function runServerAutoSyncPass(reason) {
         });
       }
       if (!existingRecords.some((r) => r.id === id)) {
+        const normBadge = normalizeQualityBadge(m?.qualityBadge);
         existingRecords.push({
           id,
           imdbId: String(m?.imdbId || "").trim(),
@@ -8369,6 +8458,7 @@ async function runServerAutoSyncPass(reason) {
           originalCategory: cat,
           isSeries,
           published: m?.published !== false,
+          qualityBadge: normBadge !== "NONE" ? normBadge : isHollywoodPrintMovie(m) ? "HDTC" : "HD",
           streamingUrl: String(m?.streamingUrl || "").trim(),
           videoQualities: m?.videoQualities && typeof m.videoQualities === "object" ? { ...m.videoQualities } : {},
           seasons: Array.isArray(m?.seasons) ? m.seasons : []
@@ -8534,7 +8624,10 @@ async function runServerAutoSyncPass(reason) {
       const chosenStream = filteredQualities["1080p"] || filteredQualities["720p"] || bestStream;
       const bestDurSec = Math.max(0, ...grp.members.map((m) => m.durationSec || 0));
       const durationFormatted = bestDurSec > 0 ? formatDuration(bestDurSec) : "";
-      const qualityBadge = filteredQualities["4K"] ? "4K" : "HD";
+      const hasHollywoodPrint = grp.members.some(
+        (m) => isHollywoodPrintText(`${m.fileName} ${m.caption}`)
+      );
+      const qualityBadge = hasHollywoodPrint ? "HDTC" : filteredQualities["4K"] ? "4K" : "HD";
       const msgDateList = grp.members.map((m) => m.msgDateMs).filter((t) => t > 0);
       const realMsgDateMs = msgDateList.length > 0 ? Math.min(...msgDateList) : grp.primary.msgDateMs || 0;
       const draft = {
@@ -8591,7 +8684,7 @@ async function runServerAutoSyncPass(reason) {
         const cleanBackdrop = (draft.backdropUrl || draft.posterUrl ? upgradePosterUrl(draft.backdropUrl || cleanPoster, 1280) || cleanPoster : "") || fallbackSvg;
         const catToSave = isSeriesItem ? String(draft.originalCategory || "").toLowerCase().includes("anime") ? "Anime Series" : "Web Series" : draft.originalCategory || "Bollywood Movie";
         const displayCat = getDisplayCategory(catToSave);
-        const badge = normalizeQualityBadge("NONE");
+        const badge = normalizeQualityBadge(draft.qualityBadge) === "HDTC" ? "HDTC" : "HD";
         if (isSeriesItem) {
           const seasonNum = Math.max(1, Number(draft.seasonNumber) || 1);
           const fallbackEpNum = existingRec ? Math.max(
@@ -8615,7 +8708,18 @@ async function runServerAutoSyncPass(reason) {
           const seriesImdbId = (existingRec?.imdbId || draft.imdbId || "").trim();
           const expectedCounts = seriesImdbId ? await fetchExpectedSeasonEpisodeCounts(seriesImdbId) : null;
           if (existingRec) {
-            const { mergedSeasons, added } = mergeEpisodeIntoSeasons(existingRec.seasons, seasonNum, epObj);
+            const seriesUpgrade = getQualityUpgradeDecision(existingRec, badge);
+            if (seriesUpgrade === "skip_holl_print_on_hd") {
+              existingUrlSet.add(draft.streamUrl.toLowerCase());
+              continue;
+            }
+            const replaceExistingEp = seriesUpgrade === "replace_holl_print_with_hd";
+            const { mergedSeasons, added } = mergeEpisodeIntoSeasons(
+              existingRec.seasons,
+              seasonNum,
+              epObj,
+              replaceExistingEp
+            );
             if (!added) {
               existingUrlSet.add(draft.streamUrl.toLowerCase());
               continue;
@@ -8625,13 +8729,15 @@ async function runServerAutoSyncPass(reason) {
               expectedCounts
             );
             const wasPublished = existingRec.published !== false;
-            const nextStream = existingRec.streamingUrl || epObj.streamUrl;
+            const nextStream = replaceExistingEp ? epObj.streamUrl : existingRec.streamingUrl || epObj.streamUrl;
+            const nextSeriesBadge = badge === "HD" ? "HD" : existingRec.qualityBadge || badge;
             const prevSeed = seedCatalogMap.get(existingRec.id) || {};
             seedCatalogMap.set(existingRec.id, {
               ...prevSeed,
               id: existingRec.id,
               seasons: mergedSeasons,
               streamingUrl: nextStream,
+              qualityBadge: nextSeriesBadge,
               published: seriesReadyToPublish,
               releaseYear: clampReleaseYear(prevSeed.releaseYear || draft.releaseYear),
               ...seriesReadyToPublish && !wasPublished ? { createdAt: nowMs } : {},
@@ -8642,6 +8748,7 @@ async function runServerAutoSyncPass(reason) {
               {
                 seasons: mergedSeasons,
                 streamingUrl: nextStream,
+                qualityBadge: nextSeriesBadge,
                 published: seriesReadyToPublish,
                 updatedAt: serverTimestamp()
               },
@@ -8650,6 +8757,7 @@ async function runServerAutoSyncPass(reason) {
             });
             existingRec.seasons = mergedSeasons;
             existingRec.streamingUrl = nextStream;
+            existingRec.qualityBadge = nextSeriesBadge;
             existingRec.published = seriesReadyToPublish;
             existingUrlSet.add(draft.streamUrl.toLowerCase());
             catalogDirty = true;
@@ -8668,7 +8776,7 @@ async function runServerAutoSyncPass(reason) {
                     isSeries: true,
                     language: (draft.language || "Hindi").trim(),
                     genre: (draft.genre || "Drama").trim(),
-                    qualityBadge: badge !== "NONE" ? badge : "",
+                    qualityBadge: badge,
                     runtime: (draft.runtime || "").trim(),
                     posterUrl: cleanPoster,
                     backdropUrl: cleanBackdrop,
@@ -8748,6 +8856,7 @@ async function runServerAutoSyncPass(reason) {
               originalCategory: catToSave,
               isSeries: true,
               published: seriesReadyToPublish,
+              qualityBadge: badge,
               streamingUrl: epObj.streamUrl,
               videoQualities: {},
               seasons: initialSeasons
@@ -8768,7 +8877,7 @@ async function runServerAutoSyncPass(reason) {
                     isSeries: true,
                     language: (draft.language || "Hindi").trim(),
                     genre: (draft.genre || "Drama").trim(),
-                    qualityBadge: badge !== "NONE" ? badge : "",
+                    qualityBadge: badge,
                     runtime: (draft.runtime || "").trim(),
                     posterUrl: cleanPoster,
                     backdropUrl: cleanBackdrop,
@@ -8791,9 +8900,56 @@ async function runServerAutoSyncPass(reason) {
           }
         }
         if (existingRec) {
+          const upgradeDecision = getQualityUpgradeDecision(existingRec, badge);
+          if (upgradeDecision === "skip_holl_print_on_hd") {
+            existingUrlSet.add(draft.streamUrl.toLowerCase());
+            continue;
+          }
+          const incomingCleanQualities = Object.fromEntries(
+            Object.entries(draft.videoQualities || {}).filter(([, u]) => Boolean(String(u || "").trim()))
+          );
+          if (upgradeDecision === "replace_holl_print_with_hd") {
+            const replacedStream = incomingCleanQualities["1080p"] || incomingCleanQualities["4K"] || incomingCleanQualities["720p"] || draft.streamUrl.trim();
+            const prevSeed = seedCatalogMap.get(existingRec.id) || {};
+            const nextRuntime = (draft.runtime || prevSeed.runtime || "").trim();
+            const nextDuration = bestDurSec || parseDurationToSeconds(nextRuntime) || prevSeed.duration || 0;
+            const replacePayload = {
+              videoQualities: incomingCleanQualities,
+              streamingUrl: replacedStream,
+              qualityBadge: "HD",
+              sourceFileName: draft.sourceFileName || "",
+              sourceCaption: draft.sourceCaption || "",
+              telegramMsgId: draft.msgId,
+              ...nextRuntime ? { runtime: nextRuntime } : {},
+              ...nextDuration > 0 ? { duration: nextDuration } : {},
+              ...!existingRec.imdbId && draft.imdbId ? { imdbId: draft.imdbId.trim() } : {},
+              ...String(prevSeed.posterUrl || "").startsWith("data:image/svg+xml") && cleanPoster ? { posterUrl: cleanPoster, backdropUrl: cleanBackdrop } : {},
+              updatedAt: nowMs
+            };
+            seedCatalogMap.set(existingRec.id, {
+              ...prevSeed,
+              id: existingRec.id,
+              ...replacePayload
+            });
+            await updateDocWithQuotaGuard(doc2(db, "movies", existingRec.id), {
+              ...replacePayload,
+              updatedAt: serverTimestamp()
+            }).catch(() => {
+            });
+            existingRec.videoQualities = incomingCleanQualities;
+            existingRec.streamingUrl = replacedStream;
+            existingRec.qualityBadge = "HD";
+            existingUrlSet.add(draft.streamUrl.toLowerCase());
+            catalogDirty = true;
+            publishedCount++;
+            console.log(
+              `[ServerAutoSync] Upgraded Holl Print -> HD for "${existingRec.title}" -> movies/${existingRec.id}`
+            );
+            continue;
+          }
           const mergedQualities = { ...existingRec.videoQualities };
           let qualityAdded = false;
-          for (const [qk, qUrl] of Object.entries(draft.videoQualities || {})) {
+          for (const [qk, qUrl] of Object.entries(incomingCleanQualities)) {
             if (qUrl && !mergedQualities[qk]) {
               mergedQualities[qk] = qUrl;
               qualityAdded = true;
@@ -8802,11 +8958,13 @@ async function runServerAutoSyncPass(reason) {
           if (qualityAdded) {
             const upgradedStream = mergedQualities["1080p"] || mergedQualities["4K"] || existingRec.streamingUrl || draft.streamUrl.trim();
             const prevSeed = seedCatalogMap.get(existingRec.id) || {};
+            const upgradedBadge = badge === "HD" ? "HD" : prevSeed.qualityBadge || badge;
             seedCatalogMap.set(existingRec.id, {
               ...prevSeed,
               id: existingRec.id,
               videoQualities: mergedQualities,
               streamingUrl: upgradedStream,
+              qualityBadge: upgradedBadge,
               updatedAt: nowMs
             });
             await setDocWithQuotaGuard(
@@ -8814,6 +8972,7 @@ async function runServerAutoSyncPass(reason) {
               {
                 videoQualities: mergedQualities,
                 streamingUrl: upgradedStream,
+                qualityBadge: upgradedBadge,
                 updatedAt: serverTimestamp()
               },
               { merge: true }
@@ -8821,7 +8980,9 @@ async function runServerAutoSyncPass(reason) {
             });
             existingRec.videoQualities = mergedQualities;
             existingRec.streamingUrl = upgradedStream;
+            existingRec.qualityBadge = upgradedBadge;
             existingUrlSet.add(draft.streamUrl.toLowerCase());
+            catalogDirty = true;
             publishedCount++;
             console.log(
               `[ServerAutoSync] Merged new quality for "${existingRec.title}" -> movies/${existingRec.id}`
@@ -8883,6 +9044,7 @@ async function runServerAutoSyncPass(reason) {
           originalCategory: catToSave,
           isSeries: false,
           published: true,
+          qualityBadge: badge,
           streamingUrl: draft.streamUrl.trim(),
           videoQualities: draft.videoQualities || {},
           seasons: []
@@ -8901,7 +9063,7 @@ async function runServerAutoSyncPass(reason) {
               isSeries: false,
               language: (draft.language || "Hindi").trim(),
               genre: (draft.genre || "Action").trim(),
-              qualityBadge: badge !== "NONE" ? badge : "",
+              qualityBadge: badge,
               runtime: (draft.runtime || "").trim(),
               posterUrl: cleanPoster,
               backdropUrl: cleanBackdrop,
@@ -9010,6 +9172,44 @@ async function setDocWithQuotaGuard(ref, data, options, timeoutMs = 4500) {
     if (timer) clearTimeout(timer);
   }
 }
+async function updateDocWithQuotaGuard(ref, data, timeoutMs = 4500) {
+  if (!isServerFirestoreWriteAllowed()) {
+    throw Object.assign(
+      new Error("Firestore daily write quota exhausted (resource-exhausted)."),
+      { code: "resource-exhausted" }
+    );
+  }
+  let timer = null;
+  try {
+    await Promise.race([
+      updateDoc(ref, data).catch(async (err) => {
+        if (err?.code === "not-found") {
+          await setDoc(ref, data);
+          return;
+        }
+        throw err;
+      }),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          markServerFirestoreQuotaExhausted("write-timeout");
+          reject(
+            Object.assign(
+              new Error("Firestore daily write quota exhausted (write timeout)."),
+              { code: "resource-exhausted" }
+            )
+          );
+        }, timeoutMs);
+      })
+    ]);
+  } catch (err) {
+    if (isFirestoreQuotaError(err)) {
+      markServerFirestoreQuotaExhausted(err);
+    }
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 var bulkSyncStopRequested = false;
 var bulkSyncJob = {
   status: "idle",
@@ -9091,6 +9291,7 @@ async function runBulkChannelSyncWorker(params) {
                   }
                 });
               }
+              const normSeedBadge = normalizeQualityBadge(m?.qualityBadge);
               existingRecords.push({
                 id: m.id,
                 imdbId: String(m?.imdbId || "").trim(),
@@ -9099,6 +9300,7 @@ async function runBulkChannelSyncWorker(params) {
                 releaseYear: Number(m?.releaseYear) || 0,
                 originalCategory: cat,
                 isSeries,
+                qualityBadge: normSeedBadge !== "NONE" ? normSeedBadge : isHollywoodPrintMovie(m) ? "HDTC" : "HD",
                 streamingUrl: String(m?.streamingUrl || "").trim(),
                 videoQualities: m?.videoQualities && typeof m.videoQualities === "object" ? { ...m.videoQualities } : {},
                 seasons: Array.isArray(m?.seasons) ? m.seasons : []
@@ -9135,6 +9337,7 @@ async function runBulkChannelSyncWorker(params) {
           });
         }
         if (!existingRecords.some((r) => r.id === d.id)) {
+          const normFsBadge = normalizeQualityBadge(m?.qualityBadge);
           existingRecords.push({
             id: d.id,
             imdbId: String(m?.imdbId || "").trim(),
@@ -9143,6 +9346,7 @@ async function runBulkChannelSyncWorker(params) {
             releaseYear: Number(m?.releaseYear) || 0,
             originalCategory: cat,
             isSeries,
+            qualityBadge: normFsBadge !== "NONE" ? normFsBadge : isHollywoodPrintMovie(m) ? "HDTC" : "HD",
             streamingUrl: String(m?.streamingUrl || "").trim(),
             videoQualities: m?.videoQualities && typeof m.videoQualities === "object" ? { ...m.videoQualities } : {},
             seasons: Array.isArray(m?.seasons) ? m.seasons : []
@@ -9376,7 +9580,10 @@ async function runBulkChannelSyncWorker(params) {
         const durationFormatted = bestDurSec > 0 ? formatDuration(bestDurSec) : "";
         const catToSave = isSeriesItem ? String(matched.originalCategory || "").toLowerCase().includes("anime") ? "Anime Series" : "Web Series" : matched.originalCategory || "Bollywood Movie";
         const displayCat = getDisplayCategory(catToSave);
-        const badge = normalizeQualityBadge("NONE");
+        const hasHollywoodPrint = grp.members.some(
+          (m) => isHollywoodPrintText(`${m.fileName} ${m.caption}`)
+        );
+        const badge = hasHollywoodPrint ? "HDTC" : "HD";
         const fallbackSvg = buildFallbackPosterDataUri(matched.title || mergedParsed.cleanTitle, candYear);
         const cleanPoster = (matched.posterUrl ? upgradePosterUrl(matched.posterUrl, 1080) || matched.posterUrl : "") || fallbackSvg;
         const cleanBackdrop = (matched.backdropUrl || matched.posterUrl ? upgradePosterUrl(matched.backdropUrl || cleanPoster, 1280) || cleanPoster : "") || fallbackSvg;
@@ -9408,14 +9615,30 @@ async function runBulkChannelSyncWorker(params) {
               showInNewEpisodes: false
             };
             if (existingRec) {
-              const { mergedSeasons, added } = mergeEpisodeIntoSeasons(existingRec.seasons, seasonNum, epObj);
+              const seriesUpgrade = getQualityUpgradeDecision(existingRec, badge);
+              if (seriesUpgrade === "skip_holl_print_on_hd") {
+                bulkSyncJob.skippedDuplicates++;
+                existingUrlSet.add(bestStream.toLowerCase());
+                continue;
+              }
+              const replaceExistingEp = seriesUpgrade === "replace_holl_print_with_hd";
+              const { mergedSeasons, added } = mergeEpisodeIntoSeasons(
+                existingRec.seasons,
+                seasonNum,
+                epObj,
+                replaceExistingEp
+              );
               if (!added) {
                 bulkSyncJob.skippedDuplicates++;
                 existingUrlSet.add(bestStream.toLowerCase());
                 continue;
               }
               existingRec.seasons = mergedSeasons;
-              if (!existingRec.streamingUrl) existingRec.streamingUrl = epObj.streamUrl;
+              if (replaceExistingEp || !existingRec.streamingUrl) {
+                existingRec.streamingUrl = epObj.streamUrl;
+              }
+              const nextSeriesBadge = badge === "HD" ? "HD" : existingRec.qualityBadge || badge;
+              existingRec.qualityBadge = nextSeriesBadge;
               existingUrlSet.add(bestStream.toLowerCase());
               const prevDirty = dirtySeriesUpdates.get(existingRec.id);
               dirtySeriesUpdates.set(existingRec.id, {
@@ -9429,6 +9652,7 @@ async function runBulkChannelSyncWorker(params) {
                 id: existingRec.id,
                 seasons: mergedSeasons,
                 streamingUrl: existingRec.streamingUrl,
+                qualityBadge: nextSeriesBadge,
                 updatedAt: Date.now()
               });
               bulkSyncJob.mergedCount++;
@@ -9444,6 +9668,7 @@ async function runBulkChannelSyncWorker(params) {
                 releaseYear: Number(matched.releaseYear) || (/* @__PURE__ */ new Date()).getFullYear(),
                 originalCategory: catToSave,
                 isSeries: true,
+                qualityBadge: badge,
                 streamingUrl: epObj.streamUrl,
                 videoQualities: {},
                 seasons: initialSeasons
@@ -9496,9 +9721,58 @@ async function runBulkChannelSyncWorker(params) {
               chunkPublished++;
             }
           } else if (existingRec) {
+            const upgradeDecision = getQualityUpgradeDecision(existingRec, badge);
+            if (upgradeDecision === "skip_holl_print_on_hd") {
+              bulkSyncJob.skippedDuplicates++;
+              existingUrlSet.add(bestStream.toLowerCase());
+              continue;
+            }
+            const incomingCleanQualities = Object.fromEntries(
+              Object.entries(filteredQualities || {}).filter(([, u]) => Boolean(String(u || "").trim()))
+            );
+            if (upgradeDecision === "replace_holl_print_with_hd") {
+              const replacedStream = incomingCleanQualities["1080p"] || incomingCleanQualities["4K"] || incomingCleanQualities["720p"] || bestStream.trim();
+              const prevSeed = seedCatalogMap.get(existingRec.id) || {};
+              const nextRuntime = (durationFormatted || matched.runtime || prevSeed.runtime || "").trim();
+              const nextDuration = bestDurSec || parseDurationToSeconds(nextRuntime) || prevSeed.duration || 0;
+              const replacePayload = {
+                videoQualities: incomingCleanQualities,
+                streamingUrl: replacedStream,
+                qualityBadge: "HD",
+                sourceFileName: grp.primary.fileName || "",
+                sourceCaption: `${mergedParsed.cleanTitle}${mergedParsed.year ? ` (${mergedParsed.year})` : ""}`,
+                telegramMsgId: grp.primary.msgId,
+                ...nextRuntime ? { runtime: nextRuntime } : {},
+                ...nextDuration > 0 ? { duration: nextDuration } : {},
+                ...!existingRec.imdbId && matched.imdbId ? { imdbId: matched.imdbId.trim() } : {},
+                ...String(prevSeed.posterUrl || "").startsWith("data:image/svg+xml") && cleanPoster ? { posterUrl: cleanPoster, backdropUrl: cleanBackdrop } : {},
+                updatedAt: Date.now()
+              };
+              existingRec.videoQualities = incomingCleanQualities;
+              existingRec.streamingUrl = replacedStream;
+              existingRec.qualityBadge = "HD";
+              existingUrlSet.add(bestStream.toLowerCase());
+              seedCatalogMap.set(existingRec.id, {
+                ...prevSeed,
+                ...replacePayload
+              });
+              try {
+                await updateDocWithQuotaGuard(doc2(db, "movies", existingRec.id), {
+                  ...replacePayload,
+                  updatedAt: serverTimestamp()
+                });
+              } catch (writeErr) {
+                if (isFirestoreQuotaError(writeErr)) {
+                  bulkSyncJob.errorMessage = "Firestore daily write quota reached; saving movies directly to permanent app catalog bundle.";
+                }
+              }
+              bulkSyncJob.mergedCount++;
+              chunkPublished++;
+              continue;
+            }
             const mergedQualities = { ...existingRec.videoQualities };
             let qualityAdded = false;
-            for (const [qk, qUrl] of Object.entries(filteredQualities)) {
+            for (const [qk, qUrl] of Object.entries(incomingCleanQualities)) {
               if (qUrl && !mergedQualities[qk]) {
                 mergedQualities[qk] = qUrl;
                 qualityAdded = true;
@@ -9510,16 +9784,19 @@ async function runBulkChannelSyncWorker(params) {
               existingRec.streamingUrl = upgradedStream;
               existingUrlSet.add(bestStream.toLowerCase());
               const prevSeed = seedCatalogMap.get(existingRec.id) || {};
+              const upgradedBadge = badge === "HD" ? "HD" : prevSeed.qualityBadge || badge;
+              existingRec.qualityBadge = upgradedBadge;
               seedCatalogMap.set(existingRec.id, {
                 ...prevSeed,
                 videoQualities: mergedQualities,
                 streamingUrl: upgradedStream,
+                qualityBadge: upgradedBadge,
                 updatedAt: Date.now()
               });
               try {
                 await setDocWithQuotaGuard(
                   doc2(db, "movies", existingRec.id),
-                  { videoQualities: mergedQualities, streamingUrl: upgradedStream, updatedAt: serverTimestamp() },
+                  { videoQualities: mergedQualities, streamingUrl: upgradedStream, qualityBadge: upgradedBadge, updatedAt: serverTimestamp() },
                   { merge: true }
                 );
               } catch (writeErr) {
@@ -9579,6 +9856,7 @@ async function runBulkChannelSyncWorker(params) {
               releaseYear: Number(matched.releaseYear) || (/* @__PURE__ */ new Date()).getFullYear(),
               originalCategory: catToSave,
               isSeries: false,
+              qualityBadge: badge,
               streamingUrl: bestStream.trim(),
               videoQualities: filteredQualities,
               seasons: []
@@ -9614,12 +9892,14 @@ async function runBulkChannelSyncWorker(params) {
         );
         dirty.rec.published = seriesReadyToPublish;
         const prevSeed = seedCatalogMap.get(seriesId) || {};
+        const resolvedSeriesBadge = dirty.rec.qualityBadge || prevSeed.qualityBadge || "HD";
         const updatedSeed = {
           ...prevSeed,
           ...dirty.isNewDoc && dirty.newPayload ? dirty.newPayload : {},
           id: seriesId,
           seasons: dirty.rec.seasons,
           streamingUrl: dirty.rec.streamingUrl,
+          qualityBadge: resolvedSeriesBadge,
           published: seriesReadyToPublish,
           releaseYear: clampReleaseYear(prevSeed.releaseYear || dirty.rec.releaseYear),
           updatedAt: Date.now()
@@ -9632,6 +9912,7 @@ async function runBulkChannelSyncWorker(params) {
               {
                 ...dirty.newPayload,
                 releaseYear: clampReleaseYear(dirty.newPayload.releaseYear),
+                qualityBadge: resolvedSeriesBadge,
                 published: seriesReadyToPublish,
                 seasons: dirty.rec.seasons,
                 updatedAt: serverTimestamp()
@@ -9644,6 +9925,7 @@ async function runBulkChannelSyncWorker(params) {
               {
                 seasons: dirty.rec.seasons,
                 streamingUrl: dirty.rec.streamingUrl,
+                qualityBadge: resolvedSeriesBadge,
                 published: seriesReadyToPublish,
                 updatedAt: serverTimestamp()
               },
@@ -9832,6 +10114,201 @@ setTimeout(() => {
     });
   }, 8e3);
 }, 3e3);
+router2.post("/backfill-print-badges", async (_req, res) => {
+  try {
+    const client2 = await getTelegramClient();
+    const byId = /* @__PURE__ */ new Map();
+    try {
+      if (fs4.existsSync(SEED_CATALOG_PATH)) {
+        const seedArr = JSON.parse(fs4.readFileSync(SEED_CATALOG_PATH, "utf8"));
+        if (Array.isArray(seedArr)) {
+          for (const m of seedArr) {
+            if (m && m.id) byId.set(String(m.id), m);
+          }
+        }
+      }
+    } catch {
+    }
+    try {
+      const fsSnap = await Promise.race([
+        getDocsFromServer(collection(db, "movies")),
+        new Promise((r) => setTimeout(() => r(null), 12e3))
+      ]);
+      if (fsSnap) {
+        fsSnap.docs.forEach((d) => {
+          const data = d.data();
+          const prev = byId.get(d.id) || {};
+          byId.set(d.id, { ...prev, ...data, id: d.id });
+        });
+      }
+    } catch {
+    }
+    const allMovies = Array.from(byId.values());
+    const refsByChannel = /* @__PURE__ */ new Map();
+    const movieRefs = /* @__PURE__ */ new Map();
+    const collectUrl = (movieId, rawUrl) => {
+      const url = String(rawUrl || "").trim();
+      if (!url) return;
+      const p = parseTelegramUrl(url);
+      if (!p.isValid || p.isInviteLink || !p.messageId) return;
+      const chId = String(p.rawChannelId || p.chatId || "").replace(/^-100/, "");
+      const msgId = Number(p.messageId);
+      if (!chId || !Number.isFinite(msgId) || msgId <= 0) return;
+      if (!refsByChannel.has(chId)) refsByChannel.set(chId, /* @__PURE__ */ new Set());
+      refsByChannel.get(chId).add(msgId);
+      if (!movieRefs.has(movieId)) movieRefs.set(movieId, []);
+      movieRefs.get(movieId).push({ channelId: chId, msgId, url });
+    };
+    for (const m of allMovies) {
+      collectUrl(m.id, m.streamingUrl);
+      if (m.videoQualities && typeof m.videoQualities === "object") {
+        Object.values(m.videoQualities).forEach((u) => collectUrl(m.id, u));
+      }
+      if (Array.isArray(m.seasons)) {
+        for (const s of m.seasons.slice(0, 2)) {
+          for (const ep of (s?.episodes || []).slice(0, 2)) {
+            collectUrl(m.id, ep?.streamUrl);
+            if (ep?.videoQualities && typeof ep.videoQualities === "object") {
+              Object.values(ep.videoQualities).forEach((u) => collectUrl(m.id, u));
+            }
+          }
+        }
+      }
+    }
+    const msgMap = /* @__PURE__ */ new Map();
+    for (const [chId, idSet] of refsByChannel.entries()) {
+      const accessHash = getCachedAccessHash(chId);
+      let peer = null;
+      if (accessHash && /^\d+$/.test(chId)) {
+        peer = new Api3.InputPeerChannel({
+          channelId: BigInt(chId),
+          accessHash: BigInt(accessHash)
+        });
+      } else {
+        try {
+          peer = await Promise.race([
+            client2.getEntity(/^\d+$/.test(chId) ? `-100${chId}` : chId),
+            new Promise((r) => setTimeout(() => r(null), 8e3))
+          ]);
+        } catch {
+        }
+      }
+      if (!peer) continue;
+      const ids = Array.from(idSet).sort((a, b) => b - a);
+      for (let i = 0; i < ids.length; i += 100) {
+        const chunk = ids.slice(i, i + 100);
+        try {
+          const msgs = await Promise.race([
+            fetchMessagesWithFloodWait(client2, peer, chunk),
+            new Promise((r) => setTimeout(() => r(null), 12e3))
+          ]);
+          for (const msg of msgs || []) {
+            if (msg && msg.id) {
+              msgMap.set(`${chId}:${msg.id}`, msg);
+            }
+          }
+        } catch (err) {
+          console.warn(`[BackfillPrintBadges] getMessages chunk failed for ${chId}:`, err);
+        }
+      }
+    }
+    const nowMs = Date.now();
+    let updatedCount = 0;
+    let hollywoodPrintCount = 0;
+    let hdCount = 0;
+    const hollywoodPrintTitles = [];
+    const firestoreChanged = [];
+    for (const m of allMovies) {
+      const refs = movieRefs.get(m.id) || [];
+      let hasAnyStreamMsg = false;
+      let hasCleanHdStream = false;
+      let hasHollywoodPrintStream = false;
+      for (const ref of refs) {
+        const msg = msgMap.get(`${ref.channelId}:${ref.msgId}`);
+        if (!msg) continue;
+        hasAnyStreamMsg = true;
+        const classified = classifyTelegramDocMedia(msg);
+        const rawText = `${classified.fileName || ""} ${"caption" in classified ? classified.caption || "" : ""}`;
+        if (isHollywoodPrintText(rawText)) {
+          hasHollywoodPrintStream = true;
+        } else {
+          hasCleanHdStream = true;
+        }
+      }
+      const fallbackTextPrint = isHollywoodPrintText(
+        `${m.qualityBadge || ""} ${m.sourceFileName || ""} ${m.sourceCaption || ""} ${m.title || ""} ${m.description || ""}`
+      );
+      const nextBadge = hasCleanHdStream ? "HD" : hasHollywoodPrintStream ? "HDTC" : normalizeQualityBadge(m.qualityBadge) === "HDTC" || fallbackTextPrint ? "HDTC" : "HD";
+      if (nextBadge === "HDTC") {
+        hollywoodPrintCount++;
+        hollywoodPrintTitles.push(`${m.title} (${m.id})`);
+      } else {
+        hdCount++;
+      }
+      if (normalizeQualityBadge(m.qualityBadge) !== nextBadge) {
+        updatedCount++;
+        byId.set(m.id, {
+          ...m,
+          qualityBadge: nextBadge,
+          updatedAt: nowMs
+        });
+        firestoreChanged.push({ id: m.id, badge: nextBadge });
+      }
+    }
+    if (updatedCount > 0) {
+      writeSeedCatalogToDisk(Array.from(byId.values()));
+    }
+    let firestoreUpdated = 0;
+    if (firestoreChanged.length > 0 && isServerFirestoreWriteAllowed()) {
+      for (let i = 0; i < firestoreChanged.length; i += 20) {
+        if (!isServerFirestoreWriteAllowed()) break;
+        const batch = firestoreChanged.slice(i, i + 20);
+        await Promise.all(
+          batch.map(async (item) => {
+            try {
+              await setDocWithQuotaGuard(
+                doc2(db, "movies", item.id),
+                {
+                  qualityBadge: item.badge,
+                  updatedAt: serverTimestamp()
+                },
+                { merge: true }
+              );
+              firestoreUpdated++;
+            } catch {
+            }
+          })
+        );
+      }
+      await setDocWithQuotaGuard(
+        doc2(db, "app_config", "catalog_sync"),
+        { updatedAt: Date.now(), action: "backfill_print_badges" },
+        { merge: true }
+      ).catch(() => {
+      });
+    }
+    if (updatedCount > 0) {
+      broadcastLiveCatalogUpdate({
+        type: "catalog_updated",
+        count: updatedCount,
+        updatedAt: Date.now(),
+        action: "backfill_print_badges"
+      });
+    }
+    return res.json({
+      success: true,
+      total: allMovies.length,
+      updated: updatedCount,
+      firestoreUpdated,
+      hollywoodPrintCount,
+      hdCount,
+      hollywoodPrintTitles: hollywoodPrintTitles.slice(0, 100)
+    });
+  } catch (err) {
+    console.error("[BackfillPrintBadges] Error:", err);
+    return res.status(500).json({ error: err?.message || "Backfill failed" });
+  }
+});
 router2.get("/stream", handleStream);
 router2.head("/stream", handleStream);
 var telegramRouter_default = router2;
@@ -10700,10 +11177,19 @@ app3.use("/api", (req, res, next) => {
 app3.get("/api/health", (req, res) => {
   const creds = getTelegramCredentials();
   const telegramConfigured = Boolean(creds.apiId && creds.apiHash && (creds.botToken || creds.sessionStr));
+  let appVersion = "3.5.289";
+  try {
+    const vPath = path6.resolve(__dirname, "public/version.json");
+    if (fs7.existsSync(vPath)) {
+      const vj = JSON.parse(fs7.readFileSync(vPath, "utf8"));
+      if (vj?.latestVersion) appVersion = String(vj.latestVersion);
+    }
+  } catch {
+  }
   res.json({
     status: "ok",
     time: (/* @__PURE__ */ new Date()).toISOString(),
-    version: "3.5.285",
+    version: appVersion,
     ffmpegAvailable: FFMPEG_AVAILABLE,
     ffprobeAvailable: FFPROBE_AVAILABLE,
     telegramConfigured,
