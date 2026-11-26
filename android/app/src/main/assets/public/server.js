@@ -4274,46 +4274,15 @@ function getSeasonCoveredEpisodes(season) {
   }
   return covered;
 }
-function isSeriesComplete(movie, expectedSeasonCounts) {
-  if (!movie) return false;
-  if (!isMovieRecordSeries(movie)) {
-    return true;
-  }
-  const seasons = Array.isArray(movie.seasons) ? movie.seasons : [];
-  if (seasons.length === 0) return false;
-  const sortedSeasons = [...seasons].sort(
-    (a, b) => (Number(a?.seasonNumber) || 0) - (Number(b?.seasonNumber) || 0)
-  );
-  const seasonNumbers = sortedSeasons.map((s) => Number(s?.seasonNumber) || 0);
-  if (seasonNumbers[0] !== 1) return false;
-  for (let i = 0; i < seasonNumbers.length; i++) {
-    if (seasonNumbers[i] !== i + 1) return false;
-  }
-  for (const season of sortedSeasons) {
-    const sNum = Number(season?.seasonNumber) || 0;
-    const hasCompletePack = Array.isArray(season?.episodes) && season.episodes.some((ep) => isCompleteSeasonPackEpisode(ep));
-    if (hasCompletePack) {
-      continue;
-    }
-    const covered = getSeasonCoveredEpisodes(season);
-    if (covered.size === 0) return false;
-    const maxEp = Math.max(...covered);
-    const minEp = Math.min(...covered);
-    if (minEp !== 1) return false;
-    for (let ep = 1; ep <= maxEp; ep++) {
-      if (!covered.has(ep)) return false;
-    }
-    const expectedCount = expectedSeasonCounts?.[sNum];
-    if (typeof expectedCount === "number" && expectedCount > 0 && maxEp < expectedCount) {
-      return false;
-    }
-  }
-  return true;
-}
 function hasPlayableContent(movie) {
   if (!movie) return false;
   if (isMovieRecordSeries(movie)) {
-    return isSeriesComplete(movie);
+    if (Array.isArray(movie.seasons) && movie.seasons.length > 0) {
+      return movie.seasons.some(
+        (s) => Array.isArray(s?.episodes) && s.episodes.some((ep) => Boolean(String(ep?.streamUrl || ep?.streamingUrl || "").trim()))
+      );
+    }
+    return Boolean(String(movie.streamingUrl || "").trim());
   }
   const hasPrimary = Boolean(String(movie.streamingUrl || "").trim());
   const hasQualities = Boolean(
@@ -9195,12 +9164,9 @@ async function runServerAutoSyncPass(reason) {
               existingUrlSet.add(draft.streamUrl.toLowerCase());
               continue;
             }
-            const seriesReadyToPublish = isSeriesComplete(
-              { originalCategory: catToSave, seasons: mergedSeasons },
-              expectedCounts
-            );
+            const seriesReadyToPublish = true;
             const wasPublished = existingRec.published !== false;
-            const nextPublished = wasPublished || seriesReadyToPublish;
+            const nextPublished = true;
             const normalizedExisting = normalizeSeriesSeasons({
               ...existingRec,
               originalCategory: catToSave,
@@ -9292,10 +9258,7 @@ async function runServerAutoSyncPass(reason) {
           } else {
             const seriesDocId = `tg_series_${cleanChannelId}_${draft.msgId}`;
             const initialSeasons = [{ seasonNumber: seasonNum, episodes: [epObj] }];
-            const seriesReadyToPublish = isSeriesComplete(
-              { originalCategory: catToSave, seasons: initialSeasons },
-              expectedCounts
-            );
+            const seriesReadyToPublish = true;
             const seriesBase = {
               id: seriesDocId,
               title: draft.title.trim(),
@@ -10506,11 +10469,8 @@ async function runBulkChannelSyncWorker(params) {
           dirty.rec.streamingUrl = firstEpUrl;
         }
         const expectedCounts = dirty.rec.imdbId ? await fetchExpectedSeasonEpisodeCounts(dirty.rec.imdbId) : null;
-        const seriesReadyToPublish = isSeriesComplete(
-          { originalCategory: dirty.rec.originalCategory, seasons: dirty.rec.seasons },
-          expectedCounts
-        );
-        dirty.rec.published = seriesReadyToPublish;
+        const seriesReadyToPublish = true;
+        dirty.rec.published = true;
         const prevSeed = seedCatalogMap.get(seriesId) || {};
         const resolvedSeriesBadge = dirty.rec.qualityBadge || prevSeed.qualityBadge || "HD";
         const updatedSeed = {

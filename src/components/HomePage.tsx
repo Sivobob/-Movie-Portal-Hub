@@ -657,8 +657,8 @@ export default function HomePage() {
   }, [movies, nowMs]);
 
   const latestMoviesAndSeries = useMemo(() => {
-    // Show newly uploaded / added movies and web series first (top of sorted catalog)
-    return movies.slice(0, 25);
+    // Show only 2026 release movies and web series in the Latest row
+    return movies.filter((m) => m && m.published !== false && is2026Release(m)).slice(0, 25);
   }, [movies]);
 
   // Dynamic Genre filtering helpers
