@@ -1,7 +1,7 @@
 export const CLOUD_RUN_BACKEND_URL = 'https://ais-pre-ls63jyrme47bhlhdh7tzui-828533060153.asia-northeast1.run.app';
 export const LIVE_BACKEND_URL = 'https://ais-dev-ls63jyrme47bhlhdh7tzui-828533060153.asia-northeast1.run.app';
 export const PRE_BACKEND_URL = 'https://ais-pre-ls63jyrme47bhlhdh7tzui-828533060153.asia-northeast1.run.app';
-export const APP_VERSION = 'v3.5.307';
+export const APP_VERSION = 'v3.5.308';
 
 const ENV_BACKEND_URL = (
   (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_BASE_URL) ||
@@ -131,20 +131,17 @@ export function getApiBaseUrl(): string {
       resolvedRemoteTranscodeUrl ||
       resolvedNativeBackendUrl ||
       (typeof window !== 'undefined' && window.location?.origin ? window.location.origin.replace(/\/+$/, '') : '') ||
-      PRE_BACKEND_URL ||
       ''
     );
   }
 
-  // 4. For Native APK loaded from bundled localhost: prefer healthy public backend, else live Cloud Run URL
+  // 4. For Native APK loaded from bundled localhost: prefer healthy public backend, else local bridge
+  const localBridge = getNativeLocalBridgeUrl();
   return (
     resolvedRemoteTranscodeUrl ||
-    ENV_BACKEND_URL ||
+    localBridge ||
     resolvedNativeBackendUrl ||
-    PRE_BACKEND_URL ||
-    LIVE_BACKEND_URL ||
-    CLOUD_RUN_BACKEND_URL ||
-    getNativeLocalBridgeUrl() ||
+    ENV_BACKEND_URL ||
     ''
   );
 }
@@ -336,13 +333,19 @@ export function buildAbsoluteDownloadUrl(pathOrUrl: string): string {
   if (!clean) return '';
   if (/^https?:\/\//i.test(clean)) return clean;
   const cleanPath = clean.startsWith('/') ? clean : `/${clean}`;
-  const base =
-    getApiBaseUrl() ||
-    (typeof window !== 'undefined' && window.location?.origin && /^https?:\/\//i.test(window.location.origin) && !window.location.origin.includes('localhost')
-      ? window.location.origin.replace(/\/+$/, '')
-      : '') ||
-    PRE_BACKEND_URL ||
-    LIVE_BACKEND_URL;
+
+  if (isNativeAppRuntime()) {
+    const remote = getRemoteTranscodeBackendUrl();
+    if (remote) {
+      return `${remote.replace(/\/+$/, '')}${cleanPath}`;
+    }
+    const local = getNativeLocalBridgeUrl();
+    if (local) {
+      return `${local.replace(/\/+$/, '')}${cleanPath}`;
+    }
+  }
+
+  const base = getApiBaseUrl();
   return base ? `${base.replace(/\/+$/, '')}${cleanPath}` : cleanPath;
 }
 

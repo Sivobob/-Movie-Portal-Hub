@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.307",
-  "minimumRequiredVersion": "3.5.307",
-  "latestVersionCode": 35307,
-  "minimumRequiredVersionCode": 35307,
+  "latestVersion": "3.5.308",
+  "minimumRequiredVersion": "3.5.308",
+  "latestVersionCode": 35308,
+  "minimumRequiredVersionCode": 35308,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Hub v3.5.307: Fixed Telegram movie auto-sync to app (including Gunmaster G9) with instant real-time live sync without app restart.",
-  "releaseNotes": "v3.5.307: Fixed Telegram channel real-time catalog sync, unblocked Firestore writes, and updated prebundled catalog."
+  "updateMessage": "Movie Hub v3.5.308: Fixed in-app movie & series download stalling issue by routing directly via high-speed native bridge.",
+  "releaseNotes": "v3.5.308: Fixed 1% download stall in app, routed direct MTProto local bridge streams for offline downloads."
 }

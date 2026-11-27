@@ -439,16 +439,27 @@ async function resolveDownloadUrls(
     };
   }
 
-  // Telegram video streams: always provide full HTTP stream URLs from backend server
-  // (both Native Android HttpURLConnection and in-app Web Downloader require direct backend streaming)
+  // Telegram video streams: always provide direct streaming URLs
+  const isNativeWithoutTranscode = isNative && !remoteBase;
+  if (isNativeWithoutTranscode || (!wantsDownscale && recommendedMode === 'direct')) {
+    const streamUrl = localBase
+      ? `${localBase}/api/stream?url=${encodeURIComponent(trimmed)}&raw=1`
+      : buildAbsoluteDownloadUrl(`/api/stream?url=${encodeURIComponent(trimmed)}&raw=1`);
+    return {
+      primaryUrl: streamUrl,
+      fallbackUrl: streamUrl,
+      estimatedTotalBytes: probedFileSize > 0 ? probedFileSize : estBytes,
+    };
+  }
+
   if (wantsDownscale) {
     return {
       primaryUrl: buildAbsoluteDownloadUrl(
         `/api/stream?url=${encodeURIComponent(trimmed)}&ext=.mp4&quality=${qualityTier}&transcode=1&download=1`
       ),
-      fallbackUrl: buildAbsoluteDownloadUrl(
-        `/api/stream?url=${encodeURIComponent(trimmed)}&raw=1`
-      ),
+      fallbackUrl: localBase
+        ? `${localBase}/api/stream?url=${encodeURIComponent(trimmed)}&raw=1`
+        : buildAbsoluteDownloadUrl(`/api/stream?url=${encodeURIComponent(trimmed)}&raw=1`),
       estimatedTotalBytes: resolvedBytes,
     };
   }
@@ -458,9 +469,9 @@ async function resolveDownloadUrls(
       ? `/api/stream?url=${encodeURIComponent(trimmed)}&raw=1`
       : `/api/stream?url=${encodeURIComponent(trimmed)}&ext=.mp4&download=1`
   );
-  const fallbackUrl = buildAbsoluteDownloadUrl(
-    `/api/stream?url=${encodeURIComponent(trimmed)}&raw=1`
-  );
+  const fallbackUrl = localBase
+    ? `${localBase}/api/stream?url=${encodeURIComponent(trimmed)}&raw=1`
+    : buildAbsoluteDownloadUrl(`/api/stream?url=${encodeURIComponent(trimmed)}&raw=1`);
 
   return {
     primaryUrl: streamUrl,
@@ -589,9 +600,7 @@ async function fetchWithRangeSlice(
 ): Promise<Response> {
   const controller = new AbortController();
   runner.controller = controller;
-  const headers: Record<string, string> = {
-    'X-Requested-With': 'XMLHttpRequest',
-  };
+  const headers: Record<string, string> = {};
   if (endByte !== null && endByte >= startByte) {
     headers['Range'] = `bytes=${startByte}-${endByte}`;
   } else {
@@ -600,7 +609,6 @@ async function fetchWithRangeSlice(
   return fetch(url, {
     method: 'GET',
     headers,
-    credentials: 'include',
     signal: controller.signal,
   });
 }
