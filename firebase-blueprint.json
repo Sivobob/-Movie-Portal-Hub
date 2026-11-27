@@ -1,0 +1,125 @@
+{
+  "entities": {
+    "movie": {
+      "title": "Movie",
+      "description": "A movie entry",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "posterUrl": { "type": "string" },
+        "backdropUrl": { "type": "string" },
+        "releaseYear": { "type": "number" },
+        "originalCategory": { "type": "string" },
+        "displayCategory": { "type": "string" },
+        "language": { "type": "string" },
+        "genre": { "type": "string" },
+        "rating": { "type": "number" },
+        "qualityBadge": { "type": "string" },
+        "featured": { "type": "boolean" },
+        "published": { "type": "boolean" },
+        "imdbId": { "type": "string" },
+        "streamingUrl": { "type": "string" },
+        "videoQualities": { "type": "object" },
+        "telegramChannelId": { "type": "string" },
+        "telegramMsgId": { "type": "number" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" },
+        "duration": { "type": "number" },
+        "viewsCount": { "type": "number", "description": "Real count of unique users/devices who started watching this movie or series" },
+        "seasons": { "type": "array", "description": "Series seasons and episodes with optional showInNewEpisodes (boolean) and newEpisodeEnabledAt (number) 24h spotlight fields" }
+      },
+      "required": ["title", "posterUrl", "originalCategory", "displayCategory", "published"]
+    },
+    "movieViewer": {
+      "title": "Movie Viewer",
+      "description": "Deduplicated record of a real user/device that started playing a movie or series",
+      "type": "object",
+      "properties": {
+        "viewerKey": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "movieId": { "type": "string", "maxLength": 128 },
+        "startedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["viewerKey", "movieId", "startedAt"]
+    },
+    "admin": {
+      "title": "Admin",
+      "description": "Authorized administrator record",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" }
+      },
+      "required": ["email"]
+    },
+    "announcement": {
+      "title": "Announcement",
+      "description": "Public notification for new content",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "releaseYear": { "type": "number" },
+        "category": { "type": "string" },
+        "posterUrl": { "type": "string" },
+        "message": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "expiresAt": { "type": "number" }
+      },
+      "required": ["title", "posterUrl", "message"]
+    },
+    "appUpdateConfig": {
+      "title": "App Update Config",
+      "description": "Remote mandatory update configuration for Android APK users",
+      "type": "object",
+      "properties": {
+        "latestVersion": { "type": "string" },
+        "minimumRequiredVersion": { "type": "string" },
+        "latestVersionCode": { "type": "number" },
+        "minimumRequiredVersionCode": { "type": "number" },
+        "apkDownloadUrl": { "type": "string" },
+        "updateMessage": { "type": "string" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": [
+        "latestVersion",
+        "minimumRequiredVersion",
+        "latestVersionCode",
+        "apkDownloadUrl",
+        "updateMessage"
+      ]
+    },
+    "appStats": {
+      "title": "App Download Stats",
+      "description": "Live APK download clicks, unique web downloaders, and installed phone counters",
+      "type": "object",
+      "properties": {
+        "totalApkClicks": { "type": "number" },
+        "uniqueDownloadUsers": { "type": "number" },
+        "installedAppUsers": { "type": "number" },
+        "inAppUpdateDownloads": { "type": "number" },
+        "lastInstalledVersion": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/movies/{movieId}": {
+      "schema": "movie",
+      "description": "Collection of all movies"
+    },
+    "/users/{userId}/watched_movies/{movieId}": {
+      "schema": "movieViewer",
+      "description": "Per-user/device deduplicated watch records for accurate real movie and series watch counts"
+    },
+    "/admins/{uid}": {
+      "schema": "admin",
+      "description": "Collection of authorized admin users"
+    },
+    "/announcements/{announcementId}": {
+      "schema": "announcement",
+      "description": "Collection of public notifications"
+    },
+    "/app_config/{configId}": {
+      "schema": "appUpdateConfig",
+      "description": "Remote configuration including Android mandatory app update settings"
+    }
+  }
+}
