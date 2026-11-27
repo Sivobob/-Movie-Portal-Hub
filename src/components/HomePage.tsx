@@ -770,10 +770,10 @@ export default function HomePage() {
             </div>
           ) : (
             <>
-              <div className="flex flex-col w-full pb-8">
+              <div className="flex flex-col w-full pb-8 px-2 sm:px-4">
                 {yearWiseCategoryRows.map((section, rowIdx) => (
-                  <div key={section.label} className={rowIdx === 0 ? 'px-3 sm:px-6' : 'mt-6 px-3 sm:px-6'}>
-                    <div className="flex items-center gap-2 mb-3 min-w-0">
+                  <div key={section.label} className={rowIdx === 0 ? '' : 'mt-7'}>
+                    <div className="flex items-center gap-2 mb-3 min-w-0 px-1">
                       <span className="w-1.5 h-5 bg-[#E50914] rounded-full flex-shrink-0" />
                       <h3 className="text-base sm:text-lg font-extrabold text-white tracking-wide">
                         {section.label}
@@ -782,12 +782,12 @@ export default function HomePage() {
                         ({section.items.length})
                       </span>
                     </div>
-                    <div className="flex items-stretch gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
-                      {section.items.map((movie) => (
-                        <div key={movie.id} className="flex-shrink-0 w-28 sm:w-32">
+                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2 sm:gap-3">
+                      {section.items.map((movie, idx) => (
+                        <div key={movie.id} className="relative group">
                           <MovieCard
                             movie={movie}
-                            loading={rowIdx < 2 ? 'eager' : 'lazy'}
+                            loading={rowIdx === 0 && idx < 12 ? 'eager' : 'lazy'}
                             onClick={() => handleMovieClick(movie)}
                           />
                         </div>

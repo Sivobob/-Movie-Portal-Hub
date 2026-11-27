@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.303",
-  "minimumRequiredVersion": "3.5.303",
-  "latestVersionCode": 35303,
-  "minimumRequiredVersionCode": 35303,
+  "latestVersion": "3.5.304",
+  "minimumRequiredVersion": "3.5.304",
+  "latestVersionCode": 35304,
+  "minimumRequiredVersionCode": 35304,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Hub v3.5.303: Home screen par Latest Movies & Series aur genre lines wapas aa gayi hain, aur Bollywood/Hollywood/Series tabs mein sabhi years (2026, 2025, 2024, 2023...) ki year-wise rows add ho gayi hain.",
-  "releaseNotes": "v3.5.303: Restored classic Home screen rows (Latest Movies & Series + genre rows) while keeping year-wise descending rows (2026, 2025, 2024, 2023...) inside Bollywood, Hollywood, and Series sections."
+  "updateMessage": "Movie Hub v3.5.304: Home screen par Latest Movies & Series aur genre lines wapas aa gayi hain, aur Bollywood/Hollywood/Series tabs mein har saal (2026, 2025, 2024, 2023...) ki 3-column grid layout lag gayi hai.",
+  "releaseNotes": "v3.5.304: Restored classic Home screen rows and updated Bollywood, Hollywood, and Series tabs to display year-wise 3-column Left-to-Right grids."
 }
