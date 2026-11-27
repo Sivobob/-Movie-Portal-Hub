@@ -1,0 +1,11 @@
+{
+  "latestVersion": "3.5.306",
+  "minimumRequiredVersion": "3.5.306",
+  "latestVersionCode": 35306,
+  "minimumRequiredVersionCode": 35306,
+  "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
+  "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
+  "isMandatory": true,
+  "updateMessage": "Movie Hub v3.5.306: High-speed Android downloads and instant channel-to-app live sync without app restart have been fully optimized and verified.",
+  "releaseNotes": "v3.5.306: Optimized Android multi-block parallel Telegram downloading speed and instant real-time catalog synchronization."
+}
