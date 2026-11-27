@@ -14,8 +14,8 @@ import { guardedFirestoreWrite, isFirestoreWriteAllowed } from './firestoreQuota
 export const APP_UPDATE_COLLECTION = 'admins';
 export const APP_UPDATE_DOC_ID = 'android_update';
 
-export const CURRENT_VERSION_NAME = '3.5.296';
-export const CURRENT_VERSION_CODE = 35296;
+export const CURRENT_VERSION_NAME = '3.5.300';
+export const CURRENT_VERSION_CODE = 35300;
 
 export const OFFICIAL_APK_DIRECT_URL =
   'https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk';
@@ -29,7 +29,7 @@ export function resolveApkDownloadUrl(rawUrl?: string | null): string {
 }
 
 export const DEFAULT_UPDATE_MESSAGE =
-  'Movie Hub v3.5.295: Sabhi movies aur series mein Android App sound issue (AC3/EAC3/DDP/DTS/AAC) fix ho gaya hai, loading fast hai aur Holl Print labels updated hain.';
+  'Movie Hub v3.5.300: Android app mein Movies aur Web Series downloading fix ho gayi hai (fast server stream, range resume aur offline playback support).';
 
 const GITHUB_VERSION_JSON_URL =
   'https://raw.githubusercontent.com/Sivobob/-Movie-Portal-Hub/main/public/version.json';

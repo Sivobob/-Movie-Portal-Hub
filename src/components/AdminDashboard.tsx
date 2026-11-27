@@ -1913,8 +1913,9 @@ export default function AdminDashboard() {
         minimumRequiredVersion: targetVersion,
         latestVersionCode: targetCode,
         minimumRequiredVersionCode: targetCode,
+        isMandatory: true,
         apkDownloadUrl: updateConfigForm.apkDownloadUrl || DEFAULT_REMOTE_UPDATE_CONFIG.apkDownloadUrl,
-        updateMessage: `Movie Hub v${targetVersion} update is ready! Update now for quality controls, all-format playback, and bug fixes.`,
+        updateMessage: `Movie Hub v${targetVersion} update is ready! Android app mein Movies aur Web Series downloading fix ho gayi hai. Abhi update karein.`,
       });
       setUpdateConfigForm(saved);
       setFirebaseUpdateVersion(saved.minimumRequiredVersion || saved.latestVersion);

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
 import {
+  buildAbsoluteDownloadUrl,
   buildApiUrl,
   ensureAndroidStreamBridge,
   getNativeLocalBridgeUrl,
@@ -418,17 +419,13 @@ async function resolveDownloadUrls(
     resolvedBytes = probedFileSize > 0 ? probedFileSize : estBytes;
   }
 
-  const hasTranscodeBackend = !isNative || Boolean(remoteBase);
-  const makeTranscodeUrl = (pathAndQuery: string) =>
-    isNative ? `${remoteBase}${pathAndQuery}` : buildApiUrl(pathAndQuery);
-
   if (!isTelegram) {
-    const proxyUrl = buildApiUrl(
+    const proxyUrl = buildAbsoluteDownloadUrl(
       `/api/download/file?url=${encodeURIComponent(trimmed)}&filename=video.mp4`
     );
-    if (wantsDownscale && hasTranscodeBackend) {
+    if (wantsDownscale) {
       return {
-        primaryUrl: makeTranscodeUrl(
+        primaryUrl: buildAbsoluteDownloadUrl(
           `/api/stream?url=${encodeURIComponent(trimmed)}&ext=.mp4&quality=${qualityTier}&transcode=1&download=1`
         ),
         fallbackUrl: trimmed,
@@ -442,46 +439,32 @@ async function resolveDownloadUrls(
     };
   }
 
-  if (wantsDownscale && hasTranscodeBackend) {
-    const localStreamUrl = localBase
-      ? `${localBase}/api/stream?url=${encodeURIComponent(trimmed)}&ext=.mp4`
-      : '';
-    const remoteRawUrl = remoteBase
-      ? `${remoteBase}/api/stream?url=${encodeURIComponent(trimmed)}&raw=1`
-      : '';
-
+  // Telegram video streams: always provide full HTTP stream URLs from backend server
+  // (both Native Android HttpURLConnection and in-app Web Downloader require direct backend streaming)
+  if (wantsDownscale) {
     return {
-      primaryUrl: makeTranscodeUrl(
+      primaryUrl: buildAbsoluteDownloadUrl(
         `/api/stream?url=${encodeURIComponent(trimmed)}&ext=.mp4&quality=${qualityTier}&transcode=1&download=1`
       ),
-      fallbackUrl: localStreamUrl || remoteRawUrl || buildApiUrl(`/api/stream?url=${encodeURIComponent(trimmed)}&raw=1`),
+      fallbackUrl: buildAbsoluteDownloadUrl(
+        `/api/stream?url=${encodeURIComponent(trimmed)}&raw=1`
+      ),
       estimatedTotalBytes: resolvedBytes,
     };
   }
 
-  if (isNative) {
-    const localStreamUrl = localBase
-      ? `${localBase}/api/stream?url=${encodeURIComponent(trimmed)}&ext=.mp4`
-      : '';
-    const remoteStreamUrl = remoteBase
-      ? `${remoteBase}/api/stream?url=${encodeURIComponent(trimmed)}&raw=1`
-      : '';
-
-    return {
-      primaryUrl: localStreamUrl || remoteStreamUrl || buildApiUrl(`/api/stream?url=${encodeURIComponent(trimmed)}&raw=1`),
-      fallbackUrl: remoteStreamUrl || localStreamUrl || '',
-      estimatedTotalBytes: resolvedBytes,
-    };
-  }
-
-  const streamUrl =
+  const streamUrl = buildAbsoluteDownloadUrl(
     recommendedMode === 'direct'
-      ? buildApiUrl(`/api/stream?url=${encodeURIComponent(trimmed)}&raw=1`)
-      : buildApiUrl(`/api/stream?url=${encodeURIComponent(trimmed)}&ext=.mp4&download=1`);
+      ? `/api/stream?url=${encodeURIComponent(trimmed)}&raw=1`
+      : `/api/stream?url=${encodeURIComponent(trimmed)}&ext=.mp4&download=1`
+  );
+  const fallbackUrl = buildAbsoluteDownloadUrl(
+    `/api/stream?url=${encodeURIComponent(trimmed)}&raw=1`
+  );
 
   return {
     primaryUrl: streamUrl,
-    fallbackUrl: buildApiUrl(`/api/stream?url=${encodeURIComponent(trimmed)}&raw=1`),
+    fallbackUrl,
     estimatedTotalBytes: resolvedBytes,
   };
 }
@@ -926,6 +909,7 @@ async function finalizeWebDownload(taskId: string, meta: PendingTaskMeta, runner
 
 // Native Android download polling loop
 let nativePollTimer: ReturnType<typeof setInterval> | null = null;
+const nativeFallbackTriggered = new Set<string>();
 
 function syncNativeDownloadTasksFromBridge() {
   if (typeof window === 'undefined' || !Capacitor.isNativePlatform()) return;
@@ -958,6 +942,7 @@ function syncNativeDownloadTasksFromBridge() {
       }
 
       if (status === 'completed') {
+        nativeFallbackTriggered.delete(id);
         const alreadySaved = storeState.downloads.some((d) => d.id === id);
         if (!alreadySaved && meta) {
           const finalBytes = totalBytes > 0 ? totalBytes : receivedBytes;
@@ -998,6 +983,38 @@ function syncNativeDownloadTasksFromBridge() {
       }
 
       if (status === 'error') {
+        const meta = pendingTaskMetaMap.get(id);
+        if (meta && !nativeFallbackTriggered.has(id)) {
+          nativeFallbackTriggered.add(id);
+          console.warn('[NativeDownload] Native download failed, falling back to in-app stream runner for:', meta.baseTitle, errorMessage);
+          try {
+            (window as any).AndroidPlayerBridge?.cancelOfflineVideoDownload?.(id);
+          } catch {}
+          webRunners.set(id, {
+            pendingParts: [],
+            pendingBytes: 0,
+            chunkIndex: 0,
+            receivedBytes: 0,
+            totalBytes: meta.estimatedTotalBytes,
+            mimeType: 'video/mp4',
+            supportsRange: null,
+            usingFallback: true,
+            paused: false,
+            cancelled: false,
+            controller: null,
+          });
+          updateActiveTask(id, {
+            status: 'downloading',
+            progress: 0,
+            receivedBytes: 0,
+            speed: 'Switching in-app...',
+            eta: 'Starting...',
+            errorMessage: undefined,
+          });
+          enqueueWebDownload(id);
+          continue;
+        }
+
         updateActiveTask(id, {
           progress,
           receivedBytes,
@@ -1055,24 +1072,33 @@ export async function startGlobalDownload(params: StartDownloadParams): Promise<
   }
 
   // Prevent duplicate active download for exact same title/episode
-  const existingActive = storeState.activeDownloads.find(
-    (d) =>
-      d.status !== 'error' &&
-      ((movieId && d.movieId === movieId && d.seasonNumber === seasonNumber && d.episodeNumber === episodeNumber) ||
-        d.videoUrl === cleanUrl)
-  );
+  const isSeriesEp = Boolean(seasonNumber !== undefined || episodeNumber !== undefined);
+  const existingActive = storeState.activeDownloads.find((d) => {
+    if (d.status === 'error') return false;
+    if (movieId && d.movieId === movieId) {
+      if (isSeriesEp) {
+        return d.seasonNumber === seasonNumber && d.episodeNumber === episodeNumber;
+      }
+      return true;
+    }
+    return !isSeriesEp && d.videoUrl === cleanUrl;
+  });
   if (existingActive) {
     setGlobalNotification(`Already downloading "${existingActive.title}" (${existingActive.progress}%)`);
     return existingActive.id;
   }
 
   // Remove any stale errored active task for this same item before starting fresh
-  const staleErrored = storeState.activeDownloads.filter(
-    (d) =>
-      d.status === 'error' &&
-      ((movieId && d.movieId === movieId && d.seasonNumber === seasonNumber && d.episodeNumber === episodeNumber) ||
-        d.videoUrl === cleanUrl)
-  );
+  const staleErrored = storeState.activeDownloads.filter((d) => {
+    if (d.status !== 'error') return false;
+    if (movieId && d.movieId === movieId) {
+      if (isSeriesEp) {
+        return d.seasonNumber === seasonNumber && d.episodeNumber === episodeNumber;
+      }
+      return true;
+    }
+    return !isSeriesEp && d.videoUrl === cleanUrl;
+  });
   staleErrored.forEach((d) => cancelActiveDownloadTask(d.id));
 
   const downloadId = `dl_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -1200,6 +1226,7 @@ export function cancelActiveDownloadTask(id: string): void {
     } catch {}
   }
   pendingTaskMetaMap.delete(id);
+  nativeFallbackTriggered.delete(id);
   removeActiveTask(id);
   pumpWebDownloadQueue();
 }

@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.296",
-  "minimumRequiredVersion": "3.5.296",
-  "latestVersionCode": 35296,
-  "minimumRequiredVersionCode": 35296,
+  "latestVersion": "3.5.300",
+  "minimumRequiredVersion": "3.5.300",
+  "latestVersionCode": 35300,
+  "minimumRequiredVersionCode": 35300,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Hub v3.5.296: New Android APK build with instant Telegram auto-sync, enhanced offline download support, and improved player sound and performance.",
-  "releaseNotes": "v3.5.296: Updated Android APK build with full audio decoder support, instant Telegram auto-sync without restart, and enhanced offline video downloads."
+  "updateMessage": "Movie Hub v3.5.300: Android app mein Movies aur Web Series downloading fix ho gayi hai (fast server stream, range resume aur offline playback support).",
+  "releaseNotes": "v3.5.300: Fixed movie and web series downloads inside the Android app with direct backend streaming, range resume, and automatic fallback."
 }

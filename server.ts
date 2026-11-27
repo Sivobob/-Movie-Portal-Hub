@@ -137,7 +137,7 @@ app.get('/api/ios-profile', (req, res) => {
     const rawProto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0].trim();
     const isLocal = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(rawHost);
     const scheme = isLocal ? rawProto : 'https';
-    const appOrigin = rawHost ? `${scheme}://${rawHost}/` : 'https://ais-pre-yaniwuwl6wc7ivl5tz2bbo-755452514312.asia-northeast1.run.app/';
+    const appOrigin = rawHost ? `${scheme}://${rawHost}/` : 'https://ais-pre-ls63jyrme47bhlhdh7tzui-828533060153.asia-northeast1.run.app/';
 
     const escapeXml = (str: string) =>
       str

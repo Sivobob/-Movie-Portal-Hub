@@ -151,6 +151,8 @@ public class MainActivity extends BridgeActivity {
     private static final String FIRESTORE_BACKEND_DOC_URL =
         "https://firestore.googleapis.com/v1/projects/gen-lang-client-0267042672/databases/ai-studio-movieportalhub-664a3e40-85f3-4758-945e-fd031bdc459f/documents/admins/backend";
     private static final String[] LIVE_WEB_CANDIDATES = new String[] {
+        "https://ais-pre-ls63jyrme47bhlhdh7tzui-828533060153.asia-northeast1.run.app",
+        "https://ais-dev-ls63jyrme47bhlhdh7tzui-828533060153.asia-northeast1.run.app",
         "https://ais-pre-jledbsv5it3bzdsqu6r7up-560942295760.asia-northeast1.run.app",
         "https://ais-dev-jledbsv5it3bzdsqu6r7up-560942295760.asia-northeast1.run.app",
         "https://ais-pre-e2ezio27fl3yrqw6mye2bv-338461367324.asia-northeast1.run.app",
@@ -2647,6 +2649,24 @@ public class MainActivity extends BridgeActivity {
 
                     try {
                         String currentUrl = activeUrl;
+                        if (currentUrl != null && currentUrl.startsWith("/")) {
+                            String base = "";
+                            if (activeLiveOrigin != null && !activeLiveOrigin.trim().isEmpty() && !activeLiveOrigin.contains("localhost")) {
+                                base = activeLiveOrigin.trim();
+                            } else {
+                                String saved = ReleaseNotificationHelper.getSavedBackendBaseUrl(getApplicationContext());
+                                if (saved != null && !saved.trim().isEmpty()) {
+                                    base = saved.trim();
+                                } else {
+                                    base = "https://ais-pre-ls63jyrme47bhlhdh7tzui-828533060153.asia-northeast1.run.app";
+                                }
+                            }
+                            if (base.endsWith("/")) {
+                                base = base.substring(0, base.length() - 1);
+                            }
+                            currentUrl = base + currentUrl;
+                        }
+
                         for (int hops = 0; hops < 8; hops++) {
                             URL urlObj = new URL(currentUrl);
                             conn = (HttpURLConnection) urlObj.openConnection();
@@ -2656,8 +2676,12 @@ public class MainActivity extends BridgeActivity {
                             conn.setRequestMethod("GET");
                             conn.setRequestProperty("User-Agent", "MovieHub/3.5.295 AndroidDownloader");
                             conn.setRequestProperty("Accept-Encoding", "identity");
-                            if (existingOffset > 0L && task.totalBytes > existingOffset) {
-                                conn.setRequestProperty("Range", "bytes=" + existingOffset + "-" + (task.totalBytes - 1L));
+                            if (existingOffset > 0L) {
+                                if (task.totalBytes > existingOffset) {
+                                    conn.setRequestProperty("Range", "bytes=" + existingOffset + "-" + (task.totalBytes - 1L));
+                                } else {
+                                    conn.setRequestProperty("Range", "bytes=" + existingOffset + "-");
+                                }
                             }
                             conn.connect();
 

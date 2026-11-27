@@ -67,6 +67,7 @@ export function isHollywoodPrintMovie(
  * - "HD" for clean HD releases
  */
 export function getWatchNowQualityLabel(movie?: any): 'Holl Print' | 'HD' {
+  if (normalizeQualityBadge(movie?.qualityBadge) === 'HD') return 'HD';
   return isHollywoodPrintMovie(movie) ? 'Holl Print' : 'HD';
 }
 

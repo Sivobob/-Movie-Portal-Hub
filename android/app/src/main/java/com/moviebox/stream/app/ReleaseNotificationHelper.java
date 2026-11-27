@@ -45,6 +45,8 @@ public class ReleaseNotificationHelper {
         "https://firestore.googleapis.com/v1/projects/gen-lang-client-0267042672/databases/ai-studio-movieportalhub-664a3e40-85f3-4758-945e-fd031bdc459f/documents/admins/latest_release_notification";
 
     private static final String[] FALLBACK_BACKEND_URLS = new String[] {
+        "https://ais-pre-ls63jyrme47bhlhdh7tzui-828533060153.asia-northeast1.run.app",
+        "https://ais-dev-ls63jyrme47bhlhdh7tzui-828533060153.asia-northeast1.run.app",
         "https://ais-pre-jledbsv5it3bzdsqu6r7up-560942295760.asia-northeast1.run.app",
         "https://ais-dev-jledbsv5it3bzdsqu6r7up-560942295760.asia-northeast1.run.app",
         "https://ais-pre-yaniwuwl6wc7ivl5tz2bbo-755452514312.asia-northeast1.run.app",
@@ -105,6 +107,19 @@ public class ReleaseNotificationHelper {
                 .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
             prefs.edit().putString(KEY_BACKEND_URL, clean).apply();
         } catch (Exception ignored) {}
+    }
+
+    public static String getSavedBackendBaseUrl(Context context) {
+        if (context == null) return "";
+        try {
+            SharedPreferences prefs = context.getApplicationContext()
+                .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            String saved = prefs.getString(KEY_BACKEND_URL, "");
+            if (saved != null && !saved.trim().isEmpty()) {
+                return saved.trim().replaceAll("/+$", "");
+            }
+        } catch (Exception ignored) {}
+        return "";
     }
 
     private static List<String> getCandidateBackendUrls(Context context) {

@@ -1,7 +1,7 @@
-export const CLOUD_RUN_BACKEND_URL = 'https://ais-pre-jledbsv5it3bzdsqu6r7up-560942295760.asia-northeast1.run.app';
-export const LIVE_BACKEND_URL = 'https://ais-dev-jledbsv5it3bzdsqu6r7up-560942295760.asia-northeast1.run.app';
-export const PRE_BACKEND_URL = 'https://ais-pre-jledbsv5it3bzdsqu6r7up-560942295760.asia-northeast1.run.app';
-export const APP_VERSION = 'v3.5.295';
+export const CLOUD_RUN_BACKEND_URL = 'https://ais-pre-ls63jyrme47bhlhdh7tzui-828533060153.asia-northeast1.run.app';
+export const LIVE_BACKEND_URL = 'https://ais-dev-ls63jyrme47bhlhdh7tzui-828533060153.asia-northeast1.run.app';
+export const PRE_BACKEND_URL = 'https://ais-pre-ls63jyrme47bhlhdh7tzui-828533060153.asia-northeast1.run.app';
+export const APP_VERSION = 'v3.5.300';
 
 const ENV_BACKEND_URL = (
   (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_BASE_URL) ||
@@ -127,7 +127,13 @@ export function getApiBaseUrl(): string {
 
   // 3. For Native APK loaded on a live HTTPS server: use same-origin unless another remote transcode server was resolved
   if (isLoadedOnRemoteLiveWebOrigin()) {
-    return resolvedRemoteTranscodeUrl || resolvedNativeBackendUrl || '';
+    return (
+      resolvedRemoteTranscodeUrl ||
+      resolvedNativeBackendUrl ||
+      (typeof window !== 'undefined' && window.location?.origin ? window.location.origin.replace(/\/+$/, '') : '') ||
+      PRE_BACKEND_URL ||
+      ''
+    );
   }
 
   // 4. For Native APK loaded from bundled localhost: prefer healthy public backend, else live Cloud Run URL
@@ -137,6 +143,7 @@ export function getApiBaseUrl(): string {
     resolvedNativeBackendUrl ||
     PRE_BACKEND_URL ||
     LIVE_BACKEND_URL ||
+    CLOUD_RUN_BACKEND_URL ||
     getNativeLocalBridgeUrl() ||
     ''
   );
@@ -314,13 +321,29 @@ export async function probeWorkingBackendUrl(force = false): Promise<string | nu
   return inflightProbePromise;
 }
 
-/**
- * Builds a full API URL given an endpoint path like `/api/stream?url=...`
- */
 export function buildApiUrl(path: string): string {
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   const base = getApiBaseUrl();
   return base ? `${base}${cleanPath}` : cleanPath;
+}
+
+/**
+ * Guarantees a fully-qualified absolute URL (https://...) suitable for
+ * Android Native Java HttpURLConnection download tasks and bridge callers.
+ */
+export function buildAbsoluteDownloadUrl(pathOrUrl: string): string {
+  const clean = String(pathOrUrl || '').trim();
+  if (!clean) return '';
+  if (/^https?:\/\//i.test(clean)) return clean;
+  const cleanPath = clean.startsWith('/') ? clean : `/${clean}`;
+  const base =
+    getApiBaseUrl() ||
+    (typeof window !== 'undefined' && window.location?.origin && /^https?:\/\//i.test(window.location.origin) && !window.location.origin.includes('localhost')
+      ? window.location.origin.replace(/\/+$/, '')
+      : '') ||
+    PRE_BACKEND_URL ||
+    LIVE_BACKEND_URL;
+  return base ? `${base.replace(/\/+$/, '')}${cleanPath}` : cleanPath;
 }
 
 /**
