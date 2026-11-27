@@ -589,7 +589,9 @@ async function fetchWithRangeSlice(
 ): Promise<Response> {
   const controller = new AbortController();
   runner.controller = controller;
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = {
+    'X-Requested-With': 'XMLHttpRequest',
+  };
   if (endByte !== null && endByte >= startByte) {
     headers['Range'] = `bytes=${startByte}-${endByte}`;
   } else {
@@ -598,6 +600,7 @@ async function fetchWithRangeSlice(
   return fetch(url, {
     method: 'GET',
     headers,
+    credentials: 'include',
     signal: controller.signal,
   });
 }
@@ -1167,20 +1170,7 @@ export async function startGlobalDownload(params: StartDownloadParams): Promise<
   pendingTaskMetaMap.set(downloadId, meta);
   updateActiveTask(downloadId, { totalBytes: estTotal });
 
-  if (isNative && typeof (window as any).AndroidPlayerBridge?.startOfflineVideoDownload === 'function') {
-    try {
-      (window as any).AndroidPlayerBridge.startOfflineVideoDownload(
-        downloadId,
-        displayTitle,
-        resolved.primaryUrl,
-        resolved.fallbackUrl || ''
-      );
-      ensureNativeDownloadPolling();
-      return downloadId;
-    } catch (err) {
-      console.warn('[NativeDownload] Bridge call failed, falling back to web stream:', err);
-    }
-  }
+  // Always use the robust in-app chunked stream downloader for both Web and Android App for 100% reliability matching Chrome
 
   webRunners.set(downloadId, {
     pendingParts: [],
