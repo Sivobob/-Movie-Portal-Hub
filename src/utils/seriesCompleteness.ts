@@ -464,50 +464,7 @@ export function isSeriesComplete(
   expectedSeasonCounts?: Record<number, number> | null
 ): boolean {
   if (!movie) return false;
-  if (!isMovieRecordSeries(movie)) {
-    return true;
-  }
-
-  const seasons = Array.isArray(movie.seasons) ? movie.seasons : [];
-  if (seasons.length === 0) return false;
-
-  const sortedSeasons = [...seasons].sort(
-    (a, b) => (Number(a?.seasonNumber) || 0) - (Number(b?.seasonNumber) || 0)
-  );
-
-  // Must start at Season 1 and have contiguous season numbers (1..N)
-  const seasonNumbers = sortedSeasons.map((s) => Number(s?.seasonNumber) || 0);
-  if (seasonNumbers[0] !== 1) return false;
-  for (let i = 0; i < seasonNumbers.length; i++) {
-    if (seasonNumbers[i] !== i + 1) return false;
-  }
-
-  for (const season of sortedSeasons) {
-    const sNum = Number(season?.seasonNumber) || 0;
-    const hasCompletePack =
-      Array.isArray(season?.episodes) &&
-      season.episodes.some((ep: any) => isCompleteSeasonPackEpisode(ep));
-    if (hasCompletePack) {
-      continue;
-    }
-
-    const covered = getSeasonCoveredEpisodes(season);
-    if (covered.size === 0) return false;
-
-    const maxEp = Math.max(...covered);
-    const minEp = Math.min(...covered);
-    if (minEp !== 1) return false;
-
-    for (let ep = 1; ep <= maxEp; ep++) {
-      if (!covered.has(ep)) return false;
-    }
-
-    const expectedCount = expectedSeasonCounts?.[sNum];
-    if (typeof expectedCount === 'number' && expectedCount > 0 && maxEp < expectedCount) {
-      return false;
-    }
-  }
-
+  if (!hasPlayableContent(movie)) return false;
   return true;
 }
 
