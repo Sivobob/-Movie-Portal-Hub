@@ -14,6 +14,7 @@ import {
   getLocalMovies,
   getCatalogFromIdb,
   fetchSeedCatalogJson,
+  fetchMergedMoviesCatalog,
   getTimestampMs,
   saveLocalMovies,
   sortMoviesList,
@@ -171,6 +172,14 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
       });
       setIsLoading(false);
     };
+
+    fetchMergedMoviesCatalog()
+      .then((merged) => {
+        if (active && merged.length > 0) {
+          mergeIntoState(merged, true);
+        }
+      })
+      .catch(() => {});
 
     getCatalogFromIdb()
       .then((idbItems) => {
