@@ -50,6 +50,31 @@ export default function UpdateNotification() {
     }
 
     const dismissedVer = typeof window !== 'undefined' ? localStorage.getItem('mp_dismissed_update_version') : null;
+    
+    // If installed version is already >= latestVersion, NEVER show update prompt!
+    if (inst && cfg && cfg.latestVersion && inst.versionName) {
+      if (compareVersions(inst.versionName, cfg.latestVersion) >= 0) {
+        setUpdateRequired(false);
+        if (typeof window !== 'undefined') {
+          (window as any).__MOVIE_PORTAL_MANDATORY_UPDATE__ = false;
+          try {
+            (window as any).AndroidPlayerBridge?.setMandatoryUpdateRequired?.(false);
+          } catch {}
+        }
+        return;
+      }
+    }
+    if (inst && cfg && cfg.latestVersionCode && inst.versionCode && inst.versionCode >= cfg.latestVersionCode) {
+      setUpdateRequired(false);
+      if (typeof window !== 'undefined') {
+        (window as any).__MOVIE_PORTAL_MANDATORY_UPDATE__ = false;
+        try {
+          (window as any).AndroidPlayerBridge?.setMandatoryUpdateRequired?.(false);
+        } catch {}
+      }
+      return;
+    }
+
     const mandatoryNeeded = isAppUpdateRequired(inst, cfg);
     const optionalNeeded = !mandatoryNeeded && hasNewerApkRelease(inst, cfg);
     const isMandatoryUpdate = mandatoryNeeded && (Boolean(cfg.isMandatory) || Boolean(cfg.minimumRequiredVersion && cfg.minimumRequiredVersion !== '1.0.0'));
