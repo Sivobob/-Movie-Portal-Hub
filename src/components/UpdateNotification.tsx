@@ -10,6 +10,7 @@ import {
   isAppUpdateRequired,
   hasNewerApkRelease,
   pickHigherRemoteUpdateConfig,
+  compareVersions,
   OFFICIAL_APK_DIRECT_URL,
   resolveApkDownloadUrl,
 } from '../services/appUpdateConfig';
