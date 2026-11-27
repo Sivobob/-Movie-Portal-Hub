@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.300",
-  "minimumRequiredVersion": "3.5.300",
-  "latestVersionCode": 35300,
-  "minimumRequiredVersionCode": 35300,
+  "latestVersion": "3.5.301",
+  "minimumRequiredVersion": "3.5.301",
+  "latestVersionCode": 35301,
+  "minimumRequiredVersionCode": 35301,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Hub v3.5.300: Android app mein Movies aur Web Series downloading fix ho gayi hai (fast server stream, range resume aur offline playback support).",
-  "releaseNotes": "v3.5.300: Fixed movie and web series downloads inside the Android app with direct backend streaming, range resume, and automatic fallback."
+  "updateMessage": "Movie Hub v3.5.301: 1% pe download rukne aur fail hone wali problem fix ho gayi hai! Ab Movies aur Web Series full speed pe bina ruke download hongi.",
+  "releaseNotes": "v3.5.301: Fixed the 1% (1.0 MB) download freeze & timeout bug by keeping Telegram DC senders alive, adding 8 MB Range-sliced downloads with auto-resume, and holding WakeLock/WifiLock."
 }

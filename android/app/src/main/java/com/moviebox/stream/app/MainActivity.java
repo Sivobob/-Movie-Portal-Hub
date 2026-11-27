@@ -2625,13 +2625,39 @@ public class MainActivity extends BridgeActivity {
         if (!task.running.compareAndSet(false, true)) return;
         videoDownloadExecutor.execute(() -> {
             HttpURLConnection conn = null;
+            PowerManager.WakeLock dlWakeLock = null;
+            WifiManager.WifiLock dlWifiLock = null;
             try {
+                try {
+                    PowerManager pm = (PowerManager) getApplicationContext().getSystemService(Context.POWER_SERVICE);
+                    if (pm != null) {
+                        dlWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MovieHub:DownloadWakeLock_" + task.notifId);
+                        dlWakeLock.setReferenceCounted(false);
+                        dlWakeLock.acquire(6L * 60L * 60L * 1000L);
+                    }
+                } catch (Exception ignored) {}
+                try {
+                    WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+                    if (wm != null) {
+                        int mode = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                            ? WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+                            : WifiManager.WIFI_MODE_FULL_HIGH_PERF;
+                        dlWifiLock = wm.createWifiLock(mode, "MovieHub:DownloadWifiLock_" + task.notifId);
+                        dlWifiLock.setReferenceCounted(false);
+                        dlWifiLock.acquire();
+                    }
+                } catch (Exception ignored) {}
+
                 task.status = "downloading";
                 task.errorMessage = "";
                 updateVideoDownloadNotification(task, false, false);
 
+                final long SLICE_SIZE = 8L * 1024L * 1024L;
+                final int MAX_STALE_RETRIES = 6;
+                final Pattern contentRangePattern = Pattern.compile("bytes\\s+(\\d+)-(\\d+)/(\\d+|\\*)", Pattern.CASE_INSENSITIVE);
+                final Pattern totalOnlyPattern = Pattern.compile("bytes\\s+\\*/(\\d+)", Pattern.CASE_INSENSITIVE);
+
                 String activeUrl = task.primaryUrl;
-                long existingOffset = task.partFile.exists() ? task.partFile.length() : 0L;
 
                 for (int attempt = 0; attempt < 2; attempt++) {
                     if (task.cancelled.get() || task.paused.get()) return;
@@ -2639,145 +2665,291 @@ public class MainActivity extends BridgeActivity {
                         if (task.fallbackUrl == null || task.fallbackUrl.trim().isEmpty() || task.fallbackUrl.equals(activeUrl)) {
                             throw new IOException("Stream source failed");
                         }
+                        String prevUrl = activeUrl;
                         activeUrl = task.fallbackUrl;
-                        // Fallback URL can be raw original instead of transcoded stream, so restart byte stream cleanly
-                        if (task.partFile.exists()) {
-                            task.partFile.delete();
+                        // Only discard partial bytes when switching to a genuinely different fallback URL
+                        if (!activeUrl.equals(prevUrl)) {
+                            if (task.partFile.exists()) {
+                                task.partFile.delete();
+                            }
+                            task.totalBytes = 0L;
+                            task.receivedBytes = 0L;
                         }
-                        existingOffset = 0L;
                     }
 
                     try {
-                        String currentUrl = activeUrl;
-                        if (currentUrl != null && currentUrl.startsWith("/")) {
-                            String base = "";
-                            if (activeLiveOrigin != null && !activeLiveOrigin.trim().isEmpty() && !activeLiveOrigin.contains("localhost")) {
-                                base = activeLiveOrigin.trim();
-                            } else {
-                                String saved = ReleaseNotificationHelper.getSavedBackendBaseUrl(getApplicationContext());
-                                if (saved != null && !saved.trim().isEmpty()) {
-                                    base = saved.trim();
-                                } else {
-                                    base = "https://ais-pre-ls63jyrme47bhlhdh7tzui-828533060153.asia-northeast1.run.app";
-                                }
-                            }
-                            if (base.endsWith("/")) {
-                                base = base.substring(0, base.length() - 1);
-                            }
-                            currentUrl = base + currentUrl;
-                        }
-
-                        for (int hops = 0; hops < 8; hops++) {
-                            URL urlObj = new URL(currentUrl);
-                            conn = (HttpURLConnection) urlObj.openConnection();
-                            conn.setInstanceFollowRedirects(false);
-                            conn.setConnectTimeout(30000);
-                            conn.setReadTimeout(120000);
-                            conn.setRequestMethod("GET");
-                            conn.setRequestProperty("User-Agent", "MovieHub/3.5.295 AndroidDownloader");
-                            conn.setRequestProperty("Accept-Encoding", "identity");
-                            if (existingOffset > 0L) {
-                                if (task.totalBytes > existingOffset) {
-                                    conn.setRequestProperty("Range", "bytes=" + existingOffset + "-" + (task.totalBytes - 1L));
-                                } else {
-                                    conn.setRequestProperty("Range", "bytes=" + existingOffset + "-");
-                                }
-                            }
-                            conn.connect();
-
-                            int code = conn.getResponseCode();
-                            if (code == HttpURLConnection.HTTP_MOVED_PERM
-                                || code == HttpURLConnection.HTTP_MOVED_TEMP
-                                || code == HttpURLConnection.HTTP_SEE_OTHER
-                                || code == 307 || code == 308) {
-                                String loc = conn.getHeaderField("Location");
-                                conn.disconnect();
-                                conn = null;
-                                if (loc == null || loc.trim().isEmpty()) {
-                                    throw new IOException("Redirect without Location");
-                                }
-                                currentUrl = new URL(urlObj, loc.trim()).toString();
-                                continue;
-                            }
-                            if (code < 200 || code >= 300) {
-                                conn.disconnect();
-                                conn = null;
-                                throw new IOException("HTTP " + code);
-                            }
-                            break;
-                        }
-
-                        if (conn == null) throw new IOException("Connection failed");
-
-                        String respContentType = conn.getContentType();
-                        if (respContentType != null) {
-                            String lowerCt = respContentType.toLowerCase();
-                            if (lowerCt.contains("text/html") || lowerCt.contains("application/json")) {
-                                throw new IOException("Invalid media response (" + respContentType + ")");
-                            }
-                        }
-
-                        int respCode = conn.getResponseCode();
-                        boolean appendMode = (respCode == 206 && existingOffset > 0L);
-                        if (!appendMode) {
+                        long knownTotalBytes = task.totalBytes > 0L ? task.totalBytes : 0L;
+                        long existingOffset = task.partFile.exists() ? task.partFile.length() : 0L;
+                        if (knownTotalBytes > 0L && existingOffset > knownTotalBytes) {
+                            task.partFile.delete();
                             existingOffset = 0L;
                         }
 
-                        long contentLength = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N
-                            ? conn.getContentLengthLong()
-                            : (long) conn.getContentLength();
-                        if (contentLength > 0L) {
-                            task.totalBytes = existingOffset + contentLength;
-                        }
-                        task.receivedBytes = existingOffset;
-
+                        int staleRetryCount = 0;
                         long speedStartMs = System.currentTimeMillis();
                         long speedBytes = 0L;
                         long lastNotifMs = 0L;
                         double curBps = 0.0;
                         byte[] buf = new byte[65536];
 
-                        try (InputStream in = new BufferedInputStream(conn.getInputStream(), 65536);
-                             FileOutputStream out = new FileOutputStream(task.partFile, appendMode)) {
-                            int n;
-                            while ((n = in.read(buf)) != -1) {
-                                if (task.cancelled.get()) {
-                                    out.flush();
-                                    return;
-                                }
-                                if (task.paused.get()) {
-                                    out.flush();
-                                    task.status = "paused";
-                                    task.speed = "Paused";
-                                    task.eta = "Paused";
-                                    updateVideoDownloadNotification(task, false, false);
-                                    return;
-                                }
-                                out.write(buf, 0, n);
-                                task.receivedBytes += n;
-                                speedBytes += n;
+                        while (true) {
+                            if (task.cancelled.get()) return;
+                            if (task.paused.get()) {
+                                task.status = "paused";
+                                task.speed = "Paused";
+                                task.eta = "Paused";
+                                updateVideoDownloadNotification(task, false, false);
+                                return;
+                            }
 
-                                long now = System.currentTimeMillis();
-                                long elapsed = now - speedStartMs;
-                                if (elapsed >= 500L) {
-                                    curBps = (speedBytes * 1000.0) / elapsed;
-                                    speedStartMs = now;
-                                    speedBytes = 0L;
+                            existingOffset = task.partFile.exists() ? task.partFile.length() : 0L;
+                            if (knownTotalBytes > 0L && existingOffset >= knownTotalBytes) {
+                                break;
+                            }
+
+                            long bytesBeforeSlice = existingOffset;
+                            try {
+                                String currentUrl = activeUrl;
+                                if (currentUrl != null && currentUrl.startsWith("/")) {
+                                    String base = "";
+                                    if (activeLiveOrigin != null && !activeLiveOrigin.trim().isEmpty() && !activeLiveOrigin.contains("localhost")) {
+                                        base = activeLiveOrigin.trim();
+                                    } else {
+                                        String saved = ReleaseNotificationHelper.getSavedBackendBaseUrl(getApplicationContext());
+                                        if (saved != null && !saved.trim().isEmpty()) {
+                                            base = saved.trim();
+                                        } else {
+                                            base = "https://ais-pre-ls63jyrme47bhlhdh7tzui-828533060153.asia-northeast1.run.app";
+                                        }
+                                    }
+                                    if (base.endsWith("/")) {
+                                        base = base.substring(0, base.length() - 1);
+                                    }
+                                    currentUrl = base + currentUrl;
                                 }
-                                if (now - lastNotifMs >= 450L) {
-                                    lastNotifMs = now;
-                                    int pct = task.totalBytes > 0L
-                                        ? (int) Math.max(1, Math.min(99, (task.receivedBytes * 100L) / task.totalBytes))
-                                        : (int) Math.min(95, Math.max(2, task.receivedBytes / (5L * 1024L * 1024L)));
-                                    task.progress = pct;
-                                    task.speed = formatSpeedReadable(curBps);
-                                    task.eta = task.totalBytes > 0L
-                                        ? formatEtaReadable(Math.max(0L, task.totalBytes - task.receivedBytes), curBps)
-                                        : "Downloading...";
-                                    updateVideoDownloadNotification(task, false, false);
+
+                                boolean isTranscoded = currentUrl != null && currentUrl.contains("transcode=1");
+                                boolean sendRange = !isTranscoded || existingOffset > 0L;
+                                long requestedSliceEnd = -1L;
+                                if (sendRange) {
+                                    requestedSliceEnd = existingOffset + SLICE_SIZE - 1L;
+                                    if (knownTotalBytes > 0L) {
+                                        requestedSliceEnd = Math.min(requestedSliceEnd, knownTotalBytes - 1L);
+                                    }
+                                }
+
+                                boolean completedVia416 = false;
+                                boolean restartedFrom416 = false;
+                                for (int hops = 0; hops < 8; hops++) {
+                                    URL urlObj = new URL(currentUrl);
+                                    conn = (HttpURLConnection) urlObj.openConnection();
+                                    conn.setInstanceFollowRedirects(false);
+                                    conn.setConnectTimeout(30000);
+                                    conn.setReadTimeout(120000);
+                                    conn.setRequestMethod("GET");
+                                    conn.setRequestProperty("User-Agent", "MovieHub/3.5.301 AndroidDownloader");
+                                    conn.setRequestProperty("Accept-Encoding", "identity");
+                                    if (sendRange && requestedSliceEnd >= existingOffset) {
+                                        conn.setRequestProperty("Range", "bytes=" + existingOffset + "-" + requestedSliceEnd);
+                                    }
+                                    conn.connect();
+
+                                    int code = conn.getResponseCode();
+                                    if (code == HttpURLConnection.HTTP_MOVED_PERM
+                                        || code == HttpURLConnection.HTTP_MOVED_TEMP
+                                        || code == HttpURLConnection.HTTP_SEE_OTHER
+                                        || code == 307 || code == 308) {
+                                        String loc = conn.getHeaderField("Location");
+                                        conn.disconnect();
+                                        conn = null;
+                                        if (loc == null || loc.trim().isEmpty()) {
+                                            throw new IOException("Redirect without Location");
+                                        }
+                                        currentUrl = new URL(urlObj, loc.trim()).toString();
+                                        continue;
+                                    }
+                                    if (code == 416 && existingOffset > 0L) {
+                                        String cr416 = conn.getHeaderField("Content-Range");
+                                        conn.disconnect();
+                                        conn = null;
+                                        if (cr416 != null) {
+                                            Matcher m416 = totalOnlyPattern.matcher(cr416);
+                                            if (m416.find()) {
+                                                long realTotal = Long.parseLong(m416.group(1));
+                                                if (realTotal > 0L && existingOffset >= realTotal) {
+                                                    knownTotalBytes = realTotal;
+                                                    task.totalBytes = realTotal;
+                                                    completedVia416 = true;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        if (task.partFile.exists()) {
+                                            task.partFile.delete();
+                                        }
+                                        knownTotalBytes = 0L;
+                                        restartedFrom416 = true;
+                                        break;
+                                    }
+                                    if (code < 200 || code >= 300) {
+                                        conn.disconnect();
+                                        conn = null;
+                                        throw new IOException("HTTP " + code);
+                                    }
+                                    break;
+                                }
+
+                                if (completedVia416) break;
+                                if (restartedFrom416) continue;
+                                if (conn == null) throw new IOException("Connection failed");
+
+                                String respContentType = conn.getContentType();
+                                if (respContentType != null) {
+                                    String lowerCt = respContentType.toLowerCase();
+                                    if (lowerCt.contains("text/html") || lowerCt.contains("application/json")) {
+                                        throw new IOException("Invalid media response (" + respContentType + ")");
+                                    }
+                                }
+
+                                int respCode = conn.getResponseCode();
+                                String contentRangeHdr = conn.getHeaderField("Content-Range");
+                                long contentLength = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N
+                                    ? conn.getContentLengthLong()
+                                    : (long) conn.getContentLength();
+
+                                boolean appendMode = false;
+                                long parsedRangeEnd = -1L;
+                                if (respCode == 206) {
+                                    long parsedRangeStart = existingOffset;
+                                    if (contentRangeHdr != null) {
+                                        Matcher crMatcher = contentRangePattern.matcher(contentRangeHdr);
+                                        if (crMatcher.find()) {
+                                            parsedRangeStart = Long.parseLong(crMatcher.group(1));
+                                            parsedRangeEnd = Long.parseLong(crMatcher.group(2));
+                                            String totalGroup = crMatcher.group(3);
+                                            if (totalGroup != null && !"*".equals(totalGroup)) {
+                                                long parsedTotal = Long.parseLong(totalGroup);
+                                                if (parsedTotal > 0L) {
+                                                    knownTotalBytes = parsedTotal;
+                                                    task.totalBytes = parsedTotal;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if (existingOffset > 0L && parsedRangeStart == existingOffset) {
+                                        appendMode = true;
+                                    } else {
+                                        existingOffset = parsedRangeStart;
+                                        appendMode = existingOffset > 0L;
+                                    }
+                                } else {
+                                    appendMode = false;
+                                    existingOffset = 0L;
+                                    if (contentLength > 0L) {
+                                        knownTotalBytes = contentLength;
+                                        task.totalBytes = contentLength;
+                                    }
+                                }
+
+                                task.receivedBytes = existingOffset;
+                                long sliceBytesRead = 0L;
+
+                                try (InputStream in = new BufferedInputStream(conn.getInputStream(), 65536);
+                                     FileOutputStream out = new FileOutputStream(task.partFile, appendMode)) {
+                                    int n;
+                                    while ((n = in.read(buf)) != -1) {
+                                        if (task.cancelled.get()) {
+                                            out.flush();
+                                            return;
+                                        }
+                                        if (task.paused.get()) {
+                                            out.flush();
+                                            task.status = "paused";
+                                            task.speed = "Paused";
+                                            task.eta = "Paused";
+                                            updateVideoDownloadNotification(task, false, false);
+                                            return;
+                                        }
+                                        out.write(buf, 0, n);
+                                        sliceBytesRead += n;
+                                        task.receivedBytes += n;
+                                        speedBytes += n;
+
+                                        long now = System.currentTimeMillis();
+                                        long elapsed = now - speedStartMs;
+                                        if (elapsed >= 500L) {
+                                            curBps = (speedBytes * 1000.0) / elapsed;
+                                            speedStartMs = now;
+                                            speedBytes = 0L;
+                                        }
+                                        if (now - lastNotifMs >= 450L) {
+                                            lastNotifMs = now;
+                                            int pct = task.totalBytes > 0L
+                                                ? (int) Math.max(1, Math.min(99, (task.receivedBytes * 100L) / task.totalBytes))
+                                                : (int) Math.min(95, Math.max(2, task.receivedBytes / (5L * 1024L * 1024L)));
+                                            task.progress = pct;
+                                            task.speed = formatSpeedReadable(curBps);
+                                            task.eta = task.totalBytes > 0L
+                                                ? formatEtaReadable(Math.max(0L, task.totalBytes - task.receivedBytes), curBps)
+                                                : "Downloading...";
+                                            updateVideoDownloadNotification(task, false, false);
+                                        }
+                                    }
+                                    out.flush();
+                                } finally {
+                                    try { conn.disconnect(); } catch (Exception ignored) {}
+                                    conn = null;
+                                }
+
+                                if (task.cancelled.get() || task.paused.get()) return;
+
+                                long afterSliceLen = task.partFile.exists() ? task.partFile.length() : 0L;
+                                if (respCode == 200) {
+                                    if (knownTotalBytes > 0L && afterSliceLen < knownTotalBytes) {
+                                        throw new IOException("Stream closed early (" + afterSliceLen + " / " + knownTotalBytes + " bytes)");
+                                    }
+                                    break;
+                                } else {
+                                    if (knownTotalBytes > 0L) {
+                                        if (afterSliceLen >= knownTotalBytes) {
+                                            break;
+                                        }
+                                        if (sliceBytesRead <= 0L) {
+                                            throw new IOException("Empty range slice at " + bytesBeforeSlice);
+                                        }
+                                        staleRetryCount = 0;
+                                    } else {
+                                        if (sliceBytesRead <= 0L) {
+                                            break;
+                                        }
+                                        if (parsedRangeEnd >= 0L && sliceBytesRead < SLICE_SIZE) {
+                                            break;
+                                        }
+                                        staleRetryCount = 0;
+                                    }
+                                }
+                            } catch (IOException sliceErr) {
+                                if (conn != null) {
+                                    try { conn.disconnect(); } catch (Exception ignored) {}
+                                    conn = null;
+                                }
+                                if (task.cancelled.get() || task.paused.get()) return;
+                                long currentLen = task.partFile.exists() ? task.partFile.length() : 0L;
+                                if (currentLen > bytesBeforeSlice) {
+                                    staleRetryCount = 0;
+                                } else {
+                                    staleRetryCount++;
+                                }
+                                if (staleRetryCount >= MAX_STALE_RETRIES) {
+                                    throw sliceErr;
+                                }
+                                try {
+                                    Thread.sleep(1500L);
+                                } catch (InterruptedException ie) {
+                                    Thread.currentThread().interrupt();
+                                    throw sliceErr;
                                 }
                             }
-                            out.flush();
                         }
 
                         if (task.cancelled.get() || task.paused.get()) return;
@@ -2822,6 +2994,16 @@ public class MainActivity extends BridgeActivity {
                 if (conn != null) {
                     try { conn.disconnect(); } catch (Exception ignored) {}
                 }
+                try {
+                    if (dlWakeLock != null && dlWakeLock.isHeld()) {
+                        dlWakeLock.release();
+                    }
+                } catch (Exception ignored) {}
+                try {
+                    if (dlWifiLock != null && dlWifiLock.isHeld()) {
+                        dlWifiLock.release();
+                    }
+                } catch (Exception ignored) {}
             }
         });
     }

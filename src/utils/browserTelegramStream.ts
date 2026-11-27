@@ -74,29 +74,30 @@ function ensureKeepaliveLoop() {
           new Promise((_, rej) => setTimeout(() => rej(new Error('PING_TIMEOUT')), 8000)),
         ]);
       }
-      // Keep active DC download senders warm so long movies never hit idle WebSocket drops
+      // Refresh active DC senders via getSender so GramJS's 30s exportedSenderReleaseTimeout resets cleanly
       for (const [dcId, sender] of Array.from(dcSenders.entries())) {
         try {
-          if (!sender) {
+          if (!sender || (typeof sender.isConnected === 'function' && !sender.isConnected())) {
             dcSenders.delete(dcId);
             continue;
           }
-          await Promise.race([
-            c.invokeWithSender(new Api.Ping({ pingId: bigInt(Date.now() + dcId) }), sender),
-            new Promise((_, rej) => setTimeout(() => rej(new Error('DC_PING_TIMEOUT')), 7000)),
+          const refreshed = await Promise.race([
+            c.getSender(dcId as any),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 6000)),
           ]);
-        } catch {
-          try {
-            (sender as any)?.reconnect?.();
-          } catch {}
-        }
+          if (refreshed) {
+            dcSenders.set(dcId, refreshed);
+          }
+        } catch {}
       }
     } catch {
-      try {
-        await resetBrowserTelegramClient({ clearSession: false });
-      } catch {}
+      if (!c.connected) {
+        try {
+          await resetBrowserTelegramClient({ clearSession: false });
+        } catch {}
+      }
     }
-  }, 35000);
+  }, 20000);
 }
 
 function getSavedChannelHash(cleanId: string): string | null {
@@ -321,18 +322,15 @@ export async function getBrowserTelegramClient(forceReconnect = false): Promise<
 
 async function getBrowserDcSenderSafe(client: TelegramClient, dcId: number | undefined): Promise<any> {
   const numericDc = typeof dcId === 'number' && Number.isFinite(dcId) ? dcId : undefined;
-  if (numericDc !== undefined) {
-    const cached = dcSenders.get(numericDc);
-    if (cached && cached._disconnected !== true) return cached;
-    if (cached) dcSenders.delete(numericDc);
-  }
   const key = numericDc !== undefined ? String(numericDc) : 'default';
   const existing = dcSenderPromises.get(key);
   if (existing) return existing;
 
+  // Always borrow via client.getSender(numericDc) so GramJS's 30s _exportedSenderReleaseTimeouts resets
+  // and disconnected senders are automatically re-established instead of returning a dead cached socket.
   const p = withTimeout(
     client.getSender(numericDc as any),
-    10000,
+    12000,
     `getSender DC${numericDc ?? 'main'}`
   )
     .then((sender) => {
@@ -611,15 +609,20 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
   const nativeBridge = () => (window as any).AndroidStreamBridge;
 
   const postBridge = async (path: string, body: BodyInit, contentType: string) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
     try {
       const res = await fetch(`${base}${path}`, {
         method: 'POST',
         headers: { 'Content-Type': contentType },
         body,
+        signal: controller.signal,
       });
       return res.status;
     } catch {
       return 0;
+    } finally {
+      clearTimeout(timer);
     }
   };
 
@@ -698,16 +701,19 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
     }
 
     let dcId: number | undefined = resolvedDcMap.get(docIdStr) ?? (doc as any).dcId;
-    let sender = await getBrowserDcSenderSafe(clientRef.current, dcId);
     let lastErr: any = null;
     let authResetDone = false;
 
-    for (let attempt = 1; attempt <= 5; attempt++) {
+    for (let attempt = 1; attempt <= 6; attempt++) {
       let timerId: ReturnType<typeof setTimeout> | undefined;
       try {
+        if (!clientRef.current?.connected) {
+          clientRef.current = await getBrowserTelegramClient();
+        }
+        const sender = await getBrowserDcSenderSafe(clientRef.current, dcId);
         const invokePromise = clientRef.current.invokeWithSender(request, sender);
         const timeoutPromise = new Promise<never>((_, reject) => {
-          timerId = setTimeout(() => reject(new Error('TIMEOUT: Telegram GetFile timed out')), 18000);
+          timerId = setTimeout(() => reject(new Error('TIMEOUT: Telegram GetFile timed out')), 22000);
         });
         const result: any = await Promise.race([invokePromise, timeoutPromise]);
         if (result instanceof Api.upload.FileCdnRedirect) {
@@ -734,44 +740,40 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
         if (isAuthSessionFatalError(err) && !authResetDone) {
           authResetDone = true;
           clientRef.current = await resetBrowserTelegramClient({ clearSession: true });
-          sender = await getBrowserDcSenderSafe(clientRef.current, dcId);
           continue;
         }
         if (err?.newDc) {
           dcId = Number(err.newDc);
           resolvedDcMap.set(docIdStr, dcId);
-          sender = await getBrowserDcSenderSafe(clientRef.current, dcId);
           continue;
         }
         const migrateMatch = msg.match(/FILE_MIGRATE_(\d+)/i);
         if (migrateMatch) {
           dcId = Number(migrateMatch[1]);
           resolvedDcMap.set(docIdStr, dcId);
-          sender = await getBrowserDcSenderSafe(clientRef.current, dcId);
           continue;
         }
         const floodMatch = msg.match(/FLOOD_WAIT_(\d+)/i);
-        if (floodMatch && Number(floodMatch[1]) <= 10 && attempt < 5) {
+        if (floodMatch && Number(floodMatch[1]) <= 12 && attempt < 6) {
           await new Promise((r) => setTimeout(r, (Number(floodMatch[1]) + 1) * 1000));
           continue;
         }
-        if (attempt < 5) {
-          if (attempt >= 2) {
-            try {
-              (sender as any)?.reconnect?.();
-            } catch {}
-          }
+        if (attempt < 6) {
           await new Promise((r) => setTimeout(r, Math.min(2500, 400 * attempt)));
           try {
-            if (!clientRef.current?.connected || isRecoverableClientError(err)) {
-              if (attempt >= 3) {
-                clientRef.current = await resetBrowserTelegramClient({ clearSession: false });
-              } else if (clientRef.current && !clientRef.current.connected) {
-                await clientRef.current.connect();
+            if (dcId !== undefined) {
+              const s = dcSenders.get(dcId);
+              if (s && typeof s.isConnected === 'function' && !s.isConnected()) {
+                dcSenders.delete(dcId);
               }
             }
-            if (dcId !== undefined) dcSenders.delete(dcId);
-            sender = await getBrowserDcSenderSafe(clientRef.current, dcId);
+            if (!clientRef.current?.connected) {
+              if (attempt >= 4) {
+                clientRef.current = await resetBrowserTelegramClient({ clearSession: false });
+              } else {
+                await clientRef.current?.connect();
+              }
+            }
           } catch {}
         }
       } finally {
@@ -904,7 +906,7 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
     },
 
     async pumpRange(reqId: string, telegramUrl: string, startByte: number, endByte: number) {
-      const CONCURRENCY = 4;
+      const CONCURRENCY = 2;
       activeReqIds.add(reqId);
 
       try {
@@ -930,13 +932,10 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
             }
           };
 
+          queueAhead(fromBlock + CONCURRENCY - 1);
+
           for (let blockIdx = fromBlock; blockIdx <= lastBlock; blockIdx++) {
             if (abortedReqs.has(reqId)) break;
-            if (blockIdx > fromBlock) {
-              queueAhead(blockIdx + CONCURRENCY);
-            } else {
-              nextQueue = Math.max(nextQueue, fromBlock + 1);
-            }
 
             const blockData = await (pending.get(blockIdx) || fetchOneBlockWithRetry(clientRef, doc, blockIdx));
             pending.delete(blockIdx);
@@ -955,21 +954,26 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
                 break;
               }
             }
-            // Only advance resume checkpoint after downstream confirmed receipt of this block
+            // Advance resume checkpoint & pipeline next block only after downstream confirmed receipt
             resumeFromBlock = blockIdx + 1;
             if (blockData.length < BLOCK) break;
+            queueAhead(blockIdx + CONCURRENCY);
           }
           pending.clear();
         };
 
-        let recoveryAttempts = 0;
+        let consecutiveFailuresAtSameBlock = 0;
         while (resumeFromBlock <= lastBlock && !abortedReqs.has(reqId)) {
+          const prevBlock = resumeFromBlock;
           try {
             await runPump(entry.document, resumeFromBlock);
             break;
           } catch (err: any) {
-            recoveryAttempts += 1;
-            if (recoveryAttempts > 5) {
+            if (resumeFromBlock > prevBlock) {
+              consecutiveFailuresAtSameBlock = 0;
+            }
+            consecutiveFailuresAtSameBlock += 1;
+            if (consecutiveFailuresAtSameBlock > 5) {
               throw err;
             }
             if (isFileRefError(err)) {
