@@ -146,6 +146,9 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
 
         const map = new Map<string, MovieData>();
         if (preferIncoming) {
+          normalized.forEach((m) => {
+            map.set(m.id, mergeMovieRecord(prevById.get(m.id), m, true));
+          });
           const incomingIds = new Set(normalized.map((m) => m.id));
           prev.forEach((m) => {
             if (
@@ -156,9 +159,6 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
             ) {
               map.set(m.id, m);
             }
-          });
-          normalized.forEach((m) => {
-            map.set(m.id, mergeMovieRecord(prevById.get(m.id), m, true));
           });
         } else {
           prev.forEach((m) => map.set(m.id, m));
@@ -198,7 +198,7 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
 
     const checkCatalogMetaAndReload = async () => {
       try {
-        const metaResp = await fetch(buildApiUrl('/api/movies/catalog-meta'), { cache: 'no-store' });
+        const metaResp = await fetch(buildApiUrl(`/api/movies/catalog-meta?t=${Date.now()}`), { cache: 'no-store' });
         if (!metaResp.ok) return;
         const meta = await metaResp.json();
         const sig = `${Number(meta?.count) || 0}:${Number(meta?.mtimeMs) || 0}:${Number(meta?.size) || 0}`;
@@ -207,6 +207,7 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
         } else if (sig !== lastCatalogMetaSigRef.current && Number(meta?.count) > 0) {
           lastCatalogMetaSigRef.current = sig;
           await loadSeedCatalog();
+          await syncFromServer(true);
         }
       } catch {}
     };
