@@ -333,7 +333,7 @@ export async function streamTelegramRange(
         const errMsg = String(blockErr?.errorMessage || blockErr?.message || '');
         const canRefreshDoc =
           Boolean(refreshDocFn) &&
-          refRefreshAttempts < 3 &&
+          refRefreshAttempts < 6 &&
           (errMsg.includes('FILE_REFERENCE') || bytesWritten > 0);
         if (canRefreshDoc && !isClosedFn() && !res.writableEnded) {
           refRefreshAttempts += 1;
@@ -484,9 +484,9 @@ export async function probeTelegramMedia(
   options?: { timeoutMs?: number; probesize?: number; analyzeduration?: number }
 ): Promise<ProbeMediaResult> {
   const localRawUrl = `http://127.0.0.1:${localPort}/api/stream?url=${encodeURIComponent(telegramUrl)}&raw=1`;
-  const timeoutMs = Math.max(3000, options?.timeoutMs ?? 14000);
-  const probesize = String(options?.probesize ?? 900000);
-  const analyzeduration = String(options?.analyzeduration ?? 900000);
+  const timeoutMs = Math.max(4000, options?.timeoutMs ?? 16000);
+  const probesize = String(options?.probesize ?? 3500000);
+  const analyzeduration = String(options?.analyzeduration ?? 5000000);
 
   return new Promise<ProbeMediaResult>((resolve) => {
     const args = [
@@ -546,12 +546,12 @@ export async function probeTelegramMedia(
           .map((s) => parseFloat(s?.duration || '0'))
           .filter((d) => Number.isFinite(d) && d > 0);
         const maxStreamDuration = streamDurations.length > 0 ? Math.max(...streamDurations) : 0;
+        const cleanFormatDur = Number.isFinite(formatDuration) && formatDuration > 0 ? Math.round(formatDuration) : 0;
+        const cleanStreamDur = maxStreamDuration > 0 ? Math.round(maxStreamDuration) : 0;
         const durationSec =
-          Number.isFinite(formatDuration) && formatDuration > 0
-            ? Math.round(formatDuration)
-            : maxStreamDuration > 0
-              ? Math.round(maxStreamDuration)
-              : docInfo.durationSec || 0;
+          cleanFormatDur > 0 && cleanStreamDur > 0
+            ? Math.max(cleanFormatDur, cleanStreamDur)
+            : cleanFormatDur || cleanStreamDur || docInfo.durationSec || 0;
 
         // Ignore attached cover art images (mjpeg/png with attached_pic = 1) or image codecs (png, mjpeg, webp, bmp, mjpg, gif)
         const videoStreamObj = streams.find(

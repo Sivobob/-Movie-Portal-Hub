@@ -43,7 +43,7 @@ import {
 import { fetchStreamInfo, formatClockTime, getCachedStreamInfo, parseDurationToSeconds } from '../utils/duration';
 import { isEpisodeNewActive, getEpisodeDisplayLabel } from '../services/movieStorage';
 import { normalizePlayerTrackList } from '../utils/videoQuality';
-import { resolveEpisodePlaybackDurationSec, resolveStreamBuildPlan } from '../utils/playerHelpers';
+import { resolveAuthoritativePlaybackDuration, resolveEpisodePlaybackDurationSec, resolveStreamBuildPlan } from '../utils/playerHelpers';
 import { useAuth } from '../context/AuthContext';
 import { recordMovieViewStart } from '../services/movieViewsService';
 
@@ -270,6 +270,9 @@ export default function VideoPlayerModal({
   const streamStartOffsetRef = useRef(streamStartOffset);
   streamStartOffsetRef.current = streamStartOffset;
   const preflightCacheRef = useRef<{ url: string; recommendedMode: 'direct' | 'remux' | 'transcode'; durationSec: number; sourceHeight?: number } | null>(null);
+  const canonicalProbeDurationRef = useRef<number>(0);
+  const [explicitRecommendedMode, setExplicitRecommendedMode] = useState<'direct' | 'remux' | 'transcode' | undefined>(undefined);
+  const [ignoredTruncatedExplicitQualities, setIgnoredTruncatedExplicitQualities] = useState<Record<string, boolean>>({});
   const userPickedQualityRef = useRef<boolean>(false);
   const exoNetworkRecoveryAttemptsRef = useRef<number>(0);
   const html5NetworkRecoveryAttemptsRef = useRef<number>(0);
@@ -822,6 +825,14 @@ export default function VideoPlayerModal({
     );
   };
 
+  const getCanonicalDurationFloor = (): number => {
+    return Math.max(
+      0,
+      Math.round(resolveKnownEpisodeOrMovieDuration() || 0),
+      Math.round(canonicalProbeDurationRef.current || 0)
+    );
+  };
+
   // Sync late initialDuration only when no authoritative duration is known yet
   useEffect(() => {
     if (hasAuthoritativeDurationRef.current) return;
@@ -893,6 +904,9 @@ export default function VideoPlayerModal({
     setDuration(resetDur);
     durationRef.current = resetDur;
     knownDurationRef.current = resetDur;
+    canonicalProbeDurationRef.current = 0;
+    setExplicitRecommendedMode(undefined);
+    setIgnoredTruncatedExplicitQualities({});
     if (manualRetryNonce === 0) {
       userPickedQualityRef.current = false;
       setSelectedQuality('Auto');
@@ -1090,11 +1104,17 @@ export default function VideoPlayerModal({
         if (!info || info.status !== 'ok') return;
 
         if (typeof info.durationSec === 'number' && info.durationSec > 0) {
+          const authDur = resolveAuthoritativePlaybackDuration(
+            info.durationSec,
+            knownDurationRef.current,
+            getCanonicalDurationFloor()
+          );
           if (info.probedByFfprobe === true || !hasAuthoritativeDurationRef.current) {
-            probedDuration = info.durationSec;
-            knownDurationRef.current = info.durationSec;
-            durationRef.current = info.durationSec;
-            setDuration(info.durationSec);
+            probedDuration = authDur;
+            canonicalProbeDurationRef.current = Math.max(canonicalProbeDurationRef.current, authDur);
+            knownDurationRef.current = authDur;
+            durationRef.current = authDur;
+            setDuration(authDur);
             if (info.probedByFfprobe === true) {
               hasAuthoritativeDurationRef.current = true;
             }
@@ -1303,14 +1323,26 @@ export default function VideoPlayerModal({
 
     const canScaleRemote = !Capacitor.isNativePlatform() || hasRemoteTranscodeBackend();
     const isIosWeb = !Capacitor.isNativePlatform() && isAppleMobileBrowser();
-    const durHint = Math.round(preflightCacheRef.current.durationSec || durationRef.current || knownDurationRef.current || 0);
+    const durHint = Math.max(
+      Math.round(preflightCacheRef.current.durationSec || 0),
+      Math.round(durationRef.current || 0),
+      Math.round(knownDurationRef.current || 0),
+      getCanonicalDurationFloor()
+    );
     const startHint = Math.floor(Math.max(0, qualityResumeTargetRef.current || resumeOffsetRef.current || 0));
+
+    const effectiveVideoQualities = videoQualities
+      ? Object.fromEntries(
+          Object.entries(videoQualities).filter(([k]) => !ignoredTruncatedExplicitQualities[k.toLowerCase()])
+        )
+      : videoQualities;
 
     const plan = resolveStreamBuildPlan({
       rawUrl: trimmed,
       selectedQuality: selectedQuality || 'Auto',
-      videoQualities,
+      videoQualities: effectiveVideoQualities,
       recommendedMode: preflightCacheRef.current.recommendedMode || 'direct',
+      explicitRecommendedMode,
       streamFallbackMode,
       canScaleRemote,
       isNativePlatform: Capacitor.isNativePlatform(),
@@ -1349,6 +1381,7 @@ export default function VideoPlayerModal({
     }
 
     let params = `?url=${encodeURIComponent(plan.sourceUrl)}&ext=.mp4`;
+    if (durHint > 0) params += `&dur=${durHint}`;
 
     if (plan.effectiveMode === 'remux') {
       params += `&remux=1`;
@@ -1377,6 +1410,8 @@ export default function VideoPlayerModal({
     selectedQuality,
     streamSourceKey,
     preflightReadyKey,
+    explicitRecommendedMode,
+    ignoredTruncatedExplicitQualities,
   ]);
 
   useEffect(() => {
@@ -1915,11 +1950,16 @@ export default function VideoPlayerModal({
           const isDirectOrHls = streamFallbackModeRef.current === 'direct' || isHlsExo;
           const candidateDur = !isDirectOrHls && baseOffset > 0 ? baseOffset + st.duration : st.duration;
           if (isDirectOrHls) {
+            const authDur = resolveAuthoritativePlaybackDuration(
+              candidateDur,
+              knownDurationRef.current,
+              getCanonicalDurationFloor()
+            );
             hasAuthoritativeDurationRef.current = true;
-            if (Math.abs(candidateDur - durationRef.current) >= 0.5) {
-              setDuration(candidateDur);
-              durationRef.current = candidateDur;
-              knownDurationRef.current = candidateDur;
+            if (Math.abs(authDur - durationRef.current) >= 0.5) {
+              setDuration(authDur);
+              durationRef.current = authDur;
+              knownDurationRef.current = authDur;
             }
           } else if (knownDurationRef.current <= 0 && candidateDur > durationRef.current) {
             // In remux/transcode fMP4 mode, never let partial segment duration overwrite known probed duration
@@ -2362,11 +2402,16 @@ export default function VideoPlayerModal({
 
       if (video.duration && isFinite(video.duration) && video.duration > 1) {
         if (activeMode === 'direct' || isHlsUrl) {
+          const authDur = resolveAuthoritativePlaybackDuration(
+            video.duration,
+            knownDurationRef.current,
+            getCanonicalDurationFloor()
+          );
           hasAuthoritativeDurationRef.current = true;
-          if (Math.abs(video.duration - durationRef.current) >= 0.5) {
-            setDuration(video.duration);
-            durationRef.current = video.duration;
-            knownDurationRef.current = video.duration;
+          if (Math.abs(authDur - durationRef.current) >= 0.5) {
+            setDuration(authDur);
+            durationRef.current = authDur;
+            knownDurationRef.current = authDur;
           }
         } else if (knownDurationRef.current <= 0) {
           const fallbackFragDur = startOff + video.duration;
@@ -2446,10 +2491,15 @@ export default function VideoPlayerModal({
       // In remux/transcode fragmented MP4 mode, browser reports growing fragment duration or Infinity — never overwrite real known duration
       if (activeMode === 'direct' || isHlsUrl) {
         if (vidDuration && isFinite(vidDuration) && vidDuration > 1) {
+          const authDur = resolveAuthoritativePlaybackDuration(
+            vidDuration,
+            knownDurationRef.current,
+            getCanonicalDurationFloor()
+          );
           hasAuthoritativeDurationRef.current = true;
-          setDuration(vidDuration);
-          durationRef.current = vidDuration;
-          knownDurationRef.current = vidDuration;
+          setDuration(authDur);
+          durationRef.current = authDur;
+          knownDurationRef.current = authDur;
           return;
         }
       } else if (knownDurationRef.current > 0) {
@@ -2478,9 +2528,14 @@ export default function VideoPlayerModal({
             if (customDuration) {
               const parsed = parseFloat(customDuration);
               if (!isNaN(parsed) && parsed > 0) {
-                setDuration(parsed);
-                durationRef.current = parsed;
-                knownDurationRef.current = parsed;
+                const authDur = resolveAuthoritativePlaybackDuration(
+                  parsed,
+                  knownDurationRef.current,
+                  getCanonicalDurationFloor()
+                );
+                setDuration(authDur);
+                durationRef.current = authDur;
+                knownDurationRef.current = authDur;
               }
             }
           })
@@ -2493,10 +2548,15 @@ export default function VideoPlayerModal({
         return;
       }
       if (video.duration && isFinite(video.duration) && video.duration > 1) {
+        const authDur = resolveAuthoritativePlaybackDuration(
+          video.duration,
+          knownDurationRef.current,
+          getCanonicalDurationFloor()
+        );
         hasAuthoritativeDurationRef.current = true;
-        setDuration(video.duration);
-        durationRef.current = video.duration;
-        knownDurationRef.current = video.duration;
+        setDuration(authDur);
+        durationRef.current = authDur;
+        knownDurationRef.current = authDur;
       }
     };
 
@@ -4279,13 +4339,14 @@ export default function VideoPlayerModal({
                             const baseSrcUrl = (preflightCacheRef.current?.url || '').trim();
                             const rawExplicit =
                               qLower !== 'auto' &&
+                              !ignoredTruncatedExplicitQualities[qLower] &&
                               (videoQualities?.[qLower] || videoQualities?.[q] || '');
                             const trimmedExplicit = String(rawExplicit || '').trim();
-                            const explicit =
+                            let explicit =
                               trimmedExplicit && trimmedExplicit.replace(/\/+$/, '') !== baseSrcUrl.replace(/\/+$/, '')
                                 ? trimmedExplicit
                                 : '';
-                            const needsScaledTranscode =
+                            let needsScaledTranscode =
                               !explicit && (qLower === '360p' || qLower === '480p' || qLower === '720p');
 
                             let canScaleRemote = !Capacitor.isNativePlatform() || hasRemoteTranscodeBackend();
@@ -4301,6 +4362,68 @@ export default function VideoPlayerModal({
                               }
                             }
 
+                            let probedExplicitMode: 'direct' | 'remux' | 'transcode' = 'direct';
+                            if (explicit) {
+                              const cachedExplicit = getCachedStreamInfo(explicit);
+                              const explicitInfo =
+                                cachedExplicit ||
+                                (await fetchStreamInfo(explicit, { timeoutMs: 8000 }).catch(() => null));
+                              const canonicalFloor = getCanonicalDurationFloor();
+                              if (
+                                explicitInfo?.durationSec &&
+                                canonicalFloor >= 1800 &&
+                                explicitInfo.durationSec < canonicalFloor * 0.85
+                              ) {
+                                // Explicit Telegram file for this tier is truncated compared to full movie runtime:
+                                // ignore the truncated explicit tier and fall back to server-scaled transcode of the full stream!
+                                if (!canScaleRemote) {
+                                  await probeWorkingBackendUrl(true).catch(() => null);
+                                  canScaleRemote = !Capacitor.isNativePlatform() || hasRemoteTranscodeBackend();
+                                }
+                                if (canScaleRemote) {
+                                  setIgnoredTruncatedExplicitQualities((prev) => ({
+                                    ...prev,
+                                    [qLower]: true,
+                                  }));
+                                  explicit = '';
+                                  needsScaledTranscode =
+                                    qLower === '360p' || qLower === '480p' || qLower === '720p' || qLower === '1080p';
+                                }
+                              } else if (explicitInfo) {
+                                const bridgeRef = (window as any).AndroidPlayerBridge;
+                                const exoCap =
+                                  Capacitor.isNativePlatform() &&
+                                  typeof bridgeRef?.isExoSupported === 'function' &&
+                                  Boolean(bridgeRef.isExoSupported());
+                                if (exoCap) {
+                                  const caps = deviceCapabilities || {};
+                                  const vc = String(explicitInfo.videoCodec || '').toLowerCase();
+                                  const ac = String(explicitInfo.audioCodec || '').toLowerCase();
+                                  const pix = String(explicitInfo.pixFmt || '').toLowerCase();
+                                  const is10Bit = Boolean(explicitInfo.is10Bit || pix.includes('10le') || pix.includes('p10'));
+                                  const is4K = (explicitInfo.width || 0) > 2100 || (explicitInfo.height || 0) > 1200;
+                                  const audioBad =
+                                    !caps.hasFfmpegAudioDecoder &&
+                                    ((ac === 'ac3' && caps.supportsAc3 === false) ||
+                                      ((ac === 'eac3' || ac === 'ec-3') && caps.supportsEac3 === false) ||
+                                      (ac.includes('dts') && caps.supportsDts === false));
+                                  const hevcBad =
+                                    (vc === 'hevc' || vc === 'h265') &&
+                                    !caps.hasHardwareHevc &&
+                                    (!caps.hasSoftwareHevc || is4K || (explicitInfo.height || 0) > 1088);
+                                  const bit10Bad = is10Bit && !caps.supportsHevc10BitHw && !caps.hasSoftwareHevc;
+                                  probedExplicitMode = (audioBad || hevcBad || bit10Bad) && canScaleRemote ? 'transcode' : 'direct';
+                                } else {
+                                  const rec = explicitInfo.recommendedMode;
+                                  probedExplicitMode =
+                                    rec === 'transcode' || rec === 'remux' || rec === 'direct' ? rec : 'direct';
+                                  if (isAppleMobileBrowser() && probedExplicitMode === 'direct') {
+                                    probedExplicitMode = 'remux';
+                                  }
+                                }
+                              }
+                            }
+
                             userPickedQualityRef.current = qLower !== 'auto';
                             selectedQualityRef.current = q;
                             setSelectedQuality(q);
@@ -4311,7 +4434,8 @@ export default function VideoPlayerModal({
                             resumeOffsetRef.current = curPos;
 
                             const baseRec = preflightCacheRef.current?.recommendedMode || 'direct';
-                            if (qLower === 'auto' || (qLower === '1080p' && !explicit && baseRec !== 'transcode')) {
+                            if (qLower === 'auto' || (qLower === '1080p' && !explicit && !needsScaledTranscode && baseRec !== 'transcode')) {
+                              setExplicitRecommendedMode(undefined);
                               const nextStage =
                                 baseRec === 'transcode'
                                   ? 'level3_transcode'
@@ -4326,14 +4450,22 @@ export default function VideoPlayerModal({
                               streamStartOffsetRef.current = curFloor;
                               showQualityToast(q === 'Auto' ? 'Quality: Auto' : 'Quality: 1080P FHD');
                             } else if (explicit) {
-                              setFallbackStage('level1_hw');
-                              fallbackStageRef.current = 'level1_hw';
-                              setStreamFallbackMode('direct');
-                              streamFallbackModeRef.current = 'direct';
+                              setExplicitRecommendedMode(probedExplicitMode);
+                              const expStage =
+                                probedExplicitMode === 'transcode'
+                                  ? 'level3_transcode'
+                                  : probedExplicitMode === 'remux'
+                                  ? 'level2_remux'
+                                  : 'level1_hw';
+                              setFallbackStage(expStage);
+                              fallbackStageRef.current = expStage;
+                              setStreamFallbackMode(probedExplicitMode);
+                              streamFallbackModeRef.current = probedExplicitMode;
                               setStreamStartOffset(curFloor);
                               streamStartOffsetRef.current = curFloor;
                               showQualityToast(`Quality: ${q}`);
                             } else {
+                              setExplicitRecommendedMode(undefined);
                               setFallbackStage('level3_transcode');
                               fallbackStageRef.current = 'level3_transcode';
                               setStreamFallbackMode('transcode');

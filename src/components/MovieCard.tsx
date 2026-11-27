@@ -5,10 +5,12 @@ import { getVisibleQualityBadge } from '../utils/qualityBadge';
 
 const MovieCard = memo(({ 
   movie, 
-  onClick 
+  onClick,
+  loading = 'eager',
 }: { 
   movie: any; 
-  onClick: () => void; 
+  onClick: () => void;
+  loading?: 'lazy' | 'eager';
 }) => {
   const qualityBadge = getVisibleQualityBadge(movie);
   const isSeries = Boolean(movie?.seasons && movie.seasons.length > 0);
@@ -28,6 +30,7 @@ const MovieCard = memo(({
           year={movie.releaseYear}
           width={420}
           alt={movie.title}
+          loading={loading}
           isSeries={isSeries}
           className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
         />

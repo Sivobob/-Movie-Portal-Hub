@@ -123,6 +123,7 @@ export interface StreamBuildPlanInput {
   selectedQuality: string;
   videoQualities?: Record<string, string>;
   recommendedMode: StreamPlaybackMode;
+  explicitRecommendedMode?: StreamPlaybackMode;
   streamFallbackMode: StreamPlaybackMode;
   canScaleRemote: boolean;
   isNativePlatform: boolean;
@@ -146,9 +147,35 @@ export interface StreamBuildPlan {
 }
 
 /**
+ * Resolves the authoritative runtime in seconds so switching video qualities
+ * (1080p / 720p / 480p / 360p / Auto) or partial/truncated stream headers never
+ * shrink a movie/episode's true runtime (e.g. a 2h10m movie dropping to 1h).
+ */
+export function resolveAuthoritativePlaybackDuration(
+  candidateDur: number,
+  currentKnownDur: number,
+  canonicalFloorDur: number
+): number {
+  const cleanCand = Number.isFinite(candidateDur) && candidateDur > 0 ? Math.round(candidateDur) : 0;
+  const cleanKnown = Number.isFinite(currentKnownDur) && currentKnownDur > 0 ? Math.round(currentKnownDur) : 0;
+  const cleanFloor = Number.isFinite(canonicalFloorDur) && canonicalFloorDur > 0 ? Math.round(canonicalFloorDur) : 0;
+  const anchor = Math.max(cleanFloor, cleanKnown);
+
+  if (cleanCand <= 0) return anchor;
+  if (anchor <= 0) return cleanCand;
+
+  // Never let a truncated/short header or wrong Telegram duration tag shrink a 2m+ title by > 5% (or > 45s)
+  if (anchor >= 120 && cleanCand < anchor - Math.max(45, Math.round(anchor * 0.05))) {
+    return anchor;
+  }
+  return cleanCand;
+}
+
+/**
  * Determines exact playback mode & quality scaling behavior so:
  * - Selecting 360P/480P/720P without an explicit quality URL forces scaled server transcoding (HLS `.m3u8` with `&quality=360p` etc.)
  * - Selecting 1080P preserves fast `direct` playback if the primary stream is already `direct`-compatible and not already forced into `transcode`.
+ * - Selecting an explicit quality URL still honors `remux`/`transcode` fallback or preflight recommendation so MKV/HEVC tiers never stall in raw `direct`.
  */
 export function resolveStreamBuildPlan(input: StreamBuildPlanInput): StreamBuildPlan {
   const trimmed = String(input.rawUrl || '').trim();
@@ -178,15 +205,19 @@ export function resolveStreamBuildPlan(input: StreamBuildPlanInput): StreamBuild
   const isIncompatibleNonTgIos =
     input.isIosWeb && !isTelegram && /\.(mkv|avi|flv|wmv|webm)(\?|#|$)/i.test(sourceUrl);
 
-  const effectiveMode: StreamPlaybackMode =
-    explicitUrl
-      ? 'direct'
-      : needsScaledTranscode || isIncompatibleNonTgIos
-        ? 'transcode'
-        : input.streamFallbackMode;
+  const effectiveMode: StreamPlaybackMode = explicitUrl
+    ? input.streamFallbackMode !== 'direct'
+      ? input.streamFallbackMode
+      : input.explicitRecommendedMode || 'direct'
+    : needsScaledTranscode || isIncompatibleNonTgIos
+      ? 'transcode'
+      : input.streamFallbackMode;
 
   const isServerPipe = effectiveMode === 'remux' || effectiveMode === 'transcode';
-  const isMp4Direct = !input.recommendedMode || input.recommendedMode === 'direct';
+  const baseRecMode = explicitUrl
+    ? input.explicitRecommendedMode || input.recommendedMode
+    : input.recommendedMode;
+  const isMp4Direct = !baseRecMode || baseRecMode === 'direct';
 
   const useHlsPipeline =
     isServerPipe &&

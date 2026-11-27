@@ -20,7 +20,7 @@ import {
 } from '../services/movieStorage';
 import { normalizeMoviePosters } from '../utils/posterUrl';
 import { buildApiUrl } from '../utils/apiConfig';
-import { hasPlayableContent } from '../utils/seriesCompleteness';
+import { hasPlayableContent, isSeriesComplete } from '../utils/seriesCompleteness';
 
 interface MoviesContextValue {
   movies: MovieData[];
@@ -118,7 +118,7 @@ function mergeMovieRecord(existing: MovieData | undefined, incoming: MovieData, 
 
 export function MoviesProvider({ children }: { children: React.ReactNode }) {
   const initialLocal = sortMoviesList(
-    getLocalMovies().filter((m: any) => m && m.published !== false && hasPlayableContent(m))
+    getLocalMovies().filter((m: any) => m && m.published !== false && hasPlayableContent(m) && isSeriesComplete(m))
   );
 
   const [movies, setMovies] = useState<MovieData[]>(initialLocal);
@@ -136,7 +136,7 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
       if (!active || incoming.length === 0) return;
       const normalized = sortMoviesList(
         incoming
-          .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m))
+          .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m) && isSeriesComplete(m))
           .map((m: any) => normalizeMoviePosters(m) as MovieData)
       );
       setMovies((prev) => {
@@ -266,7 +266,7 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
     if (!isMountedRef.current) return;
     const publishedOnly = sortMoviesList<MovieData>(
       rawList
-        .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m))
+        .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m) && isSeriesComplete(m))
         .map((m) => normalizeMoviePosters(m) as MovieData)
     );
 
@@ -430,7 +430,7 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
     // 5. Same-device & cross-tab instant updates
     const handleLocalMoviesUpdated = () => {
       const local = sortMoviesList(
-        getLocalMovies().filter((m: any) => m && m.published !== false && hasPlayableContent(m))
+        getLocalMovies().filter((m: any) => m && m.published !== false && hasPlayableContent(m) && isSeriesComplete(m))
       );
       if (local.length > 0 || getLocalMovies().length === 0) {
         applyMovieList(local, true);

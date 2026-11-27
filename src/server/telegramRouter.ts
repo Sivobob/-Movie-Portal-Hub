@@ -2653,10 +2653,18 @@ export async function handleStream(req: Request, res: Response) {
     const { docInfo, mimeType } = entry;
     const { document, fileSize } = docInfo;
 
+    const hintDurParam = req.query.dur ? Math.max(0, parseFloat(req.query.dur as string) || 0) : 0;
     // Raw internal stream for ffprobe / ffmpeg: bypass probe & remux completely
     if (!isRawParam) {
       const probe = await ensureMediaProbed(entry, urlParam);
-      const durationSec = probe.durationSec || docInfo.durationSec || 0;
+      const rawProbeDur = probe.durationSec || docInfo.durationSec || 0;
+      const durationSec =
+        hintDurParam > 0 &&
+        (rawProbeDur <= 0 ||
+          (!probe.probedByFfprobe && hintDurParam > rawProbeDur + 180) ||
+          (rawProbeDur >= 120 && hintDurParam > rawProbeDur * 1.15))
+          ? Math.max(rawProbeDur, hintDurParam)
+          : rawProbeDur;
 
       let effectiveMode: 'direct' | 'remux' | 'transcode' = probe.recommendedMode;
       const shouldDownscaleQuality =
@@ -3039,8 +3047,9 @@ function startHlsWorker(opts: {
 
   const startSec = opts.startSeg * HLS_SEG_DURATION;
   const ffArgs: string[] = [
-    '-probesize', '900000',
-    '-analyzeduration', '900000',
+    '-probesize', '3500000',
+    '-analyzeduration', '5000000',
+    '-rw_timeout', '30000000',
     '-fflags', '+discardcorrupt',
     '-reconnect', '1',
     '-reconnect_streamed', '1',
@@ -3185,8 +3194,16 @@ async function resolveHlsSourceParams(req: Request) {
     if (!entry) {
       throw new Error(error || 'Media not found');
     }
+    const hintDurSec = durationSec;
     const probe = await ensureMediaProbed(entry, urlParam);
-    durationSec = probe.durationSec || entry.docInfo.durationSec || durationSec;
+    const rawProbeDur = probe.durationSec || entry.docInfo.durationSec || 0;
+    durationSec =
+      hintDurSec > 0 &&
+      (rawProbeDur <= 0 ||
+        (!probe.probedByFfprobe && hintDurSec > rawProbeDur + 180) ||
+        (rawProbeDur >= 120 && hintDurSec > rawProbeDur * 1.15))
+        ? Math.max(hintDurSec, rawProbeDur)
+        : rawProbeDur || hintDurSec;
     const localPort = process.env.INTERNAL_APP_PORT || process.env.APP_PORT || '3000';
     inputUrl = `http://127.0.0.1:${localPort}/api/stream?url=${encodeURIComponent(urlParam)}&raw=1`;
 
@@ -5260,11 +5277,24 @@ function buildEffectiveQualityGroup<T extends { streamUrl: string; sizeBytes: nu
 } {
   const cleanMembers = members.filter((m) => !isHollywoodPrintText(`${m.fileName} ${m.caption}`));
   const effectiveMembers = cleanMembers.length > 0 ? cleanMembers : members;
+  const isSampleItem = (m: T) => /\b(sample|trailer|teaser|promo|preview)\b/i.test(`${m.fileName} ${m.caption}`);
+  const maxCleanDurSec = Math.max(
+    0,
+    ...effectiveMembers.map((m) => (!isSampleItem(m) && (m.durationSec || 0) > 0 ? m.durationSec : 0))
+  );
   const vq: Record<string, string> = {};
   const qs: Record<string, number> = {};
-  let effectivePrimary = effectiveMembers[0] || fallbackPrimary;
+  const fullLengthFallback = effectiveMembers.find(
+    (m) => maxCleanDurSec < 300 || !m.durationSec || m.durationSec >= maxCleanDurSec * 0.85
+  );
+  let effectivePrimary = fullLengthFallback || effectiveMembers[0] || fallbackPrimary;
 
   for (const m of effectiveMembers) {
+    const isTruncatedOutlier =
+      maxCleanDurSec >= 300 && m.durationSec > 0 && m.durationSec < maxCleanDurSec * 0.85;
+    if (isTruncatedOutlier) {
+      continue;
+    }
     if (m.parsed.quality) {
       const prevSz = qs[m.parsed.quality] || 0;
       if (!vq[m.parsed.quality] || m.sizeBytes > prevSz) {
@@ -5869,15 +5899,22 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
               existingUrlSet.add(draft.streamUrl.toLowerCase());
               continue;
             }
-            const seriesReadyToPublish = true;
-            const wasPublished = existingRec.published !== false;
-            const nextPublished = true;
             const normalizedExisting = normalizeSeriesSeasons({
               ...existingRec,
               originalCategory: catToSave,
               seasons: mergedSeasons,
               streamingUrl: replaceExistingEp ? epObj.streamUrl : existingRec.streamingUrl,
             });
+            const isSingleSmallNonCompleteEp =
+              !expectedCounts &&
+              (normalizedExisting.seasons?.length || 0) === 1 &&
+              (normalizedExisting.seasons?.[0]?.episodes?.length || 0) === 1 &&
+              !isCompleteSeasonPackEpisode(normalizedExisting.seasons[0].episodes[0]) &&
+              Number(normalizedExisting.seasons[0].episodes[0]?.durationSec || 0) < 5400;
+            const seriesReadyToPublish =
+              !isSingleSmallNonCompleteEp && isSeriesComplete(normalizedExisting, expectedCounts);
+            const wasPublished = existingRec.published !== false;
+            const nextPublished = seriesReadyToPublish;
             const nextStream = normalizedExisting.streamingUrl || epObj.streamUrl;
             const nextSeriesBadge = badge === 'HD' ? 'HD' : existingRec.qualityBadge || badge;
             const prevSeed = seedCatalogMap.get(existingRec.id) || {};
@@ -5968,7 +6005,16 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
           } else {
             const seriesDocId = `tg_series_${cleanChannelId}_${draft.msgId}`;
             const initialSeasons = [{ seasonNumber: seasonNum, episodes: [epObj] }];
-            const seriesReadyToPublish = true;
+            const isSingleSmallNonCompleteEp =
+              !expectedCounts &&
+              !isCompleteSeasonPackEpisode(epObj) &&
+              Number(epObj.durationSec || bestDurSec || 0) < 5400;
+            const seriesReadyToPublish =
+              !isSingleSmallNonCompleteEp &&
+              isSeriesComplete(
+                { id: seriesDocId, originalCategory: catToSave, seasons: initialSeasons },
+                expectedCounts
+              );
             const seriesBase = {
               id: seriesDocId,
               title: draft.title.trim(),
@@ -7399,8 +7445,19 @@ async function runBulkChannelSyncWorker(params: {
         const expectedCounts = dirty.rec.imdbId
           ? await fetchExpectedSeasonEpisodeCounts(dirty.rec.imdbId)
           : null;
-        const seriesReadyToPublish = true;
-        dirty.rec.published = true;
+        const totalEps = (dirty.rec.seasons || []).reduce(
+          (acc: number, s: any) => acc + (Array.isArray(s?.episodes) ? s.episodes.length : 0),
+          0
+        );
+        const onlyEp = totalEps === 1 ? dirty.rec.seasons?.[0]?.episodes?.[0] : null;
+        const isSingleSmallNonCompleteEp =
+          !expectedCounts &&
+          Boolean(onlyEp) &&
+          !isCompleteSeasonPackEpisode(onlyEp) &&
+          Number(onlyEp?.durationSec || 0) < 5400;
+        const seriesReadyToPublish =
+          !isSingleSmallNonCompleteEp && isSeriesComplete(dirty.rec, expectedCounts);
+        dirty.rec.published = seriesReadyToPublish;
 
         const prevSeed = seedCatalogMap.get(seriesId) || {};
         const resolvedSeriesBadge = dirty.rec.qualityBadge || prevSeed.qualityBadge || 'HD';
@@ -7868,6 +7925,15 @@ router.post('/backfill-print-badges', async (_req: Request, res: Response) => {
     console.error('[BackfillPrintBadges] Error:', err);
     return res.status(500).json({ error: err?.message || 'Backfill failed' });
   }
+});
+
+router.get('/series-expected-counts', async (req: Request, res: Response) => {
+  const imdbId = String(req.query.imdbId || '').trim();
+  if (!imdbId) {
+    return res.json({ counts: null });
+  }
+  const counts = await fetchExpectedSeasonEpisodeCounts(imdbId);
+  return res.json({ counts: counts || null });
 });
 
 router.get('/stream', handleStream);

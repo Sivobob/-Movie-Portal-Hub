@@ -647,12 +647,17 @@ export function parseTelegramMovieMeta(
 
   const cleanTitle = best.title || stripFileExtension(fileName || '').replace(/[._-]+/g, ' ').trim();
   const normalizedGroupTitle = normalizeTitleKey(cleanTitle).replace(/\s+/g, '');
+  const splitPartMatch = String(fileName || '').match(
+    /(?:^|[.\s_-])part0*(\d{1,3})\.(?:mkv|mp4|avi|mov|webm|m4v)$|(?:^|[.\s_-])(?:cd|disc)0*([1-9])(?:\b|[._-])/i
+  );
+  const splitPartNum = splitPartMatch ? Number(splitPartMatch[1] || splitPartMatch[2] || 0) : 0;
+  const splitSuffix = splitPartNum > 0 ? `-splitp${splitPartNum}` : '';
   const groupKey = finalIsSeries && normalizedGroupTitle
     ? `${normalizedGroupTitle}-s${finalSeasonNumber || 1}-e${finalEpisodeNumber || 0}${finalEpisodeLabel ? `-${finalEpisodeLabel}` : ''}`
     : explicitImdbId
-    ? `imdb-${explicitImdbId}`
+    ? `imdb-${explicitImdbId}${splitSuffix}`
     : normalizedGroupTitle
-    ? `${normalizedGroupTitle}${fallbackYear ? `-${fallbackYear}` : ''}`
+    ? `${normalizedGroupTitle}${fallbackYear ? `-${fallbackYear}` : ''}${splitSuffix}`
     : '';
 
   const isHollywoodPrint = isHollywoodPrintText(`${caption || ''}\n${fileName || ''}`);

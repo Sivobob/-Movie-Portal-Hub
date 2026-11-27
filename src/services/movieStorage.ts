@@ -201,13 +201,39 @@ export function getNewEpisodesWithin24h(
   });
 }
 
+export function getMovieReleaseYear(movie: Partial<MovieData> & Record<string, any> | null | undefined): number {
+  if (!movie) return 0;
+  const currentYear = new Date().getFullYear();
+  const candidates = [movie.releaseYear, (movie as any).year, (movie as any).releaseDate];
+  for (const val of candidates) {
+    if (typeof val === 'number' && Number.isFinite(val) && val >= 1900 && val <= currentYear + 1) {
+      return Math.floor(val);
+    }
+    if (typeof val === 'string') {
+      const m = val.match(/\b(19\d\d|20\d\d)\b/);
+      if (m) {
+        const y = parseInt(m[1], 10);
+        if (y >= 1900 && y <= currentYear + 1) return y;
+      }
+      const n = parseInt(val.trim(), 10);
+      if (Number.isFinite(n) && n >= 1900 && n <= currentYear + 1) return n;
+    }
+  }
+  const titleYear = String(movie.title || '').match(/\b(19\d\d|20\d\d)\b/);
+  if (titleYear) {
+    const y = parseInt(titleYear[1], 10);
+    if (y >= 1900 && y <= currentYear + 1) return y;
+  }
+  return 0;
+}
+
 export function sortMoviesList<T extends Partial<MovieData>>(list: T[]): T[] {
   return [...list].sort((a, b) => {
+    const yearDiff = getMovieReleaseYear(b as any) - getMovieReleaseYear(a as any);
+    if (yearDiff !== 0) return yearDiff;
     const aTime = getTimestampMs(a.telegramDateMs) || getTimestampMs(a.createdAt) || getTimestampMs(a.updatedAt) || 0;
     const bTime = getTimestampMs(b.telegramDateMs) || getTimestampMs(b.createdAt) || getTimestampMs(b.updatedAt) || 0;
     if (bTime !== aTime) return bTime - aTime;
-    const yearDiff = (Number(b.releaseYear) || 0) - (Number(a.releaseYear) || 0);
-    if (yearDiff !== 0) return yearDiff;
     return String(a.title || '').localeCompare(String(b.title || ''));
   });
 }

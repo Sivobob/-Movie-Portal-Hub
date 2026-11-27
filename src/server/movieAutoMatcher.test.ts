@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseTelegramMovieMeta } from './movieAutoMatcher.ts';
+import { resolveAuthoritativePlaybackDuration, resolveStreamBuildPlan } from '../utils/playerHelpers.ts';
+import { getMovieReleaseYear, sortMoviesList } from '../services/movieStorage.ts';
+import { isSeriesComplete } from '../utils/seriesCompleteness.ts';
 
 test('parses Solo Leveling Season 1 bullet/comma captions with numeric filenames', () => {
   const caption1 = [
@@ -347,3 +350,111 @@ test('handles EP(01-16), Epi_05_08, S01E0 truncation, and series episode overlap
   assert.equal(mergedSkipComplete.added, false);
   assert.equal(mergedSkipComplete.mergedSeasons[0].episodes.length, 2);
 });
+
+test('separates split .part001/.part002 files from full movies in groupKey', () => {
+  const fullMovie = parseTelegramMovieMeta(
+    'Tu Hai Meri Kiran (2026) Hindi HDTC 1080p x264.mkv',
+    'Tu Hai Meri Kiran (2026)',
+    1920,
+    1080,
+    7800
+  );
+  const part1 = parseTelegramMovieMeta(
+    'Tu Hai Meri Kiran (2026) Hindi HDTC 1080p x264.part001.mkv',
+    'Tu Hai Meri Kiran (2026)',
+    1920,
+    1080,
+    3600
+  );
+  const part2 = parseTelegramMovieMeta(
+    'Tu Hai Meri Kiran (2026) Hindi HDTC 1080p x264.part002.mkv',
+    'Tu Hai Meri Kiran (2026)',
+    1920,
+    1080,
+    3800
+  );
+
+  assert.notEqual(part1.groupKey, fullMovie.groupKey);
+  assert.notEqual(part2.groupKey, fullMovie.groupKey);
+  assert.notEqual(part1.groupKey, part2.groupKey);
+});
+
+test('preserves full 2h10m movie duration across 1080p/720p quality switches', () => {
+  // Partial/corrupted 1h container duration must NEVER shrink known 2h10m (7800s) runtime
+  const resolved = resolveAuthoritativePlaybackDuration(3600, 7800, 7800);
+  assert.equal(resolved, 7800);
+
+  // Small container delta within normal bounds (e.g. 7812s vs 7800s) updates cleanly
+  const exact = resolveAuthoritativePlaybackDuration(7812, 7800, 7800);
+  assert.equal(exact, 7812);
+
+  // Explicit quality tier honors MKV remux recommendation instead of forcing broken direct mode
+  const explicitPlan = resolveStreamBuildPlan({
+    rawUrl: 'https://t.me/c/4451036277/4000',
+    selectedQuality: '1080P',
+    videoQualities: { '1080p': 'https://t.me/c/4451036277/4001' },
+    recommendedMode: 'remux',
+    explicitRecommendedMode: 'remux',
+    streamFallbackMode: 'direct',
+    canScaleRemote: true,
+    isNativePlatform: false,
+    isIosWeb: false,
+    userPickedQuality: true,
+    audioIdx: 0,
+    durationSec: 7800,
+    startHint: 0,
+    streamStartOffset: 0,
+  });
+  assert.equal(explicitPlan.effectiveMode, 'remux');
+  assert.equal(explicitPlan.useHlsPipeline, true);
+});
+
+test('sorts movies and series strictly year-wise descending (2026 -> 2025 -> 2024)', () => {
+  const sample = [
+    { id: '1', title: 'Old 2024 Hit', releaseYear: 2024, telegramDateMs: 9000000000000 },
+    { id: '2', title: 'Movie 2025', releaseYear: 2025, telegramDateMs: 1000 },
+    { id: '3', title: 'Latest 2026', releaseYear: 2026, telegramDateMs: 500 },
+  ];
+  const sorted = sortMoviesList(sample);
+  assert.deepEqual(sorted.map((m) => getMovieReleaseYear(m)), [2026, 2025, 2024]);
+});
+
+test('blocks incomplete partial series like THE COURT (E49-E52 only) from publishing', () => {
+  const theCourtIncomplete = {
+    id: 'tg_series_court',
+    title: 'THE COURT',
+    originalCategory: 'Web Series',
+    seasons: [
+      {
+        seasonNumber: 1,
+        episodes: [
+          { episodeNumber: 49, title: 'Episode 49', streamUrl: 'https://t.me/c/1/49', durationSec: 1440 },
+          { episodeNumber: 50, title: 'Episode 50', streamUrl: 'https://t.me/c/1/50', durationSec: 1140 },
+          { episodeNumber: 51, title: 'Episode 51', streamUrl: 'https://t.me/c/1/51', durationSec: 1140 },
+          { episodeNumber: 52, title: 'Episode 52', streamUrl: 'https://t.me/c/1/52', durationSec: 1380 },
+        ],
+      },
+    ],
+  };
+  assert.equal(isSeriesComplete(theCourtIncomplete), false);
+
+  const completeMiniSeries = {
+    id: 'tg_series_full',
+    title: 'Kappi Squad',
+    originalCategory: 'Web Series',
+    seasons: [
+      {
+        seasonNumber: 1,
+        episodes: [
+          { episodeNumber: 1, title: 'Episode 1', streamUrl: 'https://t.me/c/1/1', durationSec: 2004 },
+          { episodeNumber: 2, title: 'Episode 2', streamUrl: 'https://t.me/c/1/2', durationSec: 1515 },
+          { episodeNumber: 3, title: 'Episode 3', streamUrl: 'https://t.me/c/1/3', durationSec: 1377 },
+          { episodeNumber: 4, title: 'Episode 4', streamUrl: 'https://t.me/c/1/4', durationSec: 1445 },
+        ],
+      },
+    ],
+  };
+  assert.equal(isSeriesComplete(completeMiniSeries), true);
+  assert.equal(isSeriesComplete(completeMiniSeries, { 1: 8 }), false);
+});
+

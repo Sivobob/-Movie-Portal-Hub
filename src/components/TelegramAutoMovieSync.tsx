@@ -44,6 +44,8 @@ import {
   normalizeQualityBadge,
 } from '../utils/qualityBadge';
 import {
+  isCompleteSeasonPackEpisode,
+  isSeriesComplete,
   mergeEpisodeIntoSeasons,
   normalizeSeriesSeasons,
 } from '../utils/seriesCompleteness';
@@ -657,6 +659,23 @@ export default function TelegramAutoMovieSync({
         nowMs
       );
 
+      const seriesImdb = String(existingMatch?.imdbId || draft.imdbId || '').trim();
+      let expectedCounts: Record<number, number> | null = null;
+      if (/^tt\d+$/i.test(seriesImdb)) {
+        try {
+          const cntResp = await authFetch(
+            `/api/telegram/series-expected-counts?imdbId=${encodeURIComponent(seriesImdb)}`,
+            { signal: AbortSignal.timeout(3000) }
+          );
+          if (cntResp.ok) {
+            const cntJson = await cntResp.json();
+            if (cntJson && cntJson.counts && typeof cntJson.counts === 'object') {
+              expectedCounts = cntJson.counts;
+            }
+          }
+        } catch {}
+      }
+
       if (existingMatch && existingMatch.id) {
         const seriesUpgrade = getQualityUpgradeDecision(existingMatch as any, badge);
         if (seriesUpgrade === 'skip_holl_print_on_hd') {
@@ -674,9 +693,19 @@ export default function TelegramAutoMovieSync({
         }
         const normalizedSeries = normalizeSeriesSeasons({
           ...existingMatch,
+          originalCategory: catToSave,
           seasons: mergedSeasons,
           streamingUrl: replaceExistingEp ? epObj.streamUrl : existingMatch.streamingUrl,
         });
+        const isSingleSmallNonCompleteEp =
+          !expectedCounts &&
+          (normalizedSeries.seasons?.length || 0) === 1 &&
+          (normalizedSeries.seasons?.[0]?.episodes?.length || 0) === 1 &&
+          !isCompleteSeasonPackEpisode(normalizedSeries.seasons[0].episodes[0]) &&
+          Number(normalizedSeries.seasons[0].episodes[0]?.durationSec || 0) < 5400;
+        const seriesReadyToPublish =
+          !isSingleSmallNonCompleteEp && isSeriesComplete(normalizedSeries, expectedCounts);
+        const nextPublished = seriesReadyToPublish;
         const nextStream = normalizedSeries.streamingUrl || epObj.streamUrl;
         const nextSeriesBadge =
           badge === 'HD' ? 'HD' : (existingMatch as any).qualityBadge || badge;
@@ -688,6 +717,7 @@ export default function TelegramAutoMovieSync({
                 seasons: mergedSeasons,
                 streamingUrl: nextStream,
                 qualityBadge: nextSeriesBadge,
+                published: nextPublished,
                 updatedAt: serverTimestamp(),
               },
               { merge: true }
@@ -702,6 +732,7 @@ export default function TelegramAutoMovieSync({
           seasons: mergedSeasons,
           streamingUrl: nextStream,
           qualityBadge: nextSeriesBadge,
+          published: nextPublished,
           updatedAt: nowMs,
         };
         existingMoviesRef.current = existingMoviesRef.current.map((m) =>
@@ -717,7 +748,7 @@ export default function TelegramAutoMovieSync({
           body: JSON.stringify({ draftId: draft.draftId }),
         }).catch(() => {});
 
-        if (sendNotification) {
+        if (sendNotification && nextPublished) {
           await publishReleaseAnnouncement({
             movieId: existingMatch.id,
             title: existingMatch.title || draft.title,
@@ -733,10 +764,20 @@ export default function TelegramAutoMovieSync({
             customMessage: `Season ${seasonNum} Episode ${draft.episodeLabel || epNum} Now Streaming!`,
           }).catch(() => {});
         }
-        return { published: true };
+        return { published: nextPublished };
       }
 
       const initialSeasons = [{ seasonNumber: seasonNum, episodes: [epObj] }];
+      const isSingleSmallNonCompleteEp =
+        !expectedCounts &&
+        !isCompleteSeasonPackEpisode(epObj) &&
+        Number(epObj.durationSec || draft.durationSec || 0) < 5400;
+      const seriesReadyToPublish =
+        !isSingleSmallNonCompleteEp &&
+        isSeriesComplete(
+          { originalCategory: catToSave, seasons: initialSeasons },
+          expectedCounts
+        );
       const seriesPayload: any = {
         title: draft.title.trim(),
         originalTitle: (draft.originalTitle || draft.title).trim(),
@@ -763,7 +804,7 @@ export default function TelegramAutoMovieSync({
         ),
         seasons: initialSeasons,
         featured: true,
-        published: true,
+        published: seriesReadyToPublish,
         qualityBadge: badge,
         duration: draft.durationSec || parseDurationToSeconds(draft.runtime) || 0,
         telegramMsgId: draft.msgId,
@@ -810,7 +851,7 @@ export default function TelegramAutoMovieSync({
         body: JSON.stringify({ draftId: draft.draftId }),
       }).catch(() => {});
 
-      if (sendNotification) {
+      if (sendNotification && seriesReadyToPublish) {
         await publishReleaseAnnouncement({
           movieId: publishedDocId,
           title: seriesPayload.title,
@@ -826,7 +867,7 @@ export default function TelegramAutoMovieSync({
         }).catch(() => {});
       }
 
-      return { published: true };
+      return { published: seriesReadyToPublish };
     }
 
     // Single Movie: replace Holl Print with HD OR merge newly uploaded quality tiers without duplicating
