@@ -1,0 +1,35 @@
+{
+  "appId": "com.moviebox.stream.app",
+  "appName": "Movie Hub",
+  "webDir": "dist",
+  "overrideUserAgent": "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36",
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1500,
+      "launchAutoHide": true,
+      "backgroundColor": "#000000",
+      "androidScaleType": "CENTER_CROP",
+      "showSpinner": false
+    }
+  },
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true,
+    "allowNavigation": [
+      "ais-pre-t4rahxvo4ainugtipwkod7-832989141722.asia-southeast1.run.app",
+      "ais-dev-t4rahxvo4ainugtipwkod7-832989141722.asia-southeast1.run.app",
+      "ais-pre-ls63jyrme47bhlhdh7tzui-828533060153.asia-northeast1.run.app",
+      "ais-dev-ls63jyrme47bhlhdh7tzui-828533060153.asia-northeast1.run.app",
+      "ais-pre-jledbsv5it3bzdsqu6r7up-560942295760.asia-northeast1.run.app",
+      "ais-dev-jledbsv5it3bzdsqu6r7up-560942295760.asia-northeast1.run.app",
+      "ais-pre-xnvcffdn7a5ydibjtjrezd-835315626292.asia-northeast1.run.app",
+      "ais-dev-xnvcffdn7a5ydibjtjrezd-835315626292.asia-northeast1.run.app",
+      "ais-pre-wc76ipqs2a7bm74r24a2mr-832989141722.asia-southeast1.run.app",
+      "ais-dev-wc76ipqs2a7bm74r24a2mr-832989141722.asia-southeast1.run.app",
+      "ais-pre-yaniwuwl6wc7ivl5tz2bbo-755452514312.asia-northeast1.run.app",
+      "ais-dev-yaniwuwl6wc7ivl5tz2bbo-755452514312.asia-northeast1.run.app",
+      "movie-portalhub-1012526016635.asia-southeast1.run.app",
+      "*.run.app"
+    ]
+  }
+}
