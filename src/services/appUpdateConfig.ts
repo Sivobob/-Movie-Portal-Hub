@@ -14,8 +14,8 @@ import { guardedFirestoreWrite, isFirestoreWriteAllowed } from './firestoreQuota
 export const APP_UPDATE_COLLECTION = 'admins';
 export const APP_UPDATE_DOC_ID = 'android_update';
 
-export const CURRENT_VERSION_NAME = '3.5.304';
-export const CURRENT_VERSION_CODE = 35304;
+export const CURRENT_VERSION_NAME = '3.5.305';
+export const CURRENT_VERSION_CODE = 35305;
 
 export const OFFICIAL_APK_DIRECT_URL =
   'https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk';
@@ -29,7 +29,7 @@ export function resolveApkDownloadUrl(rawUrl?: string | null): string {
 }
 
 export const DEFAULT_UPDATE_MESSAGE =
-  'Movie Hub v3.5.304: Home screen par Latest Movies & Series aur genre lines wapas aa gayi hain, aur Bollywood/Hollywood/Series tabs mein har saal (2026, 2025, 2024, 2023...) ki 3-column grid layout lag gayi hai.';
+  'Movie Hub v3.5.305: Home screen pehle jaisi lines mein aur Bollywood/Hollywood/Series sections bina year heading ke clean 3-column grid (2026 se purane sab years) mein update ho gaye hain.';
 
 const GITHUB_VERSION_JSON_URL =
   'https://raw.githubusercontent.com/Sivobob/-Movie-Portal-Hub/main/public/version.json';

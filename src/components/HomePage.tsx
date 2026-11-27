@@ -449,35 +449,38 @@ export default function HomePage() {
     ? (featuredMovies[activeSlideIndex] || featuredMovies[0])
     : null;
 
-  const categoryMovies = category
-    ? movies.filter((m) => {
-        if (category === 'Bollywood') {
-          return (
-            m.displayCategory === 'Bollywood' ||
-            m.originalCategory === 'Bollywood Movie' ||
-            m.originalCategory === 'South Indian Movie'
-          );
-        }
-        if (category === 'Hollywood') {
-          return (
-            m.displayCategory === 'Hollywood' ||
-            m.originalCategory === 'Hollywood Movie'
-          );
-        }
-        if (category === 'Series') {
-          return (
-            m.displayCategory === 'Series' ||
-            m.displayCategory === 'Anime' ||
-            m.originalCategory === 'Anime Series' ||
-            m.originalCategory === 'Anime Movie' ||
-            m.originalCategory === 'Web Series' ||
-            m.originalCategory === 'Anime' ||
-            m.contentType === 'anime'
-          );
-        }
-        return m.displayCategory === category;
-      })
-    : [];
+  const categoryMovies = useMemo(() => {
+    if (!category) return [];
+    const filtered = movies.filter((m) => {
+      if (!m || m.published === false) return false;
+      if (category === 'Bollywood') {
+        return (
+          m.displayCategory === 'Bollywood' ||
+          m.originalCategory === 'Bollywood Movie' ||
+          m.originalCategory === 'South Indian Movie'
+        );
+      }
+      if (category === 'Hollywood') {
+        return (
+          m.displayCategory === 'Hollywood' ||
+          m.originalCategory === 'Hollywood Movie'
+        );
+      }
+      if (category === 'Series') {
+        return (
+          m.displayCategory === 'Series' ||
+          m.displayCategory === 'Anime' ||
+          m.originalCategory === 'Anime Series' ||
+          m.originalCategory === 'Anime Movie' ||
+          m.originalCategory === 'Web Series' ||
+          m.originalCategory === 'Anime' ||
+          m.contentType === 'anime'
+        );
+      }
+      return m.displayCategory === category;
+    });
+    return sortMoviesList(filtered);
+  }, [category, movies]);
 
   const handleMovieClick = (movie: any, seasonIndex = 0, episodeIndex = 0) => {
     setActiveSeasonIndex(seasonIndex);
@@ -637,23 +640,6 @@ export default function HomePage() {
     return getNewEpisodesWithin24h(movies, nowMs);
   }, [movies, nowMs]);
 
-  const groupMoviesByYear = (list: any[]): Array<{ year: number; label: string; items: any[] }> => {
-    const byYear = new Map<number, any[]>();
-    for (const m of list) {
-      if (!m || m.published === false) continue;
-      const y = getMovieReleaseYear(m);
-      const bucket = byYear.get(y);
-      if (bucket) bucket.push(m);
-      else byYear.set(y, [m]);
-    }
-    return Array.from(byYear.entries())
-      .sort((a, b) => b[0] - a[0])
-      .map(([year, items]) => ({
-        year,
-        label: year > 0 ? String(year) : 'Other Releases',
-        items: sortMoviesList(items),
-      }));
-  };
 
   const latestMoviesAndSeries = useMemo(() => {
     // Show only 2026 release movies and web series in the Latest row
@@ -702,7 +688,6 @@ export default function HomePage() {
     };
   }, [movies]);
 
-  const yearWiseCategoryRows = useMemo(() => groupMoviesByYear(categoryMovies), [categoryMovies]);
 
   const renderFolderTabRow = (overHero: boolean) => (
     <div
@@ -770,29 +755,14 @@ export default function HomePage() {
             </div>
           ) : (
             <>
-              <div className="flex flex-col w-full pb-8 px-2 sm:px-4">
-                {yearWiseCategoryRows.map((section, rowIdx) => (
-                  <div key={section.label} className={rowIdx === 0 ? '' : 'mt-7'}>
-                    <div className="flex items-center gap-2 mb-3 min-w-0 px-1">
-                      <span className="w-1.5 h-5 bg-[#E50914] rounded-full flex-shrink-0" />
-                      <h3 className="text-base sm:text-lg font-extrabold text-white tracking-wide">
-                        {section.label}
-                      </h3>
-                      <span className="text-xs font-semibold text-neutral-400">
-                        ({section.items.length})
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2 sm:gap-3">
-                      {section.items.map((movie, idx) => (
-                        <div key={movie.id} className="relative group">
-                          <MovieCard
-                            movie={movie}
-                            loading={rowIdx === 0 && idx < 12 ? 'eager' : 'lazy'}
-                            onClick={() => handleMovieClick(movie)}
-                          />
-                        </div>
-                      ))}
-                    </div>
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2 sm:gap-3 px-2 sm:px-4 pb-8">
+                {categoryMovies.map((movie, idx) => (
+                  <div key={movie.id} className="relative group">
+                    <MovieCard
+                      movie={movie}
+                      loading={idx < 12 ? 'eager' : 'lazy'}
+                      onClick={() => handleMovieClick(movie)}
+                    />
                   </div>
                 ))}
               </div>
