@@ -192,12 +192,11 @@ export async function guardedFirestoreWrite<T>(
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
           const timeoutErr = Object.assign(
-            new Error('Firestore write timed out (quota/backoff protection).'),
-            { code: 'resource-exhausted' }
+            new Error('Firestore write timed out.'),
+            { code: 'deadline-exceeded' }
           );
-          markFirestoreQuotaExhausted(timeoutErr);
           reject(timeoutErr);
-        }, timeoutMs);
+        }, Math.max(10000, timeoutMs));
       }),
     ]);
     return { ok: true, value };

@@ -41,13 +41,16 @@ function loadFromDiskOnce(): void {
 export function isFirestoreQuotaErrorLike(errOrText: any): boolean {
   const code = String(errOrText?.code || '').toLowerCase();
   const msg = String(errOrText?.message || errOrText || '').toLowerCase();
+  if (msg.includes('timed out') || code.includes('deadline-exceeded') || code.includes('timeout')) {
+    return false;
+  }
   return (
     code.includes('resource-exhausted') ||
     code === '429' ||
     msg.includes('resource-exhausted') ||
     msg.includes('resource_exhausted') ||
-    msg.includes('quota') ||
-    msg.includes('free daily write') ||
+    msg.includes('daily write') ||
+    msg.includes('quota exceeded') ||
     msg.includes('too many requests')
   );
 }

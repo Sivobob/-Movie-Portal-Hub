@@ -516,13 +516,11 @@ export function getLocalMovies(): MovieData[] {
     const map = new Map<string, MovieData>();
     seedItems.forEach((m) => map.set(m.id, m));
     cached.forEach((m) => {
-      if (String(m.id).startsWith('tg_') && !map.has(m.id)) {
-        // Do not resurrect tg_* items removed from authoritative seed catalog
-        return;
-      }
       const existing = map.get(m.id);
-      if (!existing || !hasRealPoster(existing.posterUrl)) {
+      if (!existing) {
         map.set(m.id, m);
+      } else if (!hasRealPoster(existing.posterUrl) && hasRealPoster(m.posterUrl)) {
+        map.set(m.id, { ...existing, ...m });
       }
     });
 

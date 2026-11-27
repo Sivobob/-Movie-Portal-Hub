@@ -153,8 +153,8 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
           prev.forEach((m) => {
             if (
               !incomingIds.has(m.id) &&
-              !String(m.id).startsWith('tg_') &&
               hasPlayableContent(m) &&
+              m.published !== false &&
               !String(m.posterUrl || '').startsWith('data:image/svg+xml')
             ) {
               map.set(m.id, m);
