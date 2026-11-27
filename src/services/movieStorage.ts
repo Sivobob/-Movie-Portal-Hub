@@ -326,7 +326,7 @@ export async function fetchSeedCatalogJson(): Promise<MovieData[]> {
 
   try {
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
-    const bust = Date.now();
+    const bust = Date.now() + '_' + Math.random().toString(36).substring(2, 7);
     const urls = [
       buildApiUrl(`/api/movies/catalog?v=${bust}`),
       buildApiUrl(`/movies-seed.json?v=${bust}`),
@@ -337,13 +337,22 @@ export async function fetchSeedCatalogJson(): Promise<MovieData[]> {
 
     for (const url of urls) {
       try {
-        const resp = await fetch(url, { cache: 'no-store' });
+        const resp = await fetch(url, {
+          cache: 'no-store',
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+          },
+        });
         if (!resp.ok) continue;
         const data = await resp.json();
         if (Array.isArray(data) && data.length > 0) {
-          return data
+          const parsed = data
             .map((m: any) => normalizeSeriesSeasons(normalizeMoviePosters(m) as MovieData))
             .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m));
+          if (parsed.length > 0) {
+            return parsed;
+          }
         }
       } catch {}
     }

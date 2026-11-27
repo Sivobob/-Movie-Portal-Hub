@@ -193,11 +193,11 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
         if (!metaResp.ok) return;
         const meta = await metaResp.json();
         const sig = `${Number(meta?.count) || 0}:${Number(meta?.mtimeMs) || 0}:${Number(meta?.size) || 0}`;
-        if (lastCatalogMetaSigRef.current && sig !== lastCatalogMetaSigRef.current && Number(meta?.count) > 0) {
+        if (!lastCatalogMetaSigRef.current) {
+          lastCatalogMetaSigRef.current = sig;
+        } else if (sig !== lastCatalogMetaSigRef.current && Number(meta?.count) > 0) {
           lastCatalogMetaSigRef.current = sig;
           await loadSeedCatalog();
-        } else if (!lastCatalogMetaSigRef.current && sig) {
-          lastCatalogMetaSigRef.current = sig;
         }
       } catch {}
     };
