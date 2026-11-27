@@ -14,8 +14,8 @@ import { guardedFirestoreWrite, isFirestoreWriteAllowed } from './firestoreQuota
 export const APP_UPDATE_COLLECTION = 'admins';
 export const APP_UPDATE_DOC_ID = 'android_update';
 
-export const CURRENT_VERSION_NAME = '3.5.302';
-export const CURRENT_VERSION_CODE = 35302;
+export const CURRENT_VERSION_NAME = '3.5.303';
+export const CURRENT_VERSION_CODE = 35303;
 
 export const OFFICIAL_APK_DIRECT_URL =
   'https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk';
@@ -29,7 +29,7 @@ export function resolveApkDownloadUrl(rawUrl?: string | null): string {
 }
 
 export const DEFAULT_UPDATE_MESSAGE =
-  'Movie Hub v3.5.302: Ab 1080p/720p/480p sabhi quality mein poori movie & series full duration chalegi, 2026->2025 year-wise rows add ho gayi hain, aur incomplete series hide kar di gayi hain.';
+  'Movie Hub v3.5.303: Home screen par Latest Movies & Series aur genre lines wapas aa gayi hain, aur Bollywood/Hollywood/Series tabs mein sabhi years (2026, 2025, 2024, 2023...) ki year-wise rows add ho gayi hain.';
 
 const GITHUB_VERSION_JSON_URL =
   'https://raw.githubusercontent.com/Sivobob/-Movie-Portal-Hub/main/public/version.json';

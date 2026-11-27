@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.302",
-  "minimumRequiredVersion": "3.5.302",
-  "latestVersionCode": 35302,
-  "minimumRequiredVersionCode": 35302,
+  "latestVersion": "3.5.303",
+  "minimumRequiredVersion": "3.5.303",
+  "latestVersionCode": 35303,
+  "minimumRequiredVersionCode": 35303,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Hub v3.5.302: Ab 1080p/720p/480p sabhi quality mein poori movie & series full duration chalegi, 2026->2025 year-wise rows add ho gayi hain, aur incomplete series hide kar di gayi hain.",
-  "releaseNotes": "v3.5.302: Enforced full movie/episode duration consistency across all video qualities, year-wise descending rows (2026 -> 2025 -> 2024...), and complete-series publishing/display validation."
+  "updateMessage": "Movie Hub v3.5.303: Home screen par Latest Movies & Series aur genre lines wapas aa gayi hain, aur Bollywood/Hollywood/Series tabs mein sabhi years (2026, 2025, 2024, 2023...) ki year-wise rows add ho gayi hain.",
+  "releaseNotes": "v3.5.303: Restored classic Home screen rows (Latest Movies & Series + genre rows) while keeping year-wise descending rows (2026, 2025, 2024, 2023...) inside Bollywood, Hollywood, and Series sections."
 }

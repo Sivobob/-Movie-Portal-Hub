@@ -655,7 +655,53 @@ export default function HomePage() {
       }));
   };
 
-  const yearWiseAllRows = useMemo(() => groupMoviesByYear(movies), [movies]);
+  const latestMoviesAndSeries = useMemo(() => {
+    // Show only 2026 release movies and web series in the Latest row
+    return movies.filter((m) => m && m.published !== false && is2026Release(m)).slice(0, 25);
+  }, [movies]);
+
+  const {
+    suspenseMovies,
+    actionMovies,
+    comedyMovies,
+    romanceMovies,
+    thrillerHorrorMovies,
+    dramaMovies,
+    topSeries,
+  } = useMemo(() => {
+    const getByGenre = (genreKeyword: string) => {
+      const kw = genreKeyword.toLowerCase();
+      return movies.filter((m) => {
+        const g = String(m.genre || '').toLowerCase();
+        const cat = String(m.displayCategory || '').toLowerCase();
+        const orig = String(m.originalCategory || '').toLowerCase();
+        return g.includes(kw) || cat.includes(kw) || orig.includes(kw);
+      });
+    };
+
+    const thriller = getByGenre('thriller');
+    const horror = getByGenre('horror');
+
+    return {
+      suspenseMovies: getByGenre('suspense'),
+      actionMovies: getByGenre('action'),
+      comedyMovies: getByGenre('comedy'),
+      romanceMovies: getByGenre('romance'),
+      thrillerHorrorMovies: Array.from(
+        new Map([...thriller, ...horror].map((m) => [m.id, m])).values()
+      ),
+      dramaMovies: getByGenre('drama'),
+      topSeries: movies.filter(
+        (m) =>
+          m.displayCategory === 'Series' ||
+          m.displayCategory === 'Anime' ||
+          m.originalCategory === 'Anime Series' ||
+          m.originalCategory === 'Web Series' ||
+          m.contentType === 'anime'
+      ),
+    };
+  }, [movies]);
+
   const yearWiseCategoryRows = useMemo(() => groupMoviesByYear(categoryMovies), [categoryMovies]);
 
   const renderFolderTabRow = (overHero: boolean) => (
@@ -949,31 +995,233 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* YEAR-WISE ROWS: 2026 ON TOP -> 2025 -> 2024 -> ... (ALL MOVIES & SERIES) */}
-          {yearWiseAllRows.map((section, rowIdx) => (
-            <div key={section.label} className="mt-6 px-3 sm:px-6">
-              <div className="flex items-center gap-2 mb-3 min-w-0">
-                <span className="w-1.5 h-5 bg-[#E50914] rounded-full flex-shrink-0" />
-                <h3 className="text-base sm:text-lg font-extrabold text-white tracking-wide">
-                  {section.label}
-                </h3>
-                <span className="text-xs font-semibold text-neutral-400">
-                  ({section.items.length})
-                </span>
-              </div>
-              <div className="flex items-stretch gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
-                {section.items.map((movie) => (
-                  <div key={movie.id} className="flex-shrink-0 w-28 sm:w-32">
-                    <MovieCard
-                      movie={movie}
-                      loading={rowIdx < 2 ? 'eager' : 'lazy'}
-                      onClick={() => handleMovieClick(movie)}
-                    />
+          {/* LATEST MOVIES & SERIES */}
+          {latestMoviesAndSeries.length > 0 && (
+            <div className="mt-6 px-3 sm:px-6">
+              <h3 className="text-base sm:text-lg font-bold text-white tracking-wide mb-3">
+                Latest Movies &amp; Series
+              </h3>
+              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
+                {latestMoviesAndSeries.map((movie) => (
+                  <div
+                    key={movie.id}
+                    onClick={() => handleMovieClick(movie)}
+                    className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer"
+                  >
+                    <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
+                      <PosterImage
+                        posterUrl={movie.posterUrl}
+                        backdropUrl={movie.backdropUrl}
+                        title={movie.title}
+                        year={movie.releaseYear}
+                        width={400}
+                        alt={movie.title}
+                        loading="eager"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                      />
+                    </div>
                   </div>
                 ))}
               </div>
             </div>
-          ))}
+          )}
+
+          {/* 2. DYNAMIC GENRE ROW: Suspenseful Movies */}
+          {suspenseMovies.length > 0 && (
+            <div className="mt-6 px-3 sm:px-6">
+              <h3 className="text-base sm:text-lg font-bold text-white tracking-wide mb-3">
+                Suspenseful Movies
+              </h3>
+              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
+                {suspenseMovies.slice(0, 25).map((movie) => (
+                  <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
+                    <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
+                      <PosterImage
+                        posterUrl={movie.posterUrl}
+                        backdropUrl={movie.backdropUrl}
+                        title={movie.title}
+                        year={movie.releaseYear}
+                        width={400}
+                        alt={movie.title}
+                        loading="lazy"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 3. DYNAMIC GENRE ROW: Blockbuster Action & Adventure Movies */}
+          {actionMovies.length > 0 && (
+            <div className="mt-6 px-3 sm:px-6">
+              <h3 className="text-base sm:text-lg font-bold text-white tracking-wide mb-3">
+                Blockbuster Action &amp; Adventure Movies
+              </h3>
+              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
+                {actionMovies.slice(0, 25).map((movie) => (
+                  <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
+                    <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
+                      <PosterImage
+                        posterUrl={movie.posterUrl}
+                        backdropUrl={movie.backdropUrl}
+                        title={movie.title}
+                        year={movie.releaseYear}
+                        width={400}
+                        alt={movie.title}
+                        loading="lazy"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 4. TOP 10 SERIES SECTION */}
+          {topSeries.length > 0 && (
+            <div className="mt-6 px-3 sm:px-6">
+              <h3 className="text-base sm:text-lg font-bold text-white tracking-wide mb-3">
+                Top 10 Series
+              </h3>
+              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
+                {topSeries.slice(0, 10).map((movie, index) => (
+                  <div
+                    key={movie.id}
+                    onClick={() => handleMovieClick(movie)}
+                    className="flex-shrink-0 w-28 sm:w-32 cursor-pointer group relative"
+                  >
+                    <div className="relative aspect-[2/3] w-full bg-neutral-950 rounded-xl overflow-hidden border border-neutral-800/90 shadow-md">
+                      <PosterImage
+                        posterUrl={movie.posterUrl || movie.backdropUrl}
+                        backdropUrl={movie.backdropUrl}
+                        title={movie.title}
+                        year={movie.releaseYear}
+                        width={400}
+                        isSeries
+                        alt={movie.title}
+                        loading="lazy"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                      />
+                      <span className="absolute top-1.5 right-1.5 bg-black/85 text-white font-black text-[11px] px-2 py-0.5 rounded border border-white/20">
+                        #{index + 1}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 5. DYNAMIC GENRE ROW: Comedy Movies */}
+          {comedyMovies.length > 0 && (
+            <div className="mt-6 px-3 sm:px-6">
+              <h3 className="text-base sm:text-lg font-bold text-white tracking-wide mb-3">
+                Comedy Movies
+              </h3>
+              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
+                {comedyMovies.slice(0, 25).map((movie) => (
+                  <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
+                    <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
+                      <PosterImage
+                        posterUrl={movie.posterUrl}
+                        backdropUrl={movie.backdropUrl}
+                        title={movie.title}
+                        year={movie.releaseYear}
+                        width={400}
+                        alt={movie.title}
+                        loading="lazy"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 6. DYNAMIC GENRE ROW: Romantic Movies */}
+          {romanceMovies.length > 0 && (
+            <div className="mt-6 px-3 sm:px-6">
+              <h3 className="text-base sm:text-lg font-bold text-white tracking-wide mb-3">
+                Romantic Movies
+              </h3>
+              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
+                {romanceMovies.slice(0, 25).map((movie) => (
+                  <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
+                    <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
+                      <PosterImage
+                        posterUrl={movie.posterUrl}
+                        backdropUrl={movie.backdropUrl}
+                        title={movie.title}
+                        year={movie.releaseYear}
+                        width={400}
+                        alt={movie.title}
+                        loading="lazy"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 7. DYNAMIC GENRE ROW: Thriller & Horror Movies */}
+          {thrillerHorrorMovies.length > 0 && (
+            <div className="mt-6 px-3 sm:px-6">
+              <h3 className="text-base sm:text-lg font-bold text-white tracking-wide mb-3">
+                Thriller &amp; Horror Movies
+              </h3>
+              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
+                {thrillerHorrorMovies.slice(0, 25).map((movie) => (
+                  <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
+                    <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
+                      <PosterImage
+                        posterUrl={movie.posterUrl}
+                        backdropUrl={movie.backdropUrl}
+                        title={movie.title}
+                        year={movie.releaseYear}
+                        width={400}
+                        alt={movie.title}
+                        loading="lazy"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 8. DYNAMIC GENRE ROW: Drama Movies */}
+          {dramaMovies.length > 0 && (
+            <div className="mt-6 px-3 sm:px-6">
+              <h3 className="text-base sm:text-lg font-bold text-white tracking-wide mb-3">
+                Drama Movies
+              </h3>
+              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
+                {dramaMovies.slice(0, 25).map((movie) => (
+                  <div key={movie.id} onClick={() => handleMovieClick(movie)} className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer">
+                    <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
+                      <PosterImage
+                        posterUrl={movie.posterUrl}
+                        backdropUrl={movie.backdropUrl}
+                        title={movie.title}
+                        year={movie.releaseYear}
+                        width={400}
+                        alt={movie.title}
+                        loading="lazy"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="h-12" />
         </div>

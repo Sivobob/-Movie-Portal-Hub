@@ -2747,7 +2747,7 @@ public class MainActivity extends BridgeActivity {
                                     conn.setConnectTimeout(30000);
                                     conn.setReadTimeout(120000);
                                     conn.setRequestMethod("GET");
-                                    conn.setRequestProperty("User-Agent", "MovieHub/3.5.302 AndroidDownloader");
+                                    conn.setRequestProperty("User-Agent", "MovieHub/3.5.303 AndroidDownloader");
                                     conn.setRequestProperty("Accept-Encoding", "identity");
                                     if (sendRange && requestedSliceEnd >= existingOffset) {
                                         conn.setRequestProperty("Range", "bytes=" + existingOffset + "-" + requestedSliceEnd);
