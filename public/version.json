@@ -1,11 +1,11 @@
 {
-  "latestVersion": "3.5.295",
-  "minimumRequiredVersion": "3.5.295",
-  "latestVersionCode": 35295,
-  "minimumRequiredVersionCode": 35295,
+  "latestVersion": "3.5.296",
+  "minimumRequiredVersion": "3.5.296",
+  "latestVersionCode": 35296,
+  "minimumRequiredVersionCode": 35296,
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Hub v3.5.295: Android App mein sabhi movies & series ki sound (AC3/EAC3/DTS/TrueHD/Opus/AAC) aur loading problem fix ho gayi hai, aur Holl Print labels updated hain.",
-  "releaseNotes": "v3.5.295: Added built-in Media3 FFmpeg audio decoder + AudioAttributes media focus in Android APK so every movie & series plays with full sound, plus fast playback loading and Holl Print label fixes."
+  "updateMessage": "Movie Hub v3.5.296: New Android APK build with instant Telegram auto-sync, enhanced offline download support, and improved player sound and performance.",
+  "releaseNotes": "v3.5.296: Updated Android APK build with full audio decoder support, instant Telegram auto-sync without restart, and enhanced offline video downloads."
 }
