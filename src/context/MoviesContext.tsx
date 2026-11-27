@@ -198,17 +198,8 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
 
     const checkCatalogMetaAndReload = async () => {
       try {
-        const metaResp = await fetch(buildApiUrl(`/api/movies/catalog-meta?t=${Date.now()}`), { cache: 'no-store' });
-        if (!metaResp.ok) return;
-        const meta = await metaResp.json();
-        const sig = `${Number(meta?.count) || 0}:${Number(meta?.mtimeMs) || 0}:${Number(meta?.size) || 0}`;
-        if (!lastCatalogMetaSigRef.current) {
-          lastCatalogMetaSigRef.current = sig;
-        } else if (sig !== lastCatalogMetaSigRef.current && Number(meta?.count) > 0) {
-          lastCatalogMetaSigRef.current = sig;
-          await loadSeedCatalog();
-          await syncFromServer(true);
-        }
+        await loadSeedCatalog();
+        await syncFromServer(false);
       } catch {}
     };
 
@@ -249,8 +240,10 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
 
     void loadSeedCatalog().then(() => checkCatalogMetaAndReload());
     connectLiveCatalogSse();
-    const interval = setInterval(checkCatalogMetaAndReload, 4000);
+    const interval = setInterval(checkCatalogMetaAndReload, 2500);
     window.addEventListener('focus', checkCatalogMetaAndReload);
+    window.addEventListener('pageshow', checkCatalogMetaAndReload);
+    window.addEventListener('online', checkCatalogMetaAndReload);
     document.addEventListener('visibilitychange', checkCatalogMetaAndReload);
     return () => {
       active = false;
@@ -262,6 +255,8 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
         } catch {}
       }
       window.removeEventListener('focus', checkCatalogMetaAndReload);
+      window.removeEventListener('pageshow', checkCatalogMetaAndReload);
+      window.removeEventListener('online', checkCatalogMetaAndReload);
       document.removeEventListener('visibilitychange', checkCatalogMetaAndReload);
     };
   }, []);
