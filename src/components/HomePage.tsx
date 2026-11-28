@@ -1236,7 +1236,10 @@ export default function HomePage() {
           language={playingMovie.language || playingMovie.movie?.language}
           initialDuration={playingMovie.initialDuration || playingMovie.duration || 0}
           initialTime={playingMovie.currentTime || 0}
-          onEpisodeChange={(sIdx) => setActiveSeasonIndex(sIdx)}
+          onEpisodeChange={(sIdx, eIdx) => {
+            setActiveSeasonIndex(sIdx);
+            setActiveEpisodeIndex(eIdx);
+          }}
           onProgress={(curr, dur) => {
             const uid = user?.uid || 'guest_user';
             const m = playingMovie.movie || playingMovie;

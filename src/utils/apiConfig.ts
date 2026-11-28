@@ -1,7 +1,7 @@
-export const CLOUD_RUN_BACKEND_URL = 'https://ais-pre-t4rahxvo4ainugtipwkod7-832989141722.asia-southeast1.run.app';
-export const LIVE_BACKEND_URL = 'https://ais-dev-t4rahxvo4ainugtipwkod7-832989141722.asia-southeast1.run.app';
-export const PRE_BACKEND_URL = 'https://ais-pre-t4rahxvo4ainugtipwkod7-832989141722.asia-southeast1.run.app';
-export const APP_VERSION = 'v3.5.316';
+export const CLOUD_RUN_BACKEND_URL = 'https://ais-pre-6ejzhiqpwvhbnrmdodefzr-997472249123.asia-east1.run.app';
+export const LIVE_BACKEND_URL = 'https://ais-dev-6ejzhiqpwvhbnrmdodefzr-997472249123.asia-east1.run.app';
+export const PRE_BACKEND_URL = 'https://ais-pre-6ejzhiqpwvhbnrmdodefzr-997472249123.asia-east1.run.app';
+export const APP_VERSION = 'v3.5.324';
 
 const ENV_BACKEND_URL = (
   (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_BASE_URL) ||

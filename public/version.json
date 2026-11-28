@@ -1,13 +1,13 @@
 {
-  "latestVersion": "3.5.316",
-  "minimumRequiredVersion": "1.0.0",
-  "latestVersionCode": 35316,
-  "minimumRequiredVersionCode": 1,
+  "latestVersion": "3.5.324",
+  "minimumRequiredVersion": "3.5.324",
+  "latestVersionCode": 35324,
+  "minimumRequiredVersionCode": 35324,
   "otaEnabled": true,
-  "liveAppUrl": "https://ais-pre-t4rahxvo4ainugtipwkod7-832989141722.asia-southeast1.run.app",
+  "liveAppUrl": "https://ais-pre-6ejzhiqpwvhbnrmdodefzr-997472249123.asia-east1.run.app",
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
-  "isMandatory": false,
-  "updateMessage": "Movie Hub v3.5.316: Universal MKV/MP4/HEVC/10-bit/Hi10P & Web Series playback fixes, zero pause/buffer drops, and instant live Over-The-Air updates.",
-  "releaseNotes": "v3.5.316: Fixed MKV/series loading hangs, added 10-bit/Hi10P & tail-moov detection, 32MB streaming ranges with pause backpressure retry, and enabled seamless live OTA updates."
+  "isMandatory": true,
+  "updateMessage": "Movie Hub v3.5.324: Movies & Web Series playback now match Chrome, Telegram uploads appear instantly inside APK, and in-app updates work reliably.",
+  "releaseNotes": "v3.5.324: Fixed Web Series episode quality & auto-next playback, added direct MTProto Telegram instant sync in APK, and fixed in-app update detection."
 }

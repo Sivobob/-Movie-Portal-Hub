@@ -413,6 +413,14 @@ export default function VideoPlayerModal({
   const currentSeason = isSeries ? seasonsList[activeSeasonIdx] || seasonsList[0] : null;
   const episodesList = currentSeason && Array.isArray(currentSeason.episodes) ? currentSeason.episodes : [];
   const currentEpisode = isSeries && episodesList.length > 0 ? episodesList[activeEpisodeIdx] || episodesList[0] : null;
+  const activeEpisodeVideoQualities = useMemo(() => {
+    if (isSeries) {
+      return currentEpisode?.videoQualities && Object.keys(currentEpisode.videoQualities).length > 0
+        ? currentEpisode.videoQualities
+        : undefined;
+    }
+    return videoQualities;
+  }, [isSeries, currentEpisode, videoQualities]);
 
   // Sync props when opening or changing parent movie
   useEffect(() => {
@@ -1387,11 +1395,11 @@ export default function VideoPlayerModal({
     );
     const startHint = Math.floor(Math.max(0, qualityResumeTargetRef.current || resumeOffsetRef.current || 0));
 
-    const effectiveVideoQualities = videoQualities
+    const effectiveVideoQualities = activeEpisodeVideoQualities
       ? Object.fromEntries(
-          Object.entries(videoQualities).filter(([k]) => !ignoredTruncatedExplicitQualities[k.toLowerCase()])
+          Object.entries(activeEpisodeVideoQualities).filter(([k]) => !ignoredTruncatedExplicitQualities[k.toLowerCase()])
         )
-      : videoQualities;
+      : activeEpisodeVideoQualities;
 
     const plan = resolveStreamBuildPlan({
       rawUrl: trimmed,
@@ -1468,6 +1476,7 @@ export default function VideoPlayerModal({
     preflightReadyKey,
     explicitRecommendedMode,
     ignoredTruncatedExplicitQualities,
+    activeEpisodeVideoQualities,
   ]);
 
   useEffect(() => {
@@ -1854,6 +1863,13 @@ export default function VideoPlayerModal({
           setHasDecodedFrame(false);
           return;
         }
+        if (isTg && !canTranscodeRemote && isNetworkOrStall && exoNetworkRecoveryAttemptsRef.current < 1) {
+          exoNetworkRecoveryAttemptsRef.current += 1;
+          resumeOffsetRef.current = safePos;
+          setIsLoading(true);
+          setExoReconnectNonce((n) => n + 1);
+          return;
+        }
       }
 
       // Level 4: Honest terminal failure message (never silently fall back to incompatible <video>)
@@ -1868,9 +1884,10 @@ export default function VideoPlayerModal({
           (lowerReason.includes('black_screen') ||
             lowerReason.includes('codec') ||
             lowerReason.includes('decoder') ||
-            lowerReason.includes('format') ||
-            lowerReason.includes('buffering_timeout'))
-          ? 'This video uses a format (such as 10-bit / Hi10P / HEVC MKV) that requires the live transcoding server, which is currently unreachable. Publish the app backend or try playing in Chrome.'
+            lowerReason.includes('format'))
+          ? 'This video codec (such as 10-bit Hi10P H.264) is not supported by this phone hardware decoder. Tap Retry or try another quality if available.'
+          : lowerReason.includes('buffering_timeout')
+          ? 'Stream timed out while loading chunks from Telegram. Check your internet connection and tap Retry.'
           : `Playback stopped: ${reason}. Tap Retry to reconnect.`
       );
     };
@@ -1895,11 +1912,11 @@ export default function VideoPlayerModal({
         }
 
         // Level 1 -> Level 2 -> Level 3 Black-screen guard:
-        // If playing > 3.2s with 0 rendered output frames (even if videoWidth > 0 from headers)
+        // If playing > 4.5s with 0 rendered output frames (even if videoWidth > 0 from headers)
         if (
           st.isPlaying &&
           !st.isBuffering &&
-          rawPos > 3.2 &&
+          rawPos > 4.5 &&
           !st.firstFrameRendered &&
           renderedCount === 0
         ) {
@@ -1943,7 +1960,8 @@ export default function VideoPlayerModal({
           }
           lastBufferingPollAtMs = nowMs;
 
-          const preFirstFrameCapMs = isHlsExo ? 42000 : 22000;
+          const isDirectLocalBridge = !isHlsExo && !hasRemoteTranscodeBackend();
+          const preFirstFrameCapMs = isHlsExo ? 42000 : isDirectLocalBridge ? 34000 : 24000;
           if (!st.firstFrameRendered && preFirstFrameBufferingAccumMs > preFirstFrameCapMs) {
             escalateExoPlayback('buffering_timeout', effectiveTime);
             return;
@@ -1978,7 +1996,13 @@ export default function VideoPlayerModal({
                 return;
               }
             }
-            const maxStallMs = st.firstFrameRendered ? 32000 : isHlsExo ? 35000 : 14000;
+            const maxStallMs = st.firstFrameRendered
+              ? (isDirectLocalBridge ? 38000 : 32000)
+              : isHlsExo
+              ? 35000
+              : isDirectLocalBridge
+              ? 26000
+              : 16000;
             if (stallElapsed > maxStallMs) {
               escalateExoPlayback('buffering_timeout', effectiveTime);
               return;
@@ -2155,6 +2179,12 @@ export default function VideoPlayerModal({
           }
           if (onNextEpisode && hasNext) {
             onNextEpisode();
+          } else if (isSeries) {
+            if (activeEpisodeIdx + 1 < episodesList.length) {
+              handleSelectEpisode(activeEpisodeIdx + 1);
+            } else if (activeSeasonIdx + 1 < seasonsList.length) {
+              handleSelectSeason(activeSeasonIdx + 1);
+            }
           }
         }
       } catch {}
@@ -2794,6 +2824,12 @@ export default function VideoPlayerModal({
       }
       if (onNextEpisode && hasNext) {
         onNextEpisode();
+      } else if (isSeries) {
+        if (activeEpisodeIdx + 1 < episodesList.length) {
+          handleSelectEpisode(activeEpisodeIdx + 1);
+        } else if (activeSeasonIdx + 1 < seasonsList.length) {
+          handleSelectSeason(activeSeasonIdx + 1);
+        }
       }
     };
 
@@ -4454,7 +4490,7 @@ export default function VideoPlayerModal({
                             const rawExplicit =
                               qLower !== 'auto' &&
                               !ignoredTruncatedExplicitQualities[qLower] &&
-                              (videoQualities?.[qLower] || videoQualities?.[q] || '');
+                              (activeEpisodeVideoQualities?.[qLower] || activeEpisodeVideoQualities?.[q] || '');
                             const trimmedExplicit = String(rawExplicit || '').trim();
                             let explicit =
                               trimmedExplicit && trimmedExplicit.replace(/\/+$/, '') !== baseSrcUrl.replace(/\/+$/, '')

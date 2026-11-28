@@ -23,6 +23,7 @@ import {
 import { normalizeMoviePosters } from '../utils/posterUrl';
 import { buildApiUrl } from '../utils/apiConfig';
 import { hasPlayableContent, isSeriesComplete } from '../utils/seriesCompleteness';
+import { startTelegramDirectSyncLoop } from '../services/telegramDirectSync';
 
 interface MoviesContextValue {
   movies: MovieData[];
@@ -125,6 +126,8 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
 
   const [movies, setMovies] = useState<MovieData[]>(initialLocal);
   const [isLoading, setIsLoading] = useState<boolean>(initialLocal.length === 0);
+  const moviesRef = useRef<MovieData[]>(movies);
+  moviesRef.current = movies;
   const lastCatalogMetaSigRef = useRef<string>('');
 
   // Hydrate full catalog from IndexedDB + pre-bundled seed catalog + live SSE push updates
@@ -256,7 +259,7 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
 
     void loadSeedCatalog().then(() => checkCatalogMetaAndReload());
     connectLiveCatalogSse();
-    const interval = setInterval(checkCatalogMetaAndReload, 2500);
+    const interval = setInterval(checkCatalogMetaAndReload, 45000);
     window.addEventListener('focus', checkCatalogMetaAndReload);
     window.addEventListener('pageshow', checkCatalogMetaAndReload);
     window.addEventListener('online', checkCatalogMetaAndReload);
@@ -516,8 +519,11 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener('online', handleOnline);
     document.addEventListener('visibilitychange', handleResume);
 
+    const stopDirectTelegramSync = startTelegramDirectSyncLoop(() => moviesRef.current, 10000);
+
     return () => {
       isMountedRef.current = false;
+      stopDirectTelegramSync();
       if (unsubMovies) {
         try {
           unsubMovies();

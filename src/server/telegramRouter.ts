@@ -5905,14 +5905,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
               seasons: mergedSeasons,
               streamingUrl: replaceExistingEp ? epObj.streamUrl : existingRec.streamingUrl,
             });
-            const isSingleSmallNonCompleteEp =
-              !expectedCounts &&
-              (normalizedExisting.seasons?.length || 0) === 1 &&
-              (normalizedExisting.seasons?.[0]?.episodes?.length || 0) === 1 &&
-              !isCompleteSeasonPackEpisode(normalizedExisting.seasons[0].episodes[0]) &&
-              Number(normalizedExisting.seasons[0].episodes[0]?.durationSec || 0) < 5400;
-            const seriesReadyToPublish =
-              !isSingleSmallNonCompleteEp && isSeriesComplete(normalizedExisting, expectedCounts);
+            const seriesReadyToPublish = isSeriesComplete(normalizedExisting, expectedCounts);
             const wasPublished = existingRec.published !== false;
             const nextPublished = seriesReadyToPublish;
             const nextStream = normalizedExisting.streamingUrl || epObj.streamUrl;
@@ -6005,16 +5998,10 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
           } else {
             const seriesDocId = `tg_series_${cleanChannelId}_${draft.msgId}`;
             const initialSeasons = [{ seasonNumber: seasonNum, episodes: [epObj] }];
-            const isSingleSmallNonCompleteEp =
-              !expectedCounts &&
-              !isCompleteSeasonPackEpisode(epObj) &&
-              Number(epObj.durationSec || bestDurSec || 0) < 5400;
-            const seriesReadyToPublish =
-              !isSingleSmallNonCompleteEp &&
-              isSeriesComplete(
-                { id: seriesDocId, originalCategory: catToSave, seasons: initialSeasons },
-                expectedCounts
-              );
+            const seriesReadyToPublish = isSeriesComplete(
+              { id: seriesDocId, originalCategory: catToSave, seasons: initialSeasons },
+              expectedCounts
+            );
             const seriesBase = {
               id: seriesDocId,
               title: draft.title.trim(),
@@ -7445,18 +7432,7 @@ async function runBulkChannelSyncWorker(params: {
         const expectedCounts = dirty.rec.imdbId
           ? await fetchExpectedSeasonEpisodeCounts(dirty.rec.imdbId)
           : null;
-        const totalEps = (dirty.rec.seasons || []).reduce(
-          (acc: number, s: any) => acc + (Array.isArray(s?.episodes) ? s.episodes.length : 0),
-          0
-        );
-        const onlyEp = totalEps === 1 ? dirty.rec.seasons?.[0]?.episodes?.[0] : null;
-        const isSingleSmallNonCompleteEp =
-          !expectedCounts &&
-          Boolean(onlyEp) &&
-          !isCompleteSeasonPackEpisode(onlyEp) &&
-          Number(onlyEp?.durationSec || 0) < 5400;
-        const seriesReadyToPublish =
-          !isSingleSmallNonCompleteEp && isSeriesComplete(dirty.rec, expectedCounts);
+        const seriesReadyToPublish = isSeriesComplete(dirty.rec, expectedCounts);
         dirty.rec.published = seriesReadyToPublish;
 
         const prevSeed = seedCatalogMap.get(seriesId) || {};

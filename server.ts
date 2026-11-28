@@ -99,7 +99,7 @@ app.use('/api', (req, res, next) => {
 app.get('/api/health', (req, res) => {
   const creds = getTelegramCredentials();
   const telegramConfigured = Boolean(creds.apiId && creds.apiHash && (creds.botToken || creds.sessionStr));
-  let appVersion = '3.5.316';
+  let appVersion = '3.5.324';
   let otaEnabled = true;
   let liveAppUrl = '';
   try {
@@ -144,7 +144,7 @@ app.get('/api/ios-profile', (req, res) => {
     const rawProto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0].trim();
     const isLocal = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(rawHost);
     const scheme = isLocal ? rawProto : 'https';
-    const appOrigin = rawHost ? `${scheme}://${rawHost}/` : 'https://ais-pre-t4rahxvo4ainugtipwkod7-832989141722.asia-southeast1.run.app/';
+    const appOrigin = rawHost ? `${scheme}://${rawHost}/` : 'https://ais-pre-6ejzhiqpwvhbnrmdodefzr-997472249123.asia-east1.run.app/';
 
     const escapeXml = (str: string) =>
       str

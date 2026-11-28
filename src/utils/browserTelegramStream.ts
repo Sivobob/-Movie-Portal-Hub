@@ -1214,3 +1214,178 @@ export function installAndroidStreamBridge(localBaseUrl: string) {
   // Pre-warm Telegram WSS connection quietly in background on native app start
   getBrowserTelegramClient().catch(() => {});
 }
+
+export interface BrowserTelegramScannedMessage {
+  msgId: number;
+  channelId: string;
+  dateMs: number;
+  caption: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  durationSec: number;
+  width: number;
+  height: number;
+}
+
+async function resolveBrowserChannelPeerCandidates(client: TelegramClient, rawChannelId: string): Promise<{ cleanId: string; peers: any[] }> {
+  const token = String(rawChannelId || '').trim();
+  const cleanNumeric = token.replace(/^-100/, '').trim();
+  const isNumeric = /^\d+$/.test(cleanNumeric);
+  const cleanId = isNumeric ? cleanNumeric : token;
+  const peers: any[] = [];
+
+  if (isNumeric) {
+    const cachedHash = getSavedChannelHash(cleanNumeric);
+    if (cachedHash) {
+      peers.push(
+        new Api.InputPeerChannel({
+          channelId: bigInt(cleanNumeric),
+          accessHash: bigInt(cachedHash),
+        })
+      );
+    } else {
+      try {
+        const ent: any = await client.getEntity(`-100${cleanNumeric}`);
+        if (ent && ent.accessHash) {
+          saveChannelHash(cleanNumeric, ent.accessHash.toString());
+          peers.push(
+            new Api.InputPeerChannel({
+              channelId: bigInt(cleanNumeric),
+              accessHash: bigInt(ent.accessHash.toString()),
+            })
+          );
+        }
+      } catch {}
+    }
+    peers.push(bigInt(cleanNumeric), `-100${cleanNumeric}`);
+  } else if (token) {
+    const saved = getSavedUsernamePeer(token);
+    if (saved) {
+      peers.push(
+        new Api.InputPeerChannel({
+          channelId: bigInt(saved.channelId),
+          accessHash: bigInt(saved.accessHash),
+        })
+      );
+    }
+    try {
+      const ent: any = await client.getEntity(token);
+      if (ent) {
+        if (ent.id && ent.accessHash) {
+          saveUsernamePeer(token, ent.id.toString(), ent.accessHash.toString());
+        }
+        peers.push(ent);
+      }
+    } catch {}
+    peers.push(token);
+  }
+
+  return { cleanId, peers };
+}
+
+function extractDocumentFromMessage(msg: any): Api.Document | null {
+  if (!msg || !msg.media) return null;
+  if (msg.media instanceof Api.MessageMediaDocument && msg.media.document instanceof Api.Document) {
+    return msg.media.document;
+  }
+  if (
+    msg.media instanceof Api.MessageMediaWebPage &&
+    (msg.media as any).webpage?.document instanceof Api.Document
+  ) {
+    return (msg.media as any).webpage.document;
+  }
+  return null;
+}
+
+export async function fetchBrowserTelegramMessagesByIds(
+  channelId: string,
+  msgIds: number[],
+  allowRetry = true
+): Promise<{ cleanId: string; messages: BrowserTelegramScannedMessage[]; peerReachable: boolean }> {
+  if (!Array.isArray(msgIds) || msgIds.length === 0) {
+    return { cleanId: String(channelId || '').replace(/^-100/, ''), messages: [], peerReachable: true };
+  }
+
+  const client = await getBrowserTelegramClient();
+  const { cleanId, peers } = await resolveBrowserChannelPeerCandidates(client, channelId);
+  let rawMsgs: any[] | null = null;
+  let lastErr: any = null;
+
+  for (const peer of peers) {
+    try {
+      const res = await withTimeout(
+        client.getMessages(peer, { ids: msgIds }),
+        12000,
+        'browser channel scan'
+      );
+      if (Array.isArray(res)) {
+        rawMsgs = res;
+        break;
+      }
+    } catch (err: any) {
+      lastErr = err;
+      if (allowRetry && isRecoverableClientError(err)) {
+        await resetBrowserTelegramClient({ clearSession: isAuthSessionFatalError(err) });
+        return fetchBrowserTelegramMessagesByIds(channelId, msgIds, false);
+      }
+    }
+  }
+
+  if (!rawMsgs) {
+    if (lastErr) {
+      console.warn('[BrowserTgScan] Peer scan error:', lastErr?.message || lastErr);
+    }
+    return { cleanId, messages: [], peerReachable: false };
+  }
+
+  const out: BrowserTelegramScannedMessage[] = [];
+  for (const m of rawMsgs) {
+    if (!m || !m.id) continue;
+    const doc = extractDocumentFromMessage(m);
+    if (!doc) continue;
+
+    let fileName = '';
+    let durationSec = 0;
+    let width = 0;
+    let height = 0;
+    for (const attr of doc.attributes || []) {
+      if (attr instanceof Api.DocumentAttributeFilename && attr.fileName) {
+        fileName = attr.fileName;
+      } else if (attr instanceof Api.DocumentAttributeVideo) {
+        durationSec = Number((attr as any).duration || 0);
+        width = Number((attr as any).w || 0);
+        height = Number((attr as any).h || 0);
+      }
+    }
+
+    const mimeLower = String(doc.mimeType || '').toLowerCase();
+    const isVideoDoc =
+      mimeLower.startsWith('video/') ||
+      /\.(mkv|mp4|avi|mov|webm|m4v|ts|flv|wmv|mpg|mpeg)$/i.test(fileName);
+    if (!isVideoDoc) continue;
+
+    const sizeBytes = Number(doc.size || 0);
+    if (sizeBytes < 200 * 1024) continue;
+
+    const dateMs = Number(m.date || 0) > 0 ? Number(m.date) * 1000 : Date.now();
+    const caption = String(m.message || '').trim();
+
+    out.push({
+      msgId: Number(m.id),
+      channelId: cleanId,
+      dateMs,
+      caption,
+      fileName: fileName || `telegram_${m.id}.mp4`,
+      mimeType: mimeLower || 'video/mp4',
+      sizeBytes,
+      durationSec: Math.round(durationSec),
+      width,
+      height,
+    });
+  }
+
+  out.sort((a, b) => a.msgId - b.msgId);
+  return { cleanId, messages: out, peerReachable: true };
+}
+

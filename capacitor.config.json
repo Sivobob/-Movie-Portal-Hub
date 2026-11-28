@@ -16,6 +16,8 @@
     "androidScheme": "https",
     "cleartext": true,
     "allowNavigation": [
+      "ais-pre-6ejzhiqpwvhbnrmdodefzr-997472249123.asia-east1.run.app",
+      "ais-dev-6ejzhiqpwvhbnrmdodefzr-997472249123.asia-east1.run.app",
       "ais-pre-t4rahxvo4ainugtipwkod7-832989141722.asia-southeast1.run.app",
       "ais-dev-t4rahxvo4ainugtipwkod7-832989141722.asia-southeast1.run.app",
       "ais-pre-ls63jyrme47bhlhdh7tzui-828533060153.asia-northeast1.run.app",

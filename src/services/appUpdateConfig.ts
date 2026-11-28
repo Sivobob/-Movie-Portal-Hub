@@ -14,8 +14,8 @@ import { guardedFirestoreWrite, isFirestoreWriteAllowed } from './firestoreQuota
 export const APP_UPDATE_COLLECTION = 'admins';
 export const APP_UPDATE_DOC_ID = 'android_update';
 
-export const CURRENT_VERSION_NAME = '3.5.316';
-export const CURRENT_VERSION_CODE = 35316;
+export const CURRENT_VERSION_NAME = '3.5.324';
+export const CURRENT_VERSION_CODE = 35324;
 
 export const OFFICIAL_APK_DIRECT_URL =
   'https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk';
@@ -29,7 +29,7 @@ export function resolveApkDownloadUrl(rawUrl?: string | null): string {
 }
 
 export const DEFAULT_UPDATE_MESSAGE =
-  'Movie Hub v3.5.316: Fixed MKV, MP4, HEVC, 10-bit & Web Series loading issues plus instant live Over-The-Air updates without rebuilding APK.';
+  'Movie Hub v3.5.324: Movies & Series playback fixed for native APK, plus instant direct Telegram channel sync without backend delay.';
 
 const GITHUB_VERSION_JSON_URL =
   'https://raw.githubusercontent.com/Sivobob/-Movie-Portal-Hub/main/public/version.json';
@@ -242,19 +242,136 @@ export function pickHigherRemoteUpdateConfig(
 ): RemoteUpdateConfig | null {
   if (!a) return b;
   if (!b) return a;
-  const cmpVersion = compareVersions(
+  const cmpLatest = compareVersions(a.latestVersion, b.latestVersion);
+  if (cmpLatest > 0) return a;
+  if (cmpLatest < 0) return b;
+  const cmpMin = compareVersions(
     a.minimumRequiredVersion || a.latestVersion,
     b.minimumRequiredVersion || b.latestVersion
   );
-  if (cmpVersion > 0) return a;
-  if (cmpVersion < 0) return b;
-  const aCode = Number(a.minimumRequiredVersionCode || a.latestVersionCode || 0);
-  const bCode = Number(b.minimumRequiredVersionCode || b.latestVersionCode || 0);
+  if (cmpMin > 0) return a;
+  if (cmpMin < 0) return b;
+  const aCode = Number(a.latestVersionCode || a.minimumRequiredVersionCode || 0);
+  const bCode = Number(b.latestVersionCode || b.minimumRequiredVersionCode || 0);
   return aCode >= bCode ? a : b;
 }
 
+async function fetchJsonWithTimeout(url: string, timeoutMs = 4500): Promise<any> {
+  if (typeof fetch !== 'function' || !url) return null;
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      cache: 'no-store',
+      headers: { Accept: 'application/json' },
+      ...(controller ? { signal: controller.signal } : {}),
+    });
+    if (!res.ok) return null;
+    const ct = (res.headers.get('content-type') || '').toLowerCase();
+    if (ct && !ct.includes('json') && !ct.includes('text/plain')) return null;
+    return await res.json().catch(() => null);
+  } catch {
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function parseVersionCodeFromSemver(versionStr: string): number {
+  const parts = String(versionStr || '')
+    .trim()
+    .replace(/^v/i, '')
+    .split(/[^0-9]+/)
+    .filter(Boolean)
+    .map((n) => parseInt(n, 10) || 0);
+  if (parts.length >= 3) {
+    return parts[0] * 10000 + parts[1] * 1000 + parts[2];
+  }
+  return 0;
+}
+
 export async function fetchRemoteUpdateConfig(): Promise<RemoteUpdateConfig | null> {
-  return null;
+  const firestorePromise = (async (): Promise<RemoteUpdateConfig | null> => {
+    try {
+      const ref = doc(db, APP_UPDATE_COLLECTION, APP_UPDATE_DOC_ID);
+      let snap;
+      try {
+        snap = await getDocFromServer(ref);
+      } catch {
+        snap = await getDoc(ref);
+      }
+      if (snap && snap.exists()) {
+        return normalizeRemoteUpdateConfig(snap.data());
+      }
+    } catch {}
+    return null;
+  })();
+
+  const githubVersionPromise = (async (): Promise<RemoteUpdateConfig | null> => {
+    const data = await fetchJsonWithTimeout(`${GITHUB_VERSION_JSON_URL}?t=${Date.now()}`, 4500);
+    if (!data || !data.latestVersion) return null;
+    return normalizeRemoteUpdateConfig(data);
+  })();
+
+  const githubReleasePromise = (async (): Promise<RemoteUpdateConfig | null> => {
+    const rel = await fetchJsonWithTimeout(GITHUB_RELEASES_LATEST_URL, 4500);
+    if (!rel || !rel.tag_name) return null;
+    const ver = String(rel.tag_name).trim().replace(/^v/i, '');
+    if (!ver) return null;
+    const assets = Array.isArray(rel.assets) ? rel.assets : [];
+    const preferredAsset =
+      assets.find((a: any) => /^Movie-Portal\.apk$/i.test(String(a?.name || ''))) ||
+      assets.find((a: any) => /^Movie-Portal-latest\.apk$/i.test(String(a?.name || ''))) ||
+      assets.find((a: any) => /\.apk$/i.test(String(a?.name || '')));
+    const code = parseVersionCodeFromSemver(ver);
+    return normalizeRemoteUpdateConfig({
+      latestVersion: ver,
+      minimumRequiredVersion: '1.0.0',
+      latestVersionCode: code || CURRENT_VERSION_CODE,
+      minimumRequiredVersionCode: 1,
+      isMandatory: false,
+      apkDownloadUrl: preferredAsset?.browser_download_url || OFFICIAL_APK_DIRECT_URL,
+      updateMessage: rel.body || DEFAULT_UPDATE_MESSAGE,
+    });
+  })();
+
+  const backendPromise = (async (): Promise<RemoteUpdateConfig | null> => {
+    const apiUrl = buildApiUrl(`/api/download/latest-info?t=${Date.now()}`);
+    if (!apiUrl || apiUrl.startsWith('http://127.0.0.1:')) return null;
+    const data = await fetchJsonWithTimeout(apiUrl, 3500);
+    if (!data || (!data.latestVersion && !data.version)) return null;
+    return normalizeRemoteUpdateConfig({
+      ...data,
+      latestVersion: data.latestVersion || data.version,
+    });
+  })();
+
+  const settled = await Promise.allSettled([
+    firestorePromise,
+    githubVersionPromise,
+    githubReleasePromise,
+    backendPromise,
+  ]);
+
+  let best: RemoteUpdateConfig | null = null;
+  let firestoreCfg: RemoteUpdateConfig | null = null;
+  for (let i = 0; i < settled.length; i++) {
+    const res = settled[i];
+    if (res.status !== 'fulfilled' || !res.value) continue;
+    if (i === 0) firestoreCfg = res.value;
+    best = pickHigherRemoteUpdateConfig(best, res.value);
+  }
+
+  // If GitHub/backend report the same latest version as Firestore, preserve Firestore mandatory flags & custom APK URL
+  if (best && firestoreCfg && compareVersions(best.latestVersion, firestoreCfg.latestVersion) === 0) {
+    return {
+      ...best,
+      ...firestoreCfg,
+      apkDownloadUrl: firestoreCfg.apkDownloadUrl || best.apkDownloadUrl,
+    };
+  }
+  return best;
 }
 
 export function subscribeRemoteUpdateConfig(

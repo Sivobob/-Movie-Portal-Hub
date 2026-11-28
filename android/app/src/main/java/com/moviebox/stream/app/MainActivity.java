@@ -157,6 +157,7 @@ public class MainActivity extends BridgeActivity {
     private static final String GITHUB_VERSION_JSON_URL =
         "https://raw.githubusercontent.com/Sivobob/-Movie-Portal-Hub/main/public/version.json";
     private static final String[] LIVE_WEB_CANDIDATES = new String[] {
+        "https://ais-pre-6ejzhiqpwvhbnrmdodefzr-997472249123.asia-east1.run.app",
         "https://ais-pre-t4rahxvo4ainugtipwkod7-832989141722.asia-southeast1.run.app",
         "https://movie-portalhub-1012526016635.asia-southeast1.run.app"
     };
@@ -1364,10 +1365,10 @@ public class MainActivity extends BridgeActivity {
         boolean lowRam = isLowRamDeviceCompat();
         DefaultHttpDataSource.Factory httpFactory = new DefaultHttpDataSource.Factory()
             .setConnectTimeoutMs(30000)
-            .setReadTimeoutMs(60000)
+            .setReadTimeoutMs(90000)
             .setAllowCrossProtocolRedirects(true)
             .setKeepPostFor302Redirects(true)
-            .setUserAgent("MoviePortal/3.5.316 AndroidExoPlayer");
+            .setUserAgent("MoviePortal/3.5.324 AndroidExoPlayer");
 
         DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
             .setBufferDurationsMs(
@@ -2812,7 +2813,7 @@ public class MainActivity extends BridgeActivity {
                                         if (saved != null && !saved.trim().isEmpty()) {
                                             base = saved.trim();
                                         } else {
-                                            base = "https://ais-pre-t4rahxvo4ainugtipwkod7-832989141722.asia-southeast1.run.app";
+                                            base = "https://ais-pre-6ejzhiqpwvhbnrmdodefzr-997472249123.asia-east1.run.app";
                                         }
                                     }
                                     if (base.endsWith("/")) {
