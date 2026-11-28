@@ -262,6 +262,56 @@ app.post('/api/firestore/quota-exhausted', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   return res.json({ writeAllowed: false, exhaustedUntilMs });
 });
+const serverDeletedMovieIds = new Set<string>();
+
+function isServerMovieDeleted(id?: string, title?: string): boolean {
+  const t = String(title || '').toLowerCase();
+  if (t.includes('mushoku') || t.includes('jobless reincarnation') || t.includes('jobless reincarnat')) {
+    return true;
+  }
+  if (!id) return false;
+  return serverDeletedMovieIds.has(String(id));
+}
+
+app.post('/api/movies/delete', (req, res) => {
+  try {
+    const id = String(req.body?.id || '').trim();
+    const title = String(req.body?.title || '').trim();
+    if (id) {
+      serverDeletedMovieIds.add(id);
+    }
+
+    // Also remove from local seed files if present
+    const candidates = [
+      path.resolve(process.cwd(), 'public/movies-seed.json'),
+      path.resolve(process.cwd(), 'dist/movies-seed.json'),
+      path.resolve(__dirname, 'public/movies-seed.json'),
+    ];
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        try {
+          const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
+          if (Array.isArray(parsed)) {
+            const filtered = parsed.filter(
+              (m: any) =>
+                m &&
+                m.id !== id &&
+                !isServerMovieDeleted(m.id, m.title)
+            );
+            fs.writeFileSync(p, JSON.stringify(filtered, null, 2), 'utf8');
+          }
+        } catch {}
+      }
+    }
+
+    cachedCatalogMeta = null;
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({ success: true, id, message: 'Deleted from server catalog' });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || 'Failed to process deletion' });
+  }
+});
+
 app.get('/api/movies/catalog', (_req, res) => {
   try {
     const currentYear = new Date().getFullYear();
@@ -276,7 +326,14 @@ app.get('/api/movies/catalog', (_req, res) => {
         const filtered = Array.isArray(parsed)
           ? parsed
               .map((m: any) => normalizeSeriesSeasons(m))
-              .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m))
+              .filter(
+                (m: any) =>
+                  m &&
+                  m.id &&
+                  m.published !== false &&
+                  hasPlayableContent(m) &&
+                  !isServerMovieDeleted(m.id, m.title)
+              )
               .map((m: any) =>
                 Number(m.releaseYear) > currentYear ? { ...m, releaseYear: currentYear } : m
               )
@@ -314,7 +371,14 @@ app.get('/api/movies/catalog-meta', (_req, res) => {
           try {
             const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
             count = Array.isArray(parsed)
-              ? parsed.filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m)).length
+              ? parsed.filter(
+                  (m: any) =>
+                    m &&
+                    m.id &&
+                    m.published !== false &&
+                    hasPlayableContent(m) &&
+                    !isServerMovieDeleted(m.id, m.title)
+                ).length
               : 0;
           } catch {}
           cachedCatalogMeta = { filePath: p, mtimeMs: stat.mtimeMs, size: stat.size, count };

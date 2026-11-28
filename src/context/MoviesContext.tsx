@@ -18,6 +18,7 @@ import {
   getTimestampMs,
   saveLocalMovies,
   sortMoviesList,
+  isMovieDeleted,
 } from '../services/movieStorage';
 import { normalizeMoviePosters } from '../utils/posterUrl';
 import { buildApiUrl } from '../utils/apiConfig';
@@ -137,12 +138,22 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
       if (!active || incoming.length === 0) return;
       const normalized = sortMoviesList(
         incoming
-          .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m) && isSeriesComplete(m))
+          .filter(
+            (m: any) =>
+              m &&
+              m.id &&
+              m.published !== false &&
+              hasPlayableContent(m) &&
+              isSeriesComplete(m) &&
+              !isMovieDeleted(m.id, m.title, m.originalTitle)
+          )
           .map((m: any) => normalizeMoviePosters(m) as MovieData)
       );
       setMovies((prev) => {
         const prevById = new Map<string, MovieData>();
-        prev.forEach((p) => prevById.set(p.id, p));
+        prev
+          .filter((p) => !isMovieDeleted(p.id, p.title, p.originalTitle))
+          .forEach((p) => prevById.set(p.id, p));
 
         const map = new Map<string, MovieData>();
         if (preferIncoming) {
@@ -153,6 +164,7 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
           prev.forEach((m) => {
             if (
               !incomingIds.has(m.id) &&
+              !isMovieDeleted(m.id, m.title, m.originalTitle) &&
               hasPlayableContent(m) &&
               m.published !== false &&
               !String(m.posterUrl || '').startsWith('data:image/svg+xml')
@@ -161,12 +173,16 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
             }
           });
         } else {
-          prev.forEach((m) => map.set(m.id, m));
+          prev
+            .filter((m) => !isMovieDeleted(m.id, m.title, m.originalTitle))
+            .forEach((m) => map.set(m.id, m));
           normalized.forEach((m) => {
             map.set(m.id, mergeMovieRecord(map.get(m.id), m, false));
           });
         }
-        const combined = sortMoviesList(Array.from(map.values()));
+        const combined = sortMoviesList(
+          Array.from(map.values()).filter((m) => !isMovieDeleted(m.id, m.title, m.originalTitle))
+        );
         saveLocalMovies(combined);
         return combined;
       });
@@ -267,22 +283,37 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
   const syncInFlightRef = useRef<Promise<void> | null>(null);
   const resubscribeTriggerRef = useRef<() => void>(() => {});
 
-  const applyMovieList = useCallback((rawList: MovieData[], _fromCache: boolean) => {
+  const applyMovieList = useCallback((rawList: MovieData[], fromCache: boolean) => {
     if (!isMountedRef.current) return;
     const publishedOnly = sortMoviesList<MovieData>(
       rawList
-        .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m) && isSeriesComplete(m))
+        .filter(
+          (m: any) =>
+            m &&
+            m.id &&
+            m.published !== false &&
+            hasPlayableContent(m) &&
+            isSeriesComplete(m) &&
+            !isMovieDeleted(m.id, m.title, m.originalTitle)
+        )
         .map((m) => normalizeMoviePosters(m) as MovieData)
     );
 
-    // Merge incoming Firestore updates with existing seed catalog without overwriting valid posters with empty/SVG
     setMovies((currentMovies) => {
+      if (fromCache) {
+        saveLocalMovies(publishedOnly);
+        return publishedOnly;
+      }
       const mergedMap = new Map<string, MovieData>();
-      currentMovies.forEach((m) => mergedMap.set(m.id, m));
+      currentMovies
+        .filter((m) => !isMovieDeleted(m.id, m.title, m.originalTitle))
+        .forEach((m) => mergedMap.set(m.id, m));
       publishedOnly.forEach((m) => {
         mergedMap.set(m.id, mergeMovieRecord(mergedMap.get(m.id), m, true));
       });
-      const combined = sortMoviesList(Array.from(mergedMap.values()));
+      const combined = sortMoviesList(
+        Array.from(mergedMap.values()).filter((m) => !isMovieDeleted(m.id, m.title, m.originalTitle))
+      );
       saveLocalMovies(combined);
       return combined;
     });

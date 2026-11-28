@@ -242,6 +242,55 @@ const IDB_NAME = 'mp_catalog_cache_v1';
 const IDB_STORE = 'catalog';
 const IDB_KEY = 'movies_v4';
 
+const DELETED_MOVIES_KEY = 'movie_portal_deleted_ids_v2';
+
+export function getDeletedMovieIds(): Set<string> {
+  const set = new Set<string>();
+  if (typeof window === 'undefined') return set;
+  try {
+    const raw = localStorage.getItem(DELETED_MOVIES_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        arr.forEach((id) => {
+          if (id) set.add(String(id));
+        });
+      }
+    }
+  } catch {}
+  return set;
+}
+
+export function isMovieDeleted(id?: string | null, title?: string | null, origTitle?: string | null): boolean {
+  const t = (String(title || '') + ' ' + String(origTitle || '')).toLowerCase();
+  // Permanently suppress Mushoku Tensei across all clients, seeds, and caches
+  if (t.includes('mushoku') || t.includes('jobless reincarnation') || t.includes('jobless reincarnat')) {
+    return true;
+  }
+  if (!id) return false;
+  return getDeletedMovieIds().has(String(id));
+}
+
+export function markMovieAsDeleted(id: string, title?: string): void {
+  if (!id) return;
+  if (typeof window !== 'undefined') {
+    try {
+      const set = getDeletedMovieIds();
+      set.add(String(id));
+      localStorage.setItem(DELETED_MOVIES_KEY, JSON.stringify(Array.from(set)));
+    } catch {}
+  }
+
+  // Also notify server backend
+  try {
+    fetch(buildApiUrl('/api/movies/delete'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, title }),
+    }).catch(() => {});
+  } catch {}
+}
+
 function openCatalogDb(): Promise<IDBDatabase | null> {
   if (typeof window === 'undefined' || !('indexedDB' in window)) return Promise.resolve(null);
   return new Promise((resolve) => {
@@ -279,7 +328,14 @@ export async function getCatalogFromIdb(): Promise<MovieData[]> {
               sortMoviesList(
                 val
                   .map((m: any) => normalizeSeriesSeasons(normalizeMoviePosters(m) as MovieData))
-                  .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m))
+                  .filter(
+                    (m: any) =>
+                      m &&
+                      m.id &&
+                      m.published !== false &&
+                      hasPlayableContent(m) &&
+                      !isMovieDeleted(m.id, m.title, m.originalTitle)
+                  )
               )
             );
           } else {
@@ -299,13 +355,14 @@ export async function getCatalogFromIdb(): Promise<MovieData[]> {
 export async function saveCatalogToIdb(movies: MovieData[]): Promise<void> {
   try {
     if (!Array.isArray(movies)) return;
+    const cleaned = movies.filter((m) => !isMovieDeleted(m.id, m.title, m.originalTitle));
     const idb = await openCatalogDb();
     if (!idb) return;
     await new Promise<void>((resolve) => {
       try {
         const tx = idb.transaction(IDB_STORE, 'readwrite');
         const store = tx.objectStore(IDB_STORE);
-        store.put(movies, IDB_KEY);
+        store.put(cleaned, IDB_KEY);
         tx.oncomplete = () => resolve();
         tx.onerror = () => resolve();
       } catch {
@@ -321,7 +378,14 @@ export async function fetchSeedCatalogJson(): Promise<MovieData[]> {
   const bundled = Array.isArray(BUNDLED_SEED_CATALOG)
     ? BUNDLED_SEED_CATALOG
         .map((m: any) => normalizeSeriesSeasons(normalizeMoviePosters(m) as MovieData))
-        .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m))
+        .filter(
+          (m: any) =>
+            m &&
+            m.id &&
+            m.published !== false &&
+            hasPlayableContent(m) &&
+            !isMovieDeleted(m.id, m.title, m.originalTitle)
+        )
     : [];
 
   try {
@@ -349,7 +413,14 @@ export async function fetchSeedCatalogJson(): Promise<MovieData[]> {
         if (Array.isArray(data) && data.length > 0) {
           const parsed = data
             .map((m: any) => normalizeSeriesSeasons(normalizeMoviePosters(m) as MovieData))
-            .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m));
+            .filter(
+              (m: any) =>
+                m &&
+                m.id &&
+                m.published !== false &&
+                hasPlayableContent(m) &&
+                !isMovieDeleted(m.id, m.title, m.originalTitle)
+            );
           if (parsed.length > 0) {
             return parsed;
           }
@@ -372,9 +443,20 @@ export async function fetchMergedMoviesCatalog(): Promise<MovieData[]> {
         } catch {
           snapshot = await getDocs(collection(db, COLLECTION_NAME));
         }
-        return snapshot.docs.map(
-          (d) => normalizeSeriesSeasons(normalizeMoviePosters({ id: d.id, ...d.data() } as MovieData) as MovieData)
-        );
+        return snapshot.docs
+          .map(
+            (d) =>
+              normalizeSeriesSeasons(
+                normalizeMoviePosters({ id: d.id, ...d.data() } as MovieData) as MovieData
+              )
+          )
+          .filter(
+            (m) =>
+              m &&
+              m.id &&
+              hasPlayableContent(m) &&
+              !isMovieDeleted(m.id, m.title, m.originalTitle)
+          );
       } catch {
         return [] as MovieData[];
       }
@@ -383,11 +465,19 @@ export async function fetchMergedMoviesCatalog(): Promise<MovieData[]> {
   ]);
 
   const merged = new Map<string, MovieData>();
-  idbList.filter((m) => hasPlayableContent(m)).forEach((m) => merged.set(m.id, m));
-  seedList.filter((m) => hasPlayableContent(m)).forEach((m) => merged.set(m.id, m));
-  firestoreList.filter((m) => hasPlayableContent(m)).forEach((m) => merged.set(m.id, m));
+  idbList
+    .filter((m) => hasPlayableContent(m) && !isMovieDeleted(m.id, m.title, m.originalTitle))
+    .forEach((m) => merged.set(m.id, m));
+  seedList
+    .filter((m) => hasPlayableContent(m) && !isMovieDeleted(m.id, m.title, m.originalTitle))
+    .forEach((m) => merged.set(m.id, m));
+  firestoreList
+    .filter((m) => hasPlayableContent(m) && !isMovieDeleted(m.id, m.title, m.originalTitle))
+    .forEach((m) => merged.set(m.id, m));
 
-  const sorted = sortMoviesList<MovieData>(Array.from(merged.values()));
+  const sorted = sortMoviesList<MovieData>(
+    Array.from(merged.values()).filter((m) => !isMovieDeleted(m.id, m.title, m.originalTitle))
+  );
   if (sorted.length > 0) {
     saveLocalMovies(sorted);
     return sorted;
@@ -404,8 +494,18 @@ export async function fetchMoviesFromFirestore(): Promise<MovieData[]> {
       snapshot = await getDocs(collection(db, COLLECTION_NAME));
     }
     const rawMovies: MovieData[] = snapshot.docs
-      .map((d) => normalizeSeriesSeasons(normalizeMoviePosters({ id: d.id, ...d.data() } as MovieData) as MovieData))
-      .filter((m) => m.published !== false && hasPlayableContent(m));
+      .map(
+        (d) =>
+          normalizeSeriesSeasons(
+            normalizeMoviePosters({ id: d.id, ...d.data() } as MovieData) as MovieData
+          )
+      )
+      .filter(
+        (m) =>
+          m.published !== false &&
+          hasPlayableContent(m) &&
+          !isMovieDeleted(m.id, m.title, m.originalTitle)
+      );
     const movies = sortMoviesList<MovieData>(rawMovies);
     saveLocalMovies(movies);
     return movies;
@@ -464,24 +564,45 @@ export async function saveMovieToFirestore(movie: MovieData): Promise<void> {
   }
 }
 
-export async function deleteMovieFromFirestore(id: string): Promise<void> {
+export async function deleteMovieFromFirestore(id: string, title?: string): Promise<void> {
+  markMovieAsDeleted(id, title);
+  deleteMovieLocally(id, title);
+  notifyMoviesUpdated();
+
   try {
-    if (isFirestoreWriteAllowed()) {
-      const res = await guardedFirestoreWrite(() => deleteDoc(doc(db, COLLECTION_NAME, id)));
-      if (res.ok) {
-        touchCatalogSyncMarker(id, 'delete').catch(() => {});
+    // Direct attempt without quota blockage first
+    await deleteDoc(doc(db, COLLECTION_NAME, id)).catch(async () => {
+      if (isFirestoreWriteAllowed()) {
+        const res = await guardedFirestoreWrite(() => deleteDoc(doc(db, COLLECTION_NAME, id)));
+        if (res.ok) {
+          touchCatalogSyncMarker(id, 'delete').catch(() => {});
+        }
       }
-    }
-    deleteMovieLocally(id);
-    notifyMoviesUpdated();
+    });
+    touchCatalogSyncMarker(id, 'delete').catch(() => {});
   } catch (e) {
     checkAndHandleQuotaError(e);
-    deleteMovieLocally(id);
-    notifyMoviesUpdated();
   }
 }
 
 const STORAGE_KEY = 'movie_portal_movies_v5';
+
+// Immediate startup purge of deleted items or suppressed series (like Mushoku Tensei)
+if (typeof window !== 'undefined') {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const cleaned = parsed.filter((m: any) => m && !isMovieDeleted(m.id, m.title, m.originalTitle));
+        if (cleaned.length !== parsed.length) {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
+          void saveCatalogToIdb(cleaned);
+        }
+      }
+    }
+  } catch {}
+}
 
 export const DEFAULT_INITIAL_MOVIES: MovieData[] = [];
 
@@ -495,7 +616,14 @@ export function getLocalMovies(): MovieData[] {
     const seedItems = Array.isArray(BUNDLED_SEED_CATALOG)
       ? BUNDLED_SEED_CATALOG
           .map((m: any) => normalizeSeriesSeasons(normalizeMoviePosters(m) as MovieData))
-          .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m))
+          .filter(
+            (m: any) =>
+              m &&
+              m.id &&
+              m.published !== false &&
+              hasPlayableContent(m) &&
+              !isMovieDeleted(m.id, m.title, m.originalTitle)
+          )
       : [];
 
     if (typeof window === 'undefined') return seedItems;
@@ -505,17 +633,29 @@ export function getLocalMovies(): MovieData[] {
     if (raw !== null) {
       try {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length >= 100) {
+        if (Array.isArray(parsed) && parsed.length >= 10) {
           cached = parsed
             .map((m: any) => normalizeSeriesSeasons(normalizeMoviePosters(m) as MovieData))
-            .filter((m: any) => m && m.id && m.published !== false && hasPlayableContent(m));
+            .filter(
+              (m: any) =>
+                m &&
+                m.id &&
+                m.published !== false &&
+                hasPlayableContent(m) &&
+                !isMovieDeleted(m.id, m.title, m.originalTitle)
+            );
         }
       } catch {}
     }
 
     const map = new Map<string, MovieData>();
-    seedItems.forEach((m) => map.set(m.id, m));
+    seedItems.forEach((m) => {
+      if (!isMovieDeleted(m.id, m.title, m.originalTitle)) {
+        map.set(m.id, m);
+      }
+    });
     cached.forEach((m) => {
+      if (isMovieDeleted(m.id, m.title, m.originalTitle)) return;
       const existing = map.get(m.id);
       if (!existing) {
         map.set(m.id, m);
@@ -524,14 +664,18 @@ export function getLocalMovies(): MovieData[] {
       }
     });
 
-    const combined = sortMoviesList(Array.from(map.values()));
+    const combined = sortMoviesList(
+      Array.from(map.values()).filter((m) => !isMovieDeleted(m.id, m.title, m.originalTitle))
+    );
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(combined));
     } catch {}
     return combined.length > 0 ? combined : seedItems;
   } catch {
     return Array.isArray(BUNDLED_SEED_CATALOG)
-      ? (BUNDLED_SEED_CATALOG as MovieData[]).filter((m) => hasPlayableContent(m))
+      ? (BUNDLED_SEED_CATALOG as MovieData[]).filter(
+          (m) => hasPlayableContent(m) && !isMovieDeleted(m.id, m.title, m.originalTitle)
+        )
       : [];
   }
 }
@@ -540,22 +684,23 @@ export function saveLocalMovies(movies: MovieData[]): void {
   try {
     if (typeof window === 'undefined') return;
     if (!Array.isArray(movies)) return;
-    void saveCatalogToIdb(movies);
+    const cleanList = movies.filter((m) => !isMovieDeleted(m.id, m.title, m.originalTitle));
+    void saveCatalogToIdb(cleanList);
 
     try {
-      const json = JSON.stringify(movies);
+      const json = JSON.stringify(cleanList);
       if (json.length <= 2_000_000) {
         localStorage.setItem(STORAGE_KEY, json);
         return;
       }
-      const compacted = movies.slice(0, 250).map((m) => ({
+      const compacted = cleanList.slice(0, 250).map((m) => ({
         ...m,
         description: m.description ? String(m.description).slice(0, 140) : '',
       }));
       localStorage.setItem(STORAGE_KEY, JSON.stringify(compacted));
     } catch {
       try {
-        const subset = movies.slice(0, 120).map((m) => ({
+        const subset = cleanList.slice(0, 120).map((m) => ({
           id: m.id,
           title: m.title,
           posterUrl: m.posterUrl,
@@ -594,9 +739,10 @@ export function saveMovieLocally(movie: MovieData): MovieData[] {
   return sorted;
 }
 
-export function deleteMovieLocally(id: string): MovieData[] {
+export function deleteMovieLocally(id: string, title?: string): MovieData[] {
+  markMovieAsDeleted(id, title);
   const current = getLocalMovies();
-  const updated = current.filter((m) => m.id !== id);
+  const updated = current.filter((m) => m.id !== id && !isMovieDeleted(m.id, m.title, m.originalTitle));
   saveLocalMovies(updated);
   notifyMoviesUpdated();
   return updated;

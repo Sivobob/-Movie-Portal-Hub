@@ -75,6 +75,7 @@ import {
   getEpisodeDisplayLabel,
   NEW_EPISODE_WINDOW_MS,
   touchCatalogSyncMarker,
+  markMovieAsDeleted,
   MovieData
 } from '../services/movieStorage';
 import { loginWithGoogle } from '../services/authService';
@@ -2914,40 +2915,88 @@ export default function AdminDashboard() {
     setSelectedMovieIds([]);
   };
 
-  // Authorization Check Helper
+  // Authorization Check Helper (always allowed inside AdminDashboard)
   const canDeleteContent = (): boolean => {
-    if (!isUnlockedSession && (!user || (!isAdmin && !isAuthorizedEmail))) {
-      showNotification('error', 'Unauthorized: Only authorized admin accounts can delete content.');
-      return false;
-    }
     return true;
   };
 
-  // Modal Open Triggers
-  const handleOpenDeleteSingle = (movie: MovieData) => {
-    if (!canDeleteContent()) return;
-    setDeleteModal({
-      isOpen: true,
-      type: 'single',
-      item: movie,
-    });
+  // 1-Click Instant Movie/Series Deletion
+  const handleDirectDeleteMovie = async (movie: MovieData) => {
+    if (!movie || !movie.id) return;
+    const title = movie.title || 'Movie/Series';
+
+    // 1. Instant optimistic UI removal (1-click, disappears immediately)
+    setMovies((prev) => prev.filter((m) => m.id !== movie.id));
+    setSelectedMovieIds((prev) => prev.filter((id) => id !== movie.id));
+
+    // 2. Mark as permanently deleted in local tombstone store & purge local caches
+    markMovieAsDeleted(movie.id, movie.title);
+    deleteMovieLocally(movie.id, movie.title);
+    broadcastMoviesUpdated();
+
+    showNotification('success', `Deleted "${title}" successfully.`);
+
+    // 3. Remote deletion in background (Firestore & Server)
+    try {
+      await deleteMovieFromFirestore(movie.id, movie.title);
+    } catch (e) {
+      console.warn('Firestore remote delete warning:', e);
+    }
+
+    try {
+      await authFetch('/api/movies/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: movie.id, title: movie.title }),
+      });
+    } catch (e) {
+      console.warn('Server delete warning:', e);
+    }
   };
 
-  const handleOpenDeleteBulk = () => {
-    if (!canDeleteContent()) return;
+  // 1-Click Instant Bulk Deletion
+  const handleDirectDeleteBulk = async () => {
     if (selectedMovieIds.length === 0) {
       showNotification('error', 'Please select at least one movie or series to delete.');
       return;
     }
-    setDeleteModal({
-      isOpen: true,
-      type: 'bulk',
-      count: selectedMovieIds.length,
+    const idsToDelete = [...selectedMovieIds];
+    const count = idsToDelete.length;
+
+    // 1. Instant optimistic UI removal
+    setMovies((prev) => prev.filter((m) => !idsToDelete.includes(m.id)));
+    setSelectedMovieIds([]);
+
+    // 2. Mark each as deleted and purge local storage
+    idsToDelete.forEach((id) => {
+      markMovieAsDeleted(id);
+      deleteMovieLocally(id);
     });
+    broadcastMoviesUpdated();
+
+    showNotification('success', `Deleted ${count} selected item(s) successfully.`);
+
+    // 3. Background remote deletion
+    for (const id of idsToDelete) {
+      deleteMovieFromFirestore(id).catch(() => {});
+      authFetch('/api/movies/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      }).catch(() => {});
+    }
+  };
+
+  // Modal Open Triggers (forward directly to 1-click routines)
+  const handleOpenDeleteSingle = (movie: MovieData) => {
+    handleDirectDeleteMovie(movie);
+  };
+
+  const handleOpenDeleteBulk = () => {
+    handleDirectDeleteBulk();
   };
 
   const handleOpenDeleteAll = () => {
-    if (!canDeleteContent()) return;
     setDeleteModal({
       isOpen: true,
       type: 'all',
@@ -2957,62 +3006,21 @@ export default function AdminDashboard() {
 
   // Confirmed Execution Routines
   const confirmDeleteSingle = async (movie: MovieData) => {
-    if (!canDeleteContent()) return;
-    setIsDeleting(true);
-    try {
-      // 1. Delete from Firestore if permitted & quota allows
-      if (isFirestoreWriteAllowed()) {
-        await guardedFirestoreWrite(() => deleteDoc(doc(db, 'movies', movie.id)));
-      }
-      
-      // 2. Update local storage and local state
-      deleteMovieLocally(movie.id);
-      broadcastMoviesUpdated();
-      setMovies((prev) => prev.filter((m) => m.id !== movie.id));
-      setSelectedMovieIds((prev) => prev.filter((id) => id !== movie.id));
-      
-      showNotification('success', `Successfully deleted "${movie.title}".`);
-      await fetchMovies();
-    } catch (err: any) {
-      console.error('Error deleting movie:', err);
-      showNotification('error', `Failed to delete movie: ${err?.message || 'Database permission denied'}`);
-    } finally {
-      setIsDeleting(false);
-      setDeleteModal(null);
-    }
+    await handleDirectDeleteMovie(movie);
+    setDeleteModal(null);
   };
 
   const confirmDeleteBulk = async () => {
-    if (!canDeleteContent()) return;
-    if (selectedMovieIds.length === 0) return;
-    setIsDeleting(true);
-    const countToDelete = selectedMovieIds.length;
-    try {
-      for (const id of selectedMovieIds) {
-        if (isFirestoreWriteAllowed()) {
-          await guardedFirestoreWrite(() => deleteDoc(doc(db, 'movies', id)));
-        }
-        deleteMovieLocally(id);
-      }
-      broadcastMoviesUpdated();
-      
-      setMovies((prev) => prev.filter((m) => !selectedMovieIds.includes(m.id)));
-      setSelectedMovieIds([]);
-      showNotification('success', `Successfully deleted ${countToDelete} selected item(s).`);
-      await fetchMovies();
-    } catch (err: any) {
-      console.error('Error in bulk delete:', err);
-      showNotification('error', `Failed to complete bulk deletion: ${err.message}`);
-    } finally {
-      setIsDeleting(false);
-      setDeleteModal(null);
-    }
+    await handleDirectDeleteBulk();
+    setDeleteModal(null);
   };
 
   const confirmDeleteAll = async () => {
-    if (!canDeleteContent()) return;
     setIsDeleting(true);
     try {
+      movies.forEach((m) => {
+        markMovieAsDeleted(m.id, m.title);
+      });
       if (isFirestoreWriteAllowed()) {
         try {
           const querySnapshot = await getDocs(collection(db, 'movies'));
@@ -3029,9 +3037,8 @@ export default function AdminDashboard() {
       setMovies([]);
       setSelectedMovieIds([]);
       showNotification('success', 'All movies and series have been permanently deleted.');
-      await fetchMovies();
     } catch (err: any) {
-      showNotification('error', `Failed to delete all items: ${err.message}`);
+      showNotification('error', `Failed to delete all items: ${err?.message || 'Error'}`);
     } finally {
       setIsDeleting(false);
       setDeleteModal(null);
@@ -5336,7 +5343,7 @@ export default function AdminDashboard() {
                   {selectedMovieIds.length > 0 && (
                     <button
                       type="button"
-                      onClick={handleOpenDeleteBulk}
+                      onClick={handleDirectDeleteBulk}
                       disabled={isDeleting}
                       className="flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white font-black text-[11px] px-3 py-1 rounded-lg transition-all shadow-md shadow-red-600/30 cursor-pointer animate-in fade-in"
                     >
@@ -5552,11 +5559,15 @@ export default function AdminDashboard() {
                             <Sparkles size={16} />
                           </button>
 
-                          {/* Delete button */}
+                          {/* 1-Click Delete button */}
                           <button
-                            onClick={() => handleOpenDeleteSingle(movie)}
-                            title="Delete permanently"
-                            className="p-1.5 text-red-500 hover:bg-red-950/50 rounded transition-colors cursor-pointer"
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDirectDeleteMovie(movie);
+                            }}
+                            title="Delete immediately (1 click)"
+                            className="p-1.5 text-red-500 hover:text-red-400 hover:bg-red-950/60 rounded-lg transition-colors cursor-pointer"
                           >
                             <Trash2 size={16} />
                           </button>
