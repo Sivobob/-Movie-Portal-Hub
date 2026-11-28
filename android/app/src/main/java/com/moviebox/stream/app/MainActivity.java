@@ -697,7 +697,7 @@ public class MainActivity extends BridgeActivity {
                 return pInfo.versionName.trim();
             }
         } catch (Exception ignored) {}
-        return "3.5.327";
+        return "3.5.328";
     }
 
     private int compareVersionStrings(String verA, String verB) {
@@ -887,7 +887,7 @@ public class MainActivity extends BridgeActivity {
                     : (long) pInfo.versionCode;
             }
         } catch (Exception ignored) {}
-        return 35326L;
+        return 35328L;
     }
 
     private long parseFirestoreLong(JSONObject fields, String key, long fallbackVal) {
@@ -1047,7 +1047,7 @@ public class MainActivity extends BridgeActivity {
                 final JSONObject payload = new JSONObject();
                 payload.put("latestVersion", bestLatestVer);
                 payload.put("minimumRequiredVersion", bestMinVer);
-                payload.put("latestVersionCode", bestLatestCode > 0 ? bestLatestCode : 35327L);
+                payload.put("latestVersionCode", bestLatestCode > 0 ? bestLatestCode : 35328L);
                 payload.put("minimumRequiredVersionCode", bestMinCode);
                 payload.put("isMandatory", mandatoryNeeded);
                 payload.put("apkDownloadUrl", bestApkUrl);
