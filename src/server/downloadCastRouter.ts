@@ -16,7 +16,7 @@ const downloadCastRouter = Router();
 // In-memory cache for latest GitHub release APK
 let cachedApkInfo = {
   url: 'https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk',
-  version: '3.5.316',
+  version: '3.5.326',
   fileName: 'Movie-Portal.apk',
   lastChecked: 0,
 };
@@ -60,7 +60,7 @@ async function fetchLatestGitHubApk(): Promise<{ url: string; version: string; f
         }
 
         if (preferred && preferred.browser_download_url) {
-          const rawTag = (data.tag_name || '3.5.316').replace(/^v/, '');
+          const rawTag = (data.tag_name || '3.5.326').replace(/^v/, '');
           cachedApkInfo = {
             url: preferred.browser_download_url,
             version: rawTag,
@@ -77,6 +77,43 @@ async function fetchLatestGitHubApk(): Promise<{ url: string; version: string; f
   } catch (err: any) {
     console.warn('[GitHub Releases] Could not fetch latest release:', err?.message || err);
   }
+
+  // Fallback 1: raw GitHub public/version.json (not subject to GitHub REST 60 req/hr limit)
+  try {
+    const rawRes = await fetch(
+      `https://raw.githubusercontent.com/Sivobob/-Movie-Portal-Hub/main/public/version.json?t=${now}`,
+      { cache: 'no-store' }
+    );
+    if (rawRes.ok) {
+      const vj: any = await rawRes.json();
+      if (vj?.latestVersion) {
+        cachedApkInfo = {
+          url: String(vj.apkDownloadUrl || vj.apkUrl || cachedApkInfo.url),
+          version: String(vj.latestVersion).replace(/^v/i, ''),
+          fileName: `Movie-Portal-v${String(vj.latestVersion).replace(/^v/i, '')}.apk`,
+          lastChecked: now,
+        };
+        return cachedApkInfo;
+      }
+    }
+  } catch {}
+
+  // Fallback 2: local public/version.json
+  try {
+    const localVerPath = path.resolve(process.cwd(), 'public/version.json');
+    if (fs.existsSync(localVerPath)) {
+      const vj = JSON.parse(fs.readFileSync(localVerPath, 'utf8'));
+      if (vj?.latestVersion) {
+        cachedApkInfo = {
+          url: String(vj.apkDownloadUrl || vj.apkUrl || cachedApkInfo.url),
+          version: String(vj.latestVersion).replace(/^v/i, ''),
+          fileName: `Movie-Portal-v${String(vj.latestVersion).replace(/^v/i, '')}.apk`,
+          lastChecked: now,
+        };
+        return cachedApkInfo;
+      }
+    }
+  } catch {}
 
   cachedApkInfo.lastChecked = now;
   return cachedApkInfo;
@@ -140,7 +177,7 @@ async function updateServerInstallStats(opts: {
           fields: {
             deviceId: { stringValue: opts.deviceId },
             platform: { stringValue: opts.platform || 'android' },
-            versionName: { stringValue: opts.versionName || '3.5.316' },
+            versionName: { stringValue: opts.versionName || '3.5.326' },
             updatedAt: { integerValue: String(Date.now()) },
             lastActiveAt: { timestampValue: new Date().toISOString() },
           },

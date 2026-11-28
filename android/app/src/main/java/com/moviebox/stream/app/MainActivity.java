@@ -1,6 +1,7 @@
 package com.moviebox.stream.app;
 
 import android.app.ActivityManager;
+import android.app.AlertDialog;
 import android.app.DownloadManager;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -154,8 +155,18 @@ public class MainActivity extends BridgeActivity {
         "https://firestore.googleapis.com/v1/projects/gen-lang-client-0267042672/databases/ai-studio-movieportalhub-664a3e40-85f3-4758-945e-fd031bdc459f/documents/admins/backend";
     private static final String FIRESTORE_APP_CONFIG_BACKEND_DOC_URL =
         "https://firestore.googleapis.com/v1/projects/gen-lang-client-0267042672/databases/ai-studio-movieportalhub-664a3e40-85f3-4758-945e-fd031bdc459f/documents/app_config/backend";
+    private static final String FIRESTORE_ANDROID_UPDATE_DOC_URL =
+        "https://firestore.googleapis.com/v1/projects/gen-lang-client-0267042672/databases/ai-studio-movieportalhub-664a3e40-85f3-4758-945e-fd031bdc459f/documents/admins/android_update";
     private static final String GITHUB_VERSION_JSON_URL =
         "https://raw.githubusercontent.com/Sivobob/-Movie-Portal-Hub/main/public/version.json";
+    private static final String OFFICIAL_APK_DOWNLOAD_URL =
+        "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk";
+    private volatile boolean webUpdateModalVisible = false;
+    private volatile long lastNativeUpdateCheckMs = 0L;
+    private volatile boolean nativeUpdateCheckInFlight = false;
+    private volatile AlertDialog nativeUpdateDialog = null;
+    private volatile String cachedNativeUpdatePayloadJson = "";
+    private volatile String lastPromptedNativeVersion = "";
     private static final String[] LIVE_WEB_CANDIDATES = new String[] {
         "https://ais-pre-6ejzhiqpwvhbnrmdodefzr-997472249123.asia-east1.run.app",
         "https://ais-pre-t4rahxvo4ainugtipwkod7-832989141722.asia-southeast1.run.app",
@@ -339,6 +350,7 @@ public class MainActivity extends BridgeActivity {
         ReleaseNotificationHelper.scheduleBackgroundWorker(this);
         notificationExecutor.execute(() -> ReleaseNotificationHelper.syncAndNotifyLatestReleases(getApplicationContext()));
         syncLiveWebAppIfAvailable(true);
+        checkNativeAppUpdateAsync(true);
     }
 
     @Override
@@ -438,6 +450,7 @@ public class MainActivity extends BridgeActivity {
             configureWebView();
         }
         syncLiveWebAppIfAvailable(false);
+        checkNativeAppUpdateAsync(false);
         runOnUiThread(() -> {
             try {
                 if (getBridge() != null && getBridge().getWebView() != null) {
@@ -541,6 +554,9 @@ public class MainActivity extends BridgeActivity {
         if (localStreamServer != null) {
             localStreamServer.stopServer();
             localStreamServer = null;
+        }
+        if (nativeUpdateDialog != null && nativeUpdateDialog.isShowing()) {
+            try { nativeUpdateDialog.dismiss(); } catch (Exception ignored) {}
         }
         try {
             liveSyncExecutor.shutdownNow();
@@ -681,7 +697,7 @@ public class MainActivity extends BridgeActivity {
                 return pInfo.versionName.trim();
             }
         } catch (Exception ignored) {}
-        return "3.5.316";
+        return "3.5.326";
     }
 
     private int compareVersionStrings(String verA, String verB) {
@@ -714,7 +730,7 @@ public class MainActivity extends BridgeActivity {
             conn.setReadTimeout(timeoutMs);
             conn.setRequestProperty("Cache-Control", "no-store, no-cache");
             conn.setRequestProperty("Pragma", "no-cache");
-            conn.setRequestProperty("User-Agent", "MovieHub-Android-LiveSync/3.5.316");
+            conn.setRequestProperty("User-Agent", "MovieHub-Android-LiveSync/3.5.326");
             int code = conn.getResponseCode();
             if (code < 200 || code >= 300) return null;
             try (InputStream is = conn.getInputStream();
@@ -860,6 +876,260 @@ public class MainActivity extends BridgeActivity {
                 liveSyncInFlight = false;
             }
         });
+    }
+
+    private long getInstalledAppVersionCodeSafe() {
+        try {
+            PackageInfo pInfo = getPackageManager().getPackageInfo(getPackageName(), 0);
+            if (pInfo != null) {
+                return Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                    ? pInfo.getLongVersionCode()
+                    : (long) pInfo.versionCode;
+            }
+        } catch (Exception ignored) {}
+        return 35326L;
+    }
+
+    private long parseFirestoreLong(JSONObject fields, String key, long fallbackVal) {
+        if (fields == null) return fallbackVal;
+        JSONObject obj = fields.optJSONObject(key);
+        if (obj == null) return fallbackVal;
+        try {
+            if (obj.has("integerValue")) {
+                return Long.parseLong(obj.optString("integerValue", String.valueOf(fallbackVal)));
+            }
+            if (obj.has("doubleValue")) {
+                return Math.round(obj.optDouble("doubleValue", (double) fallbackVal));
+            }
+            if (obj.has("stringValue")) {
+                return Long.parseLong(obj.optString("stringValue", String.valueOf(fallbackVal)).trim());
+            }
+        } catch (Exception ignored) {}
+        return fallbackVal;
+    }
+
+    private void checkNativeAppUpdateAsync(final boolean force) {
+        if (nativeUpdateCheckInFlight) return;
+        long now = System.currentTimeMillis();
+        if (!force && lastNativeUpdateCheckMs > 0 && (now - lastNativeUpdateCheckMs) < 45000L) {
+            return;
+        }
+        lastNativeUpdateCheckMs = now;
+        nativeUpdateCheckInFlight = true;
+
+        liveSyncExecutor.execute(() -> {
+            try {
+                final String installedVer = getInstalledAppVersionNameSafe();
+                final long installedCode = getInstalledAppVersionCodeSafe();
+
+                String fsLatestVer = "";
+                String fsMinVer = "";
+                long fsLatestCode = 0L;
+                long fsMinCode = 0L;
+                boolean fsHasMandatory = false;
+                boolean fsIsMandatory = false;
+                String fsApkUrl = "";
+                String fsMsg = "";
+                boolean fsOk = false;
+
+                try {
+                    String fsRaw = fetchLiveSyncText(FIRESTORE_ANDROID_UPDATE_DOC_URL + "?t=" + System.currentTimeMillis(), 4500);
+                    if (fsRaw != null && fsRaw.contains("fields")) {
+                        JSONObject doc = new JSONObject(fsRaw);
+                        JSONObject f = doc.optJSONObject("fields");
+                        if (f != null) {
+                            fsOk = true;
+                            if (f.optJSONObject("latestVersion") != null) {
+                                fsLatestVer = f.optJSONObject("latestVersion").optString("stringValue", "").trim().replaceFirst("^[vV]", "");
+                            }
+                            if (f.optJSONObject("minimumRequiredVersion") != null) {
+                                fsMinVer = f.optJSONObject("minimumRequiredVersion").optString("stringValue", "").trim().replaceFirst("^[vV]", "");
+                            }
+                            fsLatestCode = parseFirestoreLong(f, "latestVersionCode", 0L);
+                            fsMinCode = parseFirestoreLong(f, "minimumRequiredVersionCode", 0L);
+                            if (f.optJSONObject("isMandatory") != null && f.optJSONObject("isMandatory").has("booleanValue")) {
+                                fsHasMandatory = true;
+                                fsIsMandatory = f.optJSONObject("isMandatory").optBoolean("booleanValue", false);
+                            }
+                            if (f.optJSONObject("apkDownloadUrl") != null) {
+                                fsApkUrl = f.optJSONObject("apkDownloadUrl").optString("stringValue", "").trim();
+                            }
+                            if (fsApkUrl.isEmpty() && f.optJSONObject("apkUrl") != null) {
+                                fsApkUrl = f.optJSONObject("apkUrl").optString("stringValue", "").trim();
+                            }
+                            if (f.optJSONObject("updateMessage") != null) {
+                                fsMsg = f.optJSONObject("updateMessage").optString("stringValue", "").trim();
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {}
+
+                // Respect explicit 1.0.0 kill switch in Firestore
+                if (fsOk && "1.0.0".equals(fsMinVer) && fsMinCode <= 1L && (fsLatestVer.isEmpty() || "1.0.0".equals(fsLatestVer))) {
+                    return;
+                }
+
+                String ghLatestVer = "";
+                String ghMinVer = "";
+                long ghLatestCode = 0L;
+                long ghMinCode = 0L;
+                boolean ghMandatory = false;
+                String ghApkUrl = "";
+                String ghMsg = "";
+                boolean ghOk = false;
+
+                try {
+                    String ghRaw = fetchLiveSyncText(GITHUB_VERSION_JSON_URL + "?t=" + System.currentTimeMillis(), 4500);
+                    if (ghRaw != null && ghRaw.trim().startsWith("{")) {
+                        JSONObject gh = new JSONObject(ghRaw);
+                        ghLatestVer = gh.optString("latestVersion", gh.optString("version", "")).trim().replaceFirst("^[vV]", "");
+                        if (!ghLatestVer.isEmpty()) {
+                            ghOk = true;
+                            ghMinVer = gh.optString("minimumRequiredVersion", "").trim().replaceFirst("^[vV]", "");
+                            ghLatestCode = gh.optLong("latestVersionCode", gh.optLong("versionCode", 0L));
+                            ghMinCode = gh.optLong("minimumRequiredVersionCode", 0L);
+                            ghMandatory = gh.optBoolean("isMandatory", false);
+                            ghApkUrl = gh.optString("apkDownloadUrl", "").trim();
+                            ghMsg = gh.optString("updateMessage", gh.optString("releaseNotes", "")).trim();
+                        }
+                    }
+                } catch (Exception ignored) {}
+
+                if (!fsOk && !ghOk) return;
+
+                String bestLatestVer = fsLatestVer;
+                String bestMinVer = fsMinVer;
+                long bestLatestCode = fsLatestCode;
+                long bestMinCode = fsMinCode;
+                boolean bestMandatory = fsHasMandatory ? fsIsMandatory : false;
+                String bestApkUrl = fsApkUrl;
+                String bestMsg = fsMsg;
+
+                if (ghOk) {
+                    int cmp = !fsOk ? 1 : compareVersionStrings(ghLatestVer, bestLatestVer);
+                    if (cmp > 0 || (cmp == 0 && ghLatestCode > bestLatestCode)) {
+                        bestLatestVer = ghLatestVer;
+                        bestLatestCode = ghLatestCode > 0 ? ghLatestCode : bestLatestCode;
+                        if (ghMandatory || !fsHasMandatory) bestMandatory = ghMandatory;
+                        if (!ghMinVer.isEmpty()) bestMinVer = ghMinVer;
+                        if (ghMinCode > 0) bestMinCode = ghMinCode;
+                        if (!ghApkUrl.isEmpty()) bestApkUrl = ghApkUrl;
+                        if (!ghMsg.isEmpty()) bestMsg = ghMsg;
+                    } else if (cmp == 0) {
+                        if (ghMandatory) bestMandatory = true;
+                        if (bestApkUrl.isEmpty()) bestApkUrl = ghApkUrl;
+                        if (bestMsg.isEmpty()) bestMsg = ghMsg;
+                    }
+                }
+
+                if (bestLatestVer.isEmpty()) return;
+                if (bestApkUrl.isEmpty()) bestApkUrl = OFFICIAL_APK_DOWNLOAD_URL;
+                if (bestMsg.isEmpty()) {
+                    bestMsg = "A new Movie Hub update (v" + bestLatestVer + ") is available with smoother playback and live updates.";
+                }
+                if (bestMinVer.isEmpty()) {
+                    bestMinVer = bestMandatory ? bestLatestVer : "1.0.0";
+                }
+                if (bestMinCode <= 0L) {
+                    bestMinCode = bestMandatory ? Math.max(1L, bestLatestCode) : 1L;
+                }
+
+                boolean newerByName = compareVersionStrings(installedVer, bestLatestVer) < 0;
+                boolean newerByCode = bestLatestCode > 0L && installedCode > 0L && installedCode < bestLatestCode;
+                if (!newerByName && !newerByCode) {
+                    return;
+                }
+
+                boolean mandatoryNeeded = bestMandatory
+                    || (!"1.0.0".equals(bestMinVer) && compareVersionStrings(installedVer, bestMinVer) < 0)
+                    || (bestMinCode > 1L && installedCode > 0L && installedCode < bestMinCode);
+
+                final JSONObject payload = new JSONObject();
+                payload.put("latestVersion", bestLatestVer);
+                payload.put("minimumRequiredVersion", bestMinVer);
+                payload.put("latestVersionCode", bestLatestCode > 0 ? bestLatestCode : 35326L);
+                payload.put("minimumRequiredVersionCode", bestMinCode);
+                payload.put("isMandatory", mandatoryNeeded);
+                payload.put("apkDownloadUrl", bestApkUrl);
+                payload.put("updateMessage", bestMsg);
+
+                final String payloadStr = payload.toString();
+                cachedNativeUpdatePayloadJson = payloadStr;
+
+                final String finalLatestVer = bestLatestVer;
+                final String finalApkUrl = bestApkUrl;
+                final String finalMsg = bestMsg;
+                final boolean finalMandatory = mandatoryNeeded;
+
+                runOnUiThread(() -> {
+                    try {
+                        if (finalMandatory) {
+                            isMandatoryUpdateActive = true;
+                            if (mandatoryUpdateBackCallback != null) {
+                                mandatoryUpdateBackCallback.setEnabled(true);
+                            }
+                        }
+                        if (getBridge() != null && getBridge().getWebView() != null) {
+                            String js = "window.dispatchEvent(new CustomEvent('movie_portal_native_update_config',{detail:" + payloadStr + "}));";
+                            getBridge().getWebView().evaluateJavascript(js, null);
+                            mainHandler.postDelayed(() -> {
+                                try {
+                                    if (!webUpdateModalVisible && getBridge() != null && getBridge().getWebView() != null) {
+                                        getBridge().getWebView().evaluateJavascript(js, null);
+                                    }
+                                } catch (Exception ignored) {}
+                            }, 1800);
+                        }
+                        mainHandler.postDelayed(() -> {
+                            showNativeFallbackUpdateDialogIfNeeded(finalLatestVer, finalMsg, finalApkUrl, finalMandatory);
+                        }, 4500);
+                    } catch (Exception ignored) {}
+                });
+            } catch (Exception ignored) {
+            } finally {
+                nativeUpdateCheckInFlight = false;
+            }
+        });
+    }
+
+    private void showNativeFallbackUpdateDialogIfNeeded(
+        final String latestVer,
+        final String message,
+        final String apkUrl,
+        final boolean mandatory
+    ) {
+        if (webUpdateModalVisible || isFinishing() || isDestroyed() || isPlaybackActive || exoActive) {
+            return;
+        }
+        if (nativeUpdateDialog != null && nativeUpdateDialog.isShowing()) {
+            return;
+        }
+        if (!mandatory && latestVer.equals(lastPromptedNativeVersion)) {
+            return;
+        }
+        try {
+            lastPromptedNativeVersion = latestVer;
+            AlertDialog.Builder builder = new AlertDialog.Builder(this)
+                .setTitle("New Update Available (v" + latestVer + ")")
+                .setMessage(message)
+                .setCancelable(!mandatory)
+                .setPositiveButton("Update App Now", (dialog, which) -> {
+                    startApkDownloadManager(apkUrl);
+                });
+            if (!mandatory) {
+                builder.setNegativeButton("Remind Later", (dialog, which) -> dialog.dismiss());
+            } else {
+                builder.setNeutralButton("Open Download Link", (dialog, which) -> {
+                    try {
+                        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl));
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        startActivity(intent);
+                    } catch (Exception ignored) {}
+                });
+            }
+            nativeUpdateDialog = builder.create();
+            nativeUpdateDialog.show();
+        } catch (Exception ignored) {}
     }
 
     private long getTotalRamMb() {
@@ -1368,7 +1638,7 @@ public class MainActivity extends BridgeActivity {
             .setReadTimeoutMs(90000)
             .setAllowCrossProtocolRedirects(true)
             .setKeepPostFor302Redirects(true)
-            .setUserAgent("MoviePortal/3.5.325 AndroidExoPlayer");
+            .setUserAgent("MoviePortal/3.5.326 AndroidExoPlayer");
 
         DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
             .setBufferDurationsMs(
@@ -2437,7 +2707,7 @@ public class MainActivity extends BridgeActivity {
             conn.setConnectTimeout(30000);
             conn.setReadTimeout(60000);
             conn.setRequestMethod("GET");
-            conn.setRequestProperty("User-Agent", "MoviePortal-AndroidUpdater/3.5.295");
+            conn.setRequestProperty("User-Agent", "MoviePortal-AndroidUpdater/3.5.326");
             conn.setRequestProperty("Accept", "application/vnd.android.package-archive,application/octet-stream,*/*");
             conn.setRequestProperty("Accept-Encoding", "identity");
             conn.setRequestProperty("Cache-Control", "no-cache");
@@ -2841,7 +3111,7 @@ public class MainActivity extends BridgeActivity {
                                     conn.setConnectTimeout(30000);
                                     conn.setReadTimeout(120000);
                                     conn.setRequestMethod("GET");
-                                    conn.setRequestProperty("User-Agent", "MovieHub/3.5.316 AndroidDownloader");
+                                    conn.setRequestProperty("User-Agent", "MovieHub/3.5.326 AndroidDownloader");
                                     conn.setRequestProperty("Accept-Encoding", "identity");
                                     if (sendRange && requestedSliceEnd >= existingOffset) {
                                         conn.setRequestProperty("Range", "bytes=" + existingOffset + "-" + requestedSliceEnd);
@@ -3696,11 +3966,28 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.316");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.326");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.316\",\"versionCode\":35316}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.326\",\"versionCode\":35326}";
+            }
+        }
+
+        @JavascriptInterface
+        public String getCachedNativeUpdateConfig() {
+            return cachedNativeUpdatePayloadJson != null ? cachedNativeUpdatePayloadJson : "";
+        }
+
+        @JavascriptInterface
+        public void notifyWebUpdateModalState(final boolean visible) {
+            webUpdateModalVisible = visible;
+            if (visible) {
+                runOnUiThread(() -> {
+                    if (nativeUpdateDialog != null && nativeUpdateDialog.isShowing()) {
+                        try { nativeUpdateDialog.dismiss(); } catch (Exception ignored) {}
+                    }
+                });
             }
         }
 

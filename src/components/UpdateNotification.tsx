@@ -10,6 +10,7 @@ import {
   isAppUpdateRequired,
   hasNewerApkRelease,
   pickHigherRemoteUpdateConfig,
+  normalizeRemoteUpdateConfig,
   compareVersions,
   OFFICIAL_APK_DIRECT_URL,
   resolveApkDownloadUrl,
@@ -86,6 +87,7 @@ export default function UpdateNotification() {
       (window as any).__MOVIE_PORTAL_MANDATORY_UPDATE__ = needed && isMandatoryUpdate;
       try {
         (window as any).AndroidPlayerBridge?.setMandatoryUpdateRequired?.(needed && isMandatoryUpdate);
+        (window as any).AndroidPlayerBridge?.notifyWebUpdateModalState?.(needed);
       } catch {}
     }
   };
@@ -110,9 +112,20 @@ export default function UpdateNotification() {
         ]);
         if (!mounted) return;
         currentInstalled = inst;
-        if (remote) {
-          currentRemote = remote;
-          setRemoteConfig(remote);
+        let resolvedRemote = remote;
+        try {
+          const bridge = (window as any).AndroidPlayerBridge;
+          if (bridge && typeof bridge.getCachedNativeUpdateConfig === 'function') {
+            const raw = bridge.getCachedNativeUpdateConfig();
+            if (raw && typeof raw === 'string' && raw.trim().startsWith('{')) {
+              const nativeCfg = normalizeRemoteUpdateConfig(JSON.parse(raw));
+              resolvedRemote = pickHigherRemoteUpdateConfig(resolvedRemote, nativeCfg);
+            }
+          }
+        } catch {}
+        if (resolvedRemote) {
+          currentRemote = pickHigherRemoteUpdateConfig(currentRemote, resolvedRemote);
+          setRemoteConfig(currentRemote);
         }
         setInstalled(inst);
         evaluateUpdateState(inst, currentRemote);
@@ -121,9 +134,9 @@ export default function UpdateNotification() {
 
     refreshCheck();
 
-    const unsub = subscribeRemoteUpdateConfig((cfg) => {
+    const applyRemoteConfig = (rawCfg: RemoteUpdateConfig) => {
       if (!mounted) return;
-      const merged = pickHigherRemoteUpdateConfig(currentRemote, cfg) || cfg;
+      const merged = pickHigherRemoteUpdateConfig(currentRemote, rawCfg) || rawCfg;
       currentRemote = merged;
       setRemoteConfig(merged);
       if (currentInstalled) {
@@ -138,18 +151,40 @@ export default function UpdateNotification() {
           })
           .catch(() => {});
       }
-    });
+    };
+
+    const unsub = subscribeRemoteUpdateConfig(
+      (cfg) => applyRemoteConfig(cfg),
+      () => {
+        if (mounted) refreshCheck();
+      }
+    );
+
+    const handleNativeUpdateEvent = (e: Event) => {
+      try {
+        const detail = (e as CustomEvent)?.detail;
+        if (detail && (detail.latestVersion || detail.latestVersionCode)) {
+          applyRemoteConfig(normalizeRemoteUpdateConfig(detail));
+        }
+      } catch {}
+    };
 
     const handleResumeCheck = () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       refreshCheck();
     };
 
+    const quickRetryTimer = setTimeout(() => {
+      if (mounted && !currentRemote) {
+        refreshCheck();
+      }
+    }, 2000);
+
     const retryTimer = setTimeout(() => {
       if (mounted && !currentRemote) {
         refreshCheck();
       }
-    }, 4500);
+    }, 5500);
 
     const periodicTimer = setInterval(() => {
       if (mounted && (typeof document === 'undefined' || document.visibilityState !== 'hidden')) {
@@ -157,15 +192,20 @@ export default function UpdateNotification() {
       }
     }, 90_000);
 
+    window.addEventListener('movie_portal_native_update_config', handleNativeUpdateEvent);
+    window.addEventListener('movie_portal_resume_sync', handleResumeCheck);
     window.addEventListener('focus', handleResumeCheck);
     window.addEventListener('online', handleResumeCheck);
     document.addEventListener('visibilitychange', handleResumeCheck);
 
     return () => {
       mounted = false;
+      clearTimeout(quickRetryTimer);
       clearTimeout(retryTimer);
       clearInterval(periodicTimer);
       unsub();
+      window.removeEventListener('movie_portal_native_update_config', handleNativeUpdateEvent);
+      window.removeEventListener('movie_portal_resume_sync', handleResumeCheck);
       window.removeEventListener('focus', handleResumeCheck);
       window.removeEventListener('online', handleResumeCheck);
       document.removeEventListener('visibilitychange', handleResumeCheck);

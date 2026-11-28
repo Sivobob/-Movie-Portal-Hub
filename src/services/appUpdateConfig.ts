@@ -14,8 +14,8 @@ import { guardedFirestoreWrite, isFirestoreWriteAllowed } from './firestoreQuota
 export const APP_UPDATE_COLLECTION = 'admins';
 export const APP_UPDATE_DOC_ID = 'android_update';
 
-export const CURRENT_VERSION_NAME = '3.5.325';
-export const CURRENT_VERSION_CODE = 35325;
+export const CURRENT_VERSION_NAME = '3.5.326';
+export const CURRENT_VERSION_CODE = 35326;
 
 export const OFFICIAL_APK_DIRECT_URL =
   'https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk';
@@ -29,8 +29,10 @@ export function resolveApkDownloadUrl(rawUrl?: string | null): string {
 }
 
 export const DEFAULT_UPDATE_MESSAGE =
-  'Movie Hub v3.5.325: Instant real-time Telegram channel uploads in Chrome & APK without restarting the app.';
+  'Movie Hub v3.5.326: Reliable in-app update alerts, smoother Telegram live sync, and improved Movies & Series playback.';
 
+const FIRESTORE_ANDROID_UPDATE_REST_URL =
+  'https://firestore.googleapis.com/v1/projects/gen-lang-client-0267042672/databases/ai-studio-movieportalhub-664a3e40-85f3-4758-945e-fd031bdc459f/documents/admins/android_update';
 const GITHUB_VERSION_JSON_URL =
   'https://raw.githubusercontent.com/Sivobob/-Movie-Portal-Hub/main/public/version.json';
 const GITHUB_RELEASES_LATEST_URL =
@@ -253,7 +255,18 @@ export function pickHigherRemoteUpdateConfig(
   if (cmpMin < 0) return b;
   const aCode = Number(a.latestVersionCode || a.minimumRequiredVersionCode || 0);
   const bCode = Number(b.latestVersionCode || b.minimumRequiredVersionCode || 0);
-  return aCode >= bCode ? a : b;
+  if (aCode !== bCode) {
+    return aCode > bCode ? a : b;
+  }
+  const preferred = b.isMandatory && !a.isMandatory ? b : a;
+  const secondary = preferred === b ? a : b;
+  return {
+    ...secondary,
+    ...preferred,
+    isMandatory: Boolean(a.isMandatory || b.isMandatory),
+    apkDownloadUrl: preferred.apkDownloadUrl || secondary.apkDownloadUrl,
+    updateMessage: preferred.updateMessage || secondary.updateMessage,
+  };
 }
 
 async function fetchJsonWithTimeout(url: string, timeoutMs = 4500): Promise<any> {
@@ -308,6 +321,23 @@ export async function fetchRemoteUpdateConfig(): Promise<RemoteUpdateConfig | nu
     return null;
   })();
 
+  const firestoreRestPromise = (async (): Promise<RemoteUpdateConfig | null> => {
+    const docJson = await fetchJsonWithTimeout(`${FIRESTORE_ANDROID_UPDATE_REST_URL}?t=${Date.now()}`, 4500);
+    const f = docJson?.fields;
+    if (!f) return null;
+    return normalizeRemoteUpdateConfig({
+      latestVersion: f.latestVersion?.stringValue,
+      minimumRequiredVersion: f.minimumRequiredVersion?.stringValue,
+      latestVersionCode: f.latestVersionCode?.integerValue ? Number(f.latestVersionCode.integerValue) : undefined,
+      minimumRequiredVersionCode: f.minimumRequiredVersionCode?.integerValue
+        ? Number(f.minimumRequiredVersionCode.integerValue)
+        : undefined,
+      isMandatory: typeof f.isMandatory?.booleanValue === 'boolean' ? f.isMandatory.booleanValue : undefined,
+      apkDownloadUrl: f.apkDownloadUrl?.stringValue || f.apkUrl?.stringValue,
+      updateMessage: f.updateMessage?.stringValue,
+    });
+  })();
+
   const githubVersionPromise = (async (): Promise<RemoteUpdateConfig | null> => {
     const data = await fetchJsonWithTimeout(`${GITHUB_VERSION_JSON_URL}?t=${Date.now()}`, 4500);
     if (!data || !data.latestVersion) return null;
@@ -349,17 +379,28 @@ export async function fetchRemoteUpdateConfig(): Promise<RemoteUpdateConfig | nu
 
   const settled = await Promise.allSettled([
     firestorePromise,
+    firestoreRestPromise,
     githubVersionPromise,
     githubReleasePromise,
     backendPromise,
   ]);
 
-  let best: RemoteUpdateConfig | null = null;
-  let firestoreCfg: RemoteUpdateConfig | null = null;
-  for (let i = 0; i < settled.length; i++) {
+  const fsSdkCfg = settled[0].status === 'fulfilled' ? settled[0].value : null;
+  const fsRestCfg = settled[1].status === 'fulfilled' ? settled[1].value : null;
+  const firestoreCfg = pickHigherRemoteUpdateConfig(fsSdkCfg, fsRestCfg);
+
+  if (
+    firestoreCfg &&
+    firestoreCfg.minimumRequiredVersion === '1.0.0' &&
+    (!firestoreCfg.latestVersion || firestoreCfg.latestVersion === '1.0.0')
+  ) {
+    return firestoreCfg;
+  }
+
+  let best: RemoteUpdateConfig | null = firestoreCfg;
+  for (let i = 2; i < settled.length; i++) {
     const res = settled[i];
     if (res.status !== 'fulfilled' || !res.value) continue;
-    if (i === 0) firestoreCfg = res.value;
     best = pickHigherRemoteUpdateConfig(best, res.value);
   }
 

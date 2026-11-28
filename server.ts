@@ -57,7 +57,8 @@ for (let i = 0; i < args.length; i++) {
 }
 process.env.INTERNAL_APP_PORT = String(PORT);
 
-app.use(express.json());
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
 // Request logging middleware
 app.use((req, _res, next) => {
@@ -99,7 +100,7 @@ app.use('/api', (req, res, next) => {
 app.get('/api/health', (req, res) => {
   const creds = getTelegramCredentials();
   const telegramConfigured = Boolean(creds.apiId && creds.apiHash && (creds.botToken || creds.sessionStr));
-  let appVersion = '3.5.325';
+  let appVersion = '3.5.326';
   let otaEnabled = true;
   let liveAppUrl = '';
   try {
@@ -404,12 +405,16 @@ app.use('/api', (req, res) => {
 });
 
 // Global Error Handler for API (Guaranteed JSON)
-app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error('[Global Error Handler]', err);
+  if (res.headersSent) {
+    return next(err);
+  }
+  const status = Number(err?.status || err?.statusCode || 500);
   res.setHeader('Content-Type', 'application/json');
-  res.status(err.status || 500).json({
-    error: err.message || 'Internal Server Error',
-    stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+  res.status(status).json({
+    error: err?.message || 'Internal Server Error',
+    stack: process.env.NODE_ENV === 'development' ? err?.stack : undefined,
   });
 });
 

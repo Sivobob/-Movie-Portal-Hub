@@ -654,22 +654,6 @@ export default function HomePage() {
     return getNewEpisodesWithin24h(movies, nowMs);
   }, [movies, nowMs]);
 
-
-  const recentlyAddedMovies = useMemo(() => {
-    return [...movies]
-      .filter((m) => m && m.published !== false)
-      .sort((a, b) => {
-        const aUpload = Math.max(getTimestampMs(a.telegramDateMs), getTimestampMs(a.createdAt));
-        const bUpload = Math.max(getTimestampMs(b.telegramDateMs), getTimestampMs(b.createdAt));
-        if (bUpload !== aUpload) return bUpload - aUpload;
-        const aMsg = Number(a.telegramMsgId || 0);
-        const bMsg = Number(b.telegramMsgId || 0);
-        if (bMsg !== aMsg) return bMsg - aMsg;
-        return getTimestampMs(b.updatedAt) - getTimestampMs(a.updatedAt);
-      })
-      .slice(0, 25);
-  }, [movies]);
-
   const latestMoviesAndSeries = useMemo(() => {
     // Show only 2026 release movies and web series in the Latest row
     return movies.filter((m) => m && m.published !== false && is2026Release(m)).slice(0, 25);
@@ -990,37 +974,6 @@ export default function HomePage() {
                     </div>
                   );
                 })}
-              </div>
-            </div>
-          )}
-
-          {/* RECENTLY ADDED (Newest uploads of any release year appear first instantly) */}
-          {recentlyAddedMovies.length > 0 && (
-            <div className="mt-6 px-3 sm:px-6">
-              <h3 className="text-base sm:text-lg font-bold text-white tracking-wide mb-3">
-                Recently Added
-              </h3>
-              <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-none touch-pan-x touch-pan-y">
-                {recentlyAddedMovies.map((movie) => (
-                  <div
-                    key={`recent-${movie.id}`}
-                    onClick={() => handleMovieClick(movie)}
-                    className="flex-shrink-0 w-28 sm:w-32 relative group cursor-pointer"
-                  >
-                    <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-neutral-950 border border-neutral-800/90 shadow-md">
-                      <PosterImage
-                        posterUrl={movie.posterUrl}
-                        backdropUrl={movie.backdropUrl}
-                        title={movie.title}
-                        year={movie.releaseYear}
-                        width={400}
-                        alt={movie.title}
-                        loading="eager"
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                      />
-                    </div>
-                  </div>
-                ))}
               </div>
             </div>
           )}
