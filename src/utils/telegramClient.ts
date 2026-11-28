@@ -71,7 +71,8 @@ export async function resetTelegramClient(options?: {
 
     if (prev) {
       try {
-        await prev.disconnect();
+        (prev as any)._destroyed = true;
+        await (typeof (prev as any).destroy === 'function' ? (prev as any).destroy() : prev.disconnect());
       } catch {}
     }
 
@@ -179,11 +180,17 @@ export async function getTelegramClient(): Promise<TelegramClient> {
           connectedClient = savedSessionClient;
           console.log('[TelegramClient] Connected using cached Telegram Session');
         } else {
-          try { await savedSessionClient.disconnect(); } catch {}
+          try {
+            (savedSessionClient as any)._destroyed = true;
+            await savedSessionClient.destroy();
+          } catch {}
         }
       } catch (savedErr: any) {
         console.warn('[TelegramClient] Cached session connect failed, refreshing bot session:', savedErr?.message || savedErr);
-        try { await savedSessionClient.disconnect(); } catch {}
+        try {
+          (savedSessionClient as any)._destroyed = true;
+          await savedSessionClient.destroy();
+        } catch {}
         try {
           if (fs.existsSync(SESSION_FILE_PATH)) fs.unlinkSync(SESSION_FILE_PATH);
         } catch {}
@@ -221,7 +228,10 @@ export async function getTelegramClient(): Promise<TelegramClient> {
         } catch (dcErr: any) {
           lastErr = dcErr;
           console.warn(`[TelegramClient] DC ${dc.id} bot login fallback (${dcErr?.errorMessage || dcErr?.message || dcErr})`);
-          try { await attemptClient.disconnect(); } catch {}
+          try {
+            (attemptClient as any)._destroyed = true;
+            await attemptClient.destroy();
+          } catch {}
         }
       }
       if (!connectedClient) {

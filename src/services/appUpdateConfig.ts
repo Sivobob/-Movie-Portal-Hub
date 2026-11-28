@@ -14,8 +14,8 @@ import { guardedFirestoreWrite, isFirestoreWriteAllowed } from './firestoreQuota
 export const APP_UPDATE_COLLECTION = 'admins';
 export const APP_UPDATE_DOC_ID = 'android_update';
 
-export const CURRENT_VERSION_NAME = '3.5.326';
-export const CURRENT_VERSION_CODE = 35326;
+export const CURRENT_VERSION_NAME = '3.5.327';
+export const CURRENT_VERSION_CODE = 35327;
 
 export const OFFICIAL_APK_DIRECT_URL =
   'https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk';
@@ -29,7 +29,7 @@ export function resolveApkDownloadUrl(rawUrl?: string | null): string {
 }
 
 export const DEFAULT_UPDATE_MESSAGE =
-  'Movie Hub v3.5.326: Reliable in-app update alerts, smoother Telegram live sync, and improved Movies & Series playback.';
+  'Movie Hub v3.5.327: Reliable in-app update alerts, instant Telegram live sync, and improved Movies & Series playback.';
 
 const FIRESTORE_ANDROID_UPDATE_REST_URL =
   'https://firestore.googleapis.com/v1/projects/gen-lang-client-0267042672/databases/ai-studio-movieportalhub-664a3e40-85f3-4758-945e-fd031bdc459f/documents/admins/android_update';

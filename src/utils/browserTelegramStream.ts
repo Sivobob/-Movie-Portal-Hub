@@ -124,7 +124,7 @@ function ensureKeepaliveLoop() {
     if (connectPromise || resettingPromise) return;
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
     const c = browserClient;
-    if (!c) return;
+    if (!c || (c as any)._destroyed) return;
     try {
       if (!c.connected) {
         await getBrowserTelegramClient().catch(() => {});
@@ -150,10 +150,10 @@ function ensureKeepaliveLoop() {
           }
         } catch {}
       }
-    } catch {
-      if (!c.connected && !connectPromise && !resettingPromise) {
+    } catch (err: any) {
+      if (c === browserClient && !connectPromise && !resettingPromise) {
         try {
-          await resetBrowserTelegramClient({ clearSession: false });
+          await resetBrowserTelegramClient({ clearSession: isAuthSessionFatalError(err) });
         } catch {}
       }
     }
@@ -246,6 +246,51 @@ function clearSavedBrowserSession() {
   } catch {}
 }
 
+async function destroyTelegramClientSafely(client: TelegramClient | null | undefined) {
+  if (!client) return;
+  const anyClient = client as any;
+  try {
+    anyClient._destroyed = true;
+    anyClient._lastRequest = Date.now();
+    anyClient._errorHandler = undefined;
+    if (anyClient._sender) {
+      anyClient._sender._userConnected = false;
+    }
+  } catch {}
+  try {
+    if (typeof anyClient.destroy === 'function') {
+      await anyClient.destroy();
+      return;
+    }
+  } catch {}
+  try {
+    await client.disconnect();
+  } catch {}
+}
+
+function configureBrowserClientLifecycle(client: TelegramClient) {
+  const anyClient = client as any;
+  anyClient._errorHandler = async (err: any) => {
+    if (anyClient._destroyed) return;
+    // Stop GramJS's internal _updateLoop from throwing TIMEOUT / auto-reconnecting behind our back
+    anyClient._destroyed = true;
+    anyClient._lastRequest = Date.now();
+    try {
+      if (anyClient._sender) {
+        anyClient._sender._userConnected = false;
+      }
+    } catch {}
+    if (client === browserClient && !resettingPromise && !connectPromise) {
+      const clearSession = isAuthSessionFatalError(err);
+      setTimeout(() => {
+        if (client === browserClient && !resettingPromise && !connectPromise) {
+          resetBrowserTelegramClient({ clearSession }).catch(() => {});
+        }
+      }, 50);
+    }
+  };
+}
+
 export async function resetBrowserTelegramClient(opts?: { clearSession?: boolean }): Promise<TelegramClient> {
   if (resettingPromise) return resettingPromise;
   const clearSession = Boolean(opts?.clearSession);
@@ -268,9 +313,7 @@ export async function resetBrowserTelegramClient(opts?: { clearSession?: boolean
       clearSavedBrowserSession();
     }
     if (prev) {
-      try {
-        await prev.disconnect();
-      } catch {}
+      await destroyTelegramClientSafely(prev);
     }
     return await getBrowserTelegramClient(false);
   })().finally(() => {
@@ -298,6 +341,7 @@ const BROWSER_TELEGRAM_DCS: Array<{ id: number; ip: string; port: number }> = [
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  promise.catch(() => {});
   return Promise.race([
     promise.finally(() => {
       if (timer !== undefined) clearTimeout(timer);
@@ -343,15 +387,13 @@ export async function getBrowserTelegramClient(forceReconnect = false): Promise<
 
   const myEpoch = clientEpoch;
   connectPromise = (async () => {
-    // Discard any disconnected stale client instead of calling connect() twice on the same PromisedWebSockets
+    // Discard any disconnected stale client completely (destroy sets _destroyed = true to stop _updateLoop)
     if (browserClient && !browserClient.connected) {
       const stale = browserClient;
       browserClient = null;
       dcSenders.clear();
       dcSenderPromises.clear();
-      try {
-        await stale.disconnect();
-      } catch {}
+      await destroyTelegramClientSafely(stale);
     }
 
     const saved = getSavedBrowserSession();
@@ -365,12 +407,13 @@ export async function getBrowserTelegramClient(forceReconnect = false): Promise<
         useWSS: true,
         floodSleepThreshold: 60,
         maxConcurrentDownloads: 8,
-        baseLogger: new Logger(LogLevel.ERROR),
+        baseLogger: new Logger(LogLevel.NONE),
       });
+      configureBrowserClientLifecycle(client);
       try {
         await withTimeout(client.connect(), 9000, 'saved session connect');
         if (myEpoch !== clientEpoch) {
-          try { await client.disconnect(); } catch {}
+          await destroyTelegramClientSafely(client);
           throw new Error('Telegram client reset superseded connection');
         }
         if (client.connected) {
@@ -380,9 +423,9 @@ export async function getBrowserTelegramClient(forceReconnect = false): Promise<
           ensureKeepaliveLoop();
           return client;
         }
-        try { await client.disconnect(); } catch {}
+        await destroyTelegramClientSafely(client);
       } catch (err: any) {
-        try { await client.disconnect(); } catch {}
+        await destroyTelegramClientSafely(client);
         if (isAuthSessionFatalError(err)) {
           clearSavedBrowserSession();
         }
@@ -404,8 +447,9 @@ export async function getBrowserTelegramClient(forceReconnect = false): Promise<
         useWSS: true,
         floodSleepThreshold: 60,
         maxConcurrentDownloads: 8,
-        baseLogger: new Logger(LogLevel.ERROR),
+        baseLogger: new Logger(LogLevel.NONE),
       });
+      configureBrowserClientLifecycle(freshClient);
       try {
         await withTimeout(
           freshClient.start({ botAuthToken: TG_BOT_TOKEN }),
@@ -413,7 +457,7 @@ export async function getBrowserTelegramClient(forceReconnect = false): Promise<
           `fresh WSS start DC${dc.id}`
         );
         if (myEpoch !== clientEpoch) {
-          try { await freshClient.disconnect(); } catch {}
+          await destroyTelegramClientSafely(freshClient);
           throw new Error('Telegram client reset superseded connection');
         }
         const exported = freshClient.session.save() as unknown as string;
@@ -424,7 +468,7 @@ export async function getBrowserTelegramClient(forceReconnect = false): Promise<
         return freshClient;
       } catch (dcErr: any) {
         lastErr = dcErr;
-        try { await freshClient.disconnect(); } catch {}
+        await destroyTelegramClientSafely(freshClient);
       }
     }
     throw lastErr || new Error('Failed to start browser Telegram client');
