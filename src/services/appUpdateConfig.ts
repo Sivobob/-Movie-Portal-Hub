@@ -29,7 +29,7 @@ export function resolveApkDownloadUrl(rawUrl?: string | null): string {
 }
 
 export const DEFAULT_UPDATE_MESSAGE =
-  'Movie Hub v3.5.328: Instant update popup, reliable Telegram live sync, and improved streaming.';
+  'Movie Hub v3.5.329: Instant video playback fix, reliable Telegram sync, and guaranteed update popup.';
 
 const FIRESTORE_ANDROID_UPDATE_REST_URL =
   'https://firestore.googleapis.com/v1/projects/gen-lang-client-0267042672/databases/ai-studio-movieportalhub-664a3e40-85f3-4758-945e-fd031bdc459f/documents/admins/android_update';

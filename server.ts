@@ -100,7 +100,7 @@ app.use('/api', (req, res, next) => {
 app.get('/api/health', (req, res) => {
   const creds = getTelegramCredentials();
   const telegramConfigured = Boolean(creds.apiId && creds.apiHash && (creds.botToken || creds.sessionStr));
-  let appVersion = '3.5.328';
+  let appVersion = '3.5.329';
   let otaEnabled = true;
   let liveAppUrl = '';
   try {

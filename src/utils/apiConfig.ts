@@ -1,7 +1,7 @@
 export const CLOUD_RUN_BACKEND_URL = 'https://ais-pre-6ejzhiqpwvhbnrmdodefzr-997472249123.asia-east1.run.app';
 export const LIVE_BACKEND_URL = 'https://ais-dev-6ejzhiqpwvhbnrmdodefzr-997472249123.asia-east1.run.app';
 export const PRE_BACKEND_URL = 'https://ais-pre-6ejzhiqpwvhbnrmdodefzr-997472249123.asia-east1.run.app';
-export const APP_VERSION = 'v3.5.328';
+export const APP_VERSION = 'v3.5.329';
 
 const ENV_BACKEND_URL = (
   (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_BASE_URL) ||
@@ -320,7 +320,10 @@ export async function probeWorkingBackendUrl(force = false): Promise<string | nu
 
 export function buildApiUrl(path: string): string {
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
-  const base = getApiBaseUrl();
+  let base = getApiBaseUrl();
+  if (!base && isNativeAppRuntime()) {
+    base = PRE_BACKEND_URL;
+  }
   return base ? `${base}${cleanPath}` : cleanPath;
 }
 

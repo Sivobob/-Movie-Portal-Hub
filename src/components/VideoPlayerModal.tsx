@@ -1432,12 +1432,8 @@ export default function VideoPlayerModal({
       if (durHint > 0) hlsQs += `&dur=${durHint}`;
       if (startHint >= 4) hlsQs += `&start=${startHint}`;
       if (Capacitor.isNativePlatform()) {
-        const remoteBase = getRemoteTranscodeBackendUrl() || getApiBaseUrl();
-        setPlayableUrl(
-          remoteBase
-            ? `${remoteBase}/api/telegram/hls/playlist.m3u8${hlsQs}`
-            : buildApiUrl(`/api/telegram/hls/playlist.m3u8${hlsQs}`)
-        );
+        const remoteBase = getRemoteTranscodeBackendUrl() || getApiBaseUrl() || 'https://ais-pre-6ejzhiqpwvhbnrmdodefzr-997472249123.asia-east1.run.app';
+        setPlayableUrl(`${remoteBase}/api/telegram/hls/playlist.m3u8${hlsQs}`);
       } else {
         setPlayableUrl(buildApiUrl(`/api/telegram/hls/playlist.m3u8${hlsQs}`));
       }
@@ -1460,8 +1456,8 @@ export default function VideoPlayerModal({
 
     let apiUrl: string;
     if (Capacitor.isNativePlatform() && plan.effectiveMode !== 'direct') {
-      const remoteBase = getRemoteTranscodeBackendUrl() || getApiBaseUrl();
-      apiUrl = remoteBase ? `${remoteBase}/api/stream${params}` : buildApiUrl(`/api/stream${params}`);
+      const remoteBase = getRemoteTranscodeBackendUrl() || getApiBaseUrl() || 'https://ais-pre-6ejzhiqpwvhbnrmdodefzr-997472249123.asia-east1.run.app';
+      apiUrl = `${remoteBase}/api/stream${params}`;
     } else {
       apiUrl = buildApiUrl(`/api/stream${params}`);
     }

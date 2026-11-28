@@ -77,15 +77,12 @@ export const auth = getAuth(app);
 // Validate Firestore connectivity on startup only if write quota is normal
 async function testConnection() {
   if (typeof window === 'undefined') return;
+  if (navigator.onLine === false) return;
   await hydrateFirestoreQuotaStatus().catch(() => true);
   if (!isFirestoreWriteAllowed()) return;
   try {
-    await getDocFromServer(doc(db, 'app_config', 'connection'));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn('Firestore connection check: client is currently offline.');
-    }
-  }
+    await getDocFromServer(doc(db, 'app_config', 'connection')).catch(() => {});
+  } catch {}
 }
 testConnection();
 

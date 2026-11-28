@@ -121,22 +121,21 @@ export default function PosterImage({
 
   const activeSrc = !exhausted ? candidates[attemptIdx] : '';
 
-  if (!activeSrc) {
+  if (!activeSrc || exhausted) {
     return (
-      <div className="w-full h-full bg-gradient-to-br from-neutral-900 via-neutral-950 to-black flex flex-col items-center justify-center p-2.5 text-center select-none">
-        {isSeries ? (
-          <Tv size={compactFallback ? 18 : 26} className="text-neutral-600 mb-1.5 flex-shrink-0" />
-        ) : (
-          <Film size={compactFallback ? 18 : 26} className="text-neutral-600 mb-1.5 flex-shrink-0" />
-        )}
+      <div className="w-full h-full bg-gradient-to-tr from-neutral-950 via-neutral-900 to-emerald-950 flex flex-col items-center justify-center p-3 text-center select-none relative overflow-hidden shadow-inner">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(16,185,129,0.18),transparent_70%)]" />
+        <div className="w-12 h-12 rounded-2xl bg-neutral-900/90 border border-emerald-500/30 flex items-center justify-center text-emerald-400 mb-2 shadow-lg z-10">
+          {isSeries ? <Tv size={compactFallback ? 16 : 24} /> : <Film size={compactFallback ? 16 : 24} />}
+        </div>
         {!compactFallback && title && (
-          <p className="text-[11px] font-bold text-neutral-300 line-clamp-3 leading-snug">
+          <p className="text-xs font-black text-white line-clamp-3 leading-snug drop-shadow z-10 px-1">
             {title}
           </p>
         )}
-        {!compactFallback && year && (
-          <span className="mt-1 text-[9px] font-semibold text-neutral-500">
-            {year}
+        {!compactFallback && (
+          <span className="mt-1 text-[10px] font-bold text-emerald-400/90 tracking-wide z-10">
+            {year || '2026'} • Movie Hub
           </span>
         )}
       </div>

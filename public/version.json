@@ -1,13 +1,13 @@
 {
-  "latestVersion": "3.5.328",
-  "minimumRequiredVersion": "3.5.328",
-  "latestVersionCode": 35328,
-  "minimumRequiredVersionCode": 35328,
+  "latestVersion": "3.5.329",
+  "minimumRequiredVersion": "3.5.329",
+  "latestVersionCode": 35329,
+  "minimumRequiredVersionCode": 35329,
   "otaEnabled": true,
   "liveAppUrl": "https://ais-pre-6ejzhiqpwvhbnrmdodefzr-997472249123.asia-east1.run.app",
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Hub v3.5.328: Instant update popup, reliable Telegram live sync, and improved streaming.",
-  "releaseNotes": "v3.5.328: Force update trigger popup across all user devices."
+  "updateMessage": "Movie Hub v3.5.329: Instant video playback fix, reliable Telegram sync, and guaranteed update popup.",
+  "releaseNotes": "v3.5.329: Fixed native video playback loading issue and pushed signed APK release."
 }

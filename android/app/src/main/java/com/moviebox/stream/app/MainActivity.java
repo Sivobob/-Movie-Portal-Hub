@@ -697,7 +697,7 @@ public class MainActivity extends BridgeActivity {
                 return pInfo.versionName.trim();
             }
         } catch (Exception ignored) {}
-        return "3.5.328";
+        return "3.5.329";
     }
 
     private int compareVersionStrings(String verA, String verB) {
@@ -1047,7 +1047,7 @@ public class MainActivity extends BridgeActivity {
                 final JSONObject payload = new JSONObject();
                 payload.put("latestVersion", bestLatestVer);
                 payload.put("minimumRequiredVersion", bestMinVer);
-                payload.put("latestVersionCode", bestLatestCode > 0 ? bestLatestCode : 35328L);
+                payload.put("latestVersionCode", bestLatestCode > 0 ? bestLatestCode : 35329L);
                 payload.put("minimumRequiredVersionCode", bestMinCode);
                 payload.put("isMandatory", mandatoryNeeded);
                 payload.put("apkDownloadUrl", bestApkUrl);
@@ -3966,11 +3966,11 @@ public class MainActivity extends BridgeActivity {
                     : pInfo.versionCode;
                 JSONObject json = new JSONObject();
                 json.put("packageName", getPackageName());
-                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.327");
+                json.put("versionName", pInfo.versionName != null ? pInfo.versionName : "3.5.329");
                 json.put("versionCode", vCode);
                 return json.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.327\",\"versionCode\":35327}";
+                return "{\"packageName\":\"com.moviebox.stream.app\",\"versionName\":\"3.5.329\",\"versionCode\":35329}";
             }
         }
 
