@@ -1,5 +1,6 @@
 import './shims/globals';
 import { TelegramClient, Api, Logger } from 'telegram';
+import { Raw } from 'telegram/events/index.js';
 import { LogLevel } from 'telegram/extensions/Logger.js';
 import { StringSession } from 'telegram/sessions/index.js';
 import bigInt from 'big-integer';
@@ -54,9 +55,51 @@ let browserClient: TelegramClient | null = null;
 let connectPromise: Promise<TelegramClient> | null = null;
 let resettingPromise: Promise<TelegramClient> | null = null;
 let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+const attachedPushClients = new WeakSet<TelegramClient>();
 const dcSenders = new Map<number, any>();
 const dcSenderPromises = new Map<string, Promise<any>>();
 const resolvedDcMap = new Map<string, number>();
+
+function attachLiveTelegramUpdateHandler(client: TelegramClient | null) {
+  if (!client || typeof window === 'undefined' || attachedPushClients.has(client)) return;
+  attachedPushClients.add(client);
+  try {
+    client.addEventHandler(
+      (update: any) => {
+        try {
+          if (!update) return;
+          const isNewChannel = update instanceof Api.UpdateNewChannelMessage;
+          const isEditChannel = update instanceof Api.UpdateEditChannelMessage;
+          const isNewMsg = update instanceof Api.UpdateNewMessage;
+          if (!isNewChannel && !isEditChannel && !isNewMsg) return;
+
+          const msg = (update as any).message;
+          const msgId = Number(msg?.id || 0);
+          if (!msgId || msgId <= 0) return;
+
+          const rawChannelId =
+            msg?.peerId?.channelId?.toString?.() ||
+            msg?.chatId?.toString?.()?.replace(/^-100/, '') ||
+            '';
+          if (!rawChannelId) return;
+          const cleanChannelId = String(rawChannelId).replace(/^-100/, '').trim();
+          if (!cleanChannelId) return;
+
+          window.dispatchEvent(
+            new CustomEvent('tg_channel_new_message', {
+              detail: {
+                channelId: cleanChannelId,
+                msgId,
+                edited: Boolean(isEditChannel),
+              },
+            })
+          );
+        } catch {}
+      },
+      new Raw({})
+    );
+  } catch {}
+}
 
 function isAuthSessionFatalError(err: any): boolean {
   const msg = String(err?.errorMessage || err?.message || err || '').toUpperCase();
@@ -279,12 +322,14 @@ export async function getBrowserTelegramClient(forceReconnect = false): Promise<
   }
   if (browserClient) {
     if (browserClient.connected) {
+      attachLiveTelegramUpdateHandler(browserClient);
       ensureKeepaliveLoop();
       return browserClient;
     }
     try {
       await browserClient.connect();
       if (browserClient.connected) {
+        attachLiveTelegramUpdateHandler(browserClient);
         ensureKeepaliveLoop();
         return browserClient;
       }
@@ -313,6 +358,7 @@ export async function getBrowserTelegramClient(forceReconnect = false): Promise<
         if (client.connected) {
           saveBrowserSession(client.session.save() as unknown as string);
           browserClient = client;
+          attachLiveTelegramUpdateHandler(client);
           ensureKeepaliveLoop();
           return client;
         }
@@ -347,6 +393,7 @@ export async function getBrowserTelegramClient(forceReconnect = false): Promise<
         const exported = freshClient.session.save() as unknown as string;
         saveBrowserSession(exported);
         browserClient = freshClient;
+        attachLiveTelegramUpdateHandler(freshClient);
         ensureKeepaliveLoop();
         return freshClient;
       } catch (dcErr: any) {
@@ -1302,9 +1349,9 @@ export async function fetchBrowserTelegramMessagesByIds(
   channelId: string,
   msgIds: number[],
   allowRetry = true
-): Promise<{ cleanId: string; messages: BrowserTelegramScannedMessage[]; peerReachable: boolean }> {
+): Promise<{ cleanId: string; messages: BrowserTelegramScannedMessage[]; peerReachable: boolean; highestAnyMsgId: number }> {
   if (!Array.isArray(msgIds) || msgIds.length === 0) {
-    return { cleanId: String(channelId || '').replace(/^-100/, ''), messages: [], peerReachable: true };
+    return { cleanId: String(channelId || '').replace(/^-100/, ''), messages: [], peerReachable: true, highestAnyMsgId: 0 };
   }
 
   const client = await getBrowserTelegramClient();
@@ -1336,12 +1383,17 @@ export async function fetchBrowserTelegramMessagesByIds(
     if (lastErr) {
       console.warn('[BrowserTgScan] Peer scan error:', lastErr?.message || lastErr);
     }
-    return { cleanId, messages: [], peerReachable: false };
+    return { cleanId, messages: [], peerReachable: false, highestAnyMsgId: 0 };
   }
 
+  let highestAnyMsgId = 0;
   const out: BrowserTelegramScannedMessage[] = [];
   for (const m of rawMsgs) {
     if (!m || !m.id) continue;
+    const rawId = Number(m.id);
+    if (Number.isFinite(rawId) && rawId > highestAnyMsgId) {
+      highestAnyMsgId = rawId;
+    }
     const doc = extractDocumentFromMessage(m);
     if (!doc) continue;
 
@@ -1372,7 +1424,7 @@ export async function fetchBrowserTelegramMessagesByIds(
     const caption = String(m.message || '').trim();
 
     out.push({
-      msgId: Number(m.id),
+      msgId: rawId,
       channelId: cleanId,
       dateMs,
       caption,
@@ -1386,6 +1438,6 @@ export async function fetchBrowserTelegramMessagesByIds(
   }
 
   out.sort((a, b) => a.msgId - b.msgId);
-  return { cleanId, messages: out, peerReachable: true };
+  return { cleanId, messages: out, peerReachable: true, highestAnyMsgId };
 }
 

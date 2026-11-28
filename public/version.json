@@ -1,13 +1,13 @@
 {
-  "latestVersion": "3.5.324",
-  "minimumRequiredVersion": "3.5.324",
-  "latestVersionCode": 35324,
-  "minimumRequiredVersionCode": 35324,
+  "latestVersion": "3.5.325",
+  "minimumRequiredVersion": "3.5.325",
+  "latestVersionCode": 35325,
+  "minimumRequiredVersionCode": 35325,
   "otaEnabled": true,
   "liveAppUrl": "https://ais-pre-6ejzhiqpwvhbnrmdodefzr-997472249123.asia-east1.run.app",
   "apkUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "apkDownloadUrl": "https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk",
   "isMandatory": true,
-  "updateMessage": "Movie Hub v3.5.324: Movies & Web Series playback now match Chrome, Telegram uploads appear instantly inside APK, and in-app updates work reliably.",
-  "releaseNotes": "v3.5.324: Fixed Web Series episode quality & auto-next playback, added direct MTProto Telegram instant sync in APK, and fixed in-app update detection."
+  "updateMessage": "Movie Hub v3.5.325: Instant live Telegram channel uploads now appear inside the open app (both Chrome & APK) without restarting, plus Movies & Series playback match Chrome.",
+  "releaseNotes": "v3.5.325: Added real-time MTProto WebSocket channel push sync, fixed local cache & state merge dropping series/movie updates, and added Home Recently Added row for instant visibility."
 }

@@ -1368,7 +1368,7 @@ public class MainActivity extends BridgeActivity {
             .setReadTimeoutMs(90000)
             .setAllowCrossProtocolRedirects(true)
             .setKeepPostFor302Redirects(true)
-            .setUserAgent("MoviePortal/3.5.324 AndroidExoPlayer");
+            .setUserAgent("MoviePortal/3.5.325 AndroidExoPlayer");
 
         DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
             .setBufferDurationsMs(

@@ -14,8 +14,8 @@ import { guardedFirestoreWrite, isFirestoreWriteAllowed } from './firestoreQuota
 export const APP_UPDATE_COLLECTION = 'admins';
 export const APP_UPDATE_DOC_ID = 'android_update';
 
-export const CURRENT_VERSION_NAME = '3.5.324';
-export const CURRENT_VERSION_CODE = 35324;
+export const CURRENT_VERSION_NAME = '3.5.325';
+export const CURRENT_VERSION_CODE = 35325;
 
 export const OFFICIAL_APK_DIRECT_URL =
   'https://github.com/Sivobob/-Movie-Portal-Hub/releases/latest/download/Movie-Portal.apk';
@@ -29,7 +29,7 @@ export function resolveApkDownloadUrl(rawUrl?: string | null): string {
 }
 
 export const DEFAULT_UPDATE_MESSAGE =
-  'Movie Hub v3.5.324: Movies & Series playback fixed for native APK, plus instant direct Telegram channel sync without backend delay.';
+  'Movie Hub v3.5.325: Instant real-time Telegram channel uploads in Chrome & APK without restarting the app.';
 
 const GITHUB_VERSION_JSON_URL =
   'https://raw.githubusercontent.com/Sivobob/-Movie-Portal-Hub/main/public/version.json';

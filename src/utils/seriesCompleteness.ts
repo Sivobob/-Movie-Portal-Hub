@@ -422,6 +422,15 @@ export function mergeEpisodeIntoSeasons(
       if (existingHasStream && incomingRank <= existingRank) {
         return { mergedSeasons: cloned, added: false };
       }
+      const existingQualityKey = String(existingEp?.quality || '').trim();
+      const mergedEpQualities = {
+        ...(existingEp?.videoQualities && typeof existingEp.videoQualities === 'object' ? existingEp.videoQualities : {}),
+        ...(existingQualityKey && existingHasStream ? { [existingQualityKey]: String(existingEp.streamUrl).trim() } : {}),
+        ...(newEpisode?.videoQualities && typeof newEpisode.videoQualities === 'object' ? newEpisode.videoQualities : {}),
+      };
+      if (Object.keys(mergedEpQualities).length > 0) {
+        newEpisode = { ...newEpisode, videoQualities: mergedEpQualities };
+      }
       candidateEpisodes.splice(sameIntervalIdx, 1);
     }
   }

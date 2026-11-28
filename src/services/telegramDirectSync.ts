@@ -12,6 +12,7 @@ import { db } from '../firebase';
 import { guardedFirestoreWrite, isFirestoreWriteAllowed } from './firestoreQuotaService';
 import {
   MovieData,
+  broadcastDirectMovieUpsert,
   getLocalMovies,
   isMovieDeleted,
   saveMovieLocally,
@@ -20,6 +21,7 @@ import {
 import {
   BrowserTelegramScannedMessage,
   fetchBrowserTelegramMessagesByIds,
+  getBrowserTelegramClient,
 } from '../utils/browserTelegramStream';
 import {
   AutoMatchedCandidateSummary,
@@ -54,14 +56,15 @@ import {
 
 const DEFAULT_CHANNEL_ID = '4451036277';
 const FLOOR_START_MSG_ID = 4123;
-const PROBE_WINDOW_SIZE = 45;
+const PROBE_WINDOW_SIZE = 50;
 const MAX_PAGES_PER_PASS = 4;
 const CURSOR_STORAGE_PREFIX = 'mp_direct_tg_cursor_v1_';
-const MIN_SCAN_GAP_MS = 6500;
-const FIRESTORE_CURSOR_CACHE_MS = 30000;
+const MIN_SCAN_GAP_MS = 1200;
+const FIRESTORE_CURSOR_CACHE_MS = 10000;
 
 let activeSyncPromise: Promise<{ addedCount: number; updatedCount: number }> | null = null;
 let lastScanStartedAt = 0;
+let queuedPushRescan: { hintMsgId?: number } | null = null;
 let cachedFirestoreCursor: { value: number; channelId: string; fetchedAt: number } | null = null;
 const rejectedNonMediaUrls = new Set<string>();
 
@@ -174,6 +177,7 @@ async function readRemoteCursorConfig(): Promise<{ channelId: string; cursor: nu
         channelId = rawCh;
       }
       const candidates = [
+        Number(data.lastSyncedMsgId || 0),
         Number(data.lastScannedMsgId || 0),
         Number(data.scannedMaxMsgId || 0),
         Number(data.lastMsgId || 0),
@@ -202,9 +206,11 @@ async function persistRemoteCursor(channelId: string, msgId: number): Promise<vo
       doc(db, 'app_config', 'telegram_auto_sync'),
       {
         channelId,
+        lastSyncedMsgId: msgId,
         lastScannedMsgId: msgId,
         scannedMaxMsgId: msgId,
         updatedAt: Date.now(),
+        updatedAtMs: Date.now(),
       },
       { merge: true }
     )
@@ -241,7 +247,7 @@ function buildFallbackPosterDataUri(title: string, year?: number | string | null
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
-async function fetchJsonSafe(url: string, timeoutMs = 6000): Promise<any> {
+async function fetchJsonSafe(url: string, timeoutMs = 3000): Promise<any> {
   if (typeof fetch !== 'function' || !url) return null;
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
@@ -579,6 +585,36 @@ async function resolveClientImdbMatch(parsed: ParsedTelegramMovieMeta): Promise<
   };
 }
 
+async function resolveClientImdbMatchWithTimeout(parsed: ParsedTelegramMovieMeta, timeoutMs = 4500) {
+  const currentYear = new Date().getFullYear();
+  const fallbackYear = parsed.year && parsed.year <= currentYear ? parsed.year : currentYear;
+  const fallback = {
+    imdbId: parsed.explicitImdbId || '',
+    title: parsed.cleanTitle || parsed.rawFileName || 'Untitled Movie',
+    originalTitle: parsed.cleanTitle || parsed.rawFileName || 'Untitled Movie',
+    releaseYear: fallbackYear,
+    posterUrl: '',
+    backdropUrl: '',
+    genre: parsed.isSeriesEpisode ? 'Drama' : 'Action',
+    description: '',
+    director: '',
+    cast: '',
+    runtime: '',
+    language: parsed.languageHint || 'Hindi',
+    rating: 8.0,
+    originalCategory: parsed.isSeriesEpisode ? 'Web Series' : 'Bollywood Movie',
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    resolveClientImdbMatch(parsed).finally(() => {
+      if (timer !== undefined) clearTimeout(timer);
+    }),
+    new Promise<typeof fallback>((resolve) => {
+      timer = setTimeout(() => resolve(fallback), timeoutMs);
+    }),
+  ]);
+}
+
 function normalizeDupKey(title?: string | null): string {
   return normalizeTitleKey(title || '').replace(/\s+/g, '');
 }
@@ -760,6 +796,8 @@ async function fetchLatestFirestoreRecords(): Promise<MovieData[]> {
 
 export async function runDirectTelegramSyncPass(options?: {
   force?: boolean;
+  bypassGap?: boolean;
+  hintMsgId?: number;
   currentMovies?: MovieData[];
 }): Promise<{ addedCount: number; updatedCount: number }> {
   if (typeof window === 'undefined') return { addedCount: 0, updatedCount: 0 };
@@ -769,11 +807,19 @@ export async function runDirectTelegramSyncPass(options?: {
   if (!options?.force && typeof document !== 'undefined' && document.visibilityState === 'hidden') {
     return { addedCount: 0, updatedCount: 0 };
   }
-  if (activeSyncPromise) return activeSyncPromise;
+  if (activeSyncPromise) {
+    if (options?.hintMsgId) {
+      queuedPushRescan = { hintMsgId: options.hintMsgId };
+    }
+    return activeSyncPromise;
+  }
 
   const now = Date.now();
-  if (!options?.force && now - lastScanStartedAt < MIN_SCAN_GAP_MS) {
+  if (!options?.bypassGap && !options?.force && now - lastScanStartedAt < MIN_SCAN_GAP_MS) {
     return { addedCount: 0, updatedCount: 0 };
+  }
+  if (options?.hintMsgId) {
+    cachedFirestoreCursor = null;
   }
   lastScanStartedAt = now;
 
@@ -793,12 +839,23 @@ export async function runDirectTelegramSyncPass(options?: {
       );
       const localCursor = getLocalCursor(channelId);
       let scanCursor = Math.max(FLOOR_START_MSG_ID, remoteCursor, localCursor, catalogMaxMsgId);
+      const hintId = Number(options?.hintMsgId || 0);
 
       const newMessages: BrowserTelegramScannedMessage[] = [];
+      const seenMsgIds = new Set<number>();
       let highestVideoMsgId = scanCursor;
 
       for (let page = 0; page < MAX_PAGES_PER_PASS; page++) {
-        const probeIds = Array.from({ length: PROBE_WINDOW_SIZE }, (_, i) => scanCursor + 1 + i);
+        const probeSet = new Set<number>();
+        for (let i = 1; i <= PROBE_WINDOW_SIZE; i++) {
+          probeSet.add(scanCursor + i);
+        }
+        if (page === 0 && hintId > scanCursor && hintId <= scanCursor + 200) {
+          for (let h = Math.max(scanCursor + 1, hintId - 3); h <= hintId + 5; h++) {
+            probeSet.add(h);
+          }
+        }
+        const probeIds = Array.from(probeSet).sort((a, b) => a - b);
         const res = await fetchBrowserTelegramMessagesByIds(channelId, probeIds);
         if (!res.peerReachable) break;
 
@@ -807,12 +864,20 @@ export async function runDirectTelegramSyncPass(options?: {
           if (msg.msgId > pageMaxId) pageMaxId = msg.msgId;
           if (msg.msgId > highestVideoMsgId) highestVideoMsgId = msg.msgId;
           const url = `https://t.me/c/${channelId}/${msg.msgId}`;
-          if (!initialUrlSet.has(url.toLowerCase())) {
+          if (!initialUrlSet.has(url.toLowerCase()) && !seenMsgIds.has(msg.msgId)) {
+            seenMsgIds.add(msg.msgId);
             newMessages.push(msg);
           }
         }
 
-        if (res.messages.length === 0 || pageMaxId <= scanCursor) {
+        if (res.messages.length === 0) {
+          if (res.highestAnyMsgId > scanCursor) {
+            scanCursor = res.highestAnyMsgId;
+            continue;
+          }
+          break;
+        }
+        if (pageMaxId <= scanCursor) {
           break;
         }
         scanCursor = pageMaxId;
@@ -906,7 +971,7 @@ export async function runDirectTelegramSyncPass(options?: {
           isHindiDubbed: effectiveMembers.some((m) => m.parsed.isHindiDubbed),
         };
 
-        const matched = await resolveClientImdbMatch(mergedParsed);
+        const matched = await resolveClientImdbMatchWithTimeout(mergedParsed, 4500);
         const candYear = Number(matched.releaseYear || mergedParsed.year || 0);
         const isSeriesItem =
           mergedParsed.isSeriesEpisode ||
@@ -1035,6 +1100,12 @@ export async function runDirectTelegramSyncPass(options?: {
               }
             }
 
+            Object.assign(existingRec, normalizedExisting);
+            saveMovieLocally(normalizedExisting);
+            broadcastDirectMovieUpsert(normalizedExisting);
+            grp.members.forEach((m) => existingUrlSet.add(m.streamUrl.toLowerCase()));
+            updatedCount++;
+
             if (isFirestoreWriteAllowed()) {
               await guardedFirestoreWrite(() =>
                 setDoc(
@@ -1060,12 +1131,7 @@ export async function runDirectTelegramSyncPass(options?: {
                 )
               ).catch(() => {});
             }
-
-            Object.assign(existingRec, normalizedExisting);
-            saveMovieLocally(normalizedExisting);
             await touchCatalogSyncMarker(existingRec.id, 'save').catch(() => {});
-            grp.members.forEach((m) => existingUrlSet.add(m.streamUrl.toLowerCase()));
-            updatedCount++;
             continue;
           }
 
@@ -1103,6 +1169,12 @@ export async function runDirectTelegramSyncPass(options?: {
             createdAt: itemDateMs,
           });
 
+          existingRecords.push(newSeries);
+          saveMovieLocally(newSeries);
+          broadcastDirectMovieUpsert(newSeries);
+          grp.members.forEach((m) => existingUrlSet.add(m.streamUrl.toLowerCase()));
+          addedCount++;
+
           if (isFirestoreWriteAllowed()) {
             await guardedFirestoreWrite(() =>
               setDoc(
@@ -1115,12 +1187,7 @@ export async function runDirectTelegramSyncPass(options?: {
               )
             ).catch(() => {});
           }
-
-          existingRecords.push(newSeries);
-          saveMovieLocally(newSeries);
           await touchCatalogSyncMarker(seriesDocId, 'save').catch(() => {});
-          grp.members.forEach((m) => existingUrlSet.add(m.streamUrl.toLowerCase()));
-          addedCount++;
           continue;
         }
 
@@ -1174,6 +1241,12 @@ export async function runDirectTelegramSyncPass(options?: {
               published: true,
               updatedAt: nowMs,
             };
+            Object.assign(existingRec, updatedMovie);
+            saveMovieLocally(updatedMovie);
+            broadcastDirectMovieUpsert(updatedMovie);
+            grp.members.forEach((m) => existingUrlSet.add(m.streamUrl.toLowerCase()));
+            updatedCount++;
+
             if (isFirestoreWriteAllowed()) {
               await guardedFirestoreWrite(() =>
                 setDoc(
@@ -1186,11 +1259,7 @@ export async function runDirectTelegramSyncPass(options?: {
                 )
               ).catch(() => {});
             }
-            Object.assign(existingRec, updatedMovie);
-            saveMovieLocally(updatedMovie);
             await touchCatalogSyncMarker(existingRec.id, 'save').catch(() => {});
-            grp.members.forEach((m) => existingUrlSet.add(m.streamUrl.toLowerCase()));
-            updatedCount++;
             continue;
           }
 
@@ -1223,6 +1292,11 @@ export async function runDirectTelegramSyncPass(options?: {
               published: true,
               updatedAt: nowMs,
             };
+            Object.assign(existingRec, updatedMovie);
+            saveMovieLocally(updatedMovie);
+            broadcastDirectMovieUpsert(updatedMovie);
+            updatedCount++;
+
             if (isFirestoreWriteAllowed()) {
               await guardedFirestoreWrite(() =>
                 setDoc(
@@ -1243,10 +1317,7 @@ export async function runDirectTelegramSyncPass(options?: {
                 )
               ).catch(() => {});
             }
-            Object.assign(existingRec, updatedMovie);
-            saveMovieLocally(updatedMovie);
             await touchCatalogSyncMarker(existingRec.id, 'save').catch(() => {});
-            updatedCount++;
           }
           grp.members.forEach((m) => existingUrlSet.add(m.streamUrl.toLowerCase()));
           continue;
@@ -1288,6 +1359,12 @@ export async function runDirectTelegramSyncPass(options?: {
           createdAt: itemDateMs,
         };
 
+        existingRecords.push(newMovie);
+        saveMovieLocally(newMovie);
+        broadcastDirectMovieUpsert(newMovie);
+        grp.members.forEach((m) => existingUrlSet.add(m.streamUrl.toLowerCase()));
+        addedCount++;
+
         if (isFirestoreWriteAllowed()) {
           await guardedFirestoreWrite(() =>
             setDoc(
@@ -1300,12 +1377,7 @@ export async function runDirectTelegramSyncPass(options?: {
             )
           ).catch(() => {});
         }
-
-        existingRecords.push(newMovie);
-        saveMovieLocally(newMovie);
         await touchCatalogSyncMarker(deterministicDocId, 'save').catch(() => {});
-        grp.members.forEach((m) => existingUrlSet.add(m.streamUrl.toLowerCase()));
-        addedCount++;
       }
 
       await persistRemoteCursor(channelId, highestVideoMsgId);
@@ -1315,6 +1387,18 @@ export async function runDirectTelegramSyncPass(options?: {
       return { addedCount, updatedCount };
     } finally {
       activeSyncPromise = null;
+      if (queuedPushRescan) {
+        const nextHint = queuedPushRescan.hintMsgId;
+        queuedPushRescan = null;
+        setTimeout(() => {
+          void runDirectTelegramSyncPass({
+            force: true,
+            bypassGap: true,
+            hintMsgId: nextHint,
+            currentMovies: options?.currentMovies,
+          });
+        }, 150);
+      }
     }
   })();
 
@@ -1323,38 +1407,54 @@ export async function runDirectTelegramSyncPass(options?: {
 
 export function startTelegramDirectSyncLoop(
   getCurrentMovies: () => MovieData[],
-  intervalMs = 10000
+  intervalMs = 2500
 ): () => void {
   if (typeof window === 'undefined') return () => {};
 
-  const trigger = (force = false) => {
+  // Pre-warm MTProto WebSocket client immediately so real-time channel push events arrive in Chrome & APK
+  getBrowserTelegramClient().catch(() => {});
+
+  const trigger = (force = false, bypassGap = false, hintMsgId?: number) => {
     void runDirectTelegramSyncPass({
       force,
+      bypassGap,
+      hintMsgId,
       currentMovies: getCurrentMovies(),
     });
   };
 
-  // Start slightly after initial paint so UI renders immediately
-  const bootTimer = setTimeout(() => trigger(true), 1200);
-  const pollTimer = setInterval(() => trigger(false), intervalMs);
+  // Start quickly after mount so missed uploads appear right away
+  const bootTimer = setTimeout(() => trigger(true, true), 450);
+  const pollTimer = setInterval(() => trigger(false, false), intervalMs);
+
+  const onChannelPush = (e: Event) => {
+    const detail = (e as CustomEvent)?.detail || {};
+    const msgId = Number(detail.msgId || 0);
+    trigger(true, true, msgId > 0 ? msgId : undefined);
+  };
 
   const onWake = () => {
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-    trigger(true);
+    trigger(true, true);
   };
-  const onOnline = () => trigger(true);
+  const onOnline = () => {
+    getBrowserTelegramClient().catch(() => {});
+    trigger(true, true);
+  };
 
+  window.addEventListener('tg_channel_new_message', onChannelPush);
   window.addEventListener('focus', onWake);
   window.addEventListener('pageshow', onWake);
   window.addEventListener('online', onOnline);
   document.addEventListener('visibilitychange', onWake);
 
   (window as any).__syncTelegramChannelNow = () =>
-    runDirectTelegramSyncPass({ force: true, currentMovies: getCurrentMovies() });
+    runDirectTelegramSyncPass({ force: true, bypassGap: true, currentMovies: getCurrentMovies() });
 
   return () => {
     clearTimeout(bootTimer);
     clearInterval(pollTimer);
+    window.removeEventListener('tg_channel_new_message', onChannelPush);
     window.removeEventListener('focus', onWake);
     window.removeEventListener('pageshow', onWake);
     window.removeEventListener('online', onOnline);

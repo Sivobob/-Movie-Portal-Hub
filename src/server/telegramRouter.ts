@@ -3688,8 +3688,8 @@ async function ensureChannelUploadWatcher(client: any): Promise<void> {
 
         queuePriorityChannelMsgId(cleanChannelId, Number(msg.id));
 
-        // Trigger fast server-side auto-IMDb & auto-publish pass (1.2s debounce)
-        scheduleServerAutoSync(`new_video_${cleanChannelId}_${msg.id}`, 1200);
+        // Trigger fast server-side auto-IMDb & auto-publish pass (350ms debounce)
+        scheduleServerAutoSync(`new_video_${cleanChannelId}_${msg.id}`, 350);
       } catch (watchErr: any) {
         console.warn('[TelegramAutoWatcher] Handler warning:', watchErr?.message || watchErr);
       }
@@ -4715,6 +4715,7 @@ function broadcastLiveCatalogUpdate(payload: {
   action?: string;
   latestTitle?: string;
   latestId?: string;
+  movies?: any[];
 }) {
   if (liveCatalogSseClients.size === 0) return;
   const frame = `event: catalog_updated\ndata: ${JSON.stringify(payload)}\n\n`;
@@ -5141,6 +5142,8 @@ async function getServerAutoSyncConfig(forceRefresh = false) {
         lastSyncedMsgId: Math.max(
           prevCachedLastSynced,
           Number(d?.lastSyncedMsgId) || 0,
+          Number(d?.lastScannedMsgId) || 0,
+          Number(d?.scannedMaxMsgId) || 0,
           localChannelCheckpoint[DEFAULT_AUTO_SYNC_CHANNEL_ID] || 0
         ),
         autoWatchEnabled: typeof d?.autoWatchEnabled === 'boolean' ? d.autoWatchEnabled : true,
@@ -5744,6 +5747,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
 
     let publishedCount = 0;
     let catalogDirty = false;
+    const pushedMoviesForSse: any[] = [];
     const queuedForReview: AutoMatchedMovieDraft[] = [];
 
     for (const grp of groups) {
@@ -5925,7 +5929,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
                     ...(draft.cast ? { cast: draft.cast.trim() } : {}),
                   }
                 : {};
-            seedCatalogMap.set(existingRec.id, {
+            const updatedSeriesDoc = {
               ...prevSeed,
               id: existingRec.id,
               seasons: mergedSeasons,
@@ -5936,7 +5940,11 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
               ...seriesPosterPatch,
               ...(nextPublished && !wasPublished ? { createdAt: nowMs } : {}),
               updatedAt: nowMs,
-            });
+            };
+            seedCatalogMap.set(existingRec.id, updatedSeriesDoc);
+            if (nextPublished) {
+              pushedMoviesForSse.push(updatedSeriesDoc);
+            }
             await setDocWithQuotaGuard(
               doc(db, 'movies', existingRec.id),
               {
@@ -6035,6 +6043,9 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
               createdAt: itemDateMs,
             };
             seedCatalogMap.set(seriesDocId, seriesBase);
+            if (seriesReadyToPublish) {
+              pushedMoviesForSse.push(seriesBase);
+            }
             await setDocWithQuotaGuard(
               doc(db, 'movies', seriesDocId),
               {
@@ -6156,11 +6167,13 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
               ...posterBackfillPatch,
               updatedAt: nowMs,
             };
-            seedCatalogMap.set(existingRec.id, {
+            const replacedMovieDoc = {
               ...prevSeed,
               id: existingRec.id,
               ...replacePayload,
-            });
+            };
+            seedCatalogMap.set(existingRec.id, replacedMovieDoc);
+            pushedMoviesForSse.push(replacedMovieDoc);
             await updateDocWithQuotaGuard(doc(db, 'movies', existingRec.id), {
               ...replacePayload,
               updatedAt: serverTimestamp(),
@@ -6203,11 +6216,13 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
               ...posterBackfillPatch,
               updatedAt: nowMs,
             };
-            seedCatalogMap.set(existingRec.id, {
+            const mergedMovieDoc = {
               ...prevSeed,
               id: existingRec.id,
               ...mergePayload,
-            });
+            };
+            seedCatalogMap.set(existingRec.id, mergedMovieDoc);
+            pushedMoviesForSse.push(mergedMovieDoc);
             await setDocWithQuotaGuard(
               doc(db, 'movies', existingRec.id),
               {
@@ -6271,6 +6286,7 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
           createdAt: itemDateMs,
         };
         seedCatalogMap.set(deterministicDocId, movieBase);
+        pushedMoviesForSse.push(movieBase);
         await setDocWithQuotaGuard(
           doc(db, 'movies', deterministicDocId),
           {
@@ -6345,14 +6361,15 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
     }
 
     if (publishedCount > 0 || catalogDirty) {
-      const updatedList = Array.from(seedCatalogMap.values());
-      writeSeedCatalogToDisk(updatedList);
       broadcastLiveCatalogUpdate({
         type: 'catalog_updated',
         count: publishedCount || 1,
         updatedAt: Date.now(),
         action: 'auto_publish',
+        ...(pushedMoviesForSse.length > 0 ? { movies: pushedMoviesForSse } : {}),
       });
+      const updatedList = Array.from(seedCatalogMap.values());
+      writeSeedCatalogToDisk(updatedList);
       await setDocWithQuotaGuard(
         doc(db, 'app_config', 'catalog_sync'),
         {
@@ -6370,6 +6387,8 @@ async function runServerAutoSyncPass(reason: string): Promise<void> {
         doc(db, 'app_config', 'telegram_auto_sync'),
         {
           lastSyncedMsgId: highestMsgId,
+          lastScannedMsgId: highestMsgId,
+          scannedMaxMsgId: highestMsgId,
           updatedAtMs: Date.now(),
           updatedAt: serverTimestamp(),
         },
@@ -7675,7 +7694,7 @@ router.post('/bulk-sync-channel', async (req: Request, res: Response) => {
   }
 });
 
-// Start 24/7 MTProto channel watcher on server boot + 8s safety poll
+// Start 24/7 MTProto channel watcher on server boot + 4s safety poll
 setTimeout(() => {
   getTelegramClient()
     .then((client) => ensureChannelUploadWatcher(client))
@@ -7684,7 +7703,7 @@ setTimeout(() => {
 
   setInterval(() => {
     runServerAutoSyncPass('periodic').catch(() => {});
-  }, 8_000);
+  }, 4_000);
 }, 3000);
 
 router.post('/backfill-print-badges', async (_req: Request, res: Response) => {

@@ -37,8 +37,8 @@ const MoviesContext = createContext<MoviesContextValue>({
   refreshMovies: async () => {},
 });
 
-const FOREGROUND_HEARTBEAT_MS = 8000;
-const MIN_SERVER_SYNC_GAP_MS = 2000;
+const FOREGROUND_HEARTBEAT_MS = 5000;
+const MIN_SERVER_SYNC_GAP_MS = 1200;
 
 function hasRealPosterUrl(url?: string | null): boolean {
   const s = String(url || '').trim();
@@ -236,10 +236,21 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
         sse.onopen = () => {
           sseRetryMs = 1500;
         };
-        sse.addEventListener('catalog_updated', () => {
+        sse.addEventListener('catalog_updated', (event: MessageEvent) => {
           if (!active) return;
+          try {
+            const payload = event?.data ? JSON.parse(String(event.data)) : null;
+            const pushedMovies: MovieData[] = Array.isArray(payload?.movies)
+              ? payload.movies
+              : payload?.movie
+              ? [payload.movie]
+              : [];
+            if (pushedMovies.length > 0) {
+              mergeIntoState(pushedMovies, true);
+            }
+          } catch {}
           void loadSeedCatalog();
-          void checkCatalogMetaAndReload();
+          void syncFromServer(true);
         });
         sse.onerror = () => {
           if (sse) {
@@ -303,16 +314,12 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
     );
 
     setMovies((currentMovies) => {
-      if (fromCache) {
-        saveLocalMovies(publishedOnly);
-        return publishedOnly;
-      }
       const mergedMap = new Map<string, MovieData>();
       currentMovies
         .filter((m) => !isMovieDeleted(m.id, m.title, m.originalTitle))
         .forEach((m) => mergedMap.set(m.id, m));
       publishedOnly.forEach((m) => {
-        mergedMap.set(m.id, mergeMovieRecord(mergedMap.get(m.id), m, true));
+        mergedMap.set(m.id, mergeMovieRecord(mergedMap.get(m.id), m, !fromCache));
       });
       const combined = sortMoviesList(
         Array.from(mergedMap.values()).filter((m) => !isMovieDeleted(m.id, m.title, m.originalTitle))
@@ -467,12 +474,26 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
     }, FOREGROUND_HEARTBEAT_MS);
 
     // 5. Same-device & cross-tab instant updates
-    const handleLocalMoviesUpdated = () => {
+    const handleDirectMovieUpsert = (event: Event) => {
+      const detail = (event as CustomEvent)?.detail;
+      const list: MovieData[] = Array.isArray(detail) ? detail : detail?.id ? [detail] : [];
+      if (list.length > 0) {
+        applyMovieList(list, false);
+      }
+    };
+    window.addEventListener('telegram_direct_movie_upsert', handleDirectMovieUpsert);
+
+    const handleLocalMoviesUpdated = (event?: Event) => {
+      const detail = (event as CustomEvent)?.detail;
+      if (detail && detail.id) {
+        applyMovieList([detail], false);
+        return;
+      }
       const local = sortMoviesList(
         getLocalMovies().filter((m: any) => m && m.published !== false && hasPlayableContent(m) && isSeriesComplete(m))
       );
       if (local.length > 0 || getLocalMovies().length === 0) {
-        applyMovieList(local, true);
+        applyMovieList(local, false);
       }
       syncFromServer(true);
     };
@@ -482,7 +503,9 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
       try {
         bc = new BroadcastChannel('movie_portal_updates');
         bc.onmessage = (event) => {
-          if (event.data?.type === 'MOVIES_UPDATED' || event.data?.type === 'NEW_RELEASE') {
+          if (event.data?.type === 'DIRECT_MOVIE_UPSERT' && event.data?.movie?.id) {
+            applyMovieList([event.data.movie], false);
+          } else if (event.data?.type === 'MOVIES_UPDATED' || event.data?.type === 'NEW_RELEASE') {
             handleLocalMoviesUpdated();
           }
         };
@@ -519,7 +542,7 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener('online', handleOnline);
     document.addEventListener('visibilitychange', handleResume);
 
-    const stopDirectTelegramSync = startTelegramDirectSyncLoop(() => moviesRef.current, 10000);
+    const stopDirectTelegramSync = startTelegramDirectSyncLoop(() => moviesRef.current, 2500);
 
     return () => {
       isMountedRef.current = false;
@@ -541,6 +564,7 @@ export function MoviesProvider({ children }: { children: React.ReactNode }) {
           bc.close();
         } catch {}
       }
+      window.removeEventListener('telegram_direct_movie_upsert', handleDirectMovieUpsert);
       window.removeEventListener('movies_updated', handleLocalMoviesUpdated);
       window.removeEventListener('movie_view_recorded', handleMovieViewRecorded);
       window.removeEventListener('focus', handleResume);
